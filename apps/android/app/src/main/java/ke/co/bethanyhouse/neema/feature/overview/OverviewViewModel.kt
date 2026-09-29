@@ -102,7 +102,7 @@ class OverviewViewModel(private val dash: DashboardViewModel) : ViewModel() {
         // human and AI counts and the "Human intercepts" feed.
         viewModelScope.launch {
             dash.container.socket.events.collect { e ->
-                if (e.str("type") == "intercept_changed" && life.active) onEvent.kick()
+                ke.co.bethanyhouse.neema.core.crash.contained("overview-frame") { if (e.str("type") == "intercept_changed" && life.active) onEvent.kick() }
             }
         }
         // The dashboard's orders poll found a change (the pending badge moved):

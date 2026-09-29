@@ -45,12 +45,22 @@ object CrashVault {
         dir = File(app.filesDir, DIR).apply { mkdirs() }
         val previous = Thread.getDefaultUncaughtExceptionHandler()
         Thread.setDefaultUncaughtExceptionHandler { thread, error ->
+            if (contained(thread.name)) {
+                // WebRTC's own audio threads assert on the device's audio state (the mic or
+                // speaker changing under them): that thread ends and the call goes quiet —
+                // the agent can hang up and call again. The whole app closing is worse.
+                runCatching { save(report("nonfatal", error, thread.name)) }
+                return@setDefaultUncaughtExceptionHandler
+            }
             runCatching { save(report("crash", error, thread.name)) }
             if (previous != null) previous.uncaughtException(thread, error)
             else { android.os.Process.killProcess(android.os.Process.myPid()); kotlin.system.exitProcess(10) }
         }
         runCatching { collectExitReasons(app) }
     }
+
+    /** Threads whose failure ends only themselves (see [install]): WebRTC's Java audio threads. */
+    internal fun contained(thread: String?): Boolean = thread == "AudioTrackJavaThread" || thread == "AudioRecordJavaThread"
 
     /** An error that was caught at the edge (a background coroutine) — the app keeps running. */
     fun recordNonFatal(error: Throwable, where: String = Thread.currentThread().name) {
@@ -121,6 +131,17 @@ object CrashVault {
                 at = Instant.ofEpochMilli(x.timestamp)))
         }
         prefs.edit().putLong(KEY_EXIT_SEEN, if (newest == 0L) System.currentTimeMillis() else newest).apply()
+    }
+}
+
+/**
+ * One live frame (or one step of a long-lived collector) handled on its own: a
+ * failure is recorded and the collector carries on. A collector in a
+ * viewModelScope has no handler — one bad frame used to close the app.
+ */
+internal inline fun contained(where: String, block: () -> Unit) {
+    try { block() } catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (e: Throwable) {
+        CrashVault.recordNonFatal(e, where)
     }
 }
 

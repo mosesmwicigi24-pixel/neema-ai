@@ -667,7 +667,7 @@ class CallManager internal constructor(
         loadChannels()
 
         // Headsets come and go: the call follows them (see [onRoutes]).
-        ui.launch { audio.routes.collect(::onRoutes) }
+        ui.launch { audio.routes.collect { r -> guarded("routes") { onRoutes(r) } } }
 
         // Fallback path: poll the call log for a fresh "ringing" call, so the card
         // appears even if the WS event was missed. 2.5s only while RINGING (hang-up
@@ -688,7 +688,9 @@ class CallManager internal constructor(
         // Phase side effects: ring + notify while ringing; timer + recording while
         // live; in-call audio routing + mic foreground service while a call runs.
         ui.launch {
-            state.map { it.phase }.distinctUntilChanged().collect { p ->
+            // One failure (a device's audio or ringer refusing) must not end this collector:
+            // every later call would get no audio mode, ringing, timer or recording.
+            state.map { it.phase }.distinctUntilChanged().collect { p -> guarded("phase") {
                 ringTimeoutJob?.cancel(); ringTimeoutJob = null
                 if (p == CallPhase.Ringing) {
                     ringer.startRinging()
@@ -725,7 +727,7 @@ class CallManager internal constructor(
                     liveSince = null
                 }
                 if (p in AUDIO_PHASES) enterAudio() else leaveAudio()
-            }
+            } }
         }
         // The app went to the background while a call is still ringing: notify.
         // Back on screen, the card is the alert — drop the notification.
@@ -867,7 +869,8 @@ class CallManager internal constructor(
                     logD("outbound answered")
                     val p = peer ?: return
                     if (phase == CallPhase.Placing || phase == CallPhase.RingingOut) { update { it.copy(phase = CallPhase.Connecting) }; armConnectGuard(id) }
-                    ui.launch { runCatching { p.setRemote(SdpType.Answer, sdp) } }
+                    // Posted: the call may have ended (and its peer closed) before this runs.
+                    ui.launch { if (peer === p) runCatching { p.setRemote(SdpType.Answer, sdp) } }
                 } else if (activeId == null && s.outbound && s.callId == "pending" && s.phase == CallPhase.Placing) {
                     // Ours, most likely, but connect hasn't told us its id yet.
                     earlyAnswer = id to sdp
@@ -1006,7 +1009,10 @@ class CallManager internal constructor(
         if (peer !== p) return@withLock false
         try {
             p.setRemote(SdpType.Offer, sdp)
-            p.setLocal(SdpType.Answer, p.createAnswer())
+            if (peer !== p) return@withLock false
+            val answer = p.createAnswer()
+            if (peer !== p) return@withLock false
+            p.setLocal(SdpType.Answer, answer)
             true
         } catch (e: CancellationException) {
             throw e
@@ -1668,12 +1674,16 @@ class CallManager internal constructor(
                 p.addMic(!_state.value.muted)
                 audio.micLive()
                 val mine: String
+                // Each step suspends: a hang-up meanwhile closes the peer, which must not be used again.
                 if (reversed) {
                     mine = p.createOffer()
+                    if (peer !== p) return@launch
                     p.setLocal(SdpType.Offer, mine)
                 } else {
                     p.setRemote(SdpType.Offer, offer.sdp.orEmpty())
+                    if (peer !== p) return@launch
                     mine = p.createAnswer()
+                    if (peer !== p) return@launch
                     p.setLocal(SdpType.Answer, mine)
                 }
                 awaitGathering(p)
@@ -1841,6 +1851,7 @@ class CallManager internal constructor(
             p.addMic(!_state.value.muted)
             audio.micLive()
             val offer = p.createOffer()
+            if (peer !== p) return@withContext Result.success(Unit)   // hung up while the offer was made
             p.setLocal(SdpType.Offer, offer)
             awaitGathering(p)
             if (peer !== p) return@withContext Result.success(Unit)
@@ -2154,6 +2165,14 @@ class CallManager internal constructor(
      * network's, not a refused microphone): kept as a crash report so the
      * trace reaches the team — the agent only sees the call fail.
      */
+    /** One step of a long-lived collector: a failure is recorded, and the collector carries on. */
+    private inline fun guarded(where: String, block: () -> Unit) {
+        try { block() } catch (e: CancellationException) { throw e } catch (e: Throwable) {
+            logW("$where failed", e)
+            runCatching { ke.co.bethanyhouse.neema.core.crash.CrashVault.recordNonFatal(e, "call-$where") }
+        }
+    }
+
     private fun reportUnexpected(e: Throwable, where: String) {
         if (e is ApiException || e is CallError || e is MicBlocked || e.isOffline() || e.isTimeout()) return
         runCatching { ke.co.bethanyhouse.neema.core.crash.CrashVault.recordNonFatal(e, where) }

@@ -32,16 +32,28 @@ import ke.co.bethanyhouse.neema.R
 class LiveService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
-    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int = try {
-        serve(intent)
-    } catch (t: Throwable) {
-        // Whatever went wrong, never leave a foreground start unanswered (Android
-        // kills the app for that): promote on the shortest type, then stop.
-        runCatching { ke.co.bethanyhouse.neema.core.crash.CrashVault.recordNonFatal(t, "live-service") }
-        lastResortForeground()
-        runCatching { ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE) }
-        stopSelf()
-        START_NOT_STICKY
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        // Counted by launch(): released only once this start has been answered with
+        // startForeground — a stop() arriving meanwhile (from any thread) waits for it.
+        var counted = intent?.getBooleanExtra(EXTRA_COUNTED, false) == true
+        /** This start is answered: release it, and say whether a stop asked meanwhile can run now. */
+        fun answered(): Boolean = synchronized(Companion) {
+            if (counted && pending > 0) pending--
+            counted = false
+            (stopWanted && pending == 0).also { if (it) stopWanted = false }
+        }
+        return try {
+            serve(intent, startId, ::answered)
+        } catch (t: Throwable) {
+            // Whatever went wrong, never leave a foreground start unanswered (Android
+            // kills the app for that): promote on the shortest type, then stop.
+            runCatching { ke.co.bethanyhouse.neema.core.crash.CrashVault.recordNonFatal(t, "live-service") }
+            lastResortForeground()
+            answered()
+            runCatching { ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE) }
+            stopSelf(startId)
+            START_NOT_STICKY
+        }
     }
 
     /**
@@ -58,9 +70,7 @@ class LiveService : Service() {
         }
     }
 
-    private fun serve(intent: Intent?): Int {
-        // This start is being served: a stop asked for meanwhile can now run (below).
-        if (intent?.getBooleanExtra(EXTRA_COUNTED, false) == true) synchronized(Companion) { if (pending > 0) pending-- }
+    private fun serve(intent: Intent?, startId: Int, answered: () -> Boolean): Int {
         val inCall = intent?.getBooleanExtra(EXTRA_IN_CALL, false) == true
         val b = NotificationCompat.Builder(this, Notifier.CH_LIVE)
             .setSmallIcon(R.drawable.ic_stat_neema)
@@ -96,13 +106,17 @@ class LiveService : Service() {
             .onFailure {
                 // Neither type was allowed: still answer the foreground start, then stop.
                 lastResortForeground()
+                answered()
                 runCatching { ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE) }
-                stopSelf(); return START_NOT_STICKY
+                stopSelf(startId); return START_NOT_STICKY
             }
-        val stopAsked = synchronized(Companion) { (stopWanted && pending == 0).also { if (it) stopWanted = false } }
+        // Answered (startForeground returned): only now may a stop asked meanwhile run.
+        val stopAsked = answered()
         if (stopAsked || !stillWanted(inCall)) {
-            ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
-            stopSelf()
+            // stopSelf(startId): a newer start already queued (a call's microphone start)
+            // keeps the service — stopping under it is the crash Android deals for an
+            // unanswered foreground start.
+            if (stopSelfResult(startId)) ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
             return START_NOT_STICKY
         }
         return START_STICKY

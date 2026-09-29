@@ -358,7 +358,7 @@ class ConversationsViewModel(val dash: DashboardViewModel) : ViewModel() {
             }
         }
         viewModelScope.launch { dash.inboxRefresh.collect { refresh() } }
-        viewModelScope.launch { dash.container.socket.events.collect { onSocket(it) } }
+        viewModelScope.launch { dash.container.socket.events.collect { ke.co.bethanyhouse.neema.core.crash.contained("inbox-frame") { onSocket(it) } } }
         // Deep links from other views / the hub: consume dash.openConvKey.
         viewModelScope.launch {
             combine(dash.openConvKey, _inbox) { k, s -> k to s }.collect { (k, s) -> if (k != null) tryOpenKey(k, s) }

@@ -119,6 +119,32 @@ internal class WebRtcMedia(private val context: Context) : CallMedia {
         private var track: AudioTrack? = null
         private val pc: PeerConnection
 
+        /**
+         * PeerConnection.dispose() frees the native object but leaves the Java one
+         * pointing at it: any later call on it (an answer applied a beat after the
+         * call ended, an offer finishing after a hang-up) reads freed memory and
+         * the process dies with a native crash no catch can stop. Every use goes
+         * through [live]: once [closed] it refuses before touching native code,
+         * and the teardown waits for a use already under way.
+         */
+        private val lock = Any()
+        @Volatile private var closed = false
+        /** SDP steps waiting on WebRTC: a closed peer may never answer them, so close() fails them. */
+        private val waiting = java.util.Collections.newSetFromMap(java.util.concurrent.ConcurrentHashMap<kotlinx.coroutines.CancellableContinuation<*>, Boolean>())
+
+        private fun <T> track(cont: kotlinx.coroutines.CancellableContinuation<T>) {
+            waiting += cont
+            cont.invokeOnCancellation { waiting -= cont }
+        }
+
+        private inline fun <T> live(what: String, block: () -> T): T {
+            if (closed) throw IllegalStateException("call already ended ($what)")
+            synchronized(lock) {
+                if (closed) throw IllegalStateException("call already ended ($what)")
+                return block()
+            }
+        }
+
         init {
             Log.d(TAG, "ICE servers: ${cfg.iceServers}")
             val rtc = PeerConnection.RTCConfiguration(iceServers(cfg)).apply {
@@ -169,7 +195,7 @@ internal class WebRtcMedia(private val context: Context) : CallMedia {
 
         override val hasMic: Boolean get() = track != null
 
-        override fun addMic(enabled: Boolean) {
+        override fun addMic(enabled: Boolean) = live("addMic") {
             val constraints = MediaConstraints().apply {
                 mandatory.add(MediaConstraints.KeyValuePair("googEchoCancellation", "true"))
                 mandatory.add(MediaConstraints.KeyValuePair("googNoiseSuppression", "true"))
@@ -182,14 +208,18 @@ internal class WebRtcMedia(private val context: Context) : CallMedia {
             source = src
             track = t
             pc.addTrack(t, listOf("neema"))
+            Unit
         }
 
-        override fun setMicEnabled(enabled: Boolean) { track?.setEnabled(enabled) }
+        override fun setMicEnabled(enabled: Boolean) {
+            runCatching { live("mic") { track?.setEnabled(enabled) } }
+        }
 
         override suspend fun createOffer(): String = create(offer = true)
         override suspend fun createAnswer(): String = create(offer = false)
 
         private suspend fun create(offer: Boolean): String = suspendCancellableCoroutine { cont ->
+            track(cont)
             val obs = object : SdpObserver {
                 override fun onCreateSuccess(sdp: SessionDescription) = rtcGuard("sdp-create") { if (cont.isActive) cont.resume(sdp.description) }
                 override fun onCreateFailure(error: String?) = rtcGuard("sdp-create-failed") { if (cont.isActive) cont.resumeWithException(IllegalStateException(error)) }
@@ -200,13 +230,15 @@ internal class WebRtcMedia(private val context: Context) : CallMedia {
                 mandatory.add(MediaConstraints.KeyValuePair("OfferToReceiveAudio", "true"))
                 mandatory.add(MediaConstraints.KeyValuePair("OfferToReceiveVideo", "false"))
             }
-            if (offer) pc.createOffer(obs, c) else pc.createAnswer(obs, c)
+            try { live("create") { if (offer) pc.createOffer(obs, c) else pc.createAnswer(obs, c) } }
+            catch (e: IllegalStateException) { if (cont.isActive) cont.resumeWithException(e) }
         }
 
         override suspend fun setLocal(type: SdpType, sdp: String) = setDesc(type, sdp, local = true)
         override suspend fun setRemote(type: SdpType, sdp: String) = setDesc(type, sdp, local = false)
 
         private suspend fun setDesc(type: SdpType, sdp: String, local: Boolean): Unit = suspendCancellableCoroutine { cont ->
+            track(cont)
             val obs = object : SdpObserver {
                 override fun onCreateSuccess(sdp: SessionDescription?) {}
                 override fun onCreateFailure(error: String?) {}
@@ -214,23 +246,32 @@ internal class WebRtcMedia(private val context: Context) : CallMedia {
                 override fun onSetFailure(error: String?) = rtcGuard("sdp-set-failed") { if (cont.isActive) cont.resumeWithException(IllegalStateException(error)) }
             }
             val desc = SessionDescription(if (type == SdpType.Offer) SessionDescription.Type.OFFER else SessionDescription.Type.ANSWER, sdp)
-            if (local) pc.setLocalDescription(obs, desc) else pc.setRemoteDescription(obs, desc)
+            try { live("setDescription") { if (local) pc.setLocalDescription(obs, desc) else pc.setRemoteDescription(obs, desc) } }
+            catch (e: IllegalStateException) { if (cont.isActive) cont.resumeWithException(e) }
         }
 
         override suspend fun awaitGathering() = gathered.await()
 
-        override val localSdp: String? get() = runCatching { pc.localDescription?.description }.getOrNull()
+        override val localSdp: String? get() = runCatching { live("localSdp") { pc.localDescription?.description } }.getOrNull()
 
         /** Torn down off the main thread so close() never runs on the thread that delivers events. */
         override fun close() {
             gathered.complete(Unit)
+            if (closed) return   // once: a second dispose frees freed memory
+            closed = true
+            // Whoever waits on an offer / answer hears the call ended, instead of hanging.
+            waiting.toList().forEach { c -> runCatching { c.resumeWith(Result.failure(IllegalStateException("call ended"))) } }
+            waiting.clear()
             val t = track; val s = source
             track = null; source = null
             Thread({
-                runCatching { pc.close() }
-                runCatching { pc.dispose() }
-                runCatching { t?.dispose() }
-                runCatching { s?.dispose() }
+                // Under the lock: a setRemote / createOffer already inside native code finishes first.
+                synchronized(lock) {
+                    runCatching { pc.close() }
+                    runCatching { pc.dispose() }
+                    runCatching { t?.dispose() }
+                    runCatching { s?.dispose() }
+                }
             }, "neema-call-close").start()
         }
     }
