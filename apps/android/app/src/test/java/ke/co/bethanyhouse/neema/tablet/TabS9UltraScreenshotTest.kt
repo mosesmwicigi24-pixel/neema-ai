@@ -52,8 +52,11 @@ class TabS9UltraScreenshotTest {
             else -> Unit
         }
         paparazzi.snapshotOn(d) {
-            androidx.compose.runtime.CompositionLocalProvider(androidx.lifecycle.viewmodel.compose.LocalViewModelStoreOwner provides owner) {
-                AppFrame(d.dark) { DashboardShell(dash, d.widthClass) }
+            AppFrame(d.dark) {
+                // Inside AppFrame, which provides a fresh store of its own.
+                androidx.compose.runtime.CompositionLocalProvider(androidx.lifecycle.viewmodel.compose.LocalViewModelStoreOwner provides owner) {
+                    DashboardShell(dash, d.widthClass)
+                }
             }
         }
     }
