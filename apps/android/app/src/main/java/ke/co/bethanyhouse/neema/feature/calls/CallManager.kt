@@ -2317,7 +2317,7 @@ class CallManager internal constructor(
             e.isOffline() -> OUTBOUND_OFFLINE
             e.statusOrNull() == 401 -> SESSION_EXPIRED
             // Not the server, not the network: this device couldn't set the call up.
-            e !is ApiException && e !is java.io.IOException && e !is CallError -> DEVICE_CALL_FAILED
+            e is Error -> DEVICE_CALL_FAILED
             else -> "Couldn't place the call"
         }
 
