@@ -476,6 +476,8 @@ class CallManager internal constructor(
     private val myAgentId: () -> String? = { null },
     /** The signed-in agent's name: a 409 naming it means this agent's other device holds the call. */
     private val myAgentName: () -> String? = { null },
+    /** The device's call audio failing under WebRTC (true: the microphone); see [CallAudioTrouble]. */
+    private val audioTrouble: kotlinx.coroutines.flow.Flow<Boolean> = CallAudioTrouble.events,
 ) {
     constructor(
         context: Context,
@@ -668,6 +670,7 @@ class CallManager internal constructor(
 
         // Headsets come and go: the call follows them (see [onRoutes]).
         ui.launch { audio.routes.collect { r -> guarded("routes") { onRoutes(r) } } }
+        ui.launch { audioTrouble.collect { mic -> guarded("audio-trouble") { onAudioTrouble(mic) } } }
 
         // Fallback path: poll the call log for a fresh "ringing" call, so the card
         // appears even if the WS event was missed. 2.5s only while RINGING (hang-up
@@ -2165,6 +2168,15 @@ class CallManager internal constructor(
      * network's, not a refused microphone): kept as a crash report so the
      * trace reaches the team — the agent only sees the call fail.
      */
+    /**
+     * The device's call audio failed under WebRTC: the call stays up (the agent
+     * decides), and the card says what's wrong instead of going silent.
+     */
+    private fun onAudioTrouble(mic: Boolean) {
+        if (phase !in AUDIO_PHASES) return
+        update { it.copy(error = if (mic) MIC_UNAVAILABLE else SPEAKER_UNAVAILABLE) }
+    }
+
     /** One step of a long-lived collector: a failure is recorded, and the collector carries on. */
     private inline fun guarded(where: String, block: () -> Unit) {
         try { block() } catch (e: CancellationException) { throw e } catch (e: Throwable) {
@@ -2192,6 +2204,9 @@ class CallManager internal constructor(
         private fun logW(msg: String, e: Throwable) { runCatching { Log.w(TAG, msg, e) } }
         const val MIC_BLOCKED = "Microphone blocked — allow it and try again"
         /** The phone or tablet couldn't set the call's audio up (the report goes to the team). */
+        /** WebRTC couldn't start (or lost) the microphone: another app has it, or the device refused. */
+        const val MIC_UNAVAILABLE = "The microphone isn't working — close any app using it (a screen recorder), then hang up and call again"
+        const val SPEAKER_UNAVAILABLE = "The call audio stopped on this device — hang up and call again"
         const val DEVICE_CALL_FAILED = "This device couldn't start the call — try again, or call from another phone"
         /** The wrap-up's words for a refused microphone (its button opens the settings). */
         const val MIC_BLOCKED_WRAP = "Microphone blocked — allow it in settings"

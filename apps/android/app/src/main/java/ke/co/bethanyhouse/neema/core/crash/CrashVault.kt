@@ -34,6 +34,7 @@ object CrashVault {
     private const val MAX_TRACE = 48_000
     private const val PREF = "neema_crash"
     private const val KEY_EXIT_SEEN = "exit_seen_ms"
+    private const val LAST_FATAL = "last-fatal.txt"
 
     private val json = Json { ignoreUnknownKeys = true; explicitNulls = false }
 
@@ -43,21 +44,34 @@ object CrashVault {
     fun install(context: Context) {
         val app = context.applicationContext
         dir = File(app.filesDir, DIR).apply { mkdirs() }
-        val previous = Thread.getDefaultUncaughtExceptionHandler()
+        installHandler()
+        runCatching { collectExitReasons(app) }
+    }
+
+    /**
+     * Every uncaught exception is written down first; a [contained] thread's ends
+     * that thread only; anything else goes on to the system (the app closes).
+     */
+    internal fun installHandler(
+        previous: Thread.UncaughtExceptionHandler? = Thread.getDefaultUncaughtExceptionHandler(),
+    ) {
         Thread.setDefaultUncaughtExceptionHandler { thread, error ->
             if (contained(thread.name)) {
                 // WebRTC's own audio threads assert on the device's audio state (the mic or
                 // speaker changing under them): that thread ends and the call goes quiet —
                 // the agent can hang up and call again. The whole app closing is worse.
                 runCatching { save(report("nonfatal", error, thread.name)) }
+                runCatching { onContained?.invoke(thread.name) }
                 return@setDefaultUncaughtExceptionHandler
             }
             runCatching { save(report("crash", error, thread.name)) }
             if (previous != null) previous.uncaughtException(thread, error)
             else { android.os.Process.killProcess(android.os.Process.myPid()); kotlin.system.exitProcess(10) }
         }
-        runCatching { collectExitReasons(app) }
     }
+
+    /** Told when a [contained] thread failed (the call says its audio stopped). */
+    @Volatile var onContained: ((thread: String) -> Unit)? = null
 
     /** Threads whose failure ends only themselves (see [install]): WebRTC's Java audio threads. */
     internal fun contained(thread: String?): Boolean = thread == "AudioTrackJavaThread" || thread == "AudioRecordJavaThread"
@@ -81,6 +95,23 @@ object CrashVault {
 
     fun delivered(file: File) { runCatching { file.delete() } }
 
+    /** The crash that closed the app last time, until the person has seen it (see [CrashNotice]). */
+    fun unseenFatal(): CrashReport? = runCatching {
+        (dir?.let { File(it, LAST_FATAL) })?.takeIf { it.exists() }
+            ?.let { json.decodeFromString(CrashReport.serializer(), it.readText()) }
+    }.getOrNull()
+
+    fun seen() { runCatching { dir?.let { File(it, LAST_FATAL).delete() } } }
+
+    /** A crash report as text to send on: what, where, which build and device, the trace. */
+    fun asText(r: CrashReport): String = buildString {
+        appendLine("Neema crash report")
+        appendLine(r.summary)
+        appendLine(listOf(r.at, r.kind, r.thread, r.device, "Android API ${r.sdk}", "v${r.appVersion} (${r.build})").filter { !it.isNullOrBlank() }.joinToString(" · "))
+        appendLine()
+        append(r.trace)
+    }.take(60_000)
+
     internal fun report(kind: String, error: Throwable?, thread: String?, trace: String? = null, at: Instant = Instant.now()): CrashReport {
         val text = (trace ?: error?.let { stackOf(it) }).orEmpty()
         return CrashReport(
@@ -102,6 +133,8 @@ object CrashVault {
         val body = json.encodeToString(CrashReport.serializer(), r)
         File(d, "${System.currentTimeMillis()}-${r.kind}.json").writeText(body)
         File(d, "last.txt").writeText(body)
+        // The app closed on someone: the next launch shows this, with Share and Copy.
+        if (r.kind != "nonfatal") File(d, LAST_FATAL).writeText(body)
         (d.listFiles { f -> f.name.endsWith(".json") } ?: emptyArray())
             .sortedBy { it.name }.dropLast(MAX_FILES).forEach { it.delete() }
     }

@@ -53,11 +53,13 @@ class CallNativeSafetyTest {
         val ringer = FakeRinger()
         val audio = FlakyAudio()
         val frames = MutableSharedFlow<JsonObject>(extraBufferCapacity = 64)
+        val trouble = MutableSharedFlow<Boolean>(extraBufferCapacity = 8)
         private val d = StandardTestDispatcher(scope.testScheduler)
         val calls = CallManager(
             api = api, events = frames, connected = MutableStateFlow(true), scope = scope.backgroundScope,
             foreground = MutableStateFlow(true), signedInFn = { true }, media = media, ringer = ringer, audio = audio,
             micGranted = { true }, main = d, io = d, now = { base + scope.testScheduler.currentTime },
+            audioTrouble = trouble,
         ).also { it.start() }
         val state get() = calls.state.value
         fun emit(vararg kv: Pair<String, String>) { frames.tryEmit(JsonObject(kv.associate { it.first to JsonPrimitive(it.second) })) }
@@ -138,6 +140,46 @@ class CallNativeSafetyTest {
         r.emit("type" to "outbound_answer", "call_id" to r.api.connectId, "sdp" to "v=0 their-answer"); r.settle()
         r.media.peer.onEvent(PeerEvent.Connected); r.settle()
         assertEquals(CallPhase.InCall, r.state.phase)
+    }
+
+    /**
+     * The crash in the owner's video: "Calling…", then the app closes a second
+     * later. WebRTC's microphone thread asserts the recorder is recording
+     * (WebRtcAudioRecord$AudioRecordThread.run, offset 47 in the 137 AAR) —
+     * false when another app holds the mic or the audio mode is mid-switch —
+     * and that AssertionError, on WebRTC's own thread, used to close the app.
+     */
+    @Test fun webRtcsMicThreadAssertingEndsOnlyThatThreadAndTheCardSaysSo() {
+        val before = Thread.getDefaultUncaughtExceptionHandler()
+        val fatal = mutableListOf<String>()
+        val told = java.util.Collections.synchronizedList(mutableListOf<String>())
+        try {
+            CrashVault.onContained = { told += it }
+            CrashVault.installHandler(previous = { t, _ -> fatal += t.name })
+            for (name in listOf("AudioRecordJavaThread", "AudioTrackJavaThread", "neema-worker")) {
+                val t = Thread({ throw AssertionError("Expected condition to be true") }, name)
+                t.start(); t.join()
+            }
+            assertEquals("WebRTC's audio threads: contained, and the call is told", listOf("AudioRecordJavaThread", "AudioTrackJavaThread"), told.toList())
+            assertEquals("anything else still goes to the system", listOf("neema-worker"), fatal)
+        } finally {
+            Thread.setDefaultUncaughtExceptionHandler(before)
+            CrashVault.onContained = null
+        }
+    }
+
+    @Test fun aMicrophoneWebRtcCouldNotStartIsSaidOnTheCard() = rig { r ->
+        r.trouble.tryEmit(true); r.settle()
+        assertEquals("no call: nothing to say", null, r.state.error)
+        val placed = async { r.calls.initiateCall("254712345678", "Grace") }
+        r.settle(); assertTrue(placed.await().isSuccess)
+        r.trouble.tryEmit(true); r.settle()
+        assertEquals(CallManager.MIC_UNAVAILABLE, r.state.error)
+        assertEquals("the call stays up: the agent decides", CallPhase.Placing, r.state.phase)
+        r.emit("type" to "outbound_answer", "call_id" to r.api.connectId, "sdp" to "v=0 their-answer"); r.settle()
+        r.media.peer.onEvent(PeerEvent.Connected); r.settle()
+        r.trouble.tryEmit(false); r.settle()
+        assertEquals(CallManager.SPEAKER_UNAVAILABLE, r.state.error)
     }
 
     @Test fun webRtcsOwnAudioThreadsAreContainedAndNothingElseIs() {

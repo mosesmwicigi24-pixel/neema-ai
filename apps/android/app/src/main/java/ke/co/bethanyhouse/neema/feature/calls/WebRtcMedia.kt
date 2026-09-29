@@ -69,14 +69,14 @@ internal class WebRtcMedia(private val context: Context) : CallMedia {
             .setPlaybackSamplesReadyCallback { s -> rtcGuard("remote-samples") { recorder?.onRemoteSamples(s) } }
             // A microphone or speaker the device refuses (in use, a vendor quirk) is logged, not thrown.
             .setAudioRecordErrorCallback(object : JavaAudioDeviceModule.AudioRecordErrorCallback {
-                override fun onWebRtcAudioRecordInitError(msg: String?) { Log.w(TAG, "mic init: $msg") }
-                override fun onWebRtcAudioRecordStartError(code: JavaAudioDeviceModule.AudioRecordStartErrorCode?, msg: String?) { Log.w(TAG, "mic start $code: $msg") }
-                override fun onWebRtcAudioRecordError(msg: String?) { Log.w(TAG, "mic: $msg") }
+                override fun onWebRtcAudioRecordInitError(msg: String?) { Log.w(TAG, "mic init: $msg"); CallAudioTrouble.mic() }
+                override fun onWebRtcAudioRecordStartError(code: JavaAudioDeviceModule.AudioRecordStartErrorCode?, msg: String?) { Log.w(TAG, "mic start $code: $msg"); CallAudioTrouble.mic() }
+                override fun onWebRtcAudioRecordError(msg: String?) { Log.w(TAG, "mic: $msg"); CallAudioTrouble.mic() }
             })
             .setAudioTrackErrorCallback(object : JavaAudioDeviceModule.AudioTrackErrorCallback {
-                override fun onWebRtcAudioTrackInitError(msg: String?) { Log.w(TAG, "speaker init: $msg") }
-                override fun onWebRtcAudioTrackStartError(code: JavaAudioDeviceModule.AudioTrackStartErrorCode?, msg: String?) { Log.w(TAG, "speaker start $code: $msg") }
-                override fun onWebRtcAudioTrackError(msg: String?) { Log.w(TAG, "speaker: $msg") }
+                override fun onWebRtcAudioTrackInitError(msg: String?) { Log.w(TAG, "speaker init: $msg"); CallAudioTrouble.speaker() }
+                override fun onWebRtcAudioTrackStartError(code: JavaAudioDeviceModule.AudioTrackStartErrorCode?, msg: String?) { Log.w(TAG, "speaker start $code: $msg"); CallAudioTrouble.speaker() }
+                override fun onWebRtcAudioTrackError(msg: String?) { Log.w(TAG, "speaker: $msg"); CallAudioTrouble.speaker() }
             })
             .createAudioDeviceModule()
         PeerConnectionFactory.builder().setAudioDeviceModule(adm).createPeerConnectionFactory()
