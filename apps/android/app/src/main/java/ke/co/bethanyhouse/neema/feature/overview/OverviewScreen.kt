@@ -87,7 +87,7 @@ fun OverviewScreen(
     dash: DashboardViewModel,
     vm: OverviewViewModel = viewModel { OverviewViewModel(dash) },
     /** "Now" for the 7-day chart and the activity times (fixed in tests). */
-    clock: Clock = Clock.systemDefaultZone(),
+    clock: Clock = AppClock.clock(),
 ) {
     ke.co.bethanyhouse.neema.feature.reports.TrackShown(vm.life)
     val apiStats by vm.stats.collectAsStateWithLifecycle()

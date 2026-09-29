@@ -20,6 +20,14 @@ object AppClock {
     fun today(zone: ZoneId = ZoneId.systemDefault()): LocalDate = instant().atZone(zone).toLocalDate()
     fun localNow(zone: ZoneId = ZoneId.systemDefault()): LocalDateTime = instant().atZone(zone).toLocalDateTime()
 
+    /** A [java.time.Clock] that reads [now] (so screens taking a Clock follow a test's pinned date too). */
+    fun clock(zone: ZoneId = ZoneId.systemDefault()): java.time.Clock = object : java.time.Clock() {
+        override fun getZone(): ZoneId = zone
+        override fun withZone(zone: ZoneId): java.time.Clock = clock(zone)
+        override fun instant(): Instant = AppClock.instant()
+        override fun millis(): Long = now()
+    }
+
     /** Tests only: make [now] read [pinned] at this moment (and advance from there). */
     fun pinTo(pinned: Instant) { offsetMillis = pinned.toEpochMilli() - System.currentTimeMillis() }
     fun reset() { offsetMillis = 0 }
