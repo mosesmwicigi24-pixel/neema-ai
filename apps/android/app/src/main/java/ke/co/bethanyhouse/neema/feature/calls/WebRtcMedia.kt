@@ -40,6 +40,19 @@ import kotlin.coroutines.resumeWithException
 
 private const val TAG = "CallManager"
 
+/**
+ * WebRTC calls us back on its own threads (signalling, audio, network). A
+ * throw there has no coroutine or UI to land in: Android kills the process.
+ * Every callback body runs through this — a failure is logged and kept as a
+ * crash report, and the call carries on (or ends through its own events).
+ */
+internal inline fun rtcGuard(where: String, block: () -> Unit) {
+    try { block() } catch (t: Throwable) {
+        runCatching { Log.w(TAG, "WebRTC callback failed: $where", t) }
+        runCatching { ke.co.bethanyhouse.neema.core.crash.CrashVault.recordNonFatal(t, "webrtc-$where") }
+    }
+}
+
 /** [CallMedia] over the WebRTC SDK: one factory per process, whose audio module feeds the recorder. */
 internal class WebRtcMedia(private val context: Context) : CallMedia {
     @Volatile private var recorder: CallRecorder? = null
@@ -51,8 +64,20 @@ internal class WebRtcMedia(private val context: Context) : CallMedia {
         val adm = JavaAudioDeviceModule.builder(context.applicationContext)
             .setUseHardwareAcousticEchoCanceler(true)
             .setUseHardwareNoiseSuppressor(true)
-            .setSamplesReadyCallback { s -> recorder?.onMicSamples(s) }
-            .setPlaybackSamplesReadyCallback { s -> recorder?.onRemoteSamples(s) }
+            // The recorder is fed on WebRTC's audio threads: a failing recorder must never take the call (or the app) down.
+            .setSamplesReadyCallback { s -> rtcGuard("mic-samples") { recorder?.onMicSamples(s) } }
+            .setPlaybackSamplesReadyCallback { s -> rtcGuard("remote-samples") { recorder?.onRemoteSamples(s) } }
+            // A microphone or speaker the device refuses (in use, a vendor quirk) is logged, not thrown.
+            .setAudioRecordErrorCallback(object : JavaAudioDeviceModule.AudioRecordErrorCallback {
+                override fun onWebRtcAudioRecordInitError(msg: String?) { Log.w(TAG, "mic init: $msg") }
+                override fun onWebRtcAudioRecordStartError(code: JavaAudioDeviceModule.AudioRecordStartErrorCode?, msg: String?) { Log.w(TAG, "mic start $code: $msg") }
+                override fun onWebRtcAudioRecordError(msg: String?) { Log.w(TAG, "mic: $msg") }
+            })
+            .setAudioTrackErrorCallback(object : JavaAudioDeviceModule.AudioTrackErrorCallback {
+                override fun onWebRtcAudioTrackInitError(msg: String?) { Log.w(TAG, "speaker init: $msg") }
+                override fun onWebRtcAudioTrackStartError(code: JavaAudioDeviceModule.AudioTrackStartErrorCode?, msg: String?) { Log.w(TAG, "speaker start $code: $msg") }
+                override fun onWebRtcAudioTrackError(msg: String?) { Log.w(TAG, "speaker: $msg") }
+            })
             .createAudioDeviceModule()
         PeerConnectionFactory.builder().setAudioDeviceModule(adm).createPeerConnectionFactory()
     }
@@ -100,7 +125,7 @@ internal class WebRtcMedia(private val context: Context) : CallMedia {
                 sdpSemantics = PeerConnection.SdpSemantics.UNIFIED_PLAN
             }
             val observer = object : PeerConnection.Observer {
-                override fun onConnectionChange(newState: PeerConnection.PeerConnectionState) {
+                override fun onConnectionChange(newState: PeerConnection.PeerConnectionState) = rtcGuard("connection") {
                     Log.d(TAG, "connectionState: $newState")
                     when (newState) {
                         PeerConnection.PeerConnectionState.CONNECTED -> onEvent(PeerEvent.Connected)
@@ -111,23 +136,24 @@ internal class WebRtcMedia(private val context: Context) : CallMedia {
                         else -> Unit
                     }
                 }
-                override fun onIceConnectionChange(newState: PeerConnection.IceConnectionState) {
+                override fun onIceConnectionChange(newState: PeerConnection.IceConnectionState) = rtcGuard("ice") {
                     Log.d(TAG, "iceConnectionState: $newState")
                     if (newState == PeerConnection.IceConnectionState.CONNECTED ||
                         newState == PeerConnection.IceConnectionState.COMPLETED
                     ) onEvent(PeerEvent.Connected)
                 }
-                override fun onIceGatheringChange(newState: PeerConnection.IceGatheringState) {
+                override fun onIceGatheringChange(newState: PeerConnection.IceGatheringState) = rtcGuard("gathering") {
                     if (newState == PeerConnection.IceGatheringState.COMPLETE) gathered.complete(Unit)
                 }
-                override fun onIceCandidate(candidate: IceCandidate) {
-                    if (candidate.sdp.contains("typ relay")) Log.d(TAG, "got TURN relay candidate ✓")
+                override fun onIceCandidate(candidate: IceCandidate) = rtcGuard("candidate") {
+                    if (candidate.sdp?.contains("typ relay") == true) Log.d(TAG, "got TURN relay candidate ✓")
                 }
-                override fun onIceCandidateError(event: IceCandidateErrorEvent) {
+                override fun onIceCandidateError(event: IceCandidateErrorEvent) = rtcGuard("candidate-error") {
                     Log.w(TAG, "ICE candidate error: ${event.errorText} ${event.url}")
                 }
-                override fun onTrack(transceiver: RtpTransceiver) {
+                override fun onTrack(transceiver: RtpTransceiver) = rtcGuard("track") {
                     // Remote audio plays through the audio device module on its own.
+                    // (A track already disposed — the call ended meanwhile — throws: guarded.)
                     transceiver.receiver.track()?.setEnabled(true)
                 }
                 override fun onSignalingChange(newState: PeerConnection.SignalingState) {}
@@ -165,8 +191,8 @@ internal class WebRtcMedia(private val context: Context) : CallMedia {
 
         private suspend fun create(offer: Boolean): String = suspendCancellableCoroutine { cont ->
             val obs = object : SdpObserver {
-                override fun onCreateSuccess(sdp: SessionDescription) { if (cont.isActive) cont.resume(sdp.description) }
-                override fun onCreateFailure(error: String?) { if (cont.isActive) cont.resumeWithException(IllegalStateException(error)) }
+                override fun onCreateSuccess(sdp: SessionDescription) = rtcGuard("sdp-create") { if (cont.isActive) cont.resume(sdp.description) }
+                override fun onCreateFailure(error: String?) = rtcGuard("sdp-create-failed") { if (cont.isActive) cont.resumeWithException(IllegalStateException(error)) }
                 override fun onSetSuccess() {}
                 override fun onSetFailure(error: String?) {}
             }
@@ -184,8 +210,8 @@ internal class WebRtcMedia(private val context: Context) : CallMedia {
             val obs = object : SdpObserver {
                 override fun onCreateSuccess(sdp: SessionDescription?) {}
                 override fun onCreateFailure(error: String?) {}
-                override fun onSetSuccess() { if (cont.isActive) cont.resume(Unit) }
-                override fun onSetFailure(error: String?) { if (cont.isActive) cont.resumeWithException(IllegalStateException(error)) }
+                override fun onSetSuccess() = rtcGuard("sdp-set") { if (cont.isActive) cont.resume(Unit) }
+                override fun onSetFailure(error: String?) = rtcGuard("sdp-set-failed") { if (cont.isActive) cont.resumeWithException(IllegalStateException(error)) }
             }
             val desc = SessionDescription(if (type == SdpType.Offer) SessionDescription.Type.OFFER else SessionDescription.Type.ANSWER, sdp)
             if (local) pc.setLocalDescription(obs, desc) else pc.setRemoteDescription(obs, desc)

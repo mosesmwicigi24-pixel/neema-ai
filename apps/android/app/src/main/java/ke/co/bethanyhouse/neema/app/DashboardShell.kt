@@ -299,6 +299,8 @@ fun DashboardShell(
                 if (wide && !connected && online) OfflineDot(Modifier.align(Alignment.TopEnd).padding(10.dp))
                 // Phones and narrower windows: an incoming/active call takes over the content area.
                 if (!callDocked) CallStage(dash)
+                // The microphone prompt and lock-screen flag: always here, wherever the card is.
+                ke.co.bethanyhouse.neema.feature.calls.CallMicHost(dash)
                 // Last of all, so the shell's overlays take back before the view does.
                 overlayBack()
             }

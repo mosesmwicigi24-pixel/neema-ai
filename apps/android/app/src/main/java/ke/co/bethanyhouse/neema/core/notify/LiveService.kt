@@ -32,7 +32,33 @@ import ke.co.bethanyhouse.neema.R
 class LiveService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
-    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int = try {
+        serve(intent)
+    } catch (t: Throwable) {
+        // Whatever went wrong, never leave a foreground start unanswered (Android
+        // kills the app for that): promote on the shortest type, then stop.
+        runCatching { ke.co.bethanyhouse.neema.core.crash.CrashVault.recordNonFatal(t, "live-service") }
+        lastResortForeground()
+        runCatching { ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE) }
+        stopSelf()
+        START_NOT_STICKY
+    }
+
+    /**
+     * The one promotion that needs no permission and no eligibility: a short
+     * service (API 34+; the manifest-declared types before). It exists only so
+     * a failed start ends cleanly instead of crashing the app.
+     */
+    private fun lastResortForeground() {
+        val n = NotificationCompat.Builder(this, Notifier.CH_LIVE)
+            .setSmallIcon(R.drawable.ic_stat_neema).setContentTitle("Neema").setPriority(NotificationCompat.PRIORITY_MIN).build()
+        runCatching {
+            if (Build.VERSION.SDK_INT >= 34) ServiceCompat.startForeground(this, NOTIF_ID, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_SHORT_SERVICE)
+            else startForeground(NOTIF_ID, n)
+        }
+    }
+
+    private fun serve(intent: Intent?): Int {
         // This start is being served: a stop asked for meanwhile can now run (below).
         if (intent?.getBooleanExtra(EXTRA_COUNTED, false) == true) synchronized(Companion) { if (pending > 0) pending-- }
         val inCall = intent?.getBooleanExtra(EXTRA_IN_CALL, false) == true
@@ -67,7 +93,12 @@ class LiveService : Service() {
                     else ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC
                 ServiceCompat.startForeground(this, NOTIF_ID, n, plain)
             }
-            .onFailure { stopSelf(); return START_NOT_STICKY }
+            .onFailure {
+                // Neither type was allowed: still answer the foreground start, then stop.
+                lastResortForeground()
+                runCatching { ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE) }
+                stopSelf(); return START_NOT_STICKY
+            }
         val stopAsked = synchronized(Companion) { (stopWanted && pending == 0).also { if (it) stopWanted = false } }
         if (stopAsked || !stillWanted(inCall)) {
             ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)

@@ -25,6 +25,7 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
@@ -1684,8 +1685,11 @@ class CallManager internal constructor(
                 if (stillMine() && phase == CallPhase.Connecting) armConnectGuard(callId)
             } catch (e: CancellationException) {
                 throw e
-            } catch (e: Exception) {
+            } catch (e: Throwable) {
+                // An Error too (a device's audio stack, WebRTC's native side): a
+                // failed answer, never the whole app closing on the agent.
                 logW("answer failed", e)
+                reportUnexpected(e, "call-answer")
                 if (!stillMine()) return@launch
                 when {
                     // Messenger calling was switched off since we last looked.
@@ -1780,6 +1784,23 @@ class CallManager internal constructor(
         to: String, name: String? = null, conversationId: String? = null,
         /** "messenger": [to] is their PSID and the call goes out on Messenger (CALLING_UX.md §2.0). */
         channel: String = WHATSAPP,
+    ): Result<Unit> = try {
+        placeCall(to, name, conversationId, channel)
+    } catch (e: CancellationException) {
+        throw e
+    } catch (e: Throwable) {
+        // The last net: whatever slipped past placeCall's own handling ends the
+        // call on the card — the caller (a screen's viewModelScope) never sees it.
+        logW("outbound call broke", e)
+        reportUnexpected(e, "call-place")
+        withContext(NonCancellable + main) {
+            runCatching { if (_state.value.outbound && _state.value.live) finish(CallOutcome.Failed(DEVICE_CALL_FAILED)) }
+        }
+        Result.failure(CallError(DEVICE_CALL_FAILED, shown = true))
+    }
+
+    private suspend fun placeCall(
+        to: String, name: String?, conversationId: String?, channel: String,
     ): Result<Unit> = withContext(main) {
         if (_state.value.live) return@withContext Result.failure(CallError("Already in a call"))
         val messenger = channelOf(channel) == MESSENGER
@@ -1855,8 +1876,11 @@ class CallManager internal constructor(
             Result.success(Unit)
         } catch (e: CancellationException) {
             throw e
-        } catch (e: Exception) {
+        } catch (e: Throwable) {
+            // An Error too (a device's audio stack, WebRTC's native side): a failed
+            // call on the card, never the whole app closing under the agent.
             logW("outbound call failed", e)
+            reportUnexpected(e, "call-place")
             // A connect that timed out and left no row: it may yet ring them.
             val friendly = if (e.isAmbiguous("/admin/calls/connect") && e.isTimeout()) UNCONFIRMED_CALL else outboundError(e)
             if (!stillMine()) return@withContext Result.failure(CallError(friendly))
@@ -2125,6 +2149,16 @@ class CallManager internal constructor(
 
     private class MicBlocked : Exception("Permission denied")
 
+    /**
+     * A failure the call flow doesn't expect (not the server's, not the
+     * network's, not a refused microphone): kept as a crash report so the
+     * trace reaches the team — the agent only sees the call fail.
+     */
+    private fun reportUnexpected(e: Throwable, where: String) {
+        if (e is ApiException || e is CallError || e is MicBlocked || e.isOffline() || e.isTimeout()) return
+        runCatching { ke.co.bethanyhouse.neema.core.crash.CrashVault.recordNonFatal(e, where) }
+    }
+
     /** A failed call carrying the user-facing message ([shown]: the call card already says it). */
     class CallError(message: String, val shown: Boolean = false) : Exception(message)
 
@@ -2138,6 +2172,8 @@ class CallManager internal constructor(
         private fun logD(msg: String) { runCatching { Log.d(TAG, msg) } }
         private fun logW(msg: String, e: Throwable) { runCatching { Log.w(TAG, msg, e) } }
         const val MIC_BLOCKED = "Microphone blocked — allow it and try again"
+        /** The phone or tablet couldn't set the call's audio up (the report goes to the team). */
+        const val DEVICE_CALL_FAILED = "This device couldn't start the call — try again, or call from another phone"
         /** The wrap-up's words for a refused microphone (its button opens the settings). */
         const val MIC_BLOCKED_WRAP = "Microphone blocked — allow it in settings"
         const val NO_CALL_PERMISSION = "This customer hasn't allowed WhatsApp calls yet — send them a call request"
@@ -2280,6 +2316,8 @@ class CallManager internal constructor(
             e.isTimeout() -> OUTBOUND_SLOW
             e.isOffline() -> OUTBOUND_OFFLINE
             e.statusOrNull() == 401 -> SESSION_EXPIRED
+            // Not the server, not the network: this device couldn't set the call up.
+            e !is ApiException && e !is java.io.IOException && e !is CallError -> DEVICE_CALL_FAILED
             else -> "Couldn't place the call"
         }
 
