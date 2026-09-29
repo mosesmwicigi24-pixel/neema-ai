@@ -1016,7 +1016,7 @@ class CallManager internal constructor(
             true
         } catch (e: CancellationException) {
             throw e
-        } catch (e: Exception) {
+        } catch (e: Throwable) {
             logW("Messenger $why offer not applied", e)
             false
         }
@@ -1312,7 +1312,7 @@ class CallManager internal constructor(
         if (recording != null || !recEnabled) return
         val p = peer ?: return
         if (!p.hasMic) return
-        recording = try { media.startRecording(_state.value.muted) } catch (e: Exception) {
+        recording = try { media.startRecording(_state.value.muted) } catch (e: Throwable) {
             logW("recording unavailable", e); null
         } ?: return
         recCallId = activeId ?: _state.value.callId
@@ -1336,7 +1336,7 @@ class CallManager internal constructor(
             )
         }
         bg.launch {
-            val file = try { r.stop() } catch (e: Exception) { null } ?: return@launch
+            val file = try { r.stop() } catch (e: Throwable) { null } ?: return@launch
             if (callId == null || callId == "pending" || file.length() < MIN_RECORDING_BYTES) {
                 file.delete()   // skip near-silent / empty recordings
                 return@launch
@@ -1758,7 +1758,7 @@ class CallManager internal constructor(
         val answer = resp.sdp?.takeIf { it.isNotBlank() }
         val applied = answer != null && try {
             p.setRemote(SdpType.Answer, answer); true
-        } catch (e: CancellationException) { throw e } catch (e: Exception) { logW("Messenger answer rejected", e); false }
+        } catch (e: CancellationException) { throw e } catch (e: Throwable) { logW("Messenger answer rejected", e); false }
         if (peer !== p || _state.value.callId != callId) return false
         if (!applied) {
             finish(CallOutcome.Failed(if (answer == null) AUDIO_NOT_CONNECTED else AUDIO_SETUP_FAILED))
@@ -1938,7 +1938,7 @@ class CallManager internal constructor(
         val answer = resp.sdp?.takeIf { it.isNotBlank() }
         if (answer != null) {
             try { p.setRemote(SdpType.Answer, answer); remoteReady = true }
-            catch (e: CancellationException) { throw e } catch (e: Exception) { logW("Messenger answer rejected", e) }
+            catch (e: CancellationException) { throw e } catch (e: Throwable) { logW("Messenger answer rejected", e) }
         }
         if (remoteReady) {
             resp.renegotiationSdp?.let { applyRemoteOffer(p, it, "connect") }
