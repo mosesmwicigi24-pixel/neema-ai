@@ -42,6 +42,12 @@ import ke.co.bethanyhouse.neema.core.ui.theme.WebIcons
 import ke.co.bethanyhouse.neema.core.ui.theme.asFixedSp
 import ke.co.bethanyhouse.neema.core.ui.theme.scaledAtMost
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.outlined.VolumeOff
+import androidx.compose.material.icons.automirrored.outlined.VolumeUp
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
@@ -199,6 +205,38 @@ private fun panelColors(dark: Boolean) = if (dark) PanelColors(
 )
 
 /**
+ * The bell's speaker: one tap away from quiet. Muted, it shows crossed out
+ * and offers Unmute; otherwise it offers 1 hour / 8 hours / until turned back
+ * on. Mute silences message sounds and buzzes only — calls still ring.
+ */
+@Composable
+private fun MuteControl(status: String?, onMute: (Long?) -> Unit, onUnmute: () -> Unit, active: Color, idle: Color) {
+    var open by remember { mutableStateOf(false) }
+    Box {
+        IconButton(onClick = { open = true }) {
+            Icon(
+                if (status != null) Icons.AutoMirrored.Outlined.VolumeOff else Icons.AutoMirrored.Outlined.VolumeUp,
+                contentDescription = status ?: "Mute message sounds",
+                tint = if (status != null) active else idle,
+                modifier = Modifier.size(20.dp),
+            )
+        }
+        DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+            if (status != null) {
+                Text(status, fontSize = 12.sp, color = idle, modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp))
+                DropdownMenuItem(text = { Text("Unmute") }, onClick = { open = false; onUnmute() })
+                Text("Or mute for", fontSize = 12.sp, color = idle, modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp))
+            } else {
+                Text("Mute message sounds", fontSize = 12.sp, color = idle, modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp))
+            }
+            ke.co.bethanyhouse.neema.core.notify.MUTE_CHOICES.forEach { (label, ms) ->
+                DropdownMenuItem(text = { Text(label) }, onClick = { open = false; onMute(ms) })
+            }
+        }
+    }
+}
+
+/**
  * The bell's panel: header with the unread count and "Mark all read", the
  * list (unread rows tinted, time top-right, a ✕ per row), the empty state,
  * and a footer with the count and "Clear all". Rendered in a bottom sheet
@@ -214,6 +252,11 @@ fun NotificationsPanel(
     modifier: Modifier = Modifier,
     listMaxHeight: Dp = 360.dp,
     now: Long = AppClock.now(),
+    /** "Muted until 3:40 PM" while message sounds are muted, else null. */
+    muteStatus: String? = null,
+    /** Mute for a duration (null = until turned back on); null hides the control. */
+    onMute: ((Long?) -> Unit)? = null,
+    onUnmute: () -> Unit = {},
 ) {
     val dark = Neema.colors.isDark
     val c = panelColors(dark)
@@ -235,6 +278,7 @@ fun NotificationsPanel(
                 )
             }
             Spacer(Modifier.weight(1f))
+            if (onMute != null) MuteControl(muteStatus, onMute, onUnmute, c.action, c.faint)
             if (unread > 0) Text(
                 "Mark all read", color = c.action, fontSize = 11.sp, fontWeight = FontWeight.SemiBold,
                 modifier = Modifier.clip(RoundedCornerShape(6.dp)).clickable(role = Role.Button, onClick = onMarkAllRead)

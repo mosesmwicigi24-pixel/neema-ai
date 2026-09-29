@@ -73,6 +73,12 @@ class AppContainer(val context: Context, val config: ContainerConfig = Container
     val online = kotlinx.coroutines.flow.MutableStateFlow(true)
     val snapshots = SnapshotCache(context)
     val notifications = NotificationCenter(context, appScope, socket, prefs, config.prefs?.invoke("neema_notifications"))
+    /** Every customer message beeps / buzzes (Profile → Sounds & vibration). */
+    val messageAlerts = ke.co.bethanyhouse.neema.core.notify.MessageAlerts(
+        appScope, socket, notifications, prefs,
+        ke.co.bethanyhouse.neema.core.notify.Notifier.sink(context),
+        ke.co.bethanyhouse.neema.core.notify.DeviceAlertPlayer(context),
+    )
     val calls = CallManager(
         context, api, socket, appScope,
         foreground = foreground,
