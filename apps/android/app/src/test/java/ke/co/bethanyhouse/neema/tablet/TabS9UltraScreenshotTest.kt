@@ -24,10 +24,15 @@ class TabS9UltraScreenshotTest {
     val main = ke.co.bethanyhouse.neema.testing.MainDispatcherRule()
 
     private fun on(view: ViewId, devices: List<TestDevice> = DeviceMatrix.tabS9Ultra) = devices.forEach { d ->
+        // These views print clock times ("11:20"): start each at the pinned moment, not
+        // however far into the run this test happens to be, so the goldens hold still.
+        ke.co.bethanyhouse.neema.core.util.AppClock.pinTo(java.time.Instant.parse(PIN))
         val dash = ShellShotsAccess.live(paparazzi.context, d.dark)
         dash.navigate(view)
         paparazzi.snapshotOn(d) { AppFrame(d.dark) { DashboardShell(dash, d.widthClass) } }
     }
+
+    private companion object { const val PIN = "2026-09-25T09:00:00Z" }
 
     @Test fun inbox() = on(ViewId.Conversations)
     @Test fun overview() = on(ViewId.Overview)
