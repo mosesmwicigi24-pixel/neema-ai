@@ -35,6 +35,8 @@ object CrashVault {
     private const val PREF = "neema_crash"
     private const val KEY_EXIT_SEEN = "exit_seen_ms"
     private const val LAST_FATAL = "last-fatal.txt"
+    private const val KEY_DECODED_BUILD = "decoded_build"
+    private const val RESCAN_MS = 3L * 24 * 3600 * 1000
 
     private val json = Json { ignoreUnknownKeys = true; explicitNulls = false }
 
@@ -147,10 +149,17 @@ object CrashVault {
         val am = context.getSystemService(ActivityManager::class.java) ?: return
         val prefs = context.getSharedPreferences(PREF, Context.MODE_PRIVATE)
         val seen = prefs.getLong(KEY_EXIT_SEEN, 0L)
+        // A new build reads the native crashes of the last days again: one an older
+        // build kept as unreadable bytes comes back decoded, without anyone having
+        // to make it crash a second time.
+        val build = BuildConfig.BUILD_NUMBER
+        val rescanSince = if (seen != 0L && prefs.getString(KEY_DECODED_BUILD, null) != build)
+            System.currentTimeMillis() - RESCAN_MS else Long.MAX_VALUE
         val exits = am.getHistoricalProcessExitReasons(context.packageName, 0, 10)
         var newest = seen
-        for (x in exits) {
-            if (x.timestamp <= seen) continue
+        for (x in exits.sortedBy { it.timestamp }) {
+            val again = x.timestamp <= seen
+            if (again && (x.timestamp < rescanSince || x.reason != ApplicationExitInfo.REASON_CRASH_NATIVE)) continue
             newest = maxOf(newest, x.timestamp)
             val kind = when (x.reason) {
                 ApplicationExitInfo.REASON_CRASH_NATIVE -> "native"
@@ -159,11 +168,15 @@ object CrashVault {
             }
             // Only the first run records the past: never report exits from before install.
             if (seen == 0L) continue
-            val trace = runCatching { x.traceInputStream?.use { s -> s.readBytes().decodeToString().take(MAX_TRACE) } }.getOrNull()
-            save(report(kind, null, x.processName, trace = listOfNotNull(x.description, trace).joinToString("\n"),
+            val raw = runCatching { x.traceInputStream?.use { it.readBytes() } }.getOrNull()
+            // A native crash's trace is a protobuf tombstone: decoded, the crashing
+            // thread's frames and the last log lines come first and readable.
+            val trace = raw?.let { b -> (if (kind == "native") TombstoneText.decode(b) else null) ?: b.decodeToString() }?.take(MAX_TRACE)
+            save(report(kind, null, x.processName, trace = listOfNotNull(trace, x.description?.let { "($it)" }).joinToString("\n"),
                 at = Instant.ofEpochMilli(x.timestamp)))
         }
-        prefs.edit().putLong(KEY_EXIT_SEEN, if (newest == 0L) System.currentTimeMillis() else newest).apply()
+        prefs.edit().putLong(KEY_EXIT_SEEN, if (newest == 0L) System.currentTimeMillis() else newest)
+            .putString(KEY_DECODED_BUILD, build).apply()
     }
 }
 

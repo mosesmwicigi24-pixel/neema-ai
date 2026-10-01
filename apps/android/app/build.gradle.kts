@@ -21,7 +21,12 @@ android {
         buildConfigField("String", "NEEMA_BASE_URL", "\"https://neema.bethanyhouse.co.ke\"")
         // Which CI build this is (the android-v…-N release): crash reports name it,
         // so a stack trace can be matched to that build's R8 mapping.
-        buildConfigField("String", "BUILD_NUMBER", "\"${System.getenv("GITHUB_RUN_NUMBER") ?: "local"}\"")
+        // CI's run number, else the commit: a crash report says exactly which build it came from.
+        val commit = runCatching {
+            ProcessBuilder("git", "rev-parse", "--short", "HEAD").directory(rootDir).start()
+                .inputStream.bufferedReader().readText().trim().ifEmpty { null }
+        }.getOrNull()
+        buildConfigField("String", "BUILD_NUMBER", "\"${System.getenv("GITHUB_RUN_NUMBER") ?: commit ?: "local"}\"")
     }
 
     signingConfigs {

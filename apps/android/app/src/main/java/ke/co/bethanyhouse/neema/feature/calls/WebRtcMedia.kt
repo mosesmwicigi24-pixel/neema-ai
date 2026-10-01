@@ -61,6 +61,9 @@ internal class WebRtcMedia(private val context: Context) : CallMedia {
         PeerConnectionFactory.initialize(
             PeerConnectionFactory.InitializationOptions.builder(context.applicationContext).createInitializationOptions(),
         )
+        // WebRTC's own log lines go to logcat: a native crash's tombstone carries the
+        // process's last log lines, so the report says what WebRTC was doing.
+        runCatching { org.webrtc.Logging.enableLogToDebugOutput(org.webrtc.Logging.Severity.LS_INFO) }
         val adm = JavaAudioDeviceModule.builder(context.applicationContext)
             .setUseHardwareAcousticEchoCanceler(true)
             .setUseHardwareNoiseSuppressor(true)
