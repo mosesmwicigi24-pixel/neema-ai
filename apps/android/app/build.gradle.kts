@@ -134,7 +134,8 @@ dependencies {
 // kotlinx.serialization finds a model's serializer through its generated
 // `$$serializer` class, and WebRTC's native code finds org.webrtc classes BY
 // NAME over JNI. Minification that drops or renames either still builds and
-// installs, then fails on the first API response / the first call. After R8
+// installs, then fails on the first API response / the first call (a missing
+// org.jni_zero.JniInit made every call a native crash, Oct 2026). After R8
 // runs, this reads its mapping and fails the release build if a kept
 // @Serializable class lost its serializer or an org.webrtc JNI class was
 // removed or renamed. (CI's assembleRelease runs it.)
@@ -179,6 +180,8 @@ val checkReleaseKeeps by tasks.registering {
             "org.webrtc.JniCommon", "org.webrtc.WebRtcClassLoader", "org.webrtc.SessionDescription",
             "org.webrtc.IceCandidate", "org.webrtc.MediaStreamTrack", "org.webrtc.audio.WebRtcAudioRecord",
             "org.webrtc.audio.WebRtcAudioTrack",
+            // Found by JNI_OnLoad itself: without it the library's load is a native crash.
+            "org.jni_zero.JniInit",
         )
         for (c in jni) when (val to = kept[c]) {
             null -> problems += "$c was removed (native code looks it up by name)"
