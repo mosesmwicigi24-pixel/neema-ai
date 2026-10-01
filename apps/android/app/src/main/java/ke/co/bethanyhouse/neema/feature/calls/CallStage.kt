@@ -131,6 +131,19 @@ private fun accentOf(channel: String?): CallAccent = if (channelOf(channel) == M
  */
 @Composable
 fun CallStage(dash: DashboardViewModel) {
+    val c by dash.container.calls.state.collectAsStateWithLifecycle()
+    if (c.phase == CallPhase.Idle || c.minimised) return
+    CallCard(c, rememberCallActions(dash))
+}
+
+/**
+ * The microphone prompt a call raises ([CallManager.micRequest]) and the
+ * lock-screen flag — composed once by the shell, and never moved: the call
+ * card itself moves (over the view on a phone, docked beside it on a wide
+ * tablet) and a prompt registered in it would be torn down mid-request.
+ */
+@Composable
+fun CallMicHost(dash: DashboardViewModel) {
     val calls = dash.container.calls
     val c by calls.state.collectAsStateWithLifecycle()
     val micRequest by calls.micRequest.collectAsStateWithLifecycle()
@@ -142,9 +155,6 @@ fun CallStage(dash: DashboardViewModel) {
         if (micRequest) runCatching { askMic.launch(Manifest.permission.RECORD_AUDIO) }.onFailure { calls.onMicResult(false) }
     }
     ShowOverLockScreen(c.live)
-
-    if (c.phase == CallPhase.Idle || c.minimised) return
-    CallCard(c, rememberCallActions(dash))
 }
 
 /**

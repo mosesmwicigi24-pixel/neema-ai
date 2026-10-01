@@ -9,6 +9,12 @@
 # WebRTC (JNI)
 -keep class org.webrtc.** { *; }
 -dontwarn org.webrtc.**
+# WebRTC's JNI_OnLoad finds org.jni_zero.JniInit BY NAME and stops the process
+# (SIGTRAP, "Failed to find class") when it is missing. No Java code calls it,
+# and the AAR ships no consumer rules, so R8 removed it: every release build
+# crashed natively the first time a call touched WebRTC (owner, 1 Oct 2026).
+-keep class org.jni_zero.** { *; }
+-dontwarn org.jni_zero.**
 # OkHttp
 -dontwarn okhttp3.internal.platform.**
 -dontwarn org.conscrypt.**

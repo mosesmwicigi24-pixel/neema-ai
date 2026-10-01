@@ -92,6 +92,8 @@ class MainActivity : ComponentActivity() {
                             onSignOut = { dash.logout() },
                         )
                     }
+                    // The app closed on someone last time: say so, with the report to send on.
+                    ke.co.bethanyhouse.neema.core.crash.CrashNotice()
                 }
             }
         }

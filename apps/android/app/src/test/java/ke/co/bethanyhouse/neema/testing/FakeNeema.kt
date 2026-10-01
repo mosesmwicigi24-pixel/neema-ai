@@ -84,7 +84,7 @@ class FakeNeema : Interceptor, RequestGate {
     @Volatile var offline: Boolean = false
 
     private class Fault(val method: String, val pattern: Regex, val left: AtomicInteger, val kind: Kind) {
-        enum class Kind { Drop, Timeout }
+        enum class Kind { Drop, Timeout, CallTimeout }
         fun matches(m: String, p: String) = (method == "*" || method == m) && pattern.matches(p) && left.getAndUpdate { if (it > 0) it - 1 else it } > 0
     }
 
@@ -106,6 +106,14 @@ class FakeNeema : Interceptor, RequestGate {
     }
 
     /** The request times out (SocketTimeoutException) — NeemaHttp's "timed out after 30s". */
+    /**
+     * OkHttp's own callTimeout (30 s for every request): it CANCELS the call, then
+     * the blocked read fails with InterruptedIOException("timeout").
+     */
+    fun callTimeout(method: String, path: String, times: Int = Int.MAX_VALUE) {
+        faults.add(0, Fault(method, Regex("^$path$"), AtomicInteger(times), Fault.Kind.CallTimeout))
+    }
+
     fun timeout(method: String, path: String, times: Int = Int.MAX_VALUE) {
         faults.add(0, Fault(method, Regex("^$path$"), AtomicInteger(times), Fault.Kind.Timeout))
     }
@@ -169,6 +177,7 @@ class FakeNeema : Interceptor, RequestGate {
             when (it.kind) {
                 Fault.Kind.Drop -> throw IOException("Connection reset")
                 Fault.Kind.Timeout -> throw SocketTimeoutException("timeout")
+                Fault.Kind.CallTimeout -> { chain.call().cancel(); throw java.io.InterruptedIOException("timeout") }
             }
         }
         val route = routes.firstOrNull { it.method == req.method && it.pattern.matches(path) }

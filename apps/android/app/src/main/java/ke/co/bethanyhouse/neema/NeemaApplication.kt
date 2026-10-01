@@ -23,6 +23,11 @@ class NeemaApplication : Application() {
         super.onCreate()
         // Before anything else can fail: a crash from here on leaves a report.
         ke.co.bethanyhouse.neema.core.crash.CrashVault.install(this)
+        // WebRTC's audio thread failing ends only itself: the call card says so.
+        ke.co.bethanyhouse.neema.core.crash.CrashVault.onContained = { t ->
+            if (t == "AudioRecordJavaThread") ke.co.bethanyhouse.neema.feature.calls.CallAudioTrouble.mic()
+            else ke.co.bethanyhouse.neema.feature.calls.CallAudioTrouble.speaker()
+        }
         instance = this
         container = AppContainer(this)
         Notifier.createChannels(this)
