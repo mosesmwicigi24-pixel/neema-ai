@@ -146,10 +146,12 @@ def test_a_percentage_above_the_ceiling_is_a_mistake_not_a_promotion():
 # ── the words ────────────────────────────────────────────────────────────────
 
 def test_the_sentence_names_the_offer_the_size_the_scope_and_the_end():
-    c = _c(scope="category", categories=["gowns"], ends_on="2026-09-30")
+    # Relative to today: a fixed end date made this test fail once that day passed.
+    ends = date.today() + timedelta(days=30)
+    c = _c(scope="category", categories=["gowns"], ends_on=ends.isoformat())
     said = promo.describe(c)
     assert "Harvest Offer" in said and "10%" in said
-    assert "gowns" in said and "30 September 2026" in said
+    assert "gowns" in said and f"{ends.day} {ends.strftime('%B')} {ends.year}" in said
 
 
 def test_an_expired_offer_says_nothing_at_all():
