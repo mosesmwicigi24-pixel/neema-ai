@@ -926,6 +926,36 @@ async def _history(db: AsyncSession, key: str, limit: int = 20,
     return msgs
 
 
+async def _kes_for_swahili(redis, channel: str, key: str, text: str, currency: str) -> str:
+    """KES for a Meta/TikTok thread whose market is still the USD default when
+    THEY write in Swahili or ask a price the Swahili way, and name no other
+    country (a stated Tanzania or Uganda keeps the market); remembered for
+    the thread (30 days) so the next, English, turn is not quoted in dollars.
+    Anything already decided by evidence (KES, ZMW) is left alone."""
+    if (currency or "").upper() != "USD":
+        return currency
+    from app.agent.voice import swahili_price_ask
+    from app.core.countries import iso_from_text
+    iso = iso_from_text(text)
+    if iso and iso != "KE":
+        return currency
+    rkey = f"market:swahili:{channel}:{key}"
+    if looks_swahili(text) or swahili_price_ask(text) or iso == "KE":
+        if redis is not None:
+            try:
+                await redis.set(rkey, "KES", ex=30 * 24 * 3600)
+            except Exception:
+                pass
+        return "KES"
+    if redis is not None:
+        try:
+            if await redis.get(rkey):
+                return "KES"
+        except Exception:
+            pass
+    return currency
+
+
 async def _meta_market(db: AsyncSession, channel: str, key: str) -> tuple[str, dict, str, dict | None]:
     """(currency, loc, customer_name, source_post) for a Meta contact.
     Messenger/IG carry no phone, so the market is USD — ONE currency — until
@@ -1327,6 +1357,13 @@ async def run_turn(db: AsyncSession, redis, wa_id: str, user_text: str, llm: LLM
             # remembers the FIRST post a person ever commented on — under a
             # later post it named the wrong product (cost audit, 2026-09-26).
             source_post = {"post_id": str(comment_post_id), "comment": ""}
+        # SWAHILI MEANS KENYA (owner rule), BY CONSTRUCTION (2026-10-02: "Are
+        # they consecrated? na ni pesa ngapi?" under the ring post was quoted
+        # in dollars): a Swahili message, or a Swahili price ask, that names
+        # no other country is quoted in KES — the tools' own currency, not a
+        # hope that the writer passes currency="KES" — and the thread stays
+        # KES afterwards.
+        currency = await _kes_for_swahili(redis, channel, key, user_text or "", currency)
         # The ad they tapped, when there is no post to carry: "that set" in
         # their first message is the product this ad shows.
         ad_headline = (await _ad_headline(db, channel, key)) if is_meta else ""
@@ -4309,8 +4346,9 @@ async def _post_identity(redis, channel: str, pctx: dict) -> dict:
                 await redis.delete(_post_product_key(channel, post_id))
             except Exception:
                 pass
-            _log.info("post %s: stale caption identity %r dropped — the caption lists "
-                      "several items and names no set", post_id, known.get("name"))
+            _log.info("post %s: stale caption identity %r dropped — the caption no longer "
+                      "names it (several items and no set, or a generic name beside a "
+                      "specific one)", post_id, known.get("name"))
             return {}
         if known.get("name"):
             # A record from before provenance existed (owner, 2026-09-21): the
@@ -4419,12 +4457,36 @@ def _hub_caption_match(catalog: list, title: str) -> dict | None:
                 score += 3.0
                 break
         if score > 0:
-            scored.append((score, prod))
+            scored.append((score, prod, frozenset(ntoks), cov))
+    if not scored:
+        return None
+    # A GENERIC NAME NEVER OUTRANKS THE SPECIFIC ONE (owner, 2026-10-02: a
+    # "Bishop's rings" post priced the hub's plain "Ring" at the Ring's
+    # price). A one-word name that is part of a longer hub name ("Ring" ⊂
+    # "Bishopric Ring") is generic: when the caption fully covers a specific
+    # sibling, the generic drops out; when the caption carries only the
+    # generic word, the caption has not said which — None, and the photo
+    # (the image and vision rungs) decides.
+    fully = {id(e[1]) for e in scored if e[3] == 1.0}
+    unsaid: set = set()
+    kept = []
+    for e in scored:
+        _sc, prod, ntoks, cov = e
+        if len(ntoks) == 1 and cov == 1.0:
+            supersets = [p for p in catalog if _specific_sibling(prod, p)]
+            if supersets:
+                if any(id(p) in fully for p in supersets):
+                    continue
+                unsaid.add(id(prod))
+        kept.append(e)
+    scored = kept
     if not scored:
         return None
     scored.sort(key=lambda x: -x[0])
-    best_score, best = scored[0]
+    best_score, best = scored[0][0], scored[0][1]
     if best_score < 3.0:
+        return None
+    if id(best) in unsaid:
         return None
     if len(scored) > 1 and (best_score - scored[1][0]) < 0.5:
         # Ambiguous siblings. When every tied row is the SAME item in another
@@ -4432,16 +4494,41 @@ def _hub_caption_match(catalog: list, title: str) -> dict | None:
         # Tallit"), the caption named the item and the tie is only its sizes:
         # one family identity, priced "from" the cheapest (owner, 2026-09-21:
         # this tie left a tallit post unidentified and a guess sold oil).
-        tied = [prod for sc, prod in scored if best_score - sc < 0.5]
+        tied = [e[1] for e in scored if best_score - e[0] < 0.5]
         return _size_family(tied, toks)     # None: different products — don't guess
     # A clear winner that has SIZE siblings (same core name) is still one item
     # in several sizes: the family, priced from the cheapest.
-    siblings = [prod for _sc, prod in scored[1:] if _core_tokens(prod) == _core_tokens(best)]
+    siblings = [e[1] for e in scored[1:] if _core_tokens(e[1]) == _core_tokens(best)]
     if siblings:
         fam = _size_family([best] + siblings, toks)
         if fam is not None:
             return fam
     return best
+
+
+# A colour or a size in a longer name is the same product in another colour
+# or size ("White Cassock", "Large bell"); any other extra word names a more
+# specific product ("Bishopric Ring", "Red Apostolic Cassock", "Single
+# Sided Stole").
+_QUALIFIER_WORDS = {"white", "black", "red", "purple", "navy", "blue", "green", "gold", "golden",
+                    "silver", "yellow", "maroon", "cream", "grey", "gray", "brown", "pink", "violet",
+                    "royal", "ivory", "orange", "burgundy", "wine", "plain"}
+
+
+def _specific_sibling(generic: dict, other: dict) -> bool:
+    """Does `other` name a MORE SPECIFIC product than the one-word `generic`
+    ("Bishopric Ring" beside "Ring")? Its extra words must be more than a
+    colour or a size, and it must not be a set that contains the generic
+    (owner, 2026-10-02: the generic word in a caption never prices the
+    generic row while such a sibling exists — the photo decides)."""
+    g = frozenset(_caption_token_seq(generic.get("name") or ""))
+    o = frozenset(_caption_token_seq(other.get("name") or ""))
+    if len(g) != 1 or not (o > g):
+        return False
+    from app.services.post_catalog import is_set_row
+    if is_set_row(other):
+        return False
+    return bool({t for t in (o - g) if t not in _QUALIFIER_WORDS and t not in _SIZE_WORDS})
 
 
 def _core_tokens(prod: dict) -> frozenset:
@@ -5214,9 +5301,11 @@ def _public_price_text(kes, usd, currency: str = "USD") -> str:
             if kes:
                 return money.fmt(kes, "KES")
             return money.fmt(money.exact(float(usd) * rate), "KES") if usd else ""
-        if usd:
-            return money.fmt(usd, "USD")
-        return money.fmt(money.exact(float(kes) / rate, floor_cent=True), "USD") if kes else ""
+        # THE KES PRICE IS THE TRUTH (owner, 2026-10-02): the hub's USD only
+        # when it agrees with KES / rate, else KES / rate.
+        from app.services.price_audit import usd_quote
+        q = usd_quote(kes, usd, rate)
+        return money.fmt(money.exact(q, floor_cent=True), "USD") if q else ""
     except (TypeError, ValueError):
         return ""
 

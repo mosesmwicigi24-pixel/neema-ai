@@ -95,6 +95,15 @@ def _to_display(kes, ctx: "ToolContext", price_usd=None, prices=None):
     own = (prices or {}).get(ctx.currency)
     if own is None and ctx.currency == "USD":
         own = price_usd
+    if ctx.currency == "USD":
+        # THE KES PRICE IS THE TRUTH (owner, 2026-10-02): the hub's USD row is
+        # quoted only when it agrees with KES / rate; a stale or hand-set
+        # dollar (the ring's $20 on KES 1,500) is never repeated.
+        from app.services.price_audit import usd_quote
+        q = usd_quote(kes, own, _kes_rate_for(ctx, "USD"))
+        if q is not None and q > 0:
+            return money.exact(q, floor_cent=True)
+        return _display(kes, ctx)
     try:
         v = float(own)
         if v > 0:

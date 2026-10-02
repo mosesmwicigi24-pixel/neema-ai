@@ -376,7 +376,8 @@ def test_the_bundle_line_accounts_for_every_item():
     # the Mitre is made to order, so the whole combination asks its colour
     assert total["product_type"] == "variable" and total["is_producible"] is True
     items = rt._bundle_items_text(total["bundle_rows"], "USD")
-    assert items == "the Mitre at $60, the Cincture Rope at $20 and the Skull Cap at $20"
+    # KES 5,500 is $55 and KES 1,500 is $15 — the hub's $60 and $20 are past 5% (owner, 2026-10-02)
+    assert items == "the Mitre at $55, the Cincture Rope at $20 and the Skull Cap at $15"
     for seed in ("s", "t", "u"):
         out = rt._comment_public_reply("", dm_sent=False, name_tag=" Sam", seed=seed, product_known=True,
                                        product_name=total["name"], price_text="$100", set_items=items,

@@ -103,7 +103,8 @@ def test_search_rows_carry_the_map(monkeypatch):
     assert "AND the set's total" in piece["part_of_set"]["note"]
     sset = rows["Cassock Set"]
     priced = {e["piece"]: e for e in sset["set"]["pieces_priced"]}
-    assert priced["cassock"]["row"] == "Cassock" and priced["cassock"]["price"] == 120
+    # KES 13,000 is $130 — the hub's $120 is past 5% of it (owner, 2026-10-02)
+    assert priced["cassock"]["row"] == "Cassock" and priced["cassock"]["price"] == 130
     assert "goes_with" not in sset                            # a set is complete
     # companions only on the first rows — the ones that get quoted
     assert sum(1 for r in out["results"] if r.get("goes_with")) <= 3

@@ -90,7 +90,8 @@ def test_live_which_pool_keeps_the_calm_register():
 def test_public_price_text_is_one_currency(monkeypatch):
     monkeypatch.setattr(rt.settings, "usd_kes_rate", 100, raising=False)
     assert rt._public_price_text(13000, 140, "KES") == "KES 13,000"
-    assert rt._public_price_text(13000, 140, "USD") == "$140"      # the hub's own USD
+    assert rt._public_price_text(13000, 140, "USD") == "$130"      # the hub's $140 is past 5% of KES/100
+    assert rt._public_price_text(13000, 132, "USD") == "$132"      # within 5%: the hub's own USD
     assert rt._public_price_text(13000, None, "USD") == "$130"     # no hub USD → KES / rate
     assert rt._public_price_text(None, 140, "KES") == "KES 14,000"  # no hub KES → USD × rate
     assert rt._public_price_text(450, 4.5, "USD") == "$4.50"
@@ -137,7 +138,7 @@ def test_search_catalog_rows_carry_one_currency_only(monkeypatch):
     abroad = asyncio.run(_search_catalog({"query": "chasuble"},
                                          ToolContext(db=None, redis=None, wa_id="PSID",
                                                      currency="USD")))
-    assert abroad["results"][0]["price"] == 140 and abroad["results"][0]["currency"] == "USD"
+    assert abroad["results"][0]["price"] == 130 and abroad["results"][0]["currency"] == "USD"
     assert not hasattr(ToolContext(db=None, redis=None, wa_id="x"), "placed")
 
 

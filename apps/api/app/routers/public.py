@@ -64,9 +64,12 @@ def _resolve_price(prices: dict, ccy: str):
     if ccy == "KES":
         kes = prices.get("KES") or (prices.get("USD") and prices["USD"] * rate)
         return _money(kes), "KES"
-    if prices.get(ccy):                       # their own currency, priced by the hub
+    if ccy != "USD" and prices.get(ccy):      # their own currency, priced by the hub
         return _money(prices[ccy]), ccy
-    usd = prices.get("USD") or (prices.get("KES") and prices["KES"] / rate)
+    # THE KES PRICE IS THE TRUTH (owner, 2026-10-02): the hub's USD row only
+    # when it agrees with KES / rate — the card and Neema say one figure.
+    from app.services.price_audit import usd_quote
+    usd = usd_quote(prices.get("KES"), prices.get("USD"), rate)
     return _money(usd), "USD"
 
 

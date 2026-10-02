@@ -83,9 +83,9 @@ def test_simple_line_sells_from_stock():
 
 def test_variable_but_not_producible_is_not_mto():
     # A variable ring (has size variants) that is NOT producible sells from stock.
-    ring = [{"hub_product_id": 55, "sku": "RING", "name": "Apostolic Ring", "price": 1500.0,
+    ring = [{"hub_product_id": 55, "sku": "RING", "name": "Bishopric Ring", "price": 4500.0,
              "aliases": [], "product_type": "variable", "is_producible": False}]
-    line = resolve_hub_line({"name": "Apostolic Ring", "qty": 1}, ring)
+    line = resolve_hub_line({"name": "Apostolic Ring", "qty": 1}, ring)      # the hub's old name still finds it
     assert _is_made_to_order(line) is False
 
 

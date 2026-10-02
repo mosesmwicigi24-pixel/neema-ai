@@ -376,6 +376,13 @@ def caption_record_stale(known: dict | None, caption: str, catalog: list[dict]) 
         return False
     if known.get("bundle"):
         return False
+    # A GENERIC one-word name with longer siblings in the hub ("Ring" beside
+    # "Bishopric Ring") is a record the caption ladder no longer makes (owner,
+    # 2026-10-02: the ring post priced the plain Ring for days): re-read, so
+    # the specific row — or the photo — decides.
+    from app.agent.runtime import _specific_sibling
+    if any(_specific_sibling({"name": str(known.get("name") or "")}, p) for p in catalog):
+        return True
     if len(caption_item_kinds(caption or "", catalog)) < 2:
         return False
     slug = (known.get("slug") or "").lower()
