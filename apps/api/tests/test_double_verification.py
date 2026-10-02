@@ -146,7 +146,9 @@ def test_the_verifier_reads_rands_and_allows_the_conversion_at_todays_rate():
     assert rv.money_with_currency("R2,200 or ZAR 2200 or 2,200 rands, $120, ₦5,000") == [
         ("ZAR", 2200.0), ("ZAR", 2200.0), ("ZAR", 2200.0), ("USD", 120.0), ("NGN", 5000.0)]
     assert rv.money_figures("Randall paid R500") == [500.0]
-    cassock = {"name": "Cassock", "price": 13000, "price_usd": 120}
+    # a row whose hub USD agrees with KES / 100 (the quote policy, 2026-10-02: a
+    # disagreeing hub dollar is replaced by KES / rate — see test_price_truth)
+    cassock = {"name": "Cassock", "price": 12000, "price_usd": 120}
     rate = {"ZAR": 16.43}
     ok = "The Cassock is $120 — about R1,971.60 at today's rate."
     assert rv.unverified_figures(ok, [cassock], "how much that in rands", fx=rate) == []

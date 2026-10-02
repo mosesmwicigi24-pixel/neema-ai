@@ -56,6 +56,13 @@ _EN_WORDS = frozenset("""
 _SW_ASK_RE = re.compile(r"\b(?:bei(?:\s+gani)?|(?:pesa\s+|shilingi\s+|ni\s+)?ngapi)\b", re.I)
 
 
+def swahili_price_ask(text: str | None) -> bool:
+    """A Swahili price ask inside any sentence — "na ni pesa ngapi?", "bei
+    gani?" — whatever the English around it (owner, 2026-10-02: "Are they
+    consecrated? na ni pesa ngapi?" is a Kenyan asking the price)."""
+    return bool(_SW_ASK_RE.search(text or ""))
+
+
 def looks_swahili(text: str | None) -> bool:
     """True when THEIR words are Swahili — "Bei gani?", "Nataka hii cassock",
     "Divai na mkate" — and False for English, a lone "Karibu Zambia", or a

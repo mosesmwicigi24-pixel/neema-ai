@@ -78,6 +78,14 @@ async def health(request: Request):
                           "duplicate": c.get("duplicate", 0)}
     except Exception:
         pass
+    # THE KES PRICE IS THE TRUTH (owner, 2026-10-02): the hub rows whose own
+    # USD disagrees with KES / rate — Neema quotes KES / rate past 5%, and the
+    # team fixes the hub. Cached an hour.
+    try:
+        from app.services.price_audit import health_summary as _prices_summary
+        out["prices"] = await _prices_summary(getattr(request.app.state, "redis", None))
+    except Exception:
+        pass
     # WE SELL CHURCH GOODS ONLY (owner, 2026-09-25): what the guard did today
     # — asks for other goods declined, threads paused, silenced, lifted.
     try:

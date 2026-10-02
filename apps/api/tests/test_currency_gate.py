@@ -69,15 +69,17 @@ def test_cart_display_kes_is_untouched():
     assert items[0]["unit_price"] == 12000 and total == 24000
 
 
-def test_cart_display_usd_uses_hub_price_and_sums_lines(monkeypatch):
+def test_cart_display_usd_follows_the_kes_price_and_sums_lines(monkeypatch):
     async def fake_catalog(db, redis):
         return [{"hub_product_id": 7, "price": 12000, "price_usd": 95}]
     monkeypatch.setattr(tools.svc, "catalog_items", fake_catalog)
     cart = {"items": [{"name": "Cassock", "qty": 2, "unit_price": 12000,
                        "hub_product_id": 7}]}
     items, total = asyncio.run(_cart_display(cart, _ctx("USD")))
-    assert items[0]["unit_price"] == 95      # hub USD, not 12000/100=120
-    assert total == 190                      # 95 * 2, summed from the line
+    # THE KES PRICE IS THE TRUTH (owner, 2026-10-02): the hub's $95 on KES
+    # 12,000 is a stale figure (past 5% of 120) — the cart says $120
+    assert items[0]["unit_price"] == 120
+    assert total == 240                      # 120 * 2, summed from the line
     assert cart["items"][0]["unit_price"] == 12000   # original untouched
 
 

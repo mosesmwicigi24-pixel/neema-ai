@@ -51,6 +51,7 @@ import re
 from datetime import datetime, timezone
 
 from app.core.config import settings
+from app.services.price_audit import usd_quote
 
 _log = logging.getLogger("neema.review")
 
@@ -151,25 +152,33 @@ def _row_figures(p: dict, currency: str = "USD") -> set[float]:
         k, u = _num(kes), _num(usd)
         if k:
             out.add(k)
-            if not u:
-                out.add(round(k / usd_rate, 2))
+            # THE KES PRICE IS THE TRUTH (owner, 2026-10-02): the USD a reply
+            # may state is the one the writer was shown — the hub's own only
+            # when it agrees with KES / rate, else KES / rate. A stale hub
+            # dollar is not a figure the reply may repeat.
+            q = usd_quote(k, u, usd_rate)
+            if q:
+                out.add(round(q, 2))
             if (currency or "").upper() == "ZMW":
                 out.add(round(k / zmw_rate, 2))
-        if u:
+        elif u:
             out.add(u)
-            if not k:
-                out.add(round(u * usd_rate, 2))
+            out.add(round(u * usd_rate, 2))
+    def _add_map(prices: dict | None, kes):
+        for cur, v in (prices or {}).items():
+            f = _num(v)
+            if not f:
+                continue
+            if str(cur).upper() == "USD":
+                f = usd_quote(kes or (prices or {}).get("KES"), f, usd_rate)
+            if f:
+                out.add(round(float(f), 2))
+
     _add_pair(p.get("price") or p.get("price_kes"), p.get("price_usd"))
-    for v in (p.get("prices") or {}).values():
-        f = _num(v)
-        if f:
-            out.add(f)
+    _add_map(p.get("prices"), p.get("price") or p.get("price_kes"))
     for vr in (p.get("variants") or []):
         _add_pair(vr.get("price_kes") or vr.get("price"), vr.get("price_usd"))
-        for v in (vr.get("prices") or {}).values():
-            f = _num(v)
-            if f:
-                out.add(f)
+        _add_map(vr.get("prices"), vr.get("price_kes") or vr.get("price"))
     for r in (p.get("bundle_rows") or []):
         out |= _row_figures(r, currency)
     return out
@@ -242,10 +251,9 @@ def _usd_of(base: set[float], seen: list) -> set[float]:
     for p in seen or []:
         u = _num(p.get("price_usd"))
         k = _num(p.get("price") or p.get("price_kes"))
-        if u:
-            out.add(u)
-        elif k:
-            out.add(round(k / float(settings.usd_kes_rate or 100), 2))
+        q = usd_quote(k, u, float(settings.usd_kes_rate or 100))
+        if q:
+            out.add(round(q, 2))
         for v in (p.get("variants") or []):
             u = _num(v.get("price_usd"))
             if u:
@@ -932,7 +940,9 @@ def parse_verdict(text: str) -> dict | None:
 def rows_text(seen: list, currency: str) -> str:
     lines = []
     for p in (seen or [])[:8]:
-        price = p.get("price_usd") if currency == "USD" else p.get("price")
+        price = (usd_quote(p.get("price") or p.get("price_kes"), p.get("price_usd"),
+                           float(settings.usd_kes_rate or 100))
+                 if currency == "USD" else p.get("price"))
         unit = "USD" if currency == "USD" else "KES"
         d = " ".join(str(p.get("description") or "").split())[:140]
         lines.append(f"- {p.get('name')} — {unit} {price}" + (f" — {d}" if d else ""))

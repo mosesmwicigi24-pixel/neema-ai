@@ -324,6 +324,28 @@ Last updated: 2026-07-09. Branch of record: work is fused to **`origin/main`**
   shape of something that happened: came, arrived, too small, didn't — all
   silent) is a misread: `_settle_reading` makes it high/other — a person to
   answer, never to apologise to. Tests: `tests/test_campaign_posts.py`.
+- **The KES price is the truth** (owner, 2026-10-02: under a post of bishop's
+  rings, "Are they consecrated? na ni pesa ngapi?" was answered "Hii ni Ring
+  yetu… bei ni USD 20" — the Bishopric Ring is KES 4,500 / "45 USD", the plain
+  Ring KES 1,500 / "the normal rings are 15 usd"; the hub's own USD row for the
+  Ring says 20). `price_audit.usd_quote(kes, usd, rate)`: the hub's USD row is
+  quoted only within `QUOTE_TOLERANCE_PCT` (5%) of KES/rate, else KES/rate —
+  used by `tools._to_display`, `runtime._public_price_text` (canned lines),
+  `public._resolve_price` (storefront cards) and the reviewer (`_row_figures`,
+  `_usd_of`, `rows_text`: a reply saying the stale hub dollar is HELD). The
+  1% audit still names every disagreeing row; `/api/health` → `prices`
+  (`health_summary`, cached an hour: rate, hub_usd_gaps, quoted_from_kes, the
+  worst rows with hub_usd vs quoted_usd) — the team fixes the hub, because a
+  checkout runs on the hub's own figures. IDENTITY: `_hub_caption_match` —
+  a one-word name that is part of a longer hub name ("Ring" ⊂ "Bishopric
+  Ring") is generic: it drops out when the caption fully covers the specific
+  sibling, and alone it is None (the image/vision rungs decide);
+  `core/synonyms`: bishop's / episcopal / apostolic ring, rings for bishops,
+  pete ya/za (ma)askofu → "bishopric ring". CURRENCY: `_kes_for_swahili` in
+  `run_turn` — a Meta/TikTok thread still on the USD default is quoted in KES
+  when they write Swahili or ask a price the Swahili way (`voice.
+  swahili_price_ask`) and name no other country; remembered 30 days
+  (`market:swahili:{channel}:{key}`). Tests: `tests/test_price_truth.py`.
 - **The gifting campaign — the gift is a gift** (2026-09-26, owner: "a visibility
   and mobilisation campaign gifting one free pair of shoes to a Pastor,
   Reverend or Bishop — not a voting or competition campaign; one selected
