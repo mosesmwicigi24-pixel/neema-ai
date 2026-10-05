@@ -170,7 +170,10 @@ TOOLS: list[dict] = [
     {
         "name": "update_cart",
         "description": "Add, set the quantity of, remove, or clear an item in the cart. "
-                       "The product must exist in the catalogue (call search_catalog if unsure).",
+                       "The product must exist in the catalogue (call search_catalog if unsure). "
+                       "`set` = the quantity the customer wants IN TOTAL — use it when they "
+                       "confirm or restate an item already in the cart. `add` = that many MORE "
+                       "on top of what is already there.",
         "input_schema": {
             "type": "object",
             "properties": {
@@ -1030,8 +1033,8 @@ async def _cart_display(cart: dict, ctx: ToolContext) -> tuple[list, object]:
     cached), so the common Kenyan turn does no extra work."""
     # `in_stock`/`price_usd`/`prices` on a cart line are internal bookkeeping —
     # never shown to the model (in_stock feeds the sourcing flag; the price
-    # fields feed non-KES display).
-    _hidden = ("in_stock", "price_usd", "prices")
+    # fields feed non-KES display; variant_id is the line's identity).
+    _hidden = ("in_stock", "price_usd", "prices", "variant_id")
     items = [{k: v for k, v in i.items() if k not in _hidden} for i in cart.get("items", [])]
     raw = cart.get("items", [])
     if ctx.currency == "KES":
@@ -1095,24 +1098,48 @@ async def _update_cart(args: dict, ctx: ToolContext) -> dict:
 
     key = (line or {}).get("name") or prod
 
-    def find(name):
-        return next((i for i in items if i.get("name", "").lower() == name.lower()), None)
-
     def _is_line_of(i: dict, name: str) -> bool:
         n = i.get("name", "").lower()
         # the base name removes its variants too ("Straight Collar" takes
         # "Straight Collar — 10 inch" with it)
         return n == name.lower() or n.startswith(name.lower() + " —")
 
-    existing = find(key)
+    # ONE PRODUCT, ONE LINE (2026-10-05): a line is found by WHAT it is — the
+    # hub product and variant — never by the words used to name it. The same
+    # tray by SKU, slug, name or alias is one line; a stored line whose label
+    # has since changed is still that line. Different variants stay apart.
+    ident = hub_client.line_identity(line) if line else None
+    same = ([i for i in items if hub_client.cart_line_identity(i, catalog) == ident]
+            if ident is not None else [])
+    note = None
     if action == "remove":
-        kept = [i for i in items if not _is_line_of(i, key) and not _is_line_of(i, prod)]
+        if line and line.get("product_id") is not None and line.get("variant_id") is None:
+            # the base product takes every variant of it with it
+            pid = line["product_id"]
+            gone = [i for i in items if hub_client.cart_line_identity(i, catalog)[0] == pid]
+        else:
+            gone = list(same)
+        kept = [i for i in items if not any(i is g for g in gone)
+                and not _is_line_of(i, key) and not _is_line_of(i, prod)]
         if len(kept) == len(items):
             return {"ok": False, "error": f"'{prod}' is not in the cart",
                     "items": (await _cart_display(cart, ctx))[0], "currency": ctx.currency}
         cart["items"] = kept
     elif action in ("add", "set"):
-        new_qty = qty if action == "set" else (int(existing["qty"]) + qty if existing else qty)
+        had = 0
+        for i in same:
+            try:
+                had += int(i.get("qty") or 0)
+            except (TypeError, ValueError):
+                pass
+        new_qty = qty if action == "set" else had + qty
+        if action == "add" and had:
+            # 243 of 839 adds in six weeks re-added an item already in the
+            # cart — usually the customer only confirming it again. Say what
+            # happened, so a doubled quantity is never silent.
+            note = (f"'{line['name']}' was already in the cart ×{had}; add put {qty} MORE on "
+                    f"top → now ×{new_qty}. If the customer did not ask for more, call "
+                    f"update_cart set with the quantity they want.")
         cat = next((p for p in catalog if p.get("hub_product_id") == line["product_id"]), {})
         row = {
             "hub_product_id": line["product_id"],
@@ -1121,6 +1148,7 @@ async def _update_cart(args: dict, ctx: ToolContext) -> dict:
             # re-resolution finds the exact variant (its price + variant_id) and
             # the order total matches what was quoted.
             "sku": (line.get("variant_sku") or cat.get("sku") or ""),
+            "variant_id": line.get("variant_id"),
             "qty": new_qty,
             "unit_price": line["unit_price"],
             "price_usd": line.get("unit_price_usd"),   # variant's own USD (for USD display)
@@ -1128,15 +1156,21 @@ async def _update_cart(args: dict, ctx: ToolContext) -> dict:
             "in_stock": bool(cat.get("in_stock", True)),
             "made_to_order": bool(line.get("is_producible")),
         }
-        if existing:
-            items[items.index(existing)] = row
+        if same:
+            # the line keeps its place; any duplicate of it (an old cart) folds in
+            first = same[0]
+            items = [row if i is first else i for i in items
+                     if not any(i is d for d in same[1:])]
         else:
             items.append(row)
         cart["items"] = items
 
     cart = await cartmod.save_cart(ctx.db, ctx.wa_id, cart, ctx.channel)
     items, total = await _cart_display(cart, ctx)
-    return {"ok": True, "items": items, "total": total, "currency": ctx.currency}
+    out = {"ok": True, "items": items, "total": total, "currency": ctx.currency}
+    if note:
+        out["note"] = note
+    return out
 
 
 def _sourcing_gaps(cart_items: list, catalog: list) -> list[str]:

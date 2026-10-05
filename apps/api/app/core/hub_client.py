@@ -380,6 +380,10 @@ def resolve_hub_line(item: dict, catalog: list[dict]) -> dict | None:
         }
 
     by_sku = {_norm(p.get("sku")): p for p in catalog if p.get("sku")}
+    # The storefront slug ("golden-communion-tray") is the product's third
+    # name: the agent reads it off a product link. It never resolved, so the
+    # same tray reached the cart by SKU and then failed by slug.
+    by_slug = {_norm(p.get("slug")): p for p in catalog if p.get("slug")}
     by_name = {_norm(p.get("name")): p for p in catalog if p.get("name")}
     # Variant lookups: a variant SKU ("COM-T-001-S-GOL") or full name ("thurible
     # s / gold") resolves to its parent product at the VARIANT's price.
@@ -411,6 +415,8 @@ def resolve_hub_line(item: dict, catalog: list[dict]) -> dict | None:
             return _line(known, "id")
     if sku and sku in by_sku and by_sku[sku].get("hub_product_id"):
         return _line(by_sku[sku], "sku")
+    if sku and sku in by_slug and by_slug[sku].get("hub_product_id"):
+        return _line(by_slug[sku], "slug")
     if name and name in by_var_name:
         p, v = by_var_name[name]
         return _line(p, "variant_name", v)
@@ -461,6 +467,49 @@ def resolve_hub_line(item: dict, catalog: list[dict]) -> dict | None:
             cands.sort(key=lambda p: len(_norm(p.get("name"))), reverse=True)
             return _line(cands[0], "contains")
     return None
+
+
+def line_identity(line: dict) -> tuple:
+    """The ONE identity of a resolved hub line: (hub product id, variant id).
+
+    A product reached by its SKU, its slug, its name or an alias is the same
+    product; two variants of it are not. Without a hub id (the local fallback
+    catalogue) the normalised name is all there is."""
+    pid = line.get("product_id")
+    if pid is None:
+        return ("name", _norm(line.get("name")))
+    return (pid, line.get("variant_id"))
+
+
+def cart_line_identity(row: dict, catalog: list[dict]) -> tuple:
+    """The identity of a line already IN the cart — re-resolved against the
+    catalogue (its stored variant SKU finds the variant even when the label
+    it was saved under has since changed), so an old line and a new reference
+    to the same thing compare equal."""
+    pid = row.get("hub_product_id")
+    if pid is not None and row.get("variant_id") is not None:
+        return (pid, row.get("variant_id"))
+    line = resolve_hub_line(row, catalog)
+    if line:
+        return line_identity(line)
+    return (pid, None) if pid is not None else ("name", _norm(row.get("name")))
+
+
+def _merge_same_lines(lines: list[dict]) -> list[dict]:
+    """One payload entry per (product, variant): a cart that somehow carries
+    the same thing twice must never reach the hub as two lines."""
+    out: list[dict] = []
+    seen: dict = {}
+    for line in lines:
+        key = line_identity(line)
+        if key in seen:
+            _log.warning("order payload: %s appeared twice — merged into one line",
+                         line.get("name"))
+            seen[key]["quantity"] = int(seen[key]["quantity"]) + int(line["quantity"])
+            continue
+        seen[key] = line
+        out.append(line)
+    return out
 
 
 def _is_made_to_order(line: dict) -> bool:
@@ -555,6 +604,8 @@ async def push_pending_order(
         err = ValueError("no cart line matched a hub product")
         err.unmatched = unmatched            # type: ignore[attr-defined]
         raise err
+    stock_lines = _merge_same_lines(stock_lines)
+    mto_lines = _merge_same_lines(mto_lines)
 
     # channel='whatsapp' groups the order under the hub's "WhatsApp Orders" (and
     # tags order_type/number as WA-), while the outlet stays the fulfilling store.
