@@ -899,8 +899,12 @@ async def _history(db: AsyncSession, key: str, limit: int = 20,
     if post_id:
         rows = _thread_rows(rows, post_id)[-limit:]
     msgs: list[dict] = []
+    from app.services.voice_notes import history_text as _voice_line
     for m in rows:
-        text = (m.text or "").strip()
+        # A customer's voice note reads as what they SAID (or why it couldn't
+        # be heard) — never "[audio received]", which taught the model to say
+        # it can't listen to audio (services/voice_notes).
+        text = (_voice_line(m) or m.text or "").strip()
         if not text:
             continue
         role = "user" if m.direction == MsgDirection.inbound else "assistant"
@@ -1627,8 +1631,9 @@ async def run_turn(db: AsyncSession, redis, wa_id: str, user_text: str, llm: LLM
 
     # Current inbound turn. An image message has empty text (skipped by _history),
     # so build a multimodal turn — the agent SEES the photo (Claude vision) and
-    # can match it to the catalogue. Voice notes already arrive as transcribed
-    # text, so they need no special handling here.
+    # can match it to the catalogue. Voice notes arrive as their words
+    # ("🎤 (voice note): …", services/voice_notes), so they need no special
+    # handling here.
     img_block = None
     if settings.tier2_vision and media and (media.get("type") == "image"):
         from app.agent.media import load_image_block
@@ -2322,23 +2327,35 @@ async def silenced_since(redis, channel: str, external_id: str):
         return None
 
 
-async def _hear_voice_note(text: str, media: dict | None) -> tuple[str, dict | None]:
-    """A VOICE NOTE IS THE MESSAGE (owner, 2026-09-26: image/voice
-    conversations). A Messenger/Instagram audio attachment is transcribed with
-    the configured whisper backend, exactly as WhatsApp's voice notes are, and
-    its words become the turn; with no backend (or a note that could not be
-    read) it stays the attachment the prompt knows how to handle."""
-    if not (media and media.get("type") == "audio" and media.get("url")):
-        return text, media
-    try:
-        from app.services.meta_media import transcribe_audio_url
-        heard = await transcribe_audio_url(media["url"])
-        said = heard.text if heard.ok else None
-    except Exception:
-        said = None
-    if said:
-        return (f"{text}\n{said}" if (text or "").strip() else said).strip(), None
-    return ((text or "").strip() or "(the customer sent a voice note)"), None
+async def _hear_voice_note(text: str, media: dict | None, *, channel: str = "",
+                           external_id: str = "") -> tuple[str, dict | None]:
+    """A VOICE NOTE IS THE MESSAGE (owner, 2026-09-26; cycle 5, 2026-10-05).
+    A Messenger/Instagram voice note is transcribed in the background from
+    the moment it lands (services/voice_notes); here its token — and any
+    tokens a burst carried — become the customer's words, or the reason they
+    couldn't be heard, so Neema answers what was SAID. A note with no row id
+    (an older caller) is transcribed here with the same engine."""
+    from app.services import voice_notes
+    text = text or ""
+    if media and media.get("type") == "audio":
+        if media.get("message_id"):
+            text = "\n".join(p for p in (text.strip(), voice_notes.token(media["message_id"])) if p)
+        elif media.get("url"):
+            try:
+                from app.services.meta_media import transcribe_audio_url
+                heard = await transcribe_audio_url(media["url"])
+                line = voice_notes.turn_line(heard.status, heard.text)
+            except Exception:
+                line = voice_notes.turn_line("failed:error", None)
+            text = "\n".join(p for p in (text.strip(), line) if p)
+        media = None
+    if "⟦voice:" in text:
+        try:
+            text = await voice_notes.resolve(text, channel=channel, key=external_id)
+        except Exception as exc:
+            _log.warning("voice-note resolution failed for %s/%s: %s", channel, external_id, exc)
+            text = voice_notes.TOKEN_RE.sub(voice_notes.turn_line("failed:error", None), text)
+    return text.strip(), media
 
 
 async def _run_and_send_meta(redis, channel: str, external_id: str, text: str,
@@ -2350,7 +2367,7 @@ async def _run_and_send_meta(redis, channel: str, external_id: str, text: str,
     from app.services.meta_send import send_to_channel, send_typing_on
     from app.services import n8n_bridge as svc
     reply = ""
-    text, media = await _hear_voice_note(text, media)
+    text, media = await _hear_voice_note(text, media, channel=channel, external_id=external_id)
     try:
         # Human presence: "typing…" in their Messenger while the turn composes.
         # Meta-only edge — TikTok (which also rides this path natively) has no
@@ -2509,9 +2526,16 @@ async def _meta_drain(redis, channel: str, external_id: str, token: int):
             continue
         if (item.get("text") or "").strip():
             texts.append(item["text"].strip())
+        m = item.get("media")
+        if m and m.get("type") == "audio" and m.get("message_id"):
+            # Every voice note in the burst is heard, in order — not only the
+            # last attachment (services/voice_notes resolves the token).
+            from app.services.voice_notes import token as _voice_token
+            texts.append(_voice_token(m["message_id"]))
+            continue
         # Prefer an image so the agent SEES what they sent; else keep the latest.
-        if item.get("media") and (media is None or item["media"].get("type") == "image"):
-            media = item["media"]
+        if m and (media is None or m.get("type") == "image"):
+            media = m
     return "\n".join(texts), media
 
 

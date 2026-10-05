@@ -154,6 +154,7 @@ class Transcript:
     status: str                       # done | silent | failed:<reason>
     text: str = ""
     lang: str | None = None           # ISO-639-1 when known
+    lang_source: str | None = None    # "provider" (the model said) | "guess" (word lists)
     duration_s: float = 0.0
     provider: str = ""
     model: str = ""
@@ -171,7 +172,7 @@ class Transcript:
 
     def to_cache(self) -> str:
         return json.dumps({"status": self.status, "text": self.text, "lang": self.lang,
-                           "duration_s": self.duration_s, "provider": self.provider,
+                           "lang_source": self.lang_source, "duration_s": self.duration_s, "provider": self.provider,
                            "model": self.model})
 
     @classmethod
@@ -179,7 +180,8 @@ class Transcript:
         try:
             d = json.loads(raw.decode() if isinstance(raw, bytes) else raw)
             return cls(status=str(d["status"]), text=str(d.get("text") or ""),
-                       lang=d.get("lang"), duration_s=float(d.get("duration_s") or 0),
+                       lang=d.get("lang"), lang_source=d.get("lang_source"),
+                       duration_s=float(d.get("duration_s") or 0),
                        provider=str(d.get("provider") or ""), model=str(d.get("model") or ""),
                        cached=True)
         except Exception:
@@ -591,7 +593,9 @@ async def _work(path: str, kind: str, prov: str, model: str, redis) -> Transcrip
         text = _clean(" ".join(texts))
         if not text:
             return Transcript(status="silent", cost_usd=usd, **base)
-        return Transcript(status="done", text=text, lang=lang or guess_lang(text),
+        guessed = None if lang else guess_lang(text)
+        return Transcript(status="done", text=text, lang=lang or guessed,
+                          lang_source="provider" if lang else ("guess" if guessed else None),
                           cost_usd=usd, **base)
 
 

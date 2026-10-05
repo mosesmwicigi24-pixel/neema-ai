@@ -227,21 +227,89 @@ function NoChatPane({ waId, name, prefill, onBack, onToast }: {
 }
 
 // ── AudioBubble ───────────────────────────────────────────────────────────────
-// Renders an audio player with a collapsible transcription toggle.
-// The transcript is hidden by default; agents expand it on demand.
+// An audio player with the words under it.
+// Inbound voice notes (customers): the transcript shows under the player —
+// in English when the note was in another language ("Translated from Swahili",
+// with the verbatim original one tap away), or verbatim when it was English.
+// While it is being transcribed the bubble says so; when it could not be
+// (silence, budget, a refused file) it says WHY, so the team never guesses.
+// Outbound audio (TTS replies) keeps the collapsible transcript + cart text.
 function AudioBubble({
     src,
     transcription,
     cartText,
     isInbound,
+    status,
+    note,
+    translation,
+    translatedFrom,
 }: {
     src: string;
     transcription: string | null;
     cartText: string | null;
     isInbound: boolean;
+    status?: string | null;
+    note?: string | null;
+    translation?: string | null;
+    translatedFrom?: string | null;
 }) {
     const [open, setOpen] = React.useState(false);
+    const [showOriginal, setShowOriginal] = React.useState(false);
     const hasTranscript   = !!transcription;
+    const kind = (status ?? "").startsWith("failed") ? "failed" : (status ?? "");
+
+    if (isInbound) {
+        const working = kind === "queued" || kind === "processing" || kind === "pending";
+        const unheard = kind === "failed" || kind === "silent";
+        return (
+            <div className="flex flex-col gap-1 w-full min-w-[220px]">
+                <audio src={src} controls className="w-full" style={{ minWidth: 220 }} />
+                {working && (
+                    <p className="text-[11px] px-1 text-[#699a32] flex items-center gap-1.5" aria-live="polite">
+                        <span className="inline-block w-1.5 h-1.5 rounded-full bg-[#699a32] animate-pulse" />
+                        Transcribing…
+                    </p>
+                )}
+                {unheard && (
+                    <p className="text-[11px] px-1 text-stone-500 leading-relaxed">
+                        {kind === "silent"
+                            ? "No speech heard in this voice note."
+                            : `Couldn’t transcribe this voice note${note ? ` — ${note}` : ""}.`}
+                    </p>
+                )}
+                {!working && !unheard && hasTranscript && (
+                    <div className="px-1 flex flex-col gap-0.5">
+                        <p className="text-[12.5px] leading-relaxed whitespace-pre-wrap text-[#1c2917]">
+                            {translation || transcription}
+                        </p>
+                        {translation && (
+                            <>
+                                <div className="flex items-center gap-2 flex-wrap text-[10px] text-stone-500">
+                                    <span>
+                                        <span className="select-none mr-1" aria-hidden>🌐</span>
+                                        Translated{translatedFrom ? ` from ${translatedFrom}` : ""}
+                                    </span>
+                                    <button
+                                        type="button"
+                                        onClick={() => setShowOriginal((o) => !o)}
+                                        aria-expanded={showOriginal}
+                                        className="font-medium text-[#699a32] hover:text-[#427425] underline-offset-2 hover:underline"
+                                    >
+                                        {showOriginal ? "Hide original" : "Show original"}
+                                    </button>
+                                </div>
+                                {showOriginal && (
+                                    <p className="text-[11.5px] leading-relaxed whitespace-pre-wrap italic text-[#3a5c28]/80 border-l-2 border-[#d9e8c9] pl-2">
+                                        {transcription}
+                                    </p>
+                                )}
+                            </>
+                        )}
+                    </div>
+                )}
+            </div>
+        );
+    }
 
     return (
         <div className="flex flex-col gap-1 w-full min-w-[220px]">
@@ -253,9 +321,7 @@ function AudioBubble({
                     className={[
                         "flex items-center gap-1.5 text-[10px] font-medium",
                         "transition-colors w-fit rounded-full px-2 py-0.5",
-                        isInbound
-                            ? "text-[#699a32] hover:text-[#427425] bg-[#f0f9e8]"
-                            : "text-white/70 hover:text-white bg-white/15",
+                        "text-white/70 hover:text-white bg-white/15",
                     ].join(" ")}
                 >
                     <svg className="w-3 h-3 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -268,15 +334,12 @@ function AudioBubble({
             )}
 
             {open && transcription && (
-                <p className={[
-                    "text-[11px] leading-relaxed px-1 whitespace-pre-wrap",
-                    isInbound ? "italic text-[#3a5c28]/70" : "text-white/80",
-                ].join(" ")}>
+                <p className="text-[11px] leading-relaxed px-1 whitespace-pre-wrap text-white/80">
                     {transcription}
                 </p>
             )}
 
-            {!isInbound && cartText && (
+            {cartText && (
                 <div className="text-[11px] px-2 py-1.5 rounded-lg bg-white/20 font-medium whitespace-pre-wrap leading-relaxed">
                     {cartText}
                 </div>
@@ -1511,6 +1574,8 @@ export function ConversationsView({
                 // Sent-in-their-language replies carry the human's English
                 translation: event.translation ?? undefined,
                 translated_from: event.translatedFrom ?? undefined,
+                // A voice note arrives "queued" — its words follow (voice_transcript).
+                transcript_status: event.transcriptStatus ?? undefined,
             };
             setMessages((m) => {
                 const existing = m[activeConvId] ?? [];
@@ -1533,6 +1598,33 @@ export function ConversationsView({
                         return m;
                 }
                 return { ...m, [activeConvId]: [...existing, msg] };
+            });
+        }
+        if (
+            event.type === "voice_transcript" &&
+            event.conversationId === activeConvId &&
+            event.id
+        ) {
+            // A voice note's words (or why it couldn't be heard) — patch the
+            // bubble in place.
+            setMessages((m) => {
+                const existing = m[activeConvId] ?? [];
+                let changed = false;
+                const next = existing.map((x) => {
+                    if (String(x.id) !== String(event.id)) return x;
+                    changed = true;
+                    return {
+                        ...x,
+                        transcript_status: event.transcriptStatus ?? x.transcript_status,
+                        transcript_note: event.transcriptNote ?? null,
+                        transcript_lang: event.transcriptLang ?? x.transcript_lang,
+                        ...(typeof event.text === "string" ? { text: event.text } : {}),
+                        ...(event.translation
+                            ? { translation: event.translation, translated_from: event.translatedFrom ?? null }
+                            : {}),
+                    };
+                });
+                return changed ? { ...m, [activeConvId]: next } : m;
             });
         }
         if (
@@ -3913,9 +4005,9 @@ export function ConversationsView({
                                                                 "audio/",
                                                             )
                                                         ) {
-                                                            // inbound : transcription = msg.text
-                                                            //   patch_message writes the Whisper transcript
-                                                            //   to msg.text after transcription completes.
+                                                            // inbound : transcription = msg.text — the API's
+                                                            //   voice_notes writes the verbatim transcript there
+                                                            //   (status in transcript_status, English in translation).
                                                             // outbound: text    = full AI reply (transcript label)
                                                             //           caption = cart summary
                                                             const transcription = isInbound
@@ -3930,6 +4022,10 @@ export function ConversationsView({
                                                                     transcription={transcription}
                                                                     cartText={cartText}
                                                                     isInbound={isInbound}
+                                                                    status={msg.transcript_status}
+                                                                    note={msg.transcript_note}
+                                                                    translation={msg.translation}
+                                                                    translatedFrom={msg.translated_from}
                                                                 />
                                                             );
                                                         }
@@ -3989,7 +4085,7 @@ export function ConversationsView({
                                                     {/* Reading glass: English under a foreign message —
                                                         the customer's Bulgarian AND Neema's mirrored reply
                                                         alike — so the human can follow the whole sale. */}
-                                                    {(msg as any).translation && (
+                                                    {(msg as any).translation && !(isInbound && msg.media_type === "audio") && (
                                                         <div
                                                             className={`mt-1.5 pt-1 text-[11px] leading-relaxed italic whitespace-pre-wrap border-t border-dashed ${
                                                                 isInbound

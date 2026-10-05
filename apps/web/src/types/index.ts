@@ -79,6 +79,12 @@ export interface Message {
     // message (either direction), shown gray under the bubble. Dashboard-only.
     translation?: string | null;
     translated_from?: string | null;
+    // A voice note's transcription (API services/voice_notes): none | queued |
+    // processing | done | silent | failed:<reason>; the spoken language (ISO);
+    // and, when it failed or heard nothing, why — in words for the team.
+    transcript_status?: string | null;
+    transcript_lang?: string | null;
+    transcript_note?: string | null;
     agent_name?: string;
     // Populated when type === "system_event"
     event_kind?: SystemEventKind;

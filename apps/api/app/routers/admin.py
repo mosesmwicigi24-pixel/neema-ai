@@ -22,6 +22,7 @@ from app.services.conversation import (
     transfer_conversation, send_agent_reply, approve_draft, send_agent_media,
 )
 from app.services import translate as translate_svc
+from app.services import voice_notes
 import jwt
 import logging
 from app.core.security import decode_token
@@ -65,6 +66,11 @@ def _shape_messages_into(thread: list, msgs, agent_name_map: dict) -> None:
             "text":          m.text,
             "translation":     translate_svc.translation_for(m),
             "translated_from": getattr(m, "translated_from", None),
+            # A voice note's transcription (services/voice_notes): the status,
+            # the spoken language, and — when it failed or heard nothing — why.
+            "transcript_status": getattr(m, "transcript_status", None),
+            "transcript_lang":   getattr(m, "transcript_lang", None),
+            "transcript_note":   voice_notes.note_for(m),
             "isNote":        m.media_type == "note",
             "agent_name":    agent_name_map.get(str(m.agent_id)) if m.agent_id else None,
             "created_at":    m.created_at.isoformat() if m.created_at else None,

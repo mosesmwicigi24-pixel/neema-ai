@@ -37,6 +37,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import uuid
 
 from sqlalchemy import select
 
@@ -402,6 +403,15 @@ async def _reply_after_debounce(redis, wa_id: str, token: int | None,
         if drained is None:
             return                            # superseded — a later flush owns it
         text, media = drained
+    # Voice notes: their tokens become the customer's words (or the reason
+    # they couldn't be heard) — waited for, bounded, if still transcribing.
+    try:
+        from app.services import voice_notes
+        text = await voice_notes.resolve(text, channel="whatsapp", key=wa_id)
+    except Exception as exc:
+        _log.warning("native: voice-note resolution failed for %s: %s", wa_id, exc)
+        from app.services.voice_notes import TOKEN_RE
+        text = TOKEN_RE.sub("(the customer sent a voice note)", text or "")
     if not (text or media):
         return
 
@@ -501,23 +511,26 @@ async def _ingest_guarded(event: dict, redis) -> None:
     from app.services import n8n_bridge as svc
 
     wa_id, wamid = event["wa_id"], event["wamid"]
-    text = event.get("text") or ""
+    from app.services import voice_notes
+    # Typed text never carries a voice token (defence in depth — resolution
+    # checks ownership too).
+    text = voice_notes.strip_tokens(event.get("text") or "")
     media = event.get("media")
-    media_url, media_path, transcript = None, None, None
+    media_url, media_path = None, None
     if media and media.get("media_id"):
         media_url, media_path = await download_media(media["media_id"])
-        if media["kind"] == "audio":
-            heard = await transcribe_voice_note(media_path, redis=redis)
-            if heard.ok:
-                transcript = heard.text
-                text = transcript            # the voice note IS the message
+    # A VOICE NOTE IS THE MESSAGE. Saved now as `queued` (the thread shows
+    # "Transcribing…"), transcribed in the background — Meta's webhook never
+    # waits on a provider — and the turn carries a token the reply resolves
+    # into the customer's words after the debounce window (services/voice_notes).
+    voice_id = uuid.uuid4() if (media and media.get("kind") == "audio") else None
 
     dto = MessageDto(
         wa_id=wa_id, name=event.get("name"), direction="inbound",
         text=text, ts_ms=event.get("ts_ms"), docid=wamid,
         media_type=(media or {}).get("kind"), media_url=media_url,
         media_id=(media or {}).get("media_id"),
-        media_caption=(media or {}).get("caption") or (transcript if media else None),
+        media_caption=(media or {}).get("caption"),
         mime_type=(media or {}).get("mime_type"),
         filename=(media or {}).get("filename"),
     )
@@ -547,7 +560,8 @@ async def _ingest_guarded(event: dict, redis) -> None:
             Conversation.wa_id == svc._normalize_wa_id(wa_id)))).scalar_one_or_none() is None
         # The SAME persistence n8n used: conversation upsert, provision_user
         # (name + country), previews, broadcast, video/document escalation.
-        await svc.upsert_message(db, redis, dto)
+        await svc.upsert_message(db, redis, dto, message_id=voice_id,
+                                 transcript_status="queued" if voice_id else None)
         if quoted is not None:
             try:
                 from app.models.message import Message as _Msg
@@ -578,6 +592,9 @@ async def _ingest_guarded(event: dict, redis) -> None:
         except Exception:
             pass
 
+    if voice_id is not None:
+        voice_notes.schedule(voice_id, path=media_path, redis=redis)
+
     # A reaction is presence, not a question — show it in the thread but never
     # wake the agent for it (a 👍 must not earn the customer a sales reply).
     if event.get("type") == "reaction":
@@ -589,7 +606,9 @@ async def _ingest_guarded(event: dict, redis) -> None:
         turn_media = {"type": "image", "url": media_url,
                       "caption": media.get("caption") or ""}
     turn_text = text
-    if not turn_text and media and not turn_media:
+    if voice_id is not None:
+        turn_text = "\n".join(p for p in (text, voice_notes.token(voice_id)) if p)
+    elif not turn_text and media and not turn_media:
         turn_text = media.get("caption") or f"(the customer sent a {media['kind']})"
 
     token = await _enqueue(redis, wa_id, turn_text, turn_media)
