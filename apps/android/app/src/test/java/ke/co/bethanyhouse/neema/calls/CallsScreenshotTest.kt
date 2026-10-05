@@ -113,6 +113,9 @@ class CallsScreenshotTest {
     @Test fun logNeedsNotifications() = console(readiness = CallReadiness(notifications = false))
     @Test fun logNeedsFullScreen() = console(readiness = CallReadiness(fullScreen = false))
     @Test fun logNeedsFullScreenDark() = console(dark = true, readiness = CallReadiness(fullScreen = false))
+    @Test fun logNeedsBattery() = console(readiness = CallReadiness(battery = false))
+    @Test fun logNeedsBatteryDark() = console(dark = true, readiness = CallReadiness(battery = false))
+    @Test fun logNeedsBackground() = console(readiness = CallReadiness(background = false, battery = false))
 
     @Test fun transcriptDone() = console { it.toggleTranscript(CallsFixtures.C1) }
     @Test fun transcriptDoneFull() = console { it.toggleTranscript(CallsFixtures.C1); it.toggleFull() }

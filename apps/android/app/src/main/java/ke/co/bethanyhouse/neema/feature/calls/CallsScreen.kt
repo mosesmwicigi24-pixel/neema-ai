@@ -207,10 +207,11 @@ fun CallsScreen(
     }
     val sel = selected
     val ctx = LocalContext.current
-    var readiness by remember { mutableStateOf(readinessOverride ?: CallReadiness.of(ctx)) }
-    // Re-check on return from the system settings page.
-    LifecycleResumeEffect(readinessOverride) {
-        readiness = readinessOverride ?: CallReadiness.of(ctx)
+    val backgroundLive by dash.container.prefs.backgroundLive.collectAsStateWithLifecycle()
+    var readiness by remember { mutableStateOf(readinessOverride ?: CallReadiness.of(ctx, backgroundLive)) }
+    // Re-check on return from the system settings page, and when the toggle changes.
+    LifecycleResumeEffect(readinessOverride, backgroundLive) {
+        readiness = readinessOverride ?: CallReadiness.of(ctx, backgroundLive)
         onPauseOrDispose {}
     }
 
@@ -261,6 +262,7 @@ fun CallsScreen(
                         anyMessenger = anyMessenger, channelFilter = app,
                         readiness = readiness, loadError = loadError, refreshing = refreshing, compact = compact,
                         restriction = restriction, onDismissRestriction = dash.container.calls::dismissRestriction,
+                        onStayConnected = { dash.container.prefs.setBackgroundLive(true) },
                     )
                 }
                 if (view != null) {
@@ -321,6 +323,7 @@ private fun CallLog(
     compact: Boolean = false,
     restriction: CallingRestriction? = null,
     onDismissRestriction: () -> Unit = {},
+    onStayConnected: () -> Unit = {},
 ) {
     // One card, as the web draws it (gradient, outline, shadow), over a lazy
     // list: a log of a thousand calls composes only the rows on screen. The
@@ -376,7 +379,7 @@ private fun CallLog(
                 }
             }
             restriction?.let { r -> item(key = "restricted", contentType = "banner") { RestrictionBanner(r, inset, onDismissRestriction) } }
-            if (!readiness.ready) item(key = "readiness", contentType = "banner") { ReadinessBanner(readiness, compact, inset) }
+            if (!readiness.ready) item(key = "readiness", contentType = "banner") { ReadinessBanner(readiness, compact, inset, onStayConnected) }
             // The log couldn't be refreshed: what we had stays, with the reason and a way to try again.
             if (loadError != null && !shown.isNullOrEmpty()) {
                 item(key = "load-error", contentType = "banner") { LoadErrorBanner(loadError, refreshing, vm::refresh, inset) }
@@ -1145,31 +1148,45 @@ private fun StripButton(text: String, filled: Boolean = false, fill: Color? = nu
 
 /**
  * Why a call might not ring this phone like the web's take-over card, and the
- * one tap that fixes it: notifications off (nothing rings in the background)
- * or, on Android 14+, full-screen notifications not allowed (a call shows as a
- * heads-up instead of waking the lock screen).
+ * one tap that fixes it, most fundamental first: notifications off (nothing
+ * rings in the background), "Stay connected in background" off (nothing hears
+ * the call while Neema is closed), battery optimisation on (Android — Samsung
+ * above all — cuts that connection after a while), or, on Android 14+,
+ * full-screen notifications not allowed (a call shows as a heads-up instead of
+ * waking the lock screen).
  */
 @Composable
-private fun ReadinessBanner(r: CallReadiness, compact: Boolean = false, inset: Dp = 24.dp) {
+private fun ReadinessBanner(r: CallReadiness, compact: Boolean = false, inset: Dp = 24.dp, onStayConnected: () -> Unit = {}) {
     val ctx = LocalContext.current
-    val (title, body, button) = if (!r.notifications) Triple(
-        "Calls can't ring in the background",
-        "Turn on notifications so a WhatsApp call rings this phone when Neema isn't open.",
-        "Turn on",
-    ) else Triple(
-        "Let calls take over the lock screen",
-        "Allow full-screen notifications so a ringing WhatsApp call wakes the phone, the way the dashboard takes over when it rings.",
-        "Allow",
-    )
-    fun open() {
-        val first = if (!r.notifications) notificationSettings(ctx) else fullScreenIntentSettings(ctx)
-        val tries = listOf(
-            first,
-            notificationSettings(ctx),
-            Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:${ctx.packageName}")),
+    val (title, body, button) = when (r.missing) {
+        CallReadiness.Missing.Notifications -> Triple(
+            "Calls can't ring in the background",
+            "Turn on notifications so a WhatsApp call rings this phone when Neema isn't open.",
+            "Turn on",
         )
-        for (i in tries) {
-            if (runCatching { ctx.startActivity(i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }.isSuccess) return
+        CallReadiness.Missing.Background -> Triple(
+            "Calls only ring while Neema is open",
+            "Turn on \"Stay connected in background\" so a call rings this phone even when the app is closed.",
+            "Turn on",
+        )
+        CallReadiness.Missing.Battery -> Triple(
+            "Battery saving can stop calls ringing",
+            "Let Neema run in the background (Battery → Unrestricted) so a call still rings after the app has been closed for a while.",
+            "Allow",
+        )
+        else -> Triple(
+            "Let calls take over the lock screen",
+            "Allow full-screen notifications so a ringing WhatsApp call wakes the phone, the way the dashboard takes over when it rings.",
+            "Allow",
+        )
+    }
+    fun open() {
+        val appInfo = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:${ctx.packageName}"))
+        when (r.missing) {
+            CallReadiness.Missing.Background -> onStayConnected()
+            CallReadiness.Missing.Battery -> openFirst(ctx, batterySettings(ctx))
+            CallReadiness.Missing.Notifications -> openFirst(ctx, listOf(notificationSettings(ctx), appInfo))
+            else -> openFirst(ctx, listOf(fullScreenIntentSettings(ctx), notificationSettings(ctx), appInfo))
         }
     }
     Row(
