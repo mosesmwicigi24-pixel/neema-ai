@@ -435,7 +435,7 @@ def test_backfill_cli_end_to_end_dry_run_and_execute_guard(rig, clips, capsys):
     _setup(rig)
     _pre_fix_world(rig, clips)
     rig.monkeypatch.setattr(rig.settings, "redis_url", "redis://127.0.0.1:1/0")
-    assert bf.main(["--dry-run", "--since", "30d"]) == 0
+    assert bf.main(["--dry-run", "--since", "30d", "--kind", "all"]) == 0
     out = capsys.readouterr().out
     assert "backfill: 3 voice notes + 1 call recordings since 30d" in out and "dry run" in out
     assert bf.main(["--execute"]) == 2

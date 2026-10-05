@@ -50,7 +50,7 @@ CALL_STUCK_MIN = 90
 MAX_RETRIES = 3
 RETRY_AFTER = (timedelta(minutes=10), timedelta(hours=1), timedelta(hours=6))
 TRANSIENT = ("provider_timeout", "provider_busy", "provider_unreachable", "provider_error",
-             "error", "busy", "analysis")
+             "error", "busy", "analysis", "decode_timeout")
 PER_SWEEP = 50
 
 
@@ -93,7 +93,13 @@ async def _budget_room(redis) -> bool:
 async def _eligible(redis, kind: str, key: str, status: str | None, stuck: bool, now: datetime,
                     budget_room: bool) -> bool:
     if (status or "") in ("queued", "processing", "pending"):
-        return stuck
+        # Bounded like a failure (cycle 9 audit): work that never finishes —
+        # a worker killed on the same file every time — was reset and run
+        # again on every sweep for RECOVER_DAYS. No redis → once per sweep,
+        # as before (nothing to count with).
+        if not stuck:
+            return False
+        return redis is None or await _retry_due(redis, f"stuck-{kind}", key, now)
     reason = _reason(status) or ("error" if status == "failed" else None)
     if reason == "over_budget":
         return budget_room                       # waits for room (the next UTC day), not a count

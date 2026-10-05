@@ -1,7 +1,7 @@
 """Backfill transcripts for voice notes and call recordings saved before the
 engine was switched on (calls & audio programme, cycle 8, 2026-10-05).
 
-    python -m app.scripts.backfill_transcripts --dry-run  [--since 30d] [--kind all|notes|calls]
+    python -m app.scripts.backfill_transcripts --dry-run  [--since 30d] [--kind notes|calls|all]  (default: notes)
     python -m app.scripts.backfill_transcripts --execute  [--since 30d] [--max-usd 1.50] [--limit 200]
 
 A PRODUCTION DATA WRITE when run with --execute: it fills messages.text /
@@ -211,7 +211,9 @@ def main(argv=None) -> int:
     g.add_argument("--dry-run", action="store_true", help="list and estimate; write nothing")
     g.add_argument("--execute", action="store_true", help="transcribe (a production data write)")
     p.add_argument("--since", type=parse_since, default=parse_since("30d"))
-    p.add_argument("--kind", choices=("all", "notes", "calls"), default="all")
+    # Voice notes only unless calls are asked for by name (owner, 2026-10-05:
+    # the planned run must NOT backfill call recordings).
+    p.add_argument("--kind", choices=("all", "notes", "calls"), default="notes")
     p.add_argument("--limit", type=int, default=500)
     p.add_argument("--max-usd", type=float, default=None)
     args = p.parse_args(argv)
