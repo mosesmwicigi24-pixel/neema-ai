@@ -772,3 +772,122 @@ def test_a_sweep_never_retakes_a_call_retry_tapped_a_day_later(rig, clips):
     assert status == "done" and swept["calls"] == 0, swept
     assert len(rig.provider.calls) == 1
     assert [c["purpose"] for c in rig.llm.calls].count("calls") == 1
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# 7 · A voice note while a PERSON has the thread; the live-event contract
+# ═════════════════════════════════════════════════════════════════════════════
+
+def test_voice_note_in_a_human_held_thread_is_heard_for_the_team_never_answered(rig, clips, monkeypatch):
+    """The team still gets the words (and the copilot drafts from them); the
+    agent never answers; the copilot never sees a raw token."""
+    from app.models.conversation import Conversation, InterceptMode
+    from app.services import copilot, wa_native
+    from tests.test_voice_notes_db import serve_clip
+    wa = "254755600001"
+    held: list = []
+    monkeypatch.setattr(copilot, "schedule_human_held", lambda redis, key, ch, text: held.append((key, ch, text)))
+    rig.provider.answers = [("Please call me back about the chasuble order.", "en")]
+
+    async def go():
+        n, _ = await wa_native.handle_webhook(wa_payload(wa, "wamid.C10HELD0", kind="text", text="Hi"), rig.redis)
+        await drain_tasks()
+        async with rig.maker() as db:
+            conv = (await db.execute(sa.select(Conversation).where(Conversation.wa_id == wa))).scalar_one()
+            conv.intercept_mode = InterceptMode.human
+            await db.commit()
+        rig.turns.clear()
+        serve_clip(rig, clips[5])
+        await wa_native.handle_webhook(wa_payload(wa, "wamid.C10HELD1"), rig.redis)
+        await drain_tasks()
+        for _ in range(100):
+            if held:
+                break
+            await asyncio.sleep(0.05)
+        return (await vn.voice_rows(rig, wa))[0]
+    note = run(go())
+    assert note.transcript_status == "done" and note.text == "Please call me back about the chasuble order."
+    assert rig.turns == []                                      # the agent was never asked
+    assert held == [(wa, "whatsapp", "🎤 (voice note): Please call me back about the chasuble order.")]
+
+
+def test_live_new_message_frames_keep_every_key_consumers_read(rig, clips):
+    """Every key origin/main's frames carried is still there (web + Android
+    read them), plus what the bubble now needs — for the native WhatsApp
+    frame AND the Messenger frame."""
+    from app.services import meta_media, wa_native
+    from app.routers import meta_webhook as wh
+    import app.agent.runtime as runtime
+    MAIN_NATIVE = {"type", "conversationId", "waId", "sender", "text", "mediaType", "mediaId", "mediaUrl",
+                   "mediaCaption", "mimeType", "filename"}
+    MAIN_MESSENGER = {"type", "conversationId", "channel", "sender", "text", "mediaType", "mediaUrl"}
+    NEW = {"id", "direction", "created_at", "transcriptStatus", "meta"}
+    run(wa_native.handle_webhook(wa_payload("254766700001", "wamid.C10EV1", kind="text", text="Habari"), rig.redis))
+    run(drain_tasks())
+    rig.monkeypatch.setattr(meta_media, "schedule_media_rehost", lambda *a, **k: None)
+
+    async def no_profile(*a, **k):
+        return {}
+    rig.monkeypatch.setattr("app.services.meta_send.fetch_profile", no_profile)
+
+    async def capture(*a, **k):
+        return True
+    rig.monkeypatch.setattr(runtime, "schedule_meta_reply", capture)
+    payload = {"object": "page", "entry": [{"id": "PAGE1", "time": 1, "messaging": [{
+        "sender": {"id": "psid-c10-ev"}, "recipient": {"id": "PAGE1"},
+        "message": {"mid": "m_c10_ev", "text": "Mna alb?"}}]}]}
+
+    async def go():
+        async with rig.maker() as db:
+            await wh._capture_events(db, "messenger", payload, redis=rig.redis)
+    run(go())
+    frames = rig.redis.events("new_message")
+    native = next(f for f in frames if f.get("waId") == "254766700001")
+    messenger = next(f for f in frames if f.get("channel") == "messenger")
+    assert MAIN_NATIVE | NEW <= set(native), sorted(MAIN_NATIVE | NEW - set(native))
+    assert MAIN_MESSENGER | NEW <= set(messenger), sorted(MAIN_MESSENGER | NEW - set(messenger))
+    for f in (native, messenger):
+        assert f["direction"] == "inbound" and f["sender"] == "user"
+        uuid.UUID(f["id"])                                          # the DB row's id
+        assert f["created_at"].endswith("+00:00")                   # never a naive (local-time) stamp
+        assert f["meta"] is None and f["transcriptStatus"] is None   # plain text carries no record
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# 8 · Outbound media: Meta fetches our files by link — the hardened media
+#     route must answer exactly as origin/main's did for every file we write
+# ═════════════════════════════════════════════════════════════════════════════
+
+def test_media_route_serves_every_file_we_write_exactly_as_main_did(tmp_path, monkeypatch):
+    from fastapi import FastAPI
+    from fastapi.responses import FileResponse
+    from fastapi.testclient import TestClient
+    from app.routers import media as media_router
+    monkeypatch.setattr(media_router, "MEDIA_DIR", str(tmp_path))
+    names = [f"{uuid.uuid4().hex}.jpg", f"{uuid.uuid4().hex}.png", f"{uuid.uuid4().hex}.webp",
+             f"{uuid.uuid4().hex}.mp4", f"{uuid.uuid4().hex}.pdf", f"{uuid.uuid4().hex}.docx",
+             f"{uuid.uuid4().hex}.ogg", "img_0123456789abcdef01234567.jpg", "wa_1234567890.ogg",
+             "wa_1234567890", "call_abcdef.webm", "call_meta_abcdef.ogg", "mixed_name-1.MP4"]
+    for n in names:
+        (tmp_path / n).write_bytes(b"\x00\x01" + n.encode())
+
+    main_app = FastAPI()                                   # origin/main's handler, verbatim
+
+    @main_app.get("/api/admin/media/{filename}")
+    async def serve_main(filename: str):
+        from fastapi import HTTPException
+        filepath = os.path.join(str(tmp_path), filename)
+        if not os.path.exists(filepath):
+            raise HTTPException(status_code=404, detail="File not found")
+        return FileResponse(filepath)
+    new_app = FastAPI()
+    new_app.include_router(media_router.router, prefix="/api")
+    with TestClient(main_app) as old, TestClient(new_app) as new:
+        for n in names + ["missing.ogg"]:
+            a, b = old.get(f"/api/admin/media/{n}"), new.get(f"/api/admin/media/{n}")
+            assert (b.status_code, b.headers.get("content-type"), b.content) == \
+                (a.status_code, a.headers.get("content-type"), a.content), n
+            if n != "missing.ogg":
+                assert b.status_code == 200, n
+        # No login is asked of Meta's fetcher (by design — cycle 9).
+        assert new.get(f"/api/admin/media/{names[0]}", headers={}).status_code == 200
