@@ -369,6 +369,35 @@ class Settings(BaseSettings):
     whisper_model: str = "base"            # base (light) | small | medium — bigger = better Swahili, slower
     whisper_compute_type: str = "int8"     # ctranslate2 compute type for faster-whisper on CPU
     groq_api_key: str = ""                 # only used when whisper_provider="groq"
+    # ── The transcription engine (services/transcribe.py) ─────────────────────
+    # One engine for every voice note (WhatsApp / Messenger / Instagram) and
+    # every call recording. whisper_enabled is the master switch for ALL of it;
+    # whisper_provider picks the backend. Production runs "openai" (the image
+    # has no faster-whisper); the switch lives in docker-compose.vps.yml.
+    # Model (cycle 4, 2026-10-05): gpt-4o-transcribe — OpenAI's most accurate
+    # speech model on the low-resource languages our customers speak (Swahili,
+    # code-mixed Sheng) at the same $0.006/min as whisper-1. whisper-1 stays
+    # selectable (it returns the detected language itself); the language is
+    # otherwise detected from the words by the translation pass.
+    transcribe_model: str = "gpt-4o-transcribe"
+    # The vocabulary hint sent as the provider's prompt. None = the built-in
+    # bilingual trade list (services/transcribe.VOCABULARY); "" = send none.
+    transcribe_vocabulary: str | None = None
+    groq_transcribe_model: str = "whisper-large-v3"
+    # Daily ceiling on transcription spend (USD, UTC day). Reserved BEFORE each
+    # provider call and refunded on failure, so concurrent notes can't overrun
+    # it. ~40x a normal day (≈4 audio-minutes/day ≈ $0.03). 0 = no ceiling.
+    transcribe_daily_cap_usd: float = 3.0
+    transcribe_voice_max_seconds: int = 600     # a voice note longer than 10 min is refused (abuse/cost)
+    transcribe_call_max_seconds: int = 3600     # a call longer than an hour is refused
+    transcribe_max_bytes: int = 60_000_000      # raw file ceiling (the recording upload cap is 60 MB)
+    transcribe_chunk_seconds: int = 600         # long audio is sent in 10-minute pieces
+    transcribe_timeout_seconds: int = 90        # per provider request
+    transcribe_retries: int = 2                 # extra attempts on timeout / 429 / 5xx (backoff 1s, 4s)
+    transcribe_silence_db: float = -50.0        # peak below this = silence; never sent to a provider
+    # English under a non-English voice note (Swahili included — spoken Sheng
+    # is harder to skim than written Swahili). Light model, once per note.
+    transcribe_translate: bool = True
 
     @field_validator("cors_origins", mode="before")
     @classmethod

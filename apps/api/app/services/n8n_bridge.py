@@ -931,7 +931,11 @@ async def upsert_user(db: AsyncSession, body) -> dict:
 # serving the customer instead of going silent while nobody is watching.
 # Returns a Firestore-style document array so n8n can consume the output directly.
 
-async def upsert_message(db: AsyncSession, redis, body) -> list:
+async def upsert_message(db: AsyncSession, redis, body, *, message_id=None,
+                         transcript_status: str | None = None) -> list:
+    """`message_id` / `transcript_status` are set only by in-process callers
+    (wa_native, for a voice note it will transcribe in the background) — never
+    from a request body."""
     # Normalise wa_id so inbound and outbound messages always resolve to the
     # same Conversation row regardless of whether the '+' prefix is present.
     body.wa_id = _normalize_wa_id(body.wa_id)
@@ -991,6 +995,8 @@ async def upsert_message(db: AsyncSession, redis, body) -> list:
         ts_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
 
     msg = Message(
+        **({"id": message_id} if message_id is not None else {}),
+        transcript_status=transcript_status,
         conversation_id=conv.id,
         wa_id=body.wa_id,
         person_id=conv.person_id,
@@ -1074,6 +1080,7 @@ async def upsert_message(db: AsyncSession, redis, body) -> list:
         # bubble under a random id, on the OUTBOUND side, until the next reload.
         "id":             str(msg.id),
         "direction":      direction.value,
+        "transcriptStatus": msg.transcript_status,
         "created_at":     msg.created_at.isoformat() if msg.created_at else None,
         "sender":         sender.value,
         "text":           msg.text,

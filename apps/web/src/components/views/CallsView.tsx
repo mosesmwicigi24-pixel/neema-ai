@@ -118,7 +118,8 @@ function CallTranscript({ call, onUseReply }: { call: ApiCall; onUseReply?: (tex
     // Reload when the live row says the transcript moved (call_update).
     useEffect(() => { load(); }, [load, call.transcript_status, call.summary]);
     useEffect(() => {
-        if (!data || (data.status !== "pending" && data.status !== "processing")) return;
+        const k = data?.state ?? data?.status;
+        if (!data || (k !== "pending" && k !== "queued" && k !== "processing")) return;
         // A transcription job takes ~1-2 min — 5s resolution is plenty, and a
         // hidden tab shouldn't keep polling for it.
         const t = setInterval(() => {
@@ -132,7 +133,7 @@ function CallTranscript({ call, onUseReply }: { call: ApiCall; onUseReply?: (tex
         try { await callsApi.transcribe(callId); await load(); }
         catch (e) {
             setErr(String((e as Error)?.message || "").includes("409")
-                ? "Turn on transcription on the server first (WHISPER_ENABLED)."
+                ? "Turn on transcription on the server first (WHISPER_ENABLED, WHISPER_PROVIDER=openai)."
                 : "Couldn't start transcription.");
         } finally { setBusy(false); }
     }, [callId, load]);
@@ -147,7 +148,10 @@ function CallTranscript({ call, onUseReply }: { call: ApiCall; onUseReply?: (tex
         );
     }
     if (!data) return <div style={{ color: C.faint, fontSize: 13 }}>Loading recording…</div>;
-    const st = data.status;
+    // The stored status folded to its kind (API `state`); older servers send
+    // only `status`, where "pending" = queued and "failed:<reason>" = failed.
+    const st = data.state ?? (data.status === "pending" ? "queued"
+        : (data.status ?? "").startsWith("failed") ? "failed" : data.status);
     const ins = data.insights ?? call.insights ?? null;
     const list = (title: string, items?: string[]) => items && items.length > 0 && (
         <div style={{ marginTop: 8 }}>
@@ -170,6 +174,7 @@ function CallTranscript({ call, onUseReply }: { call: ApiCall; onUseReply?: (tex
                         </div>
                     )}
                     {list("Products", ins?.products)}
+                    {list("Prices mentioned", ins?.prices)}
                     {list("Objections", ins?.objections)}
                     {list("Commitments", ins?.commitments)}
                     {ins?.follow_up_message && (
@@ -218,8 +223,8 @@ function CallTranscript({ call, onUseReply }: { call: ApiCall; onUseReply?: (tex
                     })()}
                 </>
             )}
-            {(st === "pending" || st === "processing") && (
-                <div style={{ fontSize: 13, color: "#f5c451" }}>Transcribing… this runs on our server, usually ~1–2 min.</div>
+            {(st === "queued" || st === "processing") && (
+                <div style={{ fontSize: 13, color: "#f5c451" }}>Transcribing… usually under a minute.</div>
             )}
             {st === "recorded" && (
                 <div className="flex items-center gap-3 flex-wrap">
@@ -232,7 +237,7 @@ function CallTranscript({ call, onUseReply }: { call: ApiCall; onUseReply?: (tex
             )}
             {st === "failed" && (
                 <div style={{ fontSize: 13, color: C.red }}>
-                    Transcription failed.{" "}
+                    Transcription failed{data.failure ? ` — ${data.failure}` : ""}.{" "}
                     <button type="button" onClick={runTranscribe} disabled={busy}
                         style={{ color: C.green, textDecoration: "underline", minHeight: 44 }}>Retry</button>
                 </div>

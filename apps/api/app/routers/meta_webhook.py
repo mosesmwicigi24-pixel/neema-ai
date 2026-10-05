@@ -20,6 +20,7 @@ so deploying this changes nothing until you switch it on in the Meta app.
 import hashlib
 import hmac
 import logging
+import uuid
 
 from fastapi import APIRouter, Form, Request, Response, Depends
 from fastapi.responses import HTMLResponse, PlainTextResponse, RedirectResponse
@@ -232,6 +233,7 @@ async def _capture_events(db: AsyncSession, channel: str, payload: dict, redis=N
     broadcasts: list[tuple[str, dict]] = []
     replies: list[tuple[str, str, str | None, str]] = []   # (sender, text, mid, page_id)
     media_rehosts: list[tuple[str, str, str]] = []    # (mid, cdn_url, media_type) to re-host
+    voice_jobs: list = []                             # (message row id, cdn_url) to transcribe
     captured = 0
     attributed = False
     for entry in payload.get("entry", []):
@@ -271,7 +273,8 @@ async def _capture_events(db: AsyncSession, channel: str, payload: dict, redis=N
                 if dup is not None:
                     continue
 
-            text = _event_text(message)
+            from app.services import voice_notes
+            text = voice_notes.strip_tokens(_event_text(message))
             media_type, media_url = _event_media(message)
             # A sticker is a reaction, not a photo: the thumbs-up is "👍", and
             # no image is loaded, described or priced from it.
@@ -366,20 +369,32 @@ async def _capture_events(db: AsyncSession, channel: str, payload: dict, redis=N
 
             conv = await get_or_create_conversation(db, channel, sender, person_id=ident.person_id)
 
+            # A voice note is transcribed in the background (services/
+            # voice_notes) — the row carries its outcome from `queued` on.
+            row_id = uuid.uuid4()
+            row_at = datetime.now(timezone.utc)
+            is_voice = bool(media_url and media_type == "audio")
             db.add(Message(
+                id=row_id,
                 channel=channel, external_id=sender, wa_id=None,
                 person_id=ident.person_id, conversation_id=conv.id,
                 direction=MsgDirection.inbound, sender=MsgSender.user,
                 text=text, waba_msg_id=mid,
                 media_type=media_type, media_url=media_url,
                 raw_meta=raw_meta,
+                transcript_status="queued" if is_voice else None,
+                created_at=row_at,
             ))
+            if is_voice:
+                voice_jobs.append((row_id, media_url))
             conv.last_message_at = datetime.now(timezone.utc)
             conv.last_message_preview = (text or f"[{channel} message]")[:100]
             broadcasts.append((str(conv.id), {
                 "type": "new_message", "conversationId": str(conv.id),
+                "id": str(row_id), "direction": "inbound",
+                "created_at": row_at.isoformat(),
+                "transcriptStatus": "queued" if is_voice else None,
                 "channel": channel, "sender": "user", "text": text,
-                "direction": "inbound",
                 "mediaType": media_type, "mediaUrl": media_url,
                 "meta": ({k: v for k, v in raw_meta.items() if k != "payload"}
                          if raw_meta else None),
@@ -399,9 +414,11 @@ async def _capture_events(db: AsyncSession, channel: str, payload: dict, redis=N
             turn_media = ({"type": "image", "url": media_url, "caption": turn_text}
                           if media_url and media_type == "image" else None)
             if turn_media is None and media_url and media_type == "audio":
-                # A voice note is a turn: transcribed on the send path
+                # A voice note is a turn: its words (transcribed in the
+                # background) are resolved on the send path
                 # (runtime._run_and_send_meta), so the webhook stays fast.
-                turn_media = {"type": "audio", "url": media_url}
+                turn_media = {"type": "audio", "url": media_url,
+                              "message_id": str(row_id)}
             if (turn_text or turn_media) and conv.intercept_mode == InterceptMode.ai:
                 replies.append((sender, turn_text, mid, page_id, turn_media))
             elif turn_text and conv.intercept_mode == InterceptMode.human:
@@ -429,6 +446,10 @@ async def _capture_events(db: AsyncSession, channel: str, payload: dict, redis=N
         # ── Re-host attachments (Meta CDN links expire) ───────────────────────
         # Fires after the rows are committed so each task can locate its message
         # by (channel, mid) and rewrite media_url to a stable served copy.
+        if voice_jobs:
+            from app.services import voice_notes as _vn
+            for row_id, cdn_url in voice_jobs:
+                _vn.schedule(row_id, url=cdn_url, redis=redis)
         if media_rehosts:
             from app.services import meta_media
             for mid, cdn_url, mtype in media_rehosts:

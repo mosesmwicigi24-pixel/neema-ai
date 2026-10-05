@@ -54,6 +54,11 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements-dev.txt
 
+      # The transcription engine decodes real audio with ffmpeg (as the API
+      # image does — apps/api/Dockerfile installs it); its tests skip without.
+      - name: Install ffmpeg
+        run: command -v ffmpeg || (sudo apt-get update -q && sudo apt-get install -y -q --no-install-recommends ffmpeg)
+
       # `python -m pytest`, never bare `pytest`: there is no pyproject/pytest.ini
       # and no conftest.py, so only the `-m` form puts apps/api on sys.path.
       # Bare `pytest` fails to import `app` in all 89 test modules.

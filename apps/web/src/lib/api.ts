@@ -725,11 +725,15 @@ export const whatsappApi = {
 export interface CallInsights {
     intent?: string | null;
     products?: string[];
+    /** Every price or amount mentioned, with currency and what it was for. */
+    prices?: string[];
     objections?: string[];
     commitments?: string[];
     next_action?: string | null;
     follow_up_message?: string | null;
     sentiment?: string | null;
+    /** The main language spoken, in English ("Swahili"). */
+    language?: string | null;
 }
 
 /** One call row — the shape GET /admin/calls, GET /admin/calls/{id}, the
@@ -757,7 +761,7 @@ export interface ApiCall {
     ended_at?: string | null;
     summary?: string | null;
     insights?: CallInsights | null;
-    transcript_status?: string | null;  // none | recorded | pending | processing | done | failed
+    transcript_status?: string | null;  // none | recorded | queued | processing | done | failed:<reason> (legacy: pending, failed)
     has_recording?: boolean;
     /** WhatsApp voicemail arrived for this call (the audio is in the chat). */
     has_voicemail?: boolean;
@@ -768,6 +772,11 @@ export interface ApiCall {
 export interface CallTranscriptResp {
     call_id: string;
     status: string;
+    /** none | recorded | queued | processing | done | failed — `status` folded
+     *  to its kind (legacy "pending" = queued, "failed:<reason>" = failed). */
+    state?: string;
+    /** When state is "failed": why, in words ("today's transcription budget is used up"). */
+    failure?: string | null;
     transcript: string | null;
     summary: string | null;
     insights?: CallInsights | null;

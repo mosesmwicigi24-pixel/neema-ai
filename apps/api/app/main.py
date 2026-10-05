@@ -177,6 +177,21 @@ MIGRATION_STATEMENTS = [
     # alembic revision adds it too; this keeps a box whose alembic run was
     # skipped from failing EVERY thread read on a missing column. Idempotent.
     "ALTER TABLE messages ADD COLUMN IF NOT EXISTS raw_meta JSONB",
+    # A voice note's transcription outcome (alembic 36ed77bde344 adds them
+    # too; same reason as raw_meta — a missing column fails every thread read).
+    "ALTER TABLE messages ADD COLUMN IF NOT EXISTS transcript_status VARCHAR(40)",
+    "ALTER TABLE messages ADD COLUMN IF NOT EXISTS transcript_lang VARCHAR(12)",
+    # calls.transcript_status names its failure reason (failed:provider_timeout
+    # is 23 chars) — widen only when still narrower, so a restart never takes
+    # an exclusive lock on calls for nothing.
+    """
+    DO $$ BEGIN
+      IF (SELECT character_maximum_length FROM information_schema.columns
+          WHERE table_name = 'calls' AND column_name = 'transcript_status') < 40 THEN
+        ALTER TABLE calls ALTER COLUMN transcript_status TYPE VARCHAR(40);
+      END IF;
+    END $$
+    """,
     # Seed: Super Admin (protected, cannot be modified)
     """
     INSERT INTO custom_roles (id, name, description, color, permissions, protected)
