@@ -14,6 +14,16 @@ services:
         image: ghcr.io/mosesmwicigi24-pixel/neema-ai-api:${IMAGE_TAG:-latest}
         ports:
             - "127.0.0.1:8000:8000"
+        environment:
+            # Owner, 2026-10-05: callers must reach a person at once. Meta's own
+            # per-call transcription makes Meta play a spoken notice ("this call
+            # will be recorded…") before the call connects, and callers were
+            # hanging up during it (62 of 82 inbound calls missed in 30 days).
+            # Calls are still recorded in the agent's browser (no announcement)
+            # and transcribed by Neema itself. Set here, not in .env, so it is
+            # visible and reviewed; compose `environment` beats `env_file`.
+            CALL_META_TRANSCRIPTION: "false"
+            CALL_META_RECORDING: "false"
 
     web:
         image: ghcr.io/mosesmwicigi24-pixel/neema-ai-web:${IMAGE_TAG:-latest}
