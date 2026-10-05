@@ -47,6 +47,15 @@ async def health(request: Request):
             out["agent"] = {"replies": "ok"}
     except Exception:
         pass
+    # CAN NEEMA STILL PLACE AN ORDER? (2026-10-05): the hub refused every
+    # order for six weeks and nothing said so. The last probe / order outcome,
+    # coarse only — never the token, the URL or the hub's reply.
+    try:
+        from app.services import hub_health
+        out["hub_orders"] = hub_health.health_view(
+            await hub_health.read(getattr(request.app.state, "redis", None)))
+    except Exception:
+        pass
     # THE GATE BEFORE POSTING (owner, 2026-09-25): what the reviewer did today
     # — replies passed, rewritten once, held back for a colleague.
     try:

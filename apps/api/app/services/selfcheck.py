@@ -244,6 +244,17 @@ async def _probe_agent_failures(db, redis) -> list[str]:
     return []
 
 
+async def _probe_hub_orders(db, redis) -> list[str]:
+    """Can Neema still place an order in the hub?
+
+    The check that was missing from 2026-08-24 to 2026-10-05, when the hub
+    refused every order Neema placed (403) and nothing said so for six weeks.
+    A read-only request on the same authenticated route group, with the same
+    token; a refusal logs ERROR and rings the team (services/hub_health)."""
+    from app.services import hub_health
+    return hub_health.finding(await hub_health.probe(redis))
+
+
 async def _probe_unanswered_customers(db, redis) -> list[str]:
     """Customers waiting on the AI — threads it OWNS where nothing went back.
 
@@ -462,6 +473,7 @@ async def _probe_graph_versions(db, redis) -> list[str]:
 PROBES = [
     ("graph_versions", _probe_graph_versions),
     ("agent_failures", _probe_agent_failures),
+    ("hub_orders", _probe_hub_orders),
     ("meta_tokens", _probe_meta_tokens),
     ("webhook_signature", _probe_webhook_signature),
     ("unanswered_customers", _probe_unanswered_customers),
