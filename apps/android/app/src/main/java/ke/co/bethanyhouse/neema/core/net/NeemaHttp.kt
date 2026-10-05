@@ -275,7 +275,13 @@ class NeemaHttp(
             if (job?.isActive == false) it.cancel()
         }
 
-        val cancelled: Boolean get() = call?.isCanceled() == true || job?.isActive == false
+        /**
+         * Cancelled by its coroutine. Not `call.isCanceled()`: OkHttp's callTimeout
+         * cancels the call too, and a slow server is a timeout the screen must hear
+         * about ("the server took too long"), never a silent cancellation that
+         * leaves a call stuck on "Calling…".
+         */
+        val cancelled: Boolean get() = job?.isActive == false
 
         fun close() { handle?.dispose() }
     }

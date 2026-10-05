@@ -1,6 +1,5 @@
 package ke.co.bethanyhouse.neema.settings
 
-import ke.co.bethanyhouse.neema.core.util.AppClock
 
 import ke.co.bethanyhouse.neema.app.ToastType
 import ke.co.bethanyhouse.neema.core.util.Fmt
@@ -150,7 +149,9 @@ class SettingsContractTest : AreaTest() {
     }
 
     @Test fun anOfferThatStartsLaterIsSavedNotLive() {
-        val start = AppClock.today().plusDays(10).toString()
+        // "Later" by the server's calendar (the real date): the app's clock is pinned to
+        // 25 Sep 2026, so pinned + 10 days became the real today on 5 Oct and read as live.
+        val start = LocalDate.now(java.time.ZoneOffset.UTC).plusDays(10).toString()
         vm.editDraft { it.copy(startsOn = start) }
         vm.saveOffer(vm.draft.value)
         assertFalse(vm.offer.value!!.running)

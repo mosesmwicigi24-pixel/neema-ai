@@ -143,15 +143,25 @@ class FakePeer(val onEvent: (PeerEvent) -> Unit) : CallPeer {
     var closed = false
     val gathering = CompletableDeferred<Unit>()
     var failSetRemote: Exception? = null
+    /**
+     * Every native step asked of this peer after close(): on a phone that is a
+     * PeerConnection used after dispose() — a native crash no catch can stop.
+     */
+    val usedAfterClose = mutableListOf<String>()
+    /** When set, the SDP steps wait for it (a hang-up can land while WebRTC works). */
+    var sdpGate: CompletableDeferred<Unit>? = null
     override var hasMic = false
-    override fun addMic(enabled: Boolean) { hasMic = true; micEnabled = enabled; ops += "addMic($enabled)" }
+    override fun addMic(enabled: Boolean) { if (closed) usedAfterClose += "addMic"; hasMic = true; micEnabled = enabled; ops += "addMic($enabled)" }
     override fun setMicEnabled(enabled: Boolean) { micEnabled = enabled }
-    override suspend fun createOffer(): String { ops += "createOffer"; return "v=0 our-offer" }
-    override suspend fun createAnswer(): String { ops += "createAnswer"; return "v=0 our-answer" }
-    override suspend fun setLocal(type: SdpType, sdp: String) { ops += "setLocal($type,$sdp)" }
-    override suspend fun setRemote(type: SdpType, sdp: String) { failSetRemote?.let { throw it }; ops += "setRemote($type,$sdp)" }
+    override suspend fun createOffer(): String { if (closed) usedAfterClose += "createOffer"; ops += "createOffer"; sdpGate?.await(); return "v=0 our-offer" }
+    override suspend fun createAnswer(): String { if (closed) usedAfterClose += "createAnswer"; ops += "createAnswer"; sdpGate?.await(); return "v=0 our-answer" }
+    override suspend fun setLocal(type: SdpType, sdp: String) { if (closed) usedAfterClose += "setLocal"; ops += "setLocal($type,$sdp)"; sdpGate?.await() }
+    override suspend fun setRemote(type: SdpType, sdp: String) {
+        if (closed) usedAfterClose += "setRemote"
+        failSetRemote?.let { throw it }; ops += "setRemote($type,$sdp)"; sdpGate?.await()
+    }
     override suspend fun awaitGathering() = gathering.await()
-    override val localSdp: String? get() = ops.lastOrNull { it.startsWith("setLocal") }?.let { "$it+candidates" }
+    override val localSdp: String? get() { if (closed) usedAfterClose += "localSdp"; return ops.lastOrNull { it.startsWith("setLocal") }?.let { "$it+candidates" } }
     override fun close() { closed = true }
 }
 
@@ -170,11 +180,13 @@ class FakeMedia : CallMedia {
     var configs = mutableListOf<IceConfig>()
     var recordingBytes = 48_000
     var recordings = mutableListOf<FakeRecording>()
+    /** Handed to each new peer: its SDP steps wait on it. */
+    var sdpGate: CompletableDeferred<Unit>? = null
     /** Complete ICE gathering immediately (otherwise the 2.5s cap applies). */
     var gatherAtOnce = true
     override fun createPeer(config: IceConfig, onEvent: (PeerEvent) -> Unit): CallPeer {
         configs += config
-        return FakePeer(onEvent).also { if (gatherAtOnce) it.gathering.complete(Unit); peers += it }
+        return FakePeer(onEvent).also { if (gatherAtOnce) it.gathering.complete(Unit); it.sdpGate = sdpGate; peers += it }
     }
     override fun startRecording(micMuted: Boolean): CallRecording =
         FakeRecording(recordingBytes, micMuted).also { recordings += it }

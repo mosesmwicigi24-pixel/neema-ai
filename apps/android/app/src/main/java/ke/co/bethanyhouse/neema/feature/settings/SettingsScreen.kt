@@ -141,6 +141,8 @@ fun SettingsScreen(dash: DashboardViewModel) {
                 if (access.can(ke.co.bethanyhouse.neema.core.perm.Perms.MANAGE_SETTINGS)) {
                     WhatsAppCallingCard(vm.calling)
                     Spacer(Modifier.height(14.dp))
+                    CrashReportsCard(dash)
+                    Spacer(Modifier.height(14.dp))
                 }
                 DangerZoneCard(vm)
                 Spacer(Modifier.height(24.dp))

@@ -65,7 +65,7 @@
         <service
             android:name=".core.notify.LiveService"
             android:exported="false"
-            android:foregroundServiceType="remoteMessaging|dataSync|microphone" />
+            android:foregroundServiceType="remoteMessaging|dataSync|microphone|shortService" />
 
         <!-- Reboot / app update kill the process: bring the live connection back
              when signed in with "Stay connected in background" on. -->

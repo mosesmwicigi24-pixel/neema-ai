@@ -25,6 +25,7 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
@@ -475,6 +476,8 @@ class CallManager internal constructor(
     private val myAgentId: () -> String? = { null },
     /** The signed-in agent's name: a 409 naming it means this agent's other device holds the call. */
     private val myAgentName: () -> String? = { null },
+    /** The device's call audio failing under WebRTC (true: the microphone); see [CallAudioTrouble]. */
+    private val audioTrouble: kotlinx.coroutines.flow.Flow<Boolean> = CallAudioTrouble.events,
 ) {
     constructor(
         context: Context,
@@ -666,7 +669,8 @@ class CallManager internal constructor(
         loadChannels()
 
         // Headsets come and go: the call follows them (see [onRoutes]).
-        ui.launch { audio.routes.collect(::onRoutes) }
+        ui.launch { audio.routes.collect { r -> guarded("routes") { onRoutes(r) } } }
+        ui.launch { audioTrouble.collect { mic -> guarded("audio-trouble") { onAudioTrouble(mic) } } }
 
         // Fallback path: poll the call log for a fresh "ringing" call, so the card
         // appears even if the WS event was missed. 2.5s only while RINGING (hang-up
@@ -687,7 +691,9 @@ class CallManager internal constructor(
         // Phase side effects: ring + notify while ringing; timer + recording while
         // live; in-call audio routing + mic foreground service while a call runs.
         ui.launch {
-            state.map { it.phase }.distinctUntilChanged().collect { p ->
+            // One failure (a device's audio or ringer refusing) must not end this collector:
+            // every later call would get no audio mode, ringing, timer or recording.
+            state.map { it.phase }.distinctUntilChanged().collect { p -> guarded("phase") {
                 ringTimeoutJob?.cancel(); ringTimeoutJob = null
                 if (p == CallPhase.Ringing) {
                     ringer.startRinging()
@@ -724,7 +730,7 @@ class CallManager internal constructor(
                     liveSince = null
                 }
                 if (p in AUDIO_PHASES) enterAudio() else leaveAudio()
-            }
+            } }
         }
         // The app went to the background while a call is still ringing: notify.
         // Back on screen, the card is the alert — drop the notification.
@@ -866,7 +872,8 @@ class CallManager internal constructor(
                     logD("outbound answered")
                     val p = peer ?: return
                     if (phase == CallPhase.Placing || phase == CallPhase.RingingOut) { update { it.copy(phase = CallPhase.Connecting) }; armConnectGuard(id) }
-                    ui.launch { runCatching { p.setRemote(SdpType.Answer, sdp) } }
+                    // Posted: the call may have ended (and its peer closed) before this runs.
+                    ui.launch { if (peer === p) runCatching { p.setRemote(SdpType.Answer, sdp) } }
                 } else if (activeId == null && s.outbound && s.callId == "pending" && s.phase == CallPhase.Placing) {
                     // Ours, most likely, but connect hasn't told us its id yet.
                     earlyAnswer = id to sdp
@@ -1005,11 +1012,14 @@ class CallManager internal constructor(
         if (peer !== p) return@withLock false
         try {
             p.setRemote(SdpType.Offer, sdp)
-            p.setLocal(SdpType.Answer, p.createAnswer())
+            if (peer !== p) return@withLock false
+            val answer = p.createAnswer()
+            if (peer !== p) return@withLock false
+            p.setLocal(SdpType.Answer, answer)
             true
         } catch (e: CancellationException) {
             throw e
-        } catch (e: Exception) {
+        } catch (e: Throwable) {
             logW("Messenger $why offer not applied", e)
             false
         }
@@ -1305,7 +1315,7 @@ class CallManager internal constructor(
         if (recording != null || !recEnabled) return
         val p = peer ?: return
         if (!p.hasMic) return
-        recording = try { media.startRecording(_state.value.muted) } catch (e: Exception) {
+        recording = try { media.startRecording(_state.value.muted) } catch (e: Throwable) {
             logW("recording unavailable", e); null
         } ?: return
         recCallId = activeId ?: _state.value.callId
@@ -1329,7 +1339,7 @@ class CallManager internal constructor(
             )
         }
         bg.launch {
-            val file = try { r.stop() } catch (e: Exception) { null } ?: return@launch
+            val file = try { r.stop() } catch (e: Throwable) { null } ?: return@launch
             if (callId == null || callId == "pending" || file.length() < MIN_RECORDING_BYTES) {
                 file.delete()   // skip near-silent / empty recordings
                 return@launch
@@ -1667,12 +1677,16 @@ class CallManager internal constructor(
                 p.addMic(!_state.value.muted)
                 audio.micLive()
                 val mine: String
+                // Each step suspends: a hang-up meanwhile closes the peer, which must not be used again.
                 if (reversed) {
                     mine = p.createOffer()
+                    if (peer !== p) return@launch
                     p.setLocal(SdpType.Offer, mine)
                 } else {
                     p.setRemote(SdpType.Offer, offer.sdp.orEmpty())
+                    if (peer !== p) return@launch
                     mine = p.createAnswer()
+                    if (peer !== p) return@launch
                     p.setLocal(SdpType.Answer, mine)
                 }
                 awaitGathering(p)
@@ -1684,8 +1698,11 @@ class CallManager internal constructor(
                 if (stillMine() && phase == CallPhase.Connecting) armConnectGuard(callId)
             } catch (e: CancellationException) {
                 throw e
-            } catch (e: Exception) {
+            } catch (e: Throwable) {
+                // An Error too (a device's audio stack, WebRTC's native side): a
+                // failed answer, never the whole app closing on the agent.
                 logW("answer failed", e)
+                reportUnexpected(e, "call-answer")
                 if (!stillMine()) return@launch
                 when {
                     // Messenger calling was switched off since we last looked.
@@ -1744,7 +1761,7 @@ class CallManager internal constructor(
         val answer = resp.sdp?.takeIf { it.isNotBlank() }
         val applied = answer != null && try {
             p.setRemote(SdpType.Answer, answer); true
-        } catch (e: CancellationException) { throw e } catch (e: Exception) { logW("Messenger answer rejected", e); false }
+        } catch (e: CancellationException) { throw e } catch (e: Throwable) { logW("Messenger answer rejected", e); false }
         if (peer !== p || _state.value.callId != callId) return false
         if (!applied) {
             finish(CallOutcome.Failed(if (answer == null) AUDIO_NOT_CONNECTED else AUDIO_SETUP_FAILED))
@@ -1780,6 +1797,23 @@ class CallManager internal constructor(
         to: String, name: String? = null, conversationId: String? = null,
         /** "messenger": [to] is their PSID and the call goes out on Messenger (CALLING_UX.md §2.0). */
         channel: String = WHATSAPP,
+    ): Result<Unit> = try {
+        placeCall(to, name, conversationId, channel)
+    } catch (e: CancellationException) {
+        throw e
+    } catch (e: Throwable) {
+        // The last net: whatever slipped past placeCall's own handling ends the
+        // call on the card — the caller (a screen's viewModelScope) never sees it.
+        logW("outbound call broke", e)
+        reportUnexpected(e, "call-place")
+        withContext(NonCancellable + main) {
+            runCatching { if (_state.value.outbound && _state.value.live) finish(CallOutcome.Failed(DEVICE_CALL_FAILED)) }
+        }
+        Result.failure(CallError(DEVICE_CALL_FAILED, shown = true))
+    }
+
+    private suspend fun placeCall(
+        to: String, name: String?, conversationId: String?, channel: String,
     ): Result<Unit> = withContext(main) {
         if (_state.value.live) return@withContext Result.failure(CallError("Already in a call"))
         val messenger = channelOf(channel) == MESSENGER
@@ -1820,6 +1854,7 @@ class CallManager internal constructor(
             p.addMic(!_state.value.muted)
             audio.micLive()
             val offer = p.createOffer()
+            if (peer !== p) return@withContext Result.success(Unit)   // hung up while the offer was made
             p.setLocal(SdpType.Offer, offer)
             awaitGathering(p)
             if (peer !== p) return@withContext Result.success(Unit)
@@ -1855,8 +1890,11 @@ class CallManager internal constructor(
             Result.success(Unit)
         } catch (e: CancellationException) {
             throw e
-        } catch (e: Exception) {
+        } catch (e: Throwable) {
+            // An Error too (a device's audio stack, WebRTC's native side): a failed
+            // call on the card, never the whole app closing under the agent.
             logW("outbound call failed", e)
+            reportUnexpected(e, "call-place")
             // A connect that timed out and left no row: it may yet ring them.
             val friendly = if (e.isAmbiguous("/admin/calls/connect") && e.isTimeout()) UNCONFIRMED_CALL else outboundError(e)
             if (!stillMine()) return@withContext Result.failure(CallError(friendly))
@@ -1903,7 +1941,7 @@ class CallManager internal constructor(
         val answer = resp.sdp?.takeIf { it.isNotBlank() }
         if (answer != null) {
             try { p.setRemote(SdpType.Answer, answer); remoteReady = true }
-            catch (e: CancellationException) { throw e } catch (e: Exception) { logW("Messenger answer rejected", e) }
+            catch (e: CancellationException) { throw e } catch (e: Throwable) { logW("Messenger answer rejected", e) }
         }
         if (remoteReady) {
             resp.renegotiationSdp?.let { applyRemoteOffer(p, it, "connect") }
@@ -2125,6 +2163,33 @@ class CallManager internal constructor(
 
     private class MicBlocked : Exception("Permission denied")
 
+    /**
+     * A failure the call flow doesn't expect (not the server's, not the
+     * network's, not a refused microphone): kept as a crash report so the
+     * trace reaches the team — the agent only sees the call fail.
+     */
+    /**
+     * The device's call audio failed under WebRTC: the call stays up (the agent
+     * decides), and the card says what's wrong instead of going silent.
+     */
+    private fun onAudioTrouble(mic: Boolean) {
+        if (phase !in AUDIO_PHASES) return
+        update { it.copy(error = if (mic) MIC_UNAVAILABLE else SPEAKER_UNAVAILABLE) }
+    }
+
+    /** One step of a long-lived collector: a failure is recorded, and the collector carries on. */
+    private inline fun guarded(where: String, block: () -> Unit) {
+        try { block() } catch (e: CancellationException) { throw e } catch (e: Throwable) {
+            logW("$where failed", e)
+            runCatching { ke.co.bethanyhouse.neema.core.crash.CrashVault.recordNonFatal(e, "call-$where") }
+        }
+    }
+
+    private fun reportUnexpected(e: Throwable, where: String) {
+        if (e is ApiException || e is CallError || e is MicBlocked || e.isOffline() || e.isTimeout()) return
+        runCatching { ke.co.bethanyhouse.neema.core.crash.CrashVault.recordNonFatal(e, where) }
+    }
+
     /** A failed call carrying the user-facing message ([shown]: the call card already says it). */
     class CallError(message: String, val shown: Boolean = false) : Exception(message)
 
@@ -2138,6 +2203,11 @@ class CallManager internal constructor(
         private fun logD(msg: String) { runCatching { Log.d(TAG, msg) } }
         private fun logW(msg: String, e: Throwable) { runCatching { Log.w(TAG, msg, e) } }
         const val MIC_BLOCKED = "Microphone blocked — allow it and try again"
+        /** The phone or tablet couldn't set the call's audio up (the report goes to the team). */
+        /** WebRTC couldn't start (or lost) the microphone: another app has it, or the device refused. */
+        const val MIC_UNAVAILABLE = "The microphone isn't working — close any app using it (a screen recorder), then hang up and call again"
+        const val SPEAKER_UNAVAILABLE = "The call audio stopped on this device — hang up and call again"
+        const val DEVICE_CALL_FAILED = "This device couldn't start the call — try again, or call from another phone"
         /** The wrap-up's words for a refused microphone (its button opens the settings). */
         const val MIC_BLOCKED_WRAP = "Microphone blocked — allow it in settings"
         const val NO_CALL_PERMISSION = "This customer hasn't allowed WhatsApp calls yet — send them a call request"
@@ -2280,6 +2350,8 @@ class CallManager internal constructor(
             e.isTimeout() -> OUTBOUND_SLOW
             e.isOffline() -> OUTBOUND_OFFLINE
             e.statusOrNull() == 401 -> SESSION_EXPIRED
+            // Not the server, not the network: this device couldn't set the call up.
+            e is Error -> DEVICE_CALL_FAILED
             else -> "Couldn't place the call"
         }
 

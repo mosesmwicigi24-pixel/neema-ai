@@ -141,6 +141,19 @@ class NeemaHttpTest {
         assertEquals("timed out after 30s", slow.body)
     }
 
+    /**
+     * OkHttp's 30 s callTimeout cancels the call: that is still a slow server —
+     * "timed out", which a call's card says — never a silent cancellation that
+     * left an outgoing call stuck on "Calling…".
+     */
+    @Test
+    fun okHttpsCallTimeoutIsATimeoutNotACancellation() {
+        fake.callTimeout("GET", "/slow-connect")
+        val e = expectApi { http.raw("GET", "/slow-connect") }
+        assertEquals(0, e.status)
+        assertEquals("timed out after 30s", e.body)
+    }
+
     @Test
     fun a404IsAnErrorNotASessionProblem() = runBlocking {
         fake.on("GET", "/admin/orders/x", code = 404, body = """{"detail":"Order not found"}""")

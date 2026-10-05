@@ -133,14 +133,14 @@ class CallsViewModel(private val dash: DashboardViewModel) : ViewModel(), SavesU
         // Call frames reload the log 500ms later (a burst is one reload) while
         // it is on display; off-screen, the next visit catches up anyway.
         viewModelScope.launch {
-            dash.container.socket.events.collect { e ->
+            dash.container.socket.events.collect { e -> ke.co.bethanyhouse.neema.core.crash.contained("calls-frame") {
                 val t = e.str("type")
                 // A changed row arrives whole: merged in place, no read.
                 if (t == "call_update") { (e["call"] as? kotlinx.serialization.json.JsonObject)?.let(::mergeRow); return@collect }
                 if ((t == "incoming_call" || t == "call_ended" || t == "call_answered") && life.active && frameReload?.isActive != true) {
                     frameReload = launch { delay(FRAME_RELOAD_MS); reads.run() }
                 }
-            }
+            } }
         }
     }
 

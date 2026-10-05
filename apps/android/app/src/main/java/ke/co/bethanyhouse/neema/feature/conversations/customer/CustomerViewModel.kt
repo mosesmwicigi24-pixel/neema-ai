@@ -1044,6 +1044,7 @@ class CustomerViewModel(
         if (_callRequest.value.busy) return
         _callRequest.value = CallRequestUi(busy = true)
         viewModelScope.launch {
+          try {
             val r = dash.container.calls.requestPermission(wa, _profile.value?.name ?: conversation.name,
                 if (messenger) ke.co.bethanyhouse.neema.feature.calls.MESSENGER else ke.co.bethanyhouse.neema.feature.calls.WHATSAPP)
             val resp = r.getOrNull()
@@ -1072,6 +1073,13 @@ class CustomerViewModel(
                 status = it.status, permanent = it.permanent, expiresAt = it.expiresAt, at = it.at,
                 canCall = if (it.status == "granted") true else _callPermission.value?.canCall,
             ) }
+          } catch (e: kotlinx.coroutines.CancellationException) {
+            _callRequest.value = CallRequestUi(); throw e
+          } catch (e: Throwable) {
+            // Never the app closing on "Send call request": the pill says it didn't go.
+            ke.co.bethanyhouse.neema.core.crash.CrashVault.recordNonFatal(e, "call-request")
+            _callRequest.value = CallRequestUi(error = ke.co.bethanyhouse.neema.feature.calls.CallManager.permissionRequestError(e))
+          }
         }
     }
 
@@ -1081,7 +1089,7 @@ class CustomerViewModel(
      */
     suspend fun watchCalls() {
         var pending: Job? = null
-        dash.container.socket.events.collect { e ->
+        dash.container.socket.events.collect { e -> ke.co.bethanyhouse.neema.core.crash.contained("customer-calls-frame") {
             val type = e["type"]?.let { runCatching { (it as JsonPrimitive).content }.getOrNull() }
             // Their answer to a call request (or WhatsApp's automatic revoke): read where it stands now.
             if (type == "call_permission") {
@@ -1110,7 +1118,7 @@ class CustomerViewModel(
             }
             if (pending?.isActive == true) return@collect
             pending = viewModelScope.launch { delay(500); loadCalls() }
-        }
+        } }
     }
 
     /**

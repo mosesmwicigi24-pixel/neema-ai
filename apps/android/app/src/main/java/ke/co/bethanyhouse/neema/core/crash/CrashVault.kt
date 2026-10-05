@@ -34,6 +34,9 @@ object CrashVault {
     private const val MAX_TRACE = 48_000
     private const val PREF = "neema_crash"
     private const val KEY_EXIT_SEEN = "exit_seen_ms"
+    private const val LAST_FATAL = "last-fatal.txt"
+    private const val KEY_DECODED_BUILD = "decoded_build"
+    private const val RESCAN_MS = 3L * 24 * 3600 * 1000
 
     private val json = Json { ignoreUnknownKeys = true; explicitNulls = false }
 
@@ -43,14 +46,37 @@ object CrashVault {
     fun install(context: Context) {
         val app = context.applicationContext
         dir = File(app.filesDir, DIR).apply { mkdirs() }
-        val previous = Thread.getDefaultUncaughtExceptionHandler()
+        installHandler()
+        runCatching { collectExitReasons(app) }
+    }
+
+    /**
+     * Every uncaught exception is written down first; a [contained] thread's ends
+     * that thread only; anything else goes on to the system (the app closes).
+     */
+    internal fun installHandler(
+        previous: Thread.UncaughtExceptionHandler? = Thread.getDefaultUncaughtExceptionHandler(),
+    ) {
         Thread.setDefaultUncaughtExceptionHandler { thread, error ->
+            if (contained(thread.name)) {
+                // WebRTC's own audio threads assert on the device's audio state (the mic or
+                // speaker changing under them): that thread ends and the call goes quiet —
+                // the agent can hang up and call again. The whole app closing is worse.
+                runCatching { save(report("nonfatal", error, thread.name)) }
+                runCatching { onContained?.invoke(thread.name) }
+                return@setDefaultUncaughtExceptionHandler
+            }
             runCatching { save(report("crash", error, thread.name)) }
             if (previous != null) previous.uncaughtException(thread, error)
             else { android.os.Process.killProcess(android.os.Process.myPid()); kotlin.system.exitProcess(10) }
         }
-        runCatching { collectExitReasons(app) }
     }
+
+    /** Told when a [contained] thread failed (the call says its audio stopped). */
+    @Volatile var onContained: ((thread: String) -> Unit)? = null
+
+    /** Threads whose failure ends only themselves (see [install]): WebRTC's Java audio threads. */
+    internal fun contained(thread: String?): Boolean = thread == "AudioTrackJavaThread" || thread == "AudioRecordJavaThread"
 
     /** An error that was caught at the edge (a background coroutine) — the app keeps running. */
     fun recordNonFatal(error: Throwable, where: String = Thread.currentThread().name) {
@@ -70,6 +96,23 @@ object CrashVault {
         ?.let { runCatching { json.decodeFromString(CrashReport.serializer(), it.readText()) }.getOrNull() }
 
     fun delivered(file: File) { runCatching { file.delete() } }
+
+    /** The crash that closed the app last time, until the person has seen it (see [CrashNotice]). */
+    fun unseenFatal(): CrashReport? = runCatching {
+        (dir?.let { File(it, LAST_FATAL) })?.takeIf { it.exists() }
+            ?.let { json.decodeFromString(CrashReport.serializer(), it.readText()) }
+    }.getOrNull()
+
+    fun seen() { runCatching { dir?.let { File(it, LAST_FATAL).delete() } } }
+
+    /** A crash report as text to send on: what, where, which build and device, the trace. */
+    fun asText(r: CrashReport): String = buildString {
+        appendLine("Neema crash report")
+        appendLine(r.summary)
+        appendLine(listOf(r.at, r.kind, r.thread, r.device, "Android API ${r.sdk}", "v${r.appVersion} (${r.build})").filter { !it.isNullOrBlank() }.joinToString(" · "))
+        appendLine()
+        append(r.trace)
+    }.take(60_000)
 
     internal fun report(kind: String, error: Throwable?, thread: String?, trace: String? = null, at: Instant = Instant.now()): CrashReport {
         val text = (trace ?: error?.let { stackOf(it) }).orEmpty()
@@ -92,6 +135,8 @@ object CrashVault {
         val body = json.encodeToString(CrashReport.serializer(), r)
         File(d, "${System.currentTimeMillis()}-${r.kind}.json").writeText(body)
         File(d, "last.txt").writeText(body)
+        // The app closed on someone: the next launch shows this, with Share and Copy.
+        if (r.kind != "nonfatal") File(d, LAST_FATAL).writeText(body)
         (d.listFiles { f -> f.name.endsWith(".json") } ?: emptyArray())
             .sortedBy { it.name }.dropLast(MAX_FILES).forEach { it.delete() }
     }
@@ -104,10 +149,17 @@ object CrashVault {
         val am = context.getSystemService(ActivityManager::class.java) ?: return
         val prefs = context.getSharedPreferences(PREF, Context.MODE_PRIVATE)
         val seen = prefs.getLong(KEY_EXIT_SEEN, 0L)
+        // A new build reads the native crashes of the last days again: one an older
+        // build kept as unreadable bytes comes back decoded, without anyone having
+        // to make it crash a second time.
+        val build = BuildConfig.BUILD_NUMBER
+        val rescanSince = if (seen != 0L && prefs.getString(KEY_DECODED_BUILD, null) != build)
+            System.currentTimeMillis() - RESCAN_MS else Long.MAX_VALUE
         val exits = am.getHistoricalProcessExitReasons(context.packageName, 0, 10)
         var newest = seen
-        for (x in exits) {
-            if (x.timestamp <= seen) continue
+        for (x in exits.sortedBy { it.timestamp }) {
+            val again = x.timestamp <= seen
+            if (again && (x.timestamp < rescanSince || x.reason != ApplicationExitInfo.REASON_CRASH_NATIVE)) continue
             newest = maxOf(newest, x.timestamp)
             val kind = when (x.reason) {
                 ApplicationExitInfo.REASON_CRASH_NATIVE -> "native"
@@ -116,11 +168,26 @@ object CrashVault {
             }
             // Only the first run records the past: never report exits from before install.
             if (seen == 0L) continue
-            val trace = runCatching { x.traceInputStream?.use { s -> s.readBytes().decodeToString().take(MAX_TRACE) } }.getOrNull()
-            save(report(kind, null, x.processName, trace = listOfNotNull(x.description, trace).joinToString("\n"),
+            val raw = runCatching { x.traceInputStream?.use { it.readBytes() } }.getOrNull()
+            // A native crash's trace is a protobuf tombstone: decoded, the crashing
+            // thread's frames and the last log lines come first and readable.
+            val trace = raw?.let { b -> (if (kind == "native") TombstoneText.decode(b) else null) ?: b.decodeToString() }?.take(MAX_TRACE)
+            save(report(kind, null, x.processName, trace = listOfNotNull(trace, x.description?.let { "($it)" }).joinToString("\n"),
                 at = Instant.ofEpochMilli(x.timestamp)))
         }
-        prefs.edit().putLong(KEY_EXIT_SEEN, if (newest == 0L) System.currentTimeMillis() else newest).apply()
+        prefs.edit().putLong(KEY_EXIT_SEEN, if (newest == 0L) System.currentTimeMillis() else newest)
+            .putString(KEY_DECODED_BUILD, build).apply()
+    }
+}
+
+/**
+ * One live frame (or one step of a long-lived collector) handled on its own: a
+ * failure is recorded and the collector carries on. A collector in a
+ * viewModelScope has no handler — one bad frame used to close the app.
+ */
+internal inline fun contained(where: String, block: () -> Unit) {
+    try { block() } catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (e: Throwable) {
+        CrashVault.recordNonFatal(e, where)
     }
 }
 
