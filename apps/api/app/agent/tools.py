@@ -567,6 +567,12 @@ _SEARCH_STOP = frozenset({
     "uma", "los", "las", "del", "quiero", "precio", "preco", "quanto",
     "cuanto", "necesito", "preciso", "pastorale", "pastorales", "several", "couple", "dozen",
     "hundred", "thousand",
+    # The labels of a voice-note turn ("🎤 (voice note): …", "(machine
+    # translation — where it differs, their own words above rule: …)"): the
+    # gate's own search for "what they asked" (runtime._ask_query) read every
+    # voice turn as "voice note communion tray…" and searched for it.
+    "voice", "note", "notes", "machine", "translation", "differ", "their",
+    "own", "word", "above", "rule",
 })
 
 
@@ -625,10 +631,20 @@ async def _search_catalog(args: dict, ctx: ToolContext) -> dict:
     # and the little words that carry no product are dropped before matching.
     from app.services.post_catalog import is_set_row, set_components
     from app.core import companions as _companions
+    def _words(p: dict) -> set:
+        return _search_words(" ".join([p.get("name", ""), p.get("category", ""),
+                                       " ".join(p.get("aliases") or [])]))
+
     # The customer's own words, read as the catalogue's (core/vernacular): a
     # "kasoki", a "plateau de communion", "vasitos" — words that matched no
-    # hub row and came back empty. The query as asked is kept for the log.
-    vquery = _vernacular.to_hub(query)
+    # hub row and came back empty. The hub's own names and aliases come
+    # first: when the words as asked already find rows ("divai ya ushirika"
+    # is the hub's alias for Devai), they are searched as asked. The query
+    # as asked is kept for the log.
+    toks0 = _search_tokens(query)
+    vquery = query
+    if not (toks0 and any(toks0.issubset(_words(p)) for p in catalog)):
+        vquery = _vernacular.to_hub(query)
     toks = _search_tokens(vquery)
     # A query made ONLY of little words ("our client from south africa gave us
     # this") names nothing: say so, rather than answering with the whole shelf
@@ -638,10 +654,6 @@ async def _search_catalog(args: dict, ctx: ToolContext) -> dict:
         return {"count": 0, "currency": ctx.currency, "results": [],
                 "note": "no product words in the query — nothing to match; ask which "
                         "item they mean, or search by the item's name"}
-
-    def _words(p: dict) -> set:
-        return _search_words(" ".join([p.get("name", ""), p.get("category", ""),
-                                       " ".join(p.get("aliases") or [])]))
 
     def _hay(p: dict) -> set:      # kept name: the word-set the fallback scores
         return _words(p)

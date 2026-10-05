@@ -87,8 +87,9 @@ def turn_line(status: str | None, text: str | None, translation: str | None = No
         if not re.fullmatch(r"[A-Za-z][A-Za-z \-]{1,23}", src):
             src = "another language" if src else ""
         if en and en != " ".join(words.split()) and src and src.lower() != "english":
-            line += (f"\n   (machine translation from {src} — their own words "
-                     f"above rule if the two differ: {en})")
+            # (No language name in the label: its words would reach the
+            # gate's search for "what they asked", like "voice note" did.)
+            line += f"\n   (machine translation — where it differs, their own words above rule: {en})"
         return line
     if s == "silent":
         return "🎤 (voice note — no speech could be heard in it)"

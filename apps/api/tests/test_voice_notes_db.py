@@ -300,8 +300,8 @@ def test_swahili_note_is_translated_for_the_team_and_answered_in_swahili(rig, cl
     # Neema reads what was SAID — and, for a note in another language, the
     # team's English beneath it, marked as the rough one (2026-10-05)
     assert rig.turns[-1]["text"] == (f"🎤 (voice note): {said}"
-                                     "\n(machine translation from Swahili — their own words above "
-                                     "rule if the two differ: Hello, I want two black cassocks, how much?)")
+                                     "\n(machine translation — where it differs, their own words "
+                                     "above rule: Hello, I want two black cassocks, how much?)")
     ev = rig.redis.events("voice_transcript")[-1]
     assert ev["translation"].startswith("Hello, I want") and ev["translatedFrom"] == "Swahili"
     # the transcript reached the translator as DATA, inside JSON, under a data-only system prompt
@@ -519,7 +519,7 @@ def test_messenger_and_instagram_voice_notes(rig, clips, channel, obj):
     assert m.text == said and m.transcript_status == "done" and m.transcript_lang == "sw"
     assert m.translated_text == "Do you have purple stoles?"
     assert heard.split("\n")[0] == f"🎤 (voice note): {said}" and left is None
-    assert heard.endswith("the two differ: Do you have purple stoles?)")
+    assert heard.endswith("their own words above rule: Do you have purple stoles?)")
     # another channel's customer cannot resolve it
     assert run(voice_notes.resolve(voice_notes.token(m.id), channel="whatsapp", key=psid)) == ""
 
