@@ -8,7 +8,6 @@ import types
 
 import app.main  # noqa: F401 — registers models
 import app.services.wa_native as wn
-from app.core.config import settings
 
 
 def _payload(messages, contacts=None):
