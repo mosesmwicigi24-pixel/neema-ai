@@ -3703,9 +3703,21 @@ async def calls_upload_recording(
         # A recording implies the call happened; keep a row so it can be transcribed.
         c = Call(call_id=call_id, status="completed")
         db.add(c)
+    replaced = c.recording_url
     c.recording_url = recording_url
     c.transcript_status = "queued" if auto else "recorded"
     await db.commit()
+    # The failed recording this one replaces: referenced by nothing now, yet
+    # still served by its old URL — removed (cycle 9 audit). Only our own
+    # call_* files inside the media dir.
+    if replaced:
+        old_name = os.path.basename(replaced.rstrip("/"))
+        old_path = os.path.join(MEDIA_DIR, old_name)
+        if old_name.startswith("call_") and old_name != saved_name and os.path.isfile(old_path):
+            try:
+                os.remove(old_path)
+            except OSError as exc:
+                _log.warning("could not remove replaced recording %s: %s", old_name, exc)
 
     if auto:
         from app.services.call_transcribe import schedule_transcription
