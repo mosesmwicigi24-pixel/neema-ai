@@ -505,24 +505,25 @@ def test_the_agent_pause_lifts_on_a_buying_signal():
 
 def test_a_messenger_voice_note_is_the_message(monkeypatch):
     import app.services.meta_media as mm
-
     from app.services import transcribe as stt
 
     async def _heard(url, redis=None):
         return (stt.Transcript(status="done", text="nataka kasoki mbili nyeusi")
                 if url == "https://cdn/v.mp4" else stt.failed("no_file"))
     monkeypatch.setattr(mm, "transcribe_audio_url", _heard)
+    # An older caller with no row id: heard here, with the same engine.
     text, media = asyncio.run(rt._hear_voice_note("", {"type": "audio", "url": "https://cdn/v.mp4"}))
-    assert text == "nataka kasoki mbili nyeusi" and media is None
+    assert text == "🎤 (voice note): nataka kasoki mbili nyeusi" and media is None
     text, media = asyncio.run(rt._hear_voice_note("see", {"type": "audio", "url": "https://cdn/v.mp4"}))
-    assert text == "see\nnataka kasoki mbili nyeusi"
+    assert text == "see\n🎤 (voice note): nataka kasoki mbili nyeusi"
     text, media = asyncio.run(rt._hear_voice_note("", {"type": "audio", "url": "https://cdn/none"}))
-    assert text == "(the customer sent a voice note)" and media is None      # no backend: the attachment rule
+    assert text.startswith("🎤 (voice note — it could not be transcribed") and media is None
     img = {"type": "image", "url": "u", "caption": ""}
     assert asyncio.run(rt._hear_voice_note("", img)) == ("", img)
     import app.routers.meta_webhook as wh
-    assert 'turn_media = {"type": "audio", "url": media_url}' in inspect.getsource(wh)
-    assert "text, media = await _hear_voice_note(text, media)" in inspect.getsource(rt._run_and_send_meta)
+    assert '"message_id": str(row_id)}' in inspect.getsource(wh)
+    assert ("text, media = await _hear_voice_note(text, media, channel=channel, "
+            "external_id=external_id)") in inspect.getsource(rt._run_and_send_meta)
 
 
 def test_the_guard_knows_the_hubs_names_and_urgent_buyers_get_a_date_led_reply():

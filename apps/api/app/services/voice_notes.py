@@ -235,7 +235,6 @@ async def _broadcast(redis, mid, *, status: str, text: str | None = None, lang: 
     if redis is None:
         return
     try:
-        from app.services import transcribe as stt
         if conv_id is None:
             from app.database import AsyncSessionLocal
             from app.models.message import Message
@@ -247,7 +246,7 @@ async def _broadcast(redis, mid, *, status: str, text: str | None = None, lang: 
                 if text is None and status in ("done",):
                     text = row.text
         payload = {"type": "voice_transcript", "conversationId": conv_id, "id": str(mid),
-                   "transcriptStatus": status, "transcriptNote": _note(status, stt),
+                   "transcriptStatus": status, "transcriptNote": _note(status),
                    "transcriptLang": lang}
         if text is not None and status == "done":
             payload["text"] = text
@@ -259,9 +258,8 @@ async def _broadcast(redis, mid, *, status: str, text: str | None = None, lang: 
         pass
 
 
-def _note(status: str | None, stt=None) -> str | None:
-    if stt is None:
-        from app.services import transcribe as stt
+def _note(status: str | None) -> str | None:
+    from app.services import transcribe as stt
     kind = stt.status_kind(status)
     if kind in ("failed", "silent"):
         return stt.describe(status)
@@ -332,4 +330,4 @@ async def _lines_for(ids: list, channel: str, key: str, wait_seconds: float) -> 
         pending = [r for r in mine.values() if r.transcript_status in _PENDING]
         if not pending or loop.time() >= deadline:
             return {i: turn_line(r.transcript_status, r.text) for i, r in mine.items()}
-        await asyncio.sleep(1.0)
+        await asyncio.sleep(0.25)
