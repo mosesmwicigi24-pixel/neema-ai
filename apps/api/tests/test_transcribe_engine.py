@@ -217,7 +217,10 @@ def test_whisper1_asks_for_the_language_and_4o_gets_the_vocabulary(on, audio, mo
     assert all(c["max_retries"] == 0 and c["timeout"] == float(settings.transcribe_timeout_seconds)
                for c in clients)
     # the hint is bilingual (OpenAI: a prompt "should match the audio language")
-    assert "kasoki" in reqs[0]["prompt"] and "komunio" in reqs[0]["prompt"]
+    # — and a plain list: no greeting sentence for the model to hand back
+    # (2026-10-05: "Habari, nataka kasoki." came back as 30 notes' "speech")
+    assert "kasoki" in reqs[0]["prompt"] and "ushirika" in reqs[0]["prompt"]
+    assert "habari" not in reqs[0]["prompt"].lower() and "." not in reqs[0]["prompt"]
     # gpt-transcribe: keywords + the languages we expect, no free-text prompt
     seen.clear()
     stt._openai_transcribe(path, "gpt-transcribe")

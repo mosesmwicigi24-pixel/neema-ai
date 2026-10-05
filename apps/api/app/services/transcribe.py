@@ -54,6 +54,7 @@ import re
 import shutil
 import tempfile
 import time
+from contextvars import ContextVar
 from dataclasses import dataclass, field
 
 from app.core.config import settings
@@ -78,6 +79,7 @@ REASON_WORDS = {
     "provider_auth": "the transcription key was refused",
     "provider_rejected": "the transcription service refused the audio",
     "busy": "another worker is transcribing this audio",
+    "echo": "the words could not be made out clearly (the service returned our own word list)",
     "error": "an unexpected error",
     "analysis": "the AI summary couldn't be made (the transcript is kept)",
 }
@@ -110,19 +112,117 @@ _MUSIC_ONLY = re.compile(r"^[\s♪♫🎵🎶.\-–—*]*$")
 # and an English-only prompt can nudge a Swahili note toward an English
 # rendering; so the hint is deliberately bilingual and noun-only. Replace (or
 # blank, to send none) with TRANSCRIBE_VOCABULARY.
+#
+# THE ECHO (voice note → sale, 2026-10-05). The first hint opened with a
+# SENTENCE — "Bethany House, Nairobi. Habari, nataka kasoki." — and the model
+# returned that sentence (or the whole list) as the transcript of 30 of the
+# 74 notes transcribed in production: loud notes of 7–61 seconds, real
+# speech, "transcribed" as "Habari, nataka kasoki." ("Hello, I want a
+# cassock"). The agent then sold cassocks to a customer asking about trays,
+# who re-recorded six minutes later. So: (1) the hint is a plain list of the
+# words — no greeting, no sentence a customer might say; (2) the live
+# catalogue's words replace the static list when the catalogue is cached
+# (services/stt_vocabulary); (3) a transcript made of the hint's own words is
+# an ECHO, not speech — the note is transcribed again with NO hint and the
+# second answer is the one kept (see `prompt_echo` and `_work`).
 VOCABULARY = (
-    "Bethany House, Nairobi. Habari, nataka kasoki. Cassock, chasuble, alb, stole, "
-    "surplice, cope, clergy shirt, collar, mitre, zucchetto, pectoral cross, "
-    "mkate wa komunio, vikombe vya komunio, sinia, M-Pesa, Paybill, KES, shilingi."
+    "cassock, kasoki, kanzu, chasuble, alb, stole, stola, surplice, cope, "
+    "clergy shirt, shati ya kola, collar, mitre, zucchetto, pectoral cross, msalaba, "
+    "communion tray, sinia, communion cups, vikombe vya ushirika, chalice, "
+    "mkate wa ushirika, M-Pesa, Paybill, KES, shilingi"
 )
-KEYWORDS = ("Bethany House", "cassock", "kasoki", "chasuble", "alb", "stole", "surplice",
-            "clergy shirt", "mitre", "zucchetto", "komunio", "M-Pesa", "Paybill", "KES")
+KEYWORDS = ("cassock", "kasoki", "chasuble", "alb", "stole", "surplice",
+            "clergy shirt", "mitre", "zucchetto", "chalice", "communion tray", "sinia",
+            "ushirika", "M-Pesa", "Paybill", "KES")
 LANGUAGES = ("en", "sw", "fr")    # what our customers speak (gpt-transcribe's hint)
+
+# The hint for THIS transcription (set by `_work` from the live catalogue;
+# None = the static list), and the switch that sends none at all (the echo
+# retry). Context variables, so the provider call — which runs in a worker
+# thread via asyncio.to_thread, which copies the context — reads the value
+# of the transcription that made it, and `call_provider`'s seam is unchanged.
+_HINT: ContextVar[str | None] = ContextVar("transcribe_hint", default=None)
+_NO_HINT: ContextVar[bool] = ContextVar("transcribe_no_hint", default=False)
 
 
 def vocabulary() -> str:
+    """The hint sent with this request. TRANSCRIBE_VOCABULARY (the owner's
+    override; "" = none) beats the live catalogue's list, which beats the
+    static one — and the echo retry sends nothing at all."""
+    if _NO_HINT.get():
+        return ""
     v = settings.transcribe_vocabulary
-    return VOCABULARY if v is None else v.strip()
+    if v is not None:
+        return v.strip()
+    live = _HINT.get()
+    return VOCABULARY if live is None else live
+
+
+# ── the echo ─────────────────────────────────────────────────────────────────
+
+def _words(text: str | None) -> list[str]:
+    from app.core.vernacular import fold
+    return re.findall(r"[a-z0-9]+", fold(text))
+
+
+def _longest_run(a: list[str], b: list[str]) -> tuple[int, int]:
+    """(length, start in `a`) of the longest run of words `a` shares with `b`."""
+    best, start = 0, 0
+    prev = [0] * (len(b) + 1)
+    for i in range(1, len(a) + 1):
+        cur = [0] * (len(b) + 1)
+        for j in range(1, len(b) + 1):
+            if a[i - 1] == b[j - 1]:
+                cur[j] = prev[j - 1] + 1
+                if cur[j] > best:
+                    best, start = cur[j], i - cur[j]
+        prev = cur
+    return best, start
+
+
+ECHO_RUN = 5     # this many of the hint's words in a row, inside longer speech
+
+
+def prompt_echo(text: str | None, hint: str | None) -> str | None:
+    """Did the model hand back our own hint instead of the speech?
+
+    "full"    — every word of the transcript is a word of the hint ("Habari,
+                nataka kasoki." against a hint that holds those words): the
+                speech is lost, and nothing in the text can be trusted.
+    "partial" — real words, with a run of ≥ ECHO_RUN hint words in a row
+                spliced in ("… a tray. Cassock, chasuble, alb, stole,
+                surplice"): the run is ours, the rest may be theirs.
+    None      — speech. (A note that only names one or two of our goods in
+                the hint's words IS flagged "full" — and the retry without
+                the hint then hears it again, so nothing is lost but a
+                second request.)
+    """
+    t, h = _words(text), _words(hint)
+    if not t or not h:
+        return None
+    if set(t) <= set(h):
+        return "full"
+    run, _ = _longest_run(t, h)
+    return "partial" if run >= ECHO_RUN else None
+
+
+def strip_echo(text: str, hint: str) -> str:
+    """The transcript with the hint's longest spliced-in run cut out."""
+    tw, hw = _words(text), _words(hint)
+    run, start = _longest_run(tw, hw)
+    if run < ECHO_RUN:
+        return text
+    from app.core.vernacular import fold
+    toks = [m for m in re.finditer(r"\w+", text) if re.findall(r"[a-z0-9]+", fold(m.group(0)))]
+    # word i of `tw` is token i of `toks` (both split on non-word characters,
+    # accents folded) — except where folding splits one token in two; then
+    # give up rather than cut the wrong words.
+    if len(toks) != len(tw):
+        return text
+    a, b = toks[start].start(), toks[start + run - 1].end()
+    out = (text[:a] + " " + text[b:])
+    out = re.sub(r"\s+([,.;:!?])", r"\1", re.sub(r"\s{2,}", " ", out))
+    return out.strip(" ,;:–-").strip()
 
 
 BACKOFF = (1.0, 4.0, 10.0)     # seconds before retry 1, 2, 3 (±20% jitter)
@@ -549,7 +649,9 @@ async def _transcribe(path: str | None, kind: str, redis) -> Transcript:
 
     prov, model = provider(), model_for()
     digest = await asyncio.to_thread(file_hash, path)
-    ckey, lkey = f"transcribe:result:{digest}", f"transcribe:lock:{digest}"
+    # v2 (2026-10-05): results cached under the first hint include its
+    # echoes ("Habari, nataka kasoki." for real speech) — never served again.
+    ckey, lkey = f"transcribe:result:v2:{digest}", f"transcribe:lock:{digest}"
 
     # Idempotency: the same bytes are transcribed once.
     if redis is not None:
@@ -648,16 +750,35 @@ async def _work(path: str, kind: str, prov: str, model: str, redis) -> Transcrip
             return failed("over_budget", **base)
 
         t = time.perf_counter()
+        echoes = 0
         try:
             chunk = max(60, int(settings.transcribe_chunk_seconds))
             pieces = await split(norm, chunk, work) if duration > chunk + 1 else [norm]
             texts: list[str] = []
             lang: str | None = None
-            for p in pieces:
-                text, got = await _attempts(p, prov, model)
-                if text.strip():
-                    texts.append(text.strip())
-                lang = lang or got
+            hint = await _hint_for(model, prov, redis)
+            token = _HINT.set(hint)
+            try:
+                for p in pieces:
+                    text, got = await _attempts(p, prov, model)
+                    kind = prompt_echo(text, hint) if hint else None
+                    if kind:
+                        echoes += 1
+                        text, got = await _without_hint(p, prov, model, kind, text, got, hint,
+                                                        min(duration, float(chunk)), redis)
+                    if text.strip():
+                        texts.append(text.strip())
+                    lang = lang or got
+            finally:
+                _HINT.reset(token)
+        except _EchoUnrecovered:
+            # Our own words came back and the retry could not run (budget,
+            # provider down): the speech is unheard — say so, never pass the
+            # hint off as what the customer said. Not cached: a later sweep
+            # may hear it.
+            await _meter(redis, model, usd)
+            timings["provider"] = round((time.perf_counter() - t) * 1000, 1)
+            return failed("echo", cost_usd=usd, **base)
         except Exception as exc:              # noqa: BLE001
             reason, _ = classify(exc)
             if reason == "provider_timeout":
@@ -679,6 +800,57 @@ async def _work(path: str, kind: str, prov: str, model: str, redis) -> Transcrip
         return Transcript(status="done", text=text, lang=lang or guessed,
                           lang_source="provider" if lang else ("guess" if guessed else None),
                           cost_usd=usd, **base)
+
+
+class _EchoUnrecovered(Exception):
+    """A full echo whose hint-free retry could not be made."""
+
+
+async def _hint_for(model: str, prov: str, redis) -> str:
+    """The free-text hint this request will carry ("" = none): the live
+    catalogue's list when it is cached, else the static one — for the models
+    that take a prompt. (gpt-transcribe takes keywords; the local model none.)"""
+    if prov == "local" or prov not in ("openai", "groq") or model == "gpt-transcribe":
+        return ""
+    if settings.transcribe_vocabulary is not None:
+        return settings.transcribe_vocabulary.strip()
+    try:
+        from app.services.stt_vocabulary import live_hint
+        live = await live_hint(redis)
+    except Exception:
+        live = None
+    return live or VOCABULARY
+
+
+async def _without_hint(path: str, prov: str, model: str, kind: str, text: str,
+                        got: str | None, hint: str, seconds: float, redis) -> tuple[str, str | None]:
+    """The echo, answered: the same audio once more with NO hint, its own
+    cost reserved. The second answer is the transcript (empty = silence).
+    When the retry cannot be made, a spliced-in run is cut out of the first
+    answer ("partial"); a whole-transcript echo is unheard speech."""
+    usd = round(seconds / 60.0 * price_per_min(model), 6)
+    _log.warning("transcribe: the provider returned the vocabulary hint (%s echo, %d words) — "
+                 "transcribing again without it", kind, len(_words(text)))
+    if await _reserve(redis, usd):
+        tok = _NO_HINT.set(True)
+        try:
+            again, lang = await _attempts(path, prov, model)
+            await _meter(redis, model, usd)
+            # No hint went with it, so whatever it heard is theirs — even a
+            # note that only says "nataka kasoki".
+            return again, lang or got
+        except Exception as exc:                   # noqa: BLE001
+            reason, _ = classify(exc)
+            if reason == "provider_timeout":
+                await _meter(redis, model, usd)
+            else:
+                await _refund(redis, usd)
+            _log.warning("transcribe: the hint-free retry failed (%s)", reason)
+        finally:
+            _NO_HINT.reset(tok)
+    if kind == "partial":
+        return strip_echo(text, hint), got
+    raise _EchoUnrecovered()
 
 
 # ── a cheap language guess (fallback when the model gives none) ──────────────
