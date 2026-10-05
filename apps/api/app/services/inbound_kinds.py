@@ -394,3 +394,81 @@ def public_meta(meta: dict | None) -> dict | None:
     if not isinstance(meta, dict):
         return None
     return {k: v for k, v in meta.items() if k != "payload"} or None
+
+
+# ── Messenger / Instagram / TikTok ───────────────────────────────────────────
+# Their webhooks are different shapes, but the residual is the same problem:
+# a message with no text and no usable attachment used to land as a bracket
+# placeholder ("[story_mention]", "[unsupported message]") or a warning
+# sentence. Same rule as WhatsApp: words a person understands, a record for
+# the team, Meta's/TikTok's own type kept.
+
+_APP_NAME = {"messenger": "Messenger", "facebook": "Facebook", "instagram": "Instagram",
+             "tiktok": "TikTok", "whatsapp": "WhatsApp"}
+
+_SOCIAL_ATTACHMENT_WORDS = {
+    "story_mention": ("📸 Mentioned us in their story", "story_mention"),
+    "story": ("📸 Replied to our story", "story"),
+    "share": ("🔗 Shared a post", "share"),
+    "ig_reel": ("🎬 Shared a reel", "share"),
+    "reel": ("🎬 Shared a reel", "share"),
+    "ig_post": ("🔗 Shared a post", "share"),
+    "template": ("🔗 Shared a card", "share"),
+    "fallback": ("🔗 Shared a link", "share"),
+    "sticker": ("🙂 Sent a sticker", "sticker"),
+}
+
+
+def unsupported_social(channel: str, mtype: str | None, raw: dict | None = None,
+                       errs: list | None = None) -> tuple[str, dict]:
+    """(text, meta) for a Messenger / Instagram / TikTok message we can't show."""
+    app = _APP_NAME.get(channel, channel.title() if channel else "The app")
+    t = str(mtype or "").strip()
+    label = t.replace("_", " ") if t and t not in ("unsupported", "unknown") else ""
+    if label:
+        text = f"Sent something {app} doesn't let us show here — {_a(label)} {label}. {_GENERIC_ADVICE}"
+    else:
+        text = f"Sent something {app} doesn't let us show here. {_GENERIC_ADVICE}"
+    meta = {"v": META_VERSION, "type": t or "unknown", "kind": "unsupported",
+            "app": app, "label": label or None, "advice": _GENERIC_ADVICE}
+    meta = {k: v for k, v in meta.items() if v is not None}
+    if errs:
+        meta["errors"] = errs
+    if raw is not None:
+        meta["payload"] = _bounded(redact(raw))
+    return text, meta
+
+
+def describe_meta_dm(message: dict, channel: str) -> tuple[str | None, dict | None]:
+    """For a Messenger / Instagram DM `message` object: (replacement text, meta)
+    when the message is one the plain text/attachment path can't express —
+    an unsent (deleted) message, Meta's `is_unsupported`, a story mention, a
+    share without a usable URL, a legacy location pin. (None, None) otherwise."""
+    if message.get("is_deleted"):
+        return "🗑️ Unsent a message", {"v": META_VERSION, "type": "deleted", "kind": "deleted"}
+    if message.get("is_unsupported"):
+        return unsupported_social(channel, "unsupported", message)
+    if (message.get("text") or "").strip():
+        return None, None
+    for att in (message.get("attachments") or []):
+        at = str(att.get("type") or "").lower()
+        payload = att.get("payload") or {}
+        if at == "location":
+            co = payload.get("coordinates") or {}
+            lat, lng = co.get("lat"), co.get("long")
+            if lat is not None and lng is not None:
+                title = (att.get("title") or "").strip()
+                text = "📍 Location: " + (f"{title} " if title else "") + f"({lat},{lng})"
+                return text, {"v": META_VERSION, "type": "location", "kind": "location",
+                              "lat": lat, "lng": lng, **({"name": title} if title else {})}
+        if at in _SOCIAL_ATTACHMENT_WORDS:
+            words, kind = _SOCIAL_ATTACHMENT_WORDS[at]
+            if (payload.get("url") or att.get("url")) and at not in ("story_mention", "story", "sticker"):
+                return None, None      # the media path renders it
+            return words, {"v": META_VERSION, "type": at, "kind": kind}
+    if message.get("attachments"):
+        at = str((message["attachments"][0] or {}).get("type") or "")
+        p = message["attachments"][0] or {}
+        if not ((p.get("payload") or {}).get("url") or p.get("url")):
+            return unsupported_social(channel, at or "unsupported", message)
+    return None, None
