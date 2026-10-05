@@ -487,6 +487,10 @@ async def _process(call_id: str) -> str:
                 return "failed:no_file"
             c.transcript_status = "processing"
             await db.commit()
+        # When the work STARTED (the recovery sweep's clock — a Retry tapped a
+        # day after the call is not "stuck" the moment it begins).
+        from app.services.transcript_recovery import mark_claimed
+        await mark_claimed(_redis(), "call", call_id)
         await _publish_update(call_id)
 
         res = await stt.transcribe_file(path, kind="call", redis=_redis())
@@ -750,6 +754,8 @@ async def ingest_meta_transcription(call_id: str, media_id: str) -> str:
         wa_id = c.wa_id
         c.transcript_status = "processing"
         await db.commit()
+    from app.services.transcript_recovery import mark_claimed
+    await mark_claimed(_redis(), "call", call_id)
     try:
         raw, _mime = await wa_calling.download_media(media_id)
         doc = _json.loads(raw.decode("utf-8") if isinstance(raw, (bytes, bytearray)) else raw)

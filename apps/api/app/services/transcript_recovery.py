@@ -11,10 +11,15 @@ stayed refused after midnight.
 sweep() finds that work and does it again — safely:
 
   · STUCK      queued, or processing for longer than any real run can take
-               (voice: 15 min after the note arrived; calls: 90 min after the
-               call ended), within the last RECOVER_DAYS. Processing rows are
-               first moved back to queued by a conditional UPDATE, so two
-               sweepers (two workers at startup) never both take one.
+               (voice: 15 min, calls: 90 min), within the last RECOVER_DAYS.
+               A processing row's clock starts when its work was CLAIMED
+               (mark_claimed — a redis stamp the claim writes); only a row
+               with no stamp (claimed before this existed, or with redis
+               down) falls back to the note's arrival / the call's end — which
+               let a retry started late be taken from its live run (cycle 10).
+               Processing rows are first moved back to queued by a
+               conditional UPDATE, so two sweepers (two workers at startup)
+               never both take one.
   · RETRYABLE  failed:<transient reason> (timeout, rate limit, unreachable,
                5xx, unexpected error) — at most MAX_RETRIES times per row,
                spaced by RETRY_AFTER; the count lives in redis (no redis → no
@@ -52,6 +57,37 @@ RETRY_AFTER = (timedelta(minutes=10), timedelta(hours=1), timedelta(hours=6))
 TRANSIENT = ("provider_timeout", "provider_busy", "provider_unreachable", "provider_error",
              "error", "busy", "analysis", "decode_timeout")
 PER_SWEEP = 50
+CLAIM_TTL = 6 * 3600                   # > CALL_STUCK_MIN; an expired stamp means "long ago"
+
+
+def _claim_key(kind: str, key) -> str:
+    return f"transcribe:claimed:{kind}:{key}"
+
+
+async def mark_claimed(redis, kind: str, key, *, at: datetime | None = None) -> None:
+    """Stamp the moment work on a row started (kind "msg" = a voice note by its
+    message id, "call" = a call by its call_id). The sweeper measures a
+    `processing` row's age from this. Best-effort: no redis → no stamp → the
+    sweeper falls back to arrival time, as before."""
+    if redis is None:
+        return
+    try:
+        ts = (at or datetime.now(timezone.utc)).timestamp()
+        await redis.set(_claim_key(kind, key), str(ts), ex=CLAIM_TTL)
+    except Exception:
+        pass
+
+
+async def _claimed_at(redis, kind: str, key) -> datetime | None:
+    if redis is None:
+        return None
+    try:
+        raw = await redis.get(_claim_key(kind, key))
+        if raw is None:
+            return None
+        return datetime.fromtimestamp(float(raw.decode() if isinstance(raw, bytes) else raw), tz=timezone.utc)
+    except Exception:
+        return None
 
 
 def _reason(status: str | None) -> str | None:
@@ -141,13 +177,14 @@ async def sweep(redis=None, *, now: datetime | None = None, limit: int = PER_SWE
 
     note_ids, call_ids = [], []
     for mid, status, created in notes:
-        stuck = created is not None and created < now - timedelta(minutes=VOICE_STUCK_MIN)
+        started = (await _claimed_at(redis, "msg", mid) if status == "processing" else None) or created
+        stuck = started is not None and started < now - timedelta(minutes=VOICE_STUCK_MIN)
         if len(note_ids) < limit and await _eligible(redis, "msg", str(mid), status, stuck, now, room):
             note_ids.append((mid, status))
         else:
             out["skipped"] += 1
     for cid, status, ended, started in calls:
-        at = ended or started
+        at = (await _claimed_at(redis, "call", cid) if status == "processing" else None) or ended or started
         stuck = at is not None and at < now - timedelta(minutes=CALL_STUCK_MIN if status == "processing" else 10)
         if len(call_ids) < limit and await _eligible(redis, "call", cid, status, stuck, now, room):
             call_ids.append((cid, status))

@@ -116,6 +116,15 @@ async def _claim(db, message_id) -> bool:
     return got
 
 
+def _app_redis():
+    """The app's redis (attached at boot), for a caller that passed none."""
+    try:
+        from app.services import ai_budget
+        return ai_budget._sink
+    except Exception:
+        return None
+
+
 def _local_file(media_url: str | None) -> str | None:
     """A served media URL → the file in our media dir, when it is one of ours."""
     if not media_url:
@@ -147,6 +156,10 @@ async def interpret(message_id, *, path: str | None = None, url: str | None = No
             if row is None:
                 return "missing"
             media_url = row.media_url
+        # When the work STARTED — the recovery sweep measures "stuck" from
+        # here, never from the note's arrival (a late retry is not stuck).
+        from app.services.transcript_recovery import mark_claimed
+        await mark_claimed(redis if redis is not None else _app_redis(), "msg", mid)
         await _broadcast(redis, mid, status="processing")
 
         why = stt.configured()

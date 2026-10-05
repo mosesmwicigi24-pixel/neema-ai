@@ -711,3 +711,64 @@ def test_the_runtime_image_has_ffmpeg_and_the_engine_needs_no_mime_table():
     finally:
         mimetypes.guess_extension = real
 
+
+# ═════════════════════════════════════════════════════════════════════════════
+# 6 · Cycle 9's minors: "stuck" is measured from when the work STARTED
+# ═════════════════════════════════════════════════════════════════════════════
+
+def test_a_sweep_never_retakes_a_retry_that_is_still_running(rig, clips):
+    """A note retried 20 minutes after it ARRIVED is 'stuck' by arrival time
+    the moment it is claimed — the sweeper used to take it from the live run:
+    a second interpretation, a second translation, a second broadcast."""
+    from tests import test_transcript_recovery_db as rec
+    from app.services import transcript_recovery as tr
+    from app.services import voice_notes
+    rec._setup(rig)
+    rig.provider.delay = 1.0
+    rig.llm.answers["translate-voice"] = json.dumps({"lang": "Swahili", "en": "I want a red cope."})
+    mid = rec._note(rig, clips[2], status="failed:provider_timeout", minutes_ago=20)
+
+    async def race():
+        live = asyncio.create_task(voice_notes.interpret(mid, redis=rig.redis))
+        await asyncio.sleep(0.3)                          # the live run holds the claim
+        swept = await tr.sweep(rig.redis, now=rec.NOW)
+        return swept, await live
+    swept, status = run(race())
+    assert status == "done" and swept["notes"] == 0, swept
+    assert len(rig.provider.calls) == 1
+    assert [c["purpose"] for c in rig.llm.calls].count("translate-voice") == 1
+    # …and work that really died is still recovered (claimed long ago).
+    old = rec._note(rig, clips[4], status="processing", minutes_ago=400)
+    run(claim_marker(rig, "msg", old, minutes_ago=300))
+    assert rec.sweep(rig)["notes"] == 1
+    assert run(rec._msg(rig, old)).transcript_status == "done"
+
+
+async def claim_marker(rig, kind, key, minutes_ago):
+    """What a claim records (transcript_recovery.mark_claimed), back-dated."""
+    from datetime import datetime, timedelta, timezone
+    from app.services import transcript_recovery as tr
+    await tr.mark_claimed(rig.redis, kind, key,
+                          at=datetime.now(timezone.utc) - timedelta(minutes=minutes_ago))
+
+
+def test_a_sweep_never_retakes_a_call_retry_tapped_a_day_later(rig, clips):
+    """A person taps Retry on yesterday's failed call: `processing`, and the
+    call ENDED a day ago — the sweeper used to call that stuck at once and run
+    the brief a second time beside the live one."""
+    from tests import test_transcript_recovery_db as rec
+    from app.services import call_transcribe as ct
+    from app.services import transcript_recovery as tr
+    rec._setup(rig)
+    rig.provider.delay = 1.0
+    rec._call(rig, "wacid.C10RETRY", clips["call"], status="queued", ended_minutes_ago=24 * 60)
+
+    async def race():
+        live = asyncio.create_task(ct._process("wacid.C10RETRY"))
+        await asyncio.sleep(0.3)
+        swept = await tr.sweep(rig.redis, now=rec.NOW)
+        return swept, await live
+    swept, status = run(race())
+    assert status == "done" and swept["calls"] == 0, swept
+    assert len(rig.provider.calls) == 1
+    assert [c["purpose"] for c in rig.llm.calls].count("calls") == 1
