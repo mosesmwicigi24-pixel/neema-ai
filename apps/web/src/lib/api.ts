@@ -288,6 +288,8 @@ export interface ApiThreadItem {
     mime_type?: string | null;
     filename?: string | null;
     comment_context?: Message["comment_context"];
+    /** What a non-plain message IS (location, contact, reaction, unsupported …). */
+    meta?: Message["meta"];
     reply_to?: { id: string; text: string | null; sender: string | null;
                  media_type?: string | null; media_url?: string | null } | null;
     // System-event-specific
@@ -320,6 +322,7 @@ function mapThreadItem(raw: ApiThreadItem): Message {
         mime_type:     raw.mime_type ?? null,
         filename:      raw.filename ?? null,
         comment_context: raw.comment_context ?? null,
+        meta:          raw.meta ?? null,
         reply_to:      raw.reply_to ?? null,
     };
 }

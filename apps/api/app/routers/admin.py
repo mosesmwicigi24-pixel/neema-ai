@@ -22,6 +22,7 @@ from app.services.conversation import (
     transfer_conversation, send_agent_reply, approve_draft, send_agent_media,
 )
 from app.services import translate as translate_svc
+from app.services.inbound_kinds import public_meta
 import jwt
 import logging
 from app.core.security import decode_token
@@ -75,6 +76,10 @@ def _shape_messages_into(thread: list, msgs, agent_name_map: dict) -> None:
             "mime_type":     m.mime_type,
             "filename":      m.filename,
             "comment_context": m.comment_context,
+            # What a non-plain message IS (location, contact, reaction, call
+            # permission, unsupported + Meta's error …) — minus the redacted
+            # payload copy, which stays in the database.
+            "meta": public_meta(getattr(m, "raw_meta", None)),
             "reply_to": ({"id": str(m.reply_to_id), "text": m.reply_to_text,
                           "sender": m.reply_to_sender,
                           "media_type": (_q.media_type if _q and _q.media_type != "note" else None),

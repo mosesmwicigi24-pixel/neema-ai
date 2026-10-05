@@ -130,10 +130,16 @@ async def _receive(db: AsyncSession, request: Request, event: dict, content: dic
         ident.raw_profile = {**(ident.raw_profile or {}), "tt_conversation_id": conv_tt}
     conv = await get_or_create_conversation(db, CHANNEL, from_user,
                                             person_id=ident.person_id)
+    # A type we can't read (a sticker, a voice message…) used to be stored as
+    # "[unsupported message]": now calm words + TikTok's own type, kept.
+    stored, raw_meta = text, None
+    if not text:
+        from app.services.inbound_kinds import unsupported_social
+        stored, raw_meta = unsupported_social(CHANNEL, content.get("type"), content)
     db.add(Message(channel=CHANNEL, external_id=from_user, wa_id=None,
                    conversation_id=conv.id, person_id=conv.person_id,
                    direction=MsgDirection.inbound, sender=MsgSender.user,
-                   text=text or "[unsupported message]", waba_msg_id=mid or None))
+                   text=stored, waba_msg_id=mid or None, raw_meta=raw_meta))
     conv.last_message_at = datetime.now(timezone.utc)
     conv.last_message_preview = (text or "[media]")[:100]
     intercepted = conv.intercept_mode in (InterceptMode.human, InterceptMode.paused)

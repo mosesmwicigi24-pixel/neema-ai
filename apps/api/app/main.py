@@ -173,6 +173,10 @@ MIGRATION_STATEMENTS = [
     "ALTER TABLE messages ADD COLUMN IF NOT EXISTS reply_to_id UUID REFERENCES messages(id) ON DELETE SET NULL",
     "ALTER TABLE messages ADD COLUMN IF NOT EXISTS reply_to_text TEXT",
     "ALTER TABLE messages ADD COLUMN IF NOT EXISTS reply_to_sender VARCHAR(20)",
+    # What a non-plain inbound message IS (models/message.py raw_meta). The
+    # alembic revision adds it too; this keeps a box whose alembic run was
+    # skipped from failing EVERY thread read on a missing column. Idempotent.
+    "ALTER TABLE messages ADD COLUMN IF NOT EXISTS raw_meta JSONB",
     # Seed: Super Admin (protected, cannot be modified)
     """
     INSERT INTO custom_roles (id, name, description, color, permissions, protected)

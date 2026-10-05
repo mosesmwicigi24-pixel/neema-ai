@@ -457,6 +457,11 @@ async def send_wa_template(wa_id: str, template: str, lang: str,
 
 # ── Redis Broadcast ───────────────────────────────────────
 
+def _public_meta(meta):
+    from app.services.inbound_kinds import public_meta
+    return public_meta(meta)
+
+
 async def _broadcast(redis, channel: str, payload: dict) -> None:
     await redis.publish(f"ws:channel:{channel}", json.dumps(payload))
 
@@ -1000,6 +1005,7 @@ async def upsert_message(db: AsyncSession, redis, body) -> list:
         mime_type=mime_type,
         filename=filename,
         ts_ms=ts_ms,
+        raw_meta=getattr(body, "raw_meta", None),
     )
     # Recover the customer's WhatsApp message id (wamid), captured by the API front
     # door keyed on (wa_id, text-hash), so a human reply can quote it natively (the
@@ -1064,6 +1070,11 @@ async def upsert_message(db: AsyncSession, redis, body) -> list:
         "type":           "new_message",
         "conversationId": str(conv.id),
         "waId":           body.wa_id,
+        # id + direction + time: without them the dashboard appended the live
+        # bubble under a random id, on the OUTBOUND side, until the next reload.
+        "id":             str(msg.id),
+        "direction":      direction.value,
+        "created_at":     msg.created_at.isoformat() if msg.created_at else None,
         "sender":         sender.value,
         "text":           msg.text,
         "mediaType":      media_type,
@@ -1072,6 +1083,7 @@ async def upsert_message(db: AsyncSession, redis, body) -> list:
         "mediaCaption":   media_caption,
         "mimeType":       mime_type,
         "filename":       filename,
+        "meta":           _public_meta(msg.raw_meta),
     })
 
     if intercept_log is not None:

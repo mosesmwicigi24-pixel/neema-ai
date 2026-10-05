@@ -39,6 +39,10 @@ class MessageDto(BaseModel):
     # audio transcription toggle). The user's own caption text (if any) is
     # carried in `text` and rendered below the image in the conversation view.
     image_analysis: str | None = None
+    # What a non-plain message IS (services/inbound_kinds.py): location,
+    # contact, reaction, call-permission reply, unsupported + Meta's errors and
+    # a redacted payload copy. Stored on messages.raw_meta; None for text/media.
+    raw_meta: dict | None = None
 
 class UpsertMessagePatchDto(BaseModel):
     inbound_text: str | None = None
