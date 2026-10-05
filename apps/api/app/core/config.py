@@ -394,6 +394,11 @@ class Settings(BaseSettings):
     transcribe_chunk_seconds: int = 600         # long audio is sent in 10-minute pieces
     transcribe_timeout_seconds: int = 90        # per provider request
     transcribe_retries: int = 2                 # extra attempts on timeout / 429 / 5xx (backoff 1s, 4s)
+    # How many transcriptions run at once per worker (decode + provider). The
+    # provider call is blocking HTTP on the shared default thread pool: a
+    # burst left unbounded parked every other to_thread caller in the app
+    # (measured, cycle 7: 9.2 s wait during a 40-note burst on 8 threads).
+    transcribe_concurrency: int = 4
     transcribe_silence_db: float = -50.0        # peak below this = silence; never sent to a provider
     # English under a non-English voice note (Swahili included — spoken Sheng
     # is harder to skim than written Swahili). Light model, once per note.

@@ -438,7 +438,10 @@ async def _set_status(call_id: str, status: str) -> None:
     try:
         async with AsyncSessionLocal() as db:
             c = (await db.execute(select(Call).where(Call.call_id == call_id))).scalar_one_or_none()
-            if c is not None:
+            # Never turn a finished brief back into a failure (a recovery run
+            # racing the original, a twin that timed out waiting).
+            if c is not None and not (c.transcript_status == "done" and (c.transcript or c.summary)
+                                      and status != "done"):
                 c.transcript_status = status
                 await db.commit()
     except Exception:

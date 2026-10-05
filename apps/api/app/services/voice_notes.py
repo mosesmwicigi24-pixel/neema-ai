@@ -191,6 +191,11 @@ async def _store(mid, res, lang, lang_name, english, redis) -> str:
         row = await db.get(Message, mid)
         if row is None:
             return "missing"
+        if not res.ok and row.transcript_status == "done":
+            # A second run (a recovery sweep racing a slow original, a twin
+            # that timed out waiting) never turns heard words back into a
+            # failure.
+            return "done"
         row.transcript_status = res.status
         row.transcript_lang = (lang or None) and str(lang)[:12]
         if res.ok:
@@ -205,9 +210,13 @@ async def _store(mid, res, lang, lang_name, english, redis) -> str:
                 row.translated_text = row.text        # "nothing to translate" marker
                 row.translated_from = None
             # The inbox preview: the words, while this note is still the latest.
+            # (Checked — the preview being a placeholder is not enough: a
+            # recovered or backfilled OLD note would overwrite "[image]" from a
+            # later message with words from days ago.)
             if row.conversation_id:
                 conv = await db.get(Conversation, row.conversation_id)
-                if conv is not None and (conv.last_message_preview or "").startswith("["):
+                if conv is not None and (conv.last_message_preview or "").startswith("[") \
+                        and await _is_latest(db, row):
                     conv.last_message_preview = f"🎤 {res.text}"[:100]
         await db.commit()
         out = dict(status=row.transcript_status, text=row.text, lang=row.transcript_lang,
@@ -215,6 +224,19 @@ async def _store(mid, res, lang, lang_name, english, redis) -> str:
                    conv_id=str(row.conversation_id) if row.conversation_id else None)
     await _broadcast(redis, mid, **out)
     return res.status
+
+
+async def _is_latest(db, row) -> bool:
+    """No later message in this conversation than `row`."""
+    from sqlalchemy import func
+    from app.models.message import Message
+    if row.created_at is None:
+        return True
+    later = (await db.execute(select(func.count()).select_from(Message).where(
+        Message.conversation_id == row.conversation_id,
+        Message.created_at > row.created_at,
+        Message.id != row.id))).scalar_one()
+    return not later
 
 
 async def _store_status(message_id, status: str, redis) -> None:
@@ -318,6 +340,10 @@ async def _lines_for(ids: list, channel: str, key: str, wait_seconds: float) -> 
         return {}
     loop = asyncio.get_running_loop()
     deadline = loop.time() + max(0.0, wait_seconds)
+    # Poll quickly at first (the words are usually seconds away), then back
+    # off to 1.5 s: a flat 0.25 s was 4 queries a second, up to 240 per
+    # waiting turn (measured, cycle 7).
+    pause = 0.25
     while True:
         async with AsyncSessionLocal() as db:
             rows = (await db.execute(select(Message).where(Message.id.in_(ids)))).scalars().all()
@@ -330,4 +356,5 @@ async def _lines_for(ids: list, channel: str, key: str, wait_seconds: float) -> 
         pending = [r for r in mine.values() if r.transcript_status in _PENDING]
         if not pending or loop.time() >= deadline:
             return {i: turn_line(r.transcript_status, r.text) for i, r in mine.items()}
-        await asyncio.sleep(0.25)
+        await asyncio.sleep(min(pause, max(0.05, deadline - loop.time())))
+        pause = min(1.5, pause * 1.5)

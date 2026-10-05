@@ -573,7 +573,11 @@ async def _transcribe(path: str | None, kind: str, redis) -> Transcript:
             pass
 
     try:
-        result = await _work(path, kind, prov, model, redis)
+        # Calls may hold at most half the slots: an hour-long recording is
+        # minutes of provider time, and a customer's voice note must never
+        # queue behind four of them.
+        async with _slots("call" if kind == "call" else "note"), _slots("all"):
+            result = await _work(path, kind, prov, model, redis)
         # Cache outcomes that would come out the same next time; a transient
         # failure (timeout, budget, 5xx) must stay retryable.
         if redis is not None and (result.status in ("done", "silent")
@@ -589,6 +593,24 @@ async def _transcribe(path: str | None, kind: str, redis) -> Transcript:
                 await redis.delete(lkey)
             except Exception:
                 pass
+
+
+_slot_state: dict = {}
+
+
+def _slots(pool: str = "all") -> asyncio.Semaphore:
+    """Per-event-loop caps on transcriptions in flight (decode + provider):
+    "all" = settings.transcribe_concurrency; "call" = half of it (≥1), so
+    recordings never take every slot; "note" = all of it. A semaphore binds
+    to the loop it is first used on, so they are kept per running loop."""
+    loop = asyncio.get_running_loop()
+    total = max(1, int(getattr(settings, "transcribe_concurrency", 4) or 4))
+    n = max(1, total // 2) if pool == "call" else total
+    cur = _slot_state.get(pool)
+    if cur is None or cur[1] is not loop or cur[2] != n:
+        cur = (asyncio.Semaphore(n), loop, n)
+        _slot_state[pool] = cur
+    return cur[0]
 
 
 async def _work(path: str, kind: str, prov: str, model: str, redis) -> Transcript:
