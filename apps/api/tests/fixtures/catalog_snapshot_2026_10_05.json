@@ -1,0 +1,6687 @@
+[
+{
+"aliases": [],
+"category": "",
+"description": "Gold Touch Chain",
+"hub_product_id": 149,
+"in_stock": false,
+"is_producible": false,
+"measurements": [],
+"name": "Gold Touch Chain",
+"price": 10000.0,
+"price_kes": 10000.0,
+"price_usd": 100.0,
+"prices": {
+"GBP": 66.67,
+"KES": 10000.0,
+"USD": 100.0,
+"ZMW": 1400.0
+},
+"product_type": "simple",
+"sku": "GEN-GTC-001",
+"slug": "gold-touch-chain",
+"unit": "",
+"variants": []
+},
+{
+"aliases": [],
+"category": "Vestments",
+"description": "BIB",
+"hub_product_id": 148,
+"in_stock": false,
+"is_producible": false,
+"measurements": [],
+"name": "BIB Clerical Shirt",
+"price": 1500.0,
+"price_kes": 1500.0,
+"price_usd": 15.0,
+"prices": {
+"KES": 1500.0,
+"USD": 15.0,
+"ZMW": 210.0
+},
+"product_type": "simple",
+"sku": "VES-B-001",
+"slug": "bib-1",
+"unit": "",
+"variants": []
+},
+{
+"aliases": [],
+"category": "Children Bibles",
+"description": "Children's Bible",
+"hub_product_id": 145,
+"in_stock": true,
+"is_producible": false,
+"measurements": [],
+"name": "The Carry Along Bible",
+"price": 1500.0,
+"price_kes": 1500.0,
+"price_usd": 15.0,
+"prices": {
+"KES": 1500.0,
+"USD": 15.0,
+"ZMW": 210.0
+},
+"product_type": "simple",
+"sku": "CHI-TCA-001",
+"slug": "the-carry-along-bible",
+"unit": "",
+"variants": []
+},
+{
+"aliases": [],
+"category": "Bibles",
+"description": "Bible Stories for Brave Boys",
+"hub_product_id": 146,
+"in_stock": true,
+"is_producible": false,
+"measurements": [],
+"name": "Bible Stories for Brave Boys",
+"price": 1600.0,
+"price_kes": 1600.0,
+"price_usd": 16.0,
+"prices": {
+"KES": 1600.0,
+"USD": 16.0,
+"ZMW": 224.0
+},
+"product_type": "simple",
+"sku": "BIB-BSF-001",
+"slug": "bible-stories-for-brave-boys",
+"unit": "",
+"variants": []
+},
+{
+"aliases": [],
+"category": "Bibles",
+"description": "Bible Stories for Brave Girls",
+"hub_product_id": 147,
+"in_stock": true,
+"is_producible": false,
+"measurements": [],
+"name": "Bible Stories for Brave Girls",
+"price": 1600.0,
+"price_kes": 1600.0,
+"price_usd": 16.0,
+"prices": {
+"KES": 1600.0,
+"USD": 16.0,
+"ZMW": 224.0
+},
+"product_type": "simple",
+"sku": "BIB-BSF-002",
+"slug": "bible-stories-for-brave-girls",
+"unit": "",
+"variants": []
+},
+{
+"aliases": [],
+"category": "",
+"description": "carries 50 cups",
+"hub_product_id": 144,
+"in_stock": true,
+"is_producible": false,
+"measurements": [],
+"name": "Small Wooden tray",
+"price": 3000.0,
+"price_kes": 3000.0,
+"price_usd": 30.0,
+"prices": {
+"KES": 3000.0,
+"USD": 30.0,
+"ZMW": 420.0
+},
+"product_type": "simple",
+"sku": "GEN-SWT-001",
+"slug": "small-wooden-tray",
+"unit": "",
+"variants": []
+},
+{
+"aliases": [],
+"category": "Bibles",
+"description": "Its a Bible that has both english and swahili version of NIV",
+"hub_product_id": 143,
+"in_stock": true,
+"is_producible": false,
+"measurements": [],
+"name": "NIV SWAHILI/ENGLISH",
+"price": 4500.0,
+"price_kes": 4500.0,
+"price_usd": 45.0,
+"prices": {
+"KES": 4500.0,
+"USD": 45.0,
+"ZMW": 630.0
+},
+"product_type": "simple",
+"sku": "BIB-NS-001",
+"slug": "niv-swahilienglish",
+"unit": "",
+"variants": []
+},
+{
+"aliases": [],
+"category": "Communion Accessories",
+"description": "holds sacramental bread",
+"hub_product_id": 142,
+"in_stock": true,
+"is_producible": false,
+"measurements": [],
+"name": "Small bread tray containers(SIZE 10)",
+"price": 2700.0,
+"price_kes": 2700.0,
+"price_usd": 27.0,
+"prices": {
+"KES": 2700.0,
+"USD": 27.0,
+"ZMW": 378.0
+},
+"product_type": "simple",
+"sku": "COM-SBT-001",
+"slug": "small-bread-tray-containerssize-10",
+"unit": "",
+"variants": []
+},
+{
+"aliases": [],
+"category": "Church Supplies",
+"description": "Incense is placed in it on the alter.",
+"hub_product_id": 141,
+"in_stock": true,
+"is_producible": false,
+"measurements": [],
+"name": "Boat and spoon.",
+"price": 1200.0,
+"price_kes": 1200.0,
+"price_usd": 12.0,
+"prices": {
+"KES": 1200.0,
+"USD": 12.0,
+"ZMW": 168.0
+},
+"product_type": "simple",
+"sku": "CHU-BAS-001",
+"slug": "boat-and-spoon",
+"unit": "",
+"variants": []
+},
+{
+"aliases": [],
+"category": "Gifts",
+"description": "Pendant",
+"hub_product_id": 140,
+"in_stock": true,
+"is_producible": false,
+"measurements": [],
+"name": "Pendant",
+"price": 3000.0,
+"price_kes": 3000.0,
+"price_usd": 30.0,
+"prices": {
+"KES": 3000.0,
+"USD": 30.0,
+"ZMW": 420.0
+},
+"product_type": "simple",
+"sku": "GIF-P-001",
+"slug": "pendant",
+"unit": "",
+"variants": []
+},
+{
+"aliases": [],
+"category": "Clergy Accessories",
+"description": "Premium Pectoral Cross for clergy",
+"hub_product_id": 139,
+"in_stock": true,
+"is_producible": false,
+"measurements": [],
+"name": "Episcopal Cross",
+"price": 10000.0,
+"price_kes": 10000.0,
+"price_usd": 100.0,
+"prices": {
+"KES": 10000.0,
+"USD": 100.0,
+"ZMW": 1400.0
+},
+"product_type": "simple",
+"sku": "CLE-PPC-001",
+"slug": "premium-pectoral-cross",
+"unit": "",
+"variants": []
+},
+{
+"aliases": [],
+"category": "Communion Items",
+"description": "Host",
+"hub_product_id": 138,
+"in_stock": true,
+"is_producible": false,
+"measurements": [],
+"name": "Host",
+"price": 20.0,
+"price_kes": 20.0,
+"price_usd": 0.2,
+"prices": {
+"KES": 20.0,
+"USD": 0.2,
+"ZMW": 2.8
+},
+"product_type": "simple",
+"sku": "COM-H-001",
+"slug": "host",
+"unit": "",
+"variants": []
+},
+{
+"aliases": [],
+"category": "",
+"description": "Bible",
+"hub_product_id": 136,
+"in_stock": true,
+"is_producible": false,
+"measurements": [],
+"name": "Good news bible",
+"price": 1500.0,
+"price_kes": 1500.0,
+"price_usd": 15.0,
+"prices": {
+"KES": 1500.0,
+"USD": 15.0,
+"ZMW": 210.0
+},
+"product_type": "simple",
+"sku": "GEN-GNB-001",
+"slug": "good-news-bible",
+"unit": "",
+"variants": []
+},
+{
+"aliases": [],
+"category": "Bibles",
+"description": "Thomas Nelson NKJV",
+"hub_product_id": 135,
+"in_stock": false,
+"is_producible": false,
+"measurements": [],
+"name": "NKJV Large Print",
+"price": 5500.0,
+"price_kes": 5500.0,
+"price_usd": 55.0,
+"prices": {
+"KES": 5500.0,
+"USD": 55.0,
+"ZMW": 770.0
+},
+"product_type": "simple",
+"sku": "BIB-NLP-001",
+"slug": "nkjv-large-print",
+"unit": "",
+"variants": []
+},
+{
+"aliases": [],
+"category": "Communion Items",
+"description": "The small communion refiller — a compact squeeze bottle that tops up each cup at the tray, sized for smaller services and home visits.",
+"hub_product_id": 134,
+"in_stock": true,
+"is_producible": false,
+"measurements": [],
+"name": "Small Refiller",
+"price": 1000.0,
+"price_kes": 1000.0,
+"price_usd": 10.0,
+"prices": {
+"KES": 1000.0,
+"USD": 10.0,
+"ZMW": 140.0
+},
+"product_type": "simple",
+"sku": "COM-SR-001",
+"slug": "small-refiller",
+"unit": "",
+"variants": []
+},
+{
+"aliases": [],
+"category": "Bibles",
+"description": "The New King James Version — the majesty and cadence of the KJV in today's English, trusted for pulpit and personal reading.",
+"hub_product_id": 133,
+"in_stock": true,
+"is_producible": false,
+"measurements": [],
+"name": "New King James Version",
+"price": 1500.0,
+"price_kes": 1500.0,
+"price_usd": 15.0,
+"prices": {
+"KES": 1500.0,
+"USD": 15.0,
+"ZMW": 210.0
+},
+"product_type": "simple",
+"sku": "BIB-NKJ-001",
+"slug": "new-king-james-version",
+"unit": "",
+"variants": []
+},
+{
+"aliases": [],
+"category": "Church Supplies",
+"description": "Church candles for the sanctuary — a steady, unhurried flame for altar, advent and candlelight services.",
+"hub_product_id": 132,
+"in_stock": true,
+"is_producible": false,
+"measurements": [],
+"name": "Candles",
+"price": 1200.0,
+"price_kes": 1200.0,
+"price_usd": 12.0,
+"prices": {
+"KES": 1200.0,
+"USD": 12.0,
+"ZMW": 168.0
+},
+"product_type": "simple",
+"sku": "COM-C-001",
+"slug": "candles",
+"unit": "",
+"variants": []
+},
+{
+"aliases": [],
+"category": "Church Supplies",
+"description": "The large altar bell — one full, commanding ring for the consecration and the great moments of the liturgy.",
+"hub_product_id": 131,
+"in_stock": true,
+"is_producible": false,
+"measurements": [],
+"name": "Large bell",
+"price": 3500.0,
+"price_kes": 3500.0,
+"price_usd": 35.0,
+"prices": {
+"KES": 3500.0,
+"USD": 35.0,
+"ZMW": 490.0
+},
+"product_type": "simple",
+"sku": "COM-LB-001",
+"slug": "large-bell",
+"unit": "",
+"variants": []
+},
+{
+"aliases": [],
+"category": "Clergy Accessories",
+"description": "A small cross with a quiet, dignified presence — for daily ministry wear or a thoughtful ordination and confirmation gift.",
+"hub_product_id": 130,
+"in_stock": false,
+"is_producible": false,
+"measurements": [],
+"name": "Pectoral Cross",
+"price": 2500.0,
+"price_kes": 2500.0,
+"price_usd": 30.0,
+"prices": {
+"KES": 2500.0,
+"USD": 30.0,
+"ZMW": 420.0
+},
+"product_type": "simple",
+"sku": "CLE-SC-011",
+"slug": "small-cross-1",
+"unit": "",
+"variants": []
+},
+{
+"aliases": [],
+"category": "Communion Items",
+"description": "One-litre communion refiller — a flexible, unbreakable squeeze bottle with a precise tip that fills cup after cup without a spill.",
+"hub_product_id": 128,
+"in_stock": true,
+"is_producible": false,
+"measurements": [],
+"name": "Refiller Bottle — 1000 ml",
+"price": 1500.0,
+"price_kes": 1500.0,
+"price_usd": 15.0,
+"prices": {
+"KES": 1500.0,
+"USD": 15.0,
+"ZMW": 210.0
+},
+"product_type": "simple",
+"sku": "COM-RBM-001",
+"slug": "refiller-bottle-1000ml",
+"unit": "",
+"variants": []
+},
+{
+"aliases": [],
+"category": "Communion Items",
+"description": "Four aluminium communion trays in one stacked set — 160 cups served in a single, light, dignified carry.",
+"hub_product_id": 127,
+"in_stock": false,
+"is_producible": false,
+"measurements": [],
+"name": "Aluminium 4-Stack Communion Set — 160 Cups",
+"price": 28000.0,
+"price_kes": 28000.0,
+"price_usd": 280.0,
+"prices": {
+"KES": 28000.0,
+"USD": 280.0,
+"ZMW": 3920.0
+},
+"product_type": "simple",
+"sku": "COM-ADS-001",
+"slug": "aluminium-double-stacked-communion-set",
+"unit": "",
+"variants": []
+},
+{
+"aliases": [],
+"category": "Communion Items",
+"description": "A wooden communion tray that holds 100 cups — warm natural grain and quiet craftsmanship for congregations that love a traditional table.",
+"hub_product_id": 126,
+"in_stock": true,
+"is_producible": false,
+"measurements": [],
+"name": "Wooden tray",
+"price": 5000.0,
+"price_kes": 5000.0,
+"price_usd": 50.0,
+"prices": {
+"KES": 5000.0,
+"USD": 50.0,
+"ZMW": 700.0
+},
+"product_type": "simple",
+"sku": "COM-WT-001",
+"slug": "wooden-tray",
+"unit": "",
+"variants": []
+},
+{
+"aliases": [],
+"category": "Communion Items",
+"description": "Medium gold-coated ciborium — the lidded vessel that keeps the consecrated hosts covered and radiant at the centre of the altar.",
+"hub_product_id": 125,
+"in_stock": false,
+"is_producible": false,
+"measurements": [],
+"name": "Ciborium — Gold Coated, Medium",
+"price": 20000.0,
+"price_kes": 20000.0,
+"price_usd": 200.0,
+"prices": {
+"KES": 20000.0,
+"USD": 200.0,
+"ZMW": 2800.0
+},
+"product_type": "simple",
+"sku": "GEN-CGC-001",
+"slug": "ciborium-gold-coated",
+"unit": "",
+"variants": []
+},
+{
+"aliases": [],
+"category": "Communion Items",
+"description": "Medium chalice in gold-coated stainless steel — steel's durability beneath a radiant golden finish, made for weekly service.",
+"hub_product_id": 124,
+"in_stock": true,
+"is_producible": false,
+"measurements": [],
+"name": "Chalice Cup - Medium Sized Gold Coated Stainless Steel",
+"price": 20000.0,
+"price_kes": 20000.0,
+"price_usd": 200.0,
+"prices": {
+"KES": 20000.0,
+"USD": 200.0,
+"ZMW": 2800.0
+},
+"product_type": "simple",
+"sku": "COM-CCG-001",
+"slug": "chalice-cup-gold-coated-stainless-steel",
+"unit": "",
+"variants": []
+},
+{
+"aliases": [],
+"category": "Communion Items",
+"description": "Two stacked silver-tone cup trays with a matching lidded bread tray — a complete, coordinated set for the Lord's Table.",
+"hub_product_id": 123,
+"in_stock": true,
+"is_producible": false,
+"measurements": [],
+"name": "Double Stacked Silver Tray Set",
+"price": 36000.0,
+"price_kes": 36000.0,
+"price_usd": 360.0,
+"prices": {
+"KES": 36000.0,
+"USD": 360.0,
+"ZMW": 5040.0
+},
+"product_type": "simple",
+"sku": "COM-DSS-001",
+"slug": "double-stacked-silver-tray-set",
+"unit": "",
+"variants": []
+},
+{
+"aliases": [],
+"category": "Communion Items",
+"description": "Anointing oil set apart for prayer, blessing and consecration — for pastors, elders and prayer ministries after James 5:14.",
+"hub_product_id": 122,
+"in_stock": false,
+"is_producible": false,
+"measurements": [],
+"name": "Anointing oil",
+"price": 5000.0,
+"price_kes": 5000.0,
+"price_usd": 50.0,
+"prices": {
+"KES": 5000.0,
+"USD": 50.0,
+"ZMW": 1000.0
+},
+"product_type": "simple",
+"sku": "COM-AO-001",
+"slug": "anointing-oil",
+"unit": "",
+"variants": []
+},
+{
+"aliases": [],
+"category": "Clergy Accessories",
+"description": "The large offering basket — generous, handsome and steady in the hand as the gifts of the congregation are gathered.",
+"hub_product_id": 121,
+"in_stock": true,
+"is_producible": false,
+"measurements": [],
+"name": "Large offering basket",
+"price": 6000.0,
+"price_kes": 6000.0,
+"price_usd": 60.0,
+"prices": {
+"KES": 6000.0,
+"USD": 60.0,
+"ZMW": 1200.0
+},
+"product_type": "simple",
+"sku": "CLE-LOB-001",
+"slug": "large-offering-basket",
+"unit": "",
+"variants": []
+},
+{
+"aliases": [],
+"category": "Clergy Accessories",
+"description": "The classic offering basket — light, dignified and sized for every row as the congregation brings its gifts.",
+"hub_product_id": 120,
+"in_stock": true,
+"is_producible": false,
+"measurements": [],
+"name": "Offering basket",
+"price": 4500.0,
+"price_kes": 4500.0,
+"price_usd": 50.0,
+"prices": {
+"KES": 4500.0,
+"USD": 50.0,
+"ZMW": 900.0
+},
+"product_type": "simple",
+"sku": "CLE-OB-001",
+"slug": "offering-basket",
+"unit": "",
+"variants": []
+},
+{
+"aliases": [],
+"category": "Gowns",
+"description": "The white surplice worn over cassock or robe — wide sleeves, a flowing fall, made to order in Nairobi for clergy and choirs.",
+"hub_product_id": 119,
+"in_stock": true,
+"is_producible": true,
+"measurements": [
+{
+"name": "Neck",
+"required": true,
+"unit": "Inches"
+},
+{
+"name": "Shoulders",
+"required": true,
+"unit": "Inches"
+},
+{
+"name": "Sleeves",
+"required": true,
+"unit": "Inches"
+},
+{
+"name": "Wrist",
+"required": true,
+"unit": "Inches"
+},
+{
+"name": "Arm Hole",
+"required": true,
+"unit": "Inches"
+},
+{
+"name": "Upper Arm",
+"required": true,
+"unit": "Inches"
+},
+{
+"name": "Chest",
+"required": true,
+"unit": "Inches"
+},
+{
+"name": "Stomach",
+"required": true,
+"unit": "Inches"
+},
+{
+"name": "Shirt Length",
+"required": true,
+"unit": "Inches"
+},
+{
+"name": "Full Length",
+"required": true,
+"unit": "Inches"
+}
+],
+"name": "Surplice",
+"price": 8000.0,
+"price_kes": 8000.0,
+"price_usd": 80.0,
+"prices": {
+"KES": 8000.0,
+"USD": 80.0,
+"ZMW": 1600.0
+},
+"product_type": "simple",
+"sku": "GOW-S-001",
+"slug": "surplice",
+"unit": "",
+"variants": []
+},
+{
+"aliases": [],
+"category": "Communion Accessories",
+"description": "An airtight bread container that keeps communion wafers fresh and reverently covered from preparation to distribution.",
+"hub_product_id": 118,
+"in_stock": true,
+"is_producible": false,
+"measurements": [],
+"name": "Bread container",
+"price": 250.0,
+"price_kes": 250.0,
+"price_usd": 2.5,
+"prices": {
+"KES": 250.0,
+"USD": 2.5,
+"ZMW": 35.0
+},
+"product_type": "simple",
+"sku": "COM-BC-001",
+"slug": "bread-container",
+"unit": "",
+"variants": []
+},
+{
+"aliases": [
+"usher sash",
+"ushering belt",
+"usher uniforms kenya",
+"church usher belt",
+"usher belts nairobi",
+"hospitality team belt",
+"protocol team belt"
+],
+"category": "Clergy Vestments",
+"description": "Uniform usher belt that sets your ushering team apart at the door — the ministry of first welcome, served in good order.",
+"hub_product_id": 116,
+"in_stock": true,
+"is_producible": false,
+"measurements": [],
+"name": "Usher Belt",
+"price": 650.0,
+"price_kes": 650.0,
+"price_usd": 10.0,
+"prices": {
+"KES": 650.0,
+"USD": 10.0,
+"ZMW": 130.0
+},
+"product_type": "simple",
+"sku": "CLE-UB-001",
+"slug": "usher-belt",
+"unit": "",
+"variants": []
+},
+{
+"aliases": [
+"communion wafers",
+"communion bread",
+"altar bread",
+"mkate wa ushirika",
+"communion wafers 500 pieces",
+"lords supper bread",
+"communion elements",
+"wafer bread kenya",
+"holy communion wafers"
+],
+"category": "Communion Items",
+"description": "Unleavened communion wafer bread, 500 pieces per pack — a faithful staple for the Lord's Table in growing congregations.",
+"hub_product_id": 113,
+"in_stock": true,
+"is_producible": false,
+"measurements": [],
+"name": "Communion Wafer Bread 500PCS",
+"price": 1000.0,
+"price_kes": 1000.0,
+"price_usd": 10.0,
+"prices": {
+"KES": 1000.0,
+"USD": 10.0,
+"ZMW": 200.0
+},
+"product_type": "variable",
+"sku": "COM-PO-001",
+"slug": "communion-wafer-bread-500pcs",
+"unit": "",
+"variants": []
+},
+{
+"aliases": [
+"ubani",
+"uvumba",
+"frankincense",
+"church incense",
+"incense for thurible",
+"censer incense",
+"altar incense",
+"olibanum",
+"incense resin",
+"chetezo incense"
+],
+"category": "Church Supplies",
+"description": "Frankincense church incense for the thurible — fragrant smoke that has pictured prayer rising before God since ancient days.",
+"hub_product_id": 114,
+"in_stock": true,
+"is_producible": false,
+"measurements": [],
+"name": "Incense",
+"price": 500.0,
+"price_kes": 500.0,
+"price_usd": 10.0,
+"prices": {
+"KES": 500.0,
+"USD": 10.0,
+"ZMW": 100.0
+},
+"product_type": "simple",
+"sku": "COM-I-001",
+"slug": "incense",
+"unit": "",
+"variants": []
+},
+{
+"aliases": [
+"clergy stole",
+"priest stole",
+"liturgical stole",
+"ordination stole",
+"single side stole",
+"deacon stole",
+"reverend stole",
+"church stole kenya",
+"stole for pastors"
+],
+"category": "Clergy Vestments",
+"description": "The badge of ordained ministry — a classic single-sided stole in your liturgical colour, tailored with reverence in Nairobi.",
+"hub_product_id": 111,
+"in_stock": true,
+"is_producible": false,
+"measurements": [],
+"name": "Single Sided Stole",
+"price": 2500.0,
+"price_kes": 2500.0,
+"price_usd": 30.0,
+"prices": {
+"KES": 2500.0,
+"USD": 30.0,
+"ZMW": 500.0
+},
+"product_type": "simple",
+"sku": "CLE-S-009",
+"slug": "single-sided-stole",
+"unit": "",
+"variants": []
+},
+{
+"aliases": [
+"brass communion cup",
+"communion chalice",
+"chalice kenya",
+"church chalice nairobi",
+"kikombe cha ushirika",
+"mass chalice",
+"goblet chalice"
+],
+"category": "Chalice",
+"description": "A brass chalice for Holy Communion — warm traditional lustre in the classic cup, stem and foot form, made to serve for generations.",
+"hub_product_id": 110,
+"in_stock": false,
+"is_producible": false,
+"measurements": [],
+"name": "Brass Chalice Cup",
+"price": 40000.0,
+"price_kes": 40000.0,
+"price_usd": 400.0,
+"prices": {
+"KES": 40000.0,
+"USD": 400.0,
+"ZMW": 8000.0
+},
+"product_type": "simple",
+"sku": "CHA-BCC-001",
+"slug": "brass-chalice-cup",
+"unit": "",
+"variants": []
+},
+{
+"aliases": [
+"censer",
+"incense burner",
+"thurible kenya",
+"thurble",
+"chetezo",
+"church incense burner",
+"censer for church",
+"incense burner nairobi",
+"ubani burner"
+],
+"category": "Clergy Accessories",
+"description": "Chain-swung thurible (censer) for incensing altar and congregation — the rising smoke of prayer in Psalm 141:2.",
+"hub_product_id": 78,
+"in_stock": true,
+"is_producible": false,
+"measurements": [],
+"name": "Incense Burner / Thurible",
+"price": 15000.0,
+"price_kes": 15000.0,
+"price_max_kes": 15000.0,
+"price_max_usd": 150.0,
+"price_min_kes": 12000.0,
+"price_min_usd": 120.0,
+"price_usd": 150.0,
+"prices": {
+"KES": 15000.0,
+"USD": 150.0,
+"ZMW": 3000.0
+},
+"product_type": "variable",
+"sku": "CLE-IB-001",
+"slug": "incense-burner",
+"unit": "",
+"variants": [
+{
+"attributes": {
+"Size": "M"
+},
+"is_default": false,
+"label": "Incense Burner / Thurible — Size M",
+"name": "INCENSE BURNER/THURBLE",
+"price_kes": 15000.0,
+"price_usd": 150.0,
+"prices": {
+"KES": 15000.0,
+"USD": 150.0,
+"ZMW": 3000.0
+},
+"sku": "CLE-IB-001-M"
+},
+{
+"attributes": {
+"Size": "S"
+},
+"is_default": true,
+"label": "Incense Burner / Thurible — Size S",
+"name": "INCENSE BURNER/THURBLE",
+"price_kes": 12000.0,
+"price_usd": 120.0,
+"prices": {
+"KES": 12000.0,
+"USD": 120.0,
+"ZMW": 2400.0
+},
+"sku": "CLE-IB-001-S"
+}
+]
+},
+{
+"aliases": [
+"children bible stories book",
+"bible storybook for kids",
+"sunday school prize book kenya",
+"kids bible stories nairobi",
+"favourite bible stories",
+"102 favorite bible stories",
+"children's story bible",
+"bible stories for children",
+"102 childrens stories"
+],
+"category": "Children Bibles",
+"description": "102 beloved Bible stories retold in simple words, with full-colour illustrations on every page and a Scripture reference for each story.",
+"hub_product_id": 109,
+"in_stock": true,
+"is_producible": false,
+"measurements": [],
+"name": "102 Favorite Children's Bible stories",
+"price": 1500.0,
+"price_kes": 1500.0,
+"price_usd": 15.0,
+"prices": {
+"KES": 1500.0,
+"USD": 15.0,
+"ZMW": 300.0
+},
+"product_type": "simple",
+"sku": "CHI-FC-001",
+"slug": "102-favorite-childrens-bible-stories",
+"unit": "",
+"variants": []
+},
+{
+"aliases": [
+"niv application bible",
+"life application study bible",
+"niv study bible kenya",
+"study bible nairobi",
+"leather bible",
+"pastors bible",
+"ordination gift bible",
+"bible for pastors kenya"
+],
+"category": "Bibles",
+"description": "The NIV Leather Application Bible — practical study notes that show what Scripture means, and how to apply it to everyday life.",
+"hub_product_id": 108,
+"in_stock": true,
+"is_producible": false,
+"measurements": [],
+"name": "NIV APPLICATION BIBLE",
+"price": 8000.0,
+"price_kes": 8000.0,
+"price_usd": 80.0,
+"prices": {
+"KES": 8000.0,
+"USD": 80.0,
+"ZMW": 1600.0
+},
+"product_type": "simple",
+"sku": "BIB-NAB-001",
+"slug": "niv-application-bible",
+"unit": "",
+"variants": []
+},
+{
+"aliases": [
+"communion wafers 1000",
+"communion bread",
+"altar bread",
+"bulk communion wafers",
+"mkate wa ushirika",
+"unleavened communion bread",
+"church wafers kenya",
+"communion elements",
+"white communion wafers"
+],
+"category": "Communion Items",
+"description": "Plain round white communion wafers, 1 1/8 in. across, in airtight boxes — 1000 pieces for large congregations and big days.",
+"hub_product_id": 14,
+"in_stock": true,
+"is_producible": false,
+"measurements": [],
+"name": "Holy Communion Bread 1000 Pcs",
+"price": 1800.0,
+"price_kes": 1800.0,
+"price_max_kes": 1800.0,
+"price_max_usd": 18.0,
+"price_min_kes": 1800.0,
+"price_min_usd": 18.0,
+"price_usd": 18.0,
+"prices": {
+"KES": 1800.0,
+"USD": 18.0,
+"ZMW": 200.0
+},
+"product_type": "variable",
+"sku": "KU5ZE5ZFY",
+"slug": "holy-communion-bread-1000pcs",
+"unit": "",
+"variants": [
+{
+"attributes": {
+"Features": "Pcs"
+},
+"is_default": false,
+"label": "Holy Communion Bread 1000 Pcs — 500PCS + 200, 500 and 1000",
+"name": "Holy Communion Bread -500PCS + 200, 500 and 1000",
+"price_kes": 1800.0,
+"price_usd": 18.0,
+"prices": {
+"KES": 1800.0,
+"USD": 18.0,
+"ZMW": 200.0
+},
+"sku": "KU5ZE5ZFY-"
+}
+]
+},
+{
+"aliases": [
+"red cassock",
+"apostolic cassock",
+"red clergy robe",
+"pentecostal cassock",
+"red soutane",
+"bishop red cassock",
+"red church robe",
+"red cassok",
+"red cassock price in kenya"
+],
+"category": "Clergy Vestments",
+"description": "Striking red apostolic cassock made to order in Nairobi — the colour of Pentecost fire, for apostles, bishops and church leaders.",
+"hub_product_id": 106,
+"in_stock": false,
+"is_producible": true,
+"measurements": [
+{
+"name": "Neck",
+"required": true,
+"unit": "Inches"
+},
+{
+"name": "Shoulders",
+"required": true,
+"unit": "Inches"
+},
+{
+"name": "Sleeves",
+"required": true,
+"unit": "Inches"
+},
+{
+"name": "Wrist",
+"required": true,
+"unit": "Inches"
+},
+{
+"name": "Arm Hole",
+"required": true,
+"unit": "Inches"
+},
+{
+"name": "Upper Arm",
+"required": true,
+"unit": "Inches"
+},
+{
+"name": "Chest",
+"required": true,
+"unit": "Inches"
+},
+{
+"name": "Stomach",
+"required": true,
+"unit": "Inches"
+},
+{
+"name": "Shirt Length",
+"required": true,
+"unit": "Inches"
+},
+{
+"name": "Full Length",
+"required": true,
+"unit": "Inches"
+}
+],
+"name": "Red Apostolic Cassock",
+"price": 21000.0,
+"price_kes": 21000.0,
+"price_max_kes": 16400.0,
+"price_max_usd": 170.0,
+"price_min_kes": 16400.0,
+"price_min_usd": 170.0,
+"price_usd": 170.0,
+"prices": {
+"KES": 21000.0,
+"USD": 170.0,
+"ZMW": 3280.0
+},
+"product_type": "variable",
+"sku": "CLE-RAC-001",
+"slug": "red-apostolic-cassock",
+"unit": "",
+"variants": [
+{
+"attributes": {
+"Colour": "Black",
+"Features": "Pleats, Piping and Buttons",
+"Size": "S"
+},
+"is_default": true,
+"label": "Red Apostolic Cassock — Black Pleats, Piping and Buttons / Size S",
+"name": "Red Apostolic Cassock + Black Pleats, Piping and Buttons",
+"price_kes": 16400.0,
+"price_usd": 170.0,
+"prices": {
+"KES": 16400.0,
+"USD": 170.0,
+"ZMW": 3280.0
+},
+"sku": "CLE-RAC-001-BLA-S"
+},
+{
+"attributes": {
+"Colour": "Black",
+"Features": "Pleats, Piping and Buttons",
+"Size": "M"
+},
+"is_default": false,
+"label": "Red Apostolic Cassock — Black Pleats, Piping and Buttons / Size M",
+"name": "Red Apostolic Cassock + Black Pleats, Piping and Buttons",
+"price_kes": 16400.0,
+"price_usd": 170.0,
+"prices": {
+"KES": 16400.0,
+"USD": 170.0,
+"ZMW": 3280.0
+},
+"sku": "CLE-RAC-001-BLA-M"
+},
+{
+"attributes": {
+"Colour": "Black",
+"Features": "Pleats, Piping and Buttons",
+"Size": "L"
+},
+"is_default": false,
+"label": "Red Apostolic Cassock — Black Pleats, Piping and Buttons / Size L",
+"name": "Red Apostolic Cassock + Black Pleats, Piping and Buttons",
+"price_kes": 16400.0,
+"price_usd": 170.0,
+"prices": {
+"KES": 16400.0,
+"USD": 170.0,
+"ZMW": 3280.0
+},
+"sku": "CLE-RAC-001-BLA-L"
+},
+{
+"attributes": {
+"Colour": "Black",
+"Features": "Pleats, Piping and Buttons",
+"Size": "XL"
+},
+"is_default": false,
+"label": "Red Apostolic Cassock — Black Pleats, Piping and Buttons / Size XL",
+"name": "Red Apostolic Cassock + Black Pleats, Piping and Buttons",
+"price_kes": 16400.0,
+"price_usd": 170.0,
+"prices": {
+"KES": 16400.0,
+"USD": 170.0,
+"ZMW": 3280.0
+},
+"sku": "CLE-RAC-001-BLA-XL"
+},
+{
+"attributes": {
+"Colour": "Black",
+"Features": "Pleats, Piping and Buttons",
+"Size": "XXL"
+},
+"is_default": false,
+"label": "Red Apostolic Cassock — Black Pleats, Piping and Buttons / Size XXL",
+"name": "Red Apostolic Cassock + Black Pleats, Piping and Buttons",
+"price_kes": 16400.0,
+"price_usd": 170.0,
+"prices": {
+"KES": 16400.0,
+"USD": 170.0,
+"ZMW": 3280.0
+},
+"sku": "CLE-RAC-001-BLA-XXL"
+},
+{
+"attributes": {
+"Colour": "White",
+"Features": "Pleats, Piping and Buttons",
+"Size": "S"
+},
+"is_default": false,
+"label": "Red Apostolic Cassock — White Pleats, Piping and Buttons / Size S",
+"name": "Red Apostolic Cassock + White Pleats, Piping and Buttons",
+"price_kes": 16400.0,
+"price_usd": 170.0,
+"prices": {
+"KES": 16400.0,
+"USD": 170.0,
+"ZMW": 3280.0
+},
+"sku": "CLE-RAC-001-WHI-S"
+},
+{
+"attributes": {
+"Colour": "White",
+"Features": "Pleats, Piping and Buttons",
+"Size": "M"
+},
+"is_default": false,
+"label": "Red Apostolic Cassock — White Pleats, Piping and Buttons / Size M",
+"name": "Red Apostolic Cassock + White Pleats, Piping and Buttons",
+"price_kes": 16400.0,
+"price_usd": 170.0,
+"prices": {
+"KES": 16400.0,
+"USD": 170.0,
+"ZMW": 3280.0
+},
+"sku": "CLE-RAC-001-WHI-M"
+},
+{
+"attributes": {
+"Colour": "White",
+"Features": "Pleats, Piping and Buttons",
+"Size": "L"
+},
+"is_default": false,
+"label": "Red Apostolic Cassock — White Pleats, Piping and Buttons / Size L",
+"name": "Red Apostolic Cassock + White Pleats, Piping and Buttons",
+"price_kes": 16400.0,
+"price_usd": 170.0,
+"prices": {
+"KES": 16400.0,
+"USD": 170.0,
+"ZMW": 3280.0
+},
+"sku": "CLE-RAC-001-WHI-L"
+},
+{
+"attributes": {
+"Colour": "White",
+"Features": "Pleats, Piping and Buttons",
+"Size": "XL"
+},
+"is_default": false,
+"label": "Red Apostolic Cassock — White Pleats, Piping and Buttons / Size XL",
+"name": "Red Apostolic Cassock + White Pleats, Piping and Buttons",
+"price_kes": 16400.0,
+"price_usd": 170.0,
+"prices": {
+"KES": 16400.0,
+"USD": 170.0,
+"ZMW": 3280.0
+},
+"sku": "CLE-RAC-001-WHI-XL"
+},
+{
+"attributes": {
+"Colour": "White",
+"Features": "Pleats, Piping and Buttons",
+"Size": "XXL"
+},
+"is_default": false,
+"label": "Red Apostolic Cassock — White Pleats, Piping and Buttons / Size XXL",
+"name": "Red Apostolic Cassock + White Pleats, Piping and Buttons",
+"price_kes": 16400.0,
+"price_usd": 170.0,
+"prices": {
+"KES": 16400.0,
+"USD": 170.0,
+"ZMW": 3280.0
+},
+"sku": "CLE-RAC-001-WHI-XXL"
+},
+{
+"attributes": {
+"Colour": "Navy",
+"Features": "Pleats, Piping and Buttons",
+"Size": "S"
+},
+"is_default": false,
+"label": "Red Apostolic Cassock — Navy Pleats, Piping and Buttons / Size S",
+"name": "Red Apostolic Cassock + Navy Pleats, Piping and Buttons",
+"price_kes": 16400.0,
+"price_usd": 170.0,
+"prices": {
+"KES": 16400.0,
+"USD": 170.0,
+"ZMW": 3280.0
+},
+"sku": "CLE-RAC-001-NAV-S"
+},
+{
+"attributes": {
+"Colour": "Navy",
+"Features": "Pleats, Piping and Buttons",
+"Size": "M"
+},
+"is_default": false,
+"label": "Red Apostolic Cassock — Navy Pleats, Piping and Buttons / Size M",
+"name": "Red Apostolic Cassock + Navy Pleats, Piping and Buttons",
+"price_kes": 16400.0,
+"price_usd": 170.0,
+"prices": {
+"KES": 16400.0,
+"USD": 170.0,
+"ZMW": 3280.0
+},
+"sku": "CLE-RAC-001-NAV-M"
+},
+{
+"attributes": {
+"Colour": "Navy",
+"Features": "Pleats, Piping and Buttons",
+"Size": "L"
+},
+"is_default": false,
+"label": "Red Apostolic Cassock — Navy Pleats, Piping and Buttons / Size L",
+"name": "Red Apostolic Cassock + Navy Pleats, Piping and Buttons",
+"price_kes": 16400.0,
+"price_usd": 170.0,
+"prices": {
+"KES": 16400.0,
+"USD": 170.0,
+"ZMW": 3280.0
+},
+"sku": "CLE-RAC-001-NAV-L"
+},
+{
+"attributes": {
+"Colour": "Navy",
+"Features": "Pleats, Piping and Buttons",
+"Size": "XL"
+},
+"is_default": false,
+"label": "Red Apostolic Cassock — Navy Pleats, Piping and Buttons / Size XL",
+"name": "Red Apostolic Cassock + Navy Pleats, Piping and Buttons",
+"price_kes": 16400.0,
+"price_usd": 170.0,
+"prices": {
+"KES": 16400.0,
+"USD": 170.0,
+"ZMW": 3280.0
+},
+"sku": "CLE-RAC-001-NAV-XL"
+},
+{
+"attributes": {
+"Colour": "Navy",
+"Features": "Pleats, Piping and Buttons",
+"Size": "XXL"
+},
+"is_default": false,
+"label": "Red Apostolic Cassock — Navy Pleats, Piping and Buttons / Size XXL",
+"name": "Red Apostolic Cassock + Navy Pleats, Piping and Buttons",
+"price_kes": 16400.0,
+"price_usd": 170.0,
+"prices": {
+"KES": 16400.0,
+"USD": 170.0,
+"ZMW": 3280.0
+},
+"sku": "CLE-RAC-001-NAV-XXL"
+},
+{
+"attributes": {
+"Colour": "Red",
+"Features": "Pleats, Piping and Buttons",
+"Size": "S"
+},
+"is_default": false,
+"label": "Red Apostolic Cassock — Red Pleats, Piping and Buttons / Size S",
+"name": "Red Apostolic Cassock + Red Pleats, Piping and Buttons",
+"price_kes": 16400.0,
+"price_usd": 170.0,
+"prices": {
+"KES": 16400.0,
+"USD": 170.0,
+"ZMW": 3280.0
+},
+"sku": "CLE-RAC-001-RED-S"
+},
+{
+"attributes": {
+"Colour": "Red",
+"Features": "Pleats, Piping and Buttons",
+"Size": "M"
+},
+"is_default": false,
+"label": "Red Apostolic Cassock — Red Pleats, Piping and Buttons / Size M",
+"name": "Red Apostolic Cassock + Red Pleats, Piping and Buttons",
+"price_kes": 16400.0,
+"price_usd": 170.0,
+"prices": {
+"KES": 16400.0,
+"USD": 170.0,
+"ZMW": 3280.0
+},
+"sku": "CLE-RAC-001-RED-M"
+},
+{
+"attributes": {
+"Colour": "Red",
+"Features": "Pleats, Piping and Buttons",
+"Size": "L"
+},
+"is_default": false,
+"label": "Red Apostolic Cassock — Red Pleats, Piping and Buttons / Size L",
+"name": "Red Apostolic Cassock + Red Pleats, Piping and Buttons",
+"price_kes": 16400.0,
+"price_usd": 170.0,
+"prices": {
+"KES": 16400.0,
+"USD": 170.0,
+"ZMW": 3280.0
+},
+"sku": "CLE-RAC-001-RED-L"
+},
+{
+"attributes": {
+"Colour": "Red",
+"Features": "Pleats, Piping and Buttons",
+"Size": "XL"
+},
+"is_default": false,
+"label": "Red Apostolic Cassock — Red Pleats, Piping and Buttons / Size XL",
+"name": "Red Apostolic Cassock + Red Pleats, Piping and Buttons",
+"price_kes": 16400.0,
+"price_usd": 170.0,
+"prices": {
+"KES": 16400.0,
+"USD": 170.0,
+"ZMW": 3280.0
+},
+"sku": "CLE-RAC-001-RED-XL"
+},
+{
+"attributes": {
+"Colour": "Red",
+"Features": "Pleats, Piping and Buttons",
+"Size": "XXL"
+},
+"is_default": false,
+"label": "Red Apostolic Cassock — Red Pleats, Piping and Buttons / Size XXL",
+"name": "Red Apostolic Cassock + Red Pleats, Piping and Buttons",
+"price_kes": 16400.0,
+"price_usd": 170.0,
+"prices": {
+"KES": 16400.0,
+"USD": 170.0,
+"ZMW": 3280.0
+},
+"sku": "CLE-RAC-001-RED-XXL"
+},
+{
+"attributes": {
+"Colour": "Green",
+"Features": "Pleats, Piping and Buttons",
+"Size": "S"
+},
+"is_default": false,
+"label": "Red Apostolic Cassock — Green Pleats, Piping and Buttons / Size S",
+"name": "Red Apostolic Cassock + Green Pleats, Piping and Buttons",
+"price_kes": 16400.0,
+"price_usd": 170.0,
+"prices": {
+"KES": 16400.0,
+"USD": 170.0,
+"ZMW": 3280.0
+},
+"sku": "CLE-RAC-001-GRE-S"
+},
+{
+"attributes": {
+"Colour": "Green",
+"Features": "Pleats, Piping and Buttons",
+"Size": "M"
+},
+"is_default": false,
+"label": "Red Apostolic Cassock — Green Pleats, Piping and Buttons / Size M",
+"name": "Red Apostolic Cassock + Green Pleats, Piping and Buttons",
+"price_kes": 16400.0,
+"price_usd": 170.0,
+"prices": {
+"KES": 16400.0,
+"USD": 170.0,
+"ZMW": 3280.0
+},
+"sku": "CLE-RAC-001-GRE-M"
+},
+{
+"attributes": {
+"Colour": "Green",
+"Features": "Pleats, Piping and Buttons",
+"Size": "L"
+},
+"is_default": false,
+"label": "Red Apostolic Cassock — Green Pleats, Piping and Buttons / Size L",
+"name": "Red Apostolic Cassock + Green Pleats, Piping and Buttons",
+"price_kes": 16400.0,
+"price_usd": 170.0,
+"prices": {
+"KES": 16400.0,
+"USD": 170.0,
+"ZMW": 3280.0
+},
+"sku": "CLE-RAC-001-GRE-L"
+},
+{
+"attributes": {
+"Colour": "Green",
+"Features": "Pleats, Piping and Buttons",
+"Size": "XL"
+},
+"is_default": false,
+"label": "Red Apostolic Cassock — Green Pleats, Piping and Buttons / Size XL",
+"name": "Red Apostolic Cassock + Green Pleats, Piping and Buttons",
+"price_kes": 16400.0,
+"price_usd": 170.0,
+"prices": {
+"KES": 16400.0,
+"USD": 170.0,
+"ZMW": 3280.0
+},
+"sku": "CLE-RAC-001-GRE-XL"
+},
+{
+"attributes": {
+"Colour": "Green",
+"Features": "Pleats, Piping and Buttons",
+"Size": "XXL"
+},
+"is_default": false,
+"label": "Red Apostolic Cassock — Green Pleats, Piping and Buttons / Size XXL",
+"name": "Red Apostolic Cassock + Green Pleats, Piping and Buttons",
+"price_kes": 16400.0,
+"price_usd": 170.0,
+"prices": {
+"KES": 16400.0,
+"USD": 170.0,
+"ZMW": 3280.0
+},
+"sku": "CLE-RAC-001-GRE-XXL"
+},
+{
+"attributes": {
+"Colour": "Grey",
+"Features": "Pleats, Piping and Buttons",
+"Size": "S"
+},
+"is_default": false,
+"label": "Red Apostolic Cassock — Grey Pleats, Piping and Buttons / Size S",
+"name": "Red Apostolic Cassock + Grey Pleats, Piping and Buttons",
+"price_kes": 16400.0,
+"price_usd": 170.0,
+"prices": {
+"KES": 16400.0,
+"USD": 170.0,
+"ZMW": 3280.0
+},
+"sku": "CLE-RAC-001-GRE-S-2"
+},
+{
+"attributes": {
+"Colour": "Grey",
+"Features": "Pleats, Piping and Buttons",
+"Size": "M"
+},
+"is_default": false,
+"label": "Red Apostolic Cassock — Grey Pleats, Piping and Buttons / Size M",
+"name": "Red Apostolic Cassock + Grey Pleats, Piping and Buttons",
+"price_kes": 16400.0,
+"price_usd": 170.0,
+"prices": {
+"KES": 16400.0,
+"USD": 170.0,
+"ZMW": 3280.0
+},
+"sku": "CLE-RAC-001-GRE-M-2"
+},
+{
+"attributes": {
+"Colour": "Grey",
+"Features": "Pleats, Piping and Buttons",
+"Size": "L"
+},
+"is_default": false,
+"label": "Red Apostolic Cassock — Grey Pleats, Piping and Buttons / Size L",
+"name": "Red Apostolic Cassock + Grey Pleats, Piping and Buttons",
+"price_kes": 16400.0,
+"price_usd": 170.0,
+"prices": {
+"KES": 16400.0,
+"USD": 170.0,
+"ZMW": 3280.0
+},
+"sku": "CLE-RAC-001-GRE-L-2"
+},
+{
+"attributes": {
+"Colour": "Grey",
+"Features": "Pleats, Piping and Buttons",
+"Size": "XL"
+},
+"is_default": false,
+"label": "Red Apostolic Cassock — Grey Pleats, Piping and Buttons / Size XL",
+"name": "Red Apostolic Cassock + Grey Pleats, Piping and Buttons",
+"price_kes": 16400.0,
+"price_usd": 170.0,
+"prices": {
+"KES": 16400.0,
+"USD": 170.0,
+"ZMW": 3280.0
+},
+"sku": "CLE-RAC-001-GRE-XL-2"
+},
+{
+"attributes": {
+"Colour": "Grey",
+"Features": "Pleats, Piping and Buttons",
+"Size": "XXL"
+},
+"is_default": false,
+"label": "Red Apostolic Cassock — Grey Pleats, Piping and Buttons / Size XXL",
+"name": "Red Apostolic Cassock + Grey Pleats, Piping and Buttons",
+"price_kes": 16400.0,
+"price_usd": 170.0,
+"prices": {
+"KES": 16400.0,
+"USD": 170.0,
+"ZMW": 3280.0
+},
+"sku": "CLE-RAC-001-GRE-XXL-2"
+},
+{
+"attributes": {
+"Colour": "Gold",
+"Features": "Pleats, Piping and Buttons",
+"Size": "S"
+},
+"is_default": false,
+"label": "Red Apostolic Cassock — Gold Pleats, Piping and Buttons / Size S",
+"name": "Red Apostolic Cassock + Gold Pleats, Piping and Buttons",
+"price_kes": 16400.0,
+"price_usd": 170.0,
+"prices": {
+"KES": 16400.0,
+"USD": 170.0,
+"ZMW": 3280.0
+},
+"sku": "CLE-RAC-001-GOL-S"
+},
+{
+"attributes": {
+"Colour": "Gold",
+"Features": "Pleats, Piping and Buttons",
+"Size": "M"
+},
+"is_default": false,
+"label": "Red Apostolic Cassock — Gold Pleats, Piping and Buttons / Size M",
+"name": "Red Apostolic Cassock + Gold Pleats, Piping and Buttons",
+"price_kes": 16400.0,
+"price_usd": 170.0,
+"prices": {
+"KES": 16400.0,
+"USD": 170.0,
+"ZMW": 3280.0
+},
+"sku": "CLE-RAC-001-GOL-M"
+},
+{
+"attributes": {
+"Colour": "Gold",
+"Features": "Pleats, Piping and Buttons",
+"Size": "L"
+},
+"is_default": false,
+"label": "Red Apostolic Cassock — Gold Pleats, Piping and Buttons / Size L",
+"name": "Red Apostolic Cassock + Gold Pleats, Piping and Buttons",
+"price_kes": 16400.0,
+"price_usd": 170.0,
+"prices": {
+"KES": 16400.0,
+"USD": 170.0,
+"ZMW": 3280.0
+},
+"sku": "CLE-RAC-001-GOL-L"
+},
+{
+"attributes": {
+"Colour": "Gold",
+"Features": "Pleats, Piping and Buttons",
+"Size": "XL"
+},
+"is_default": false,
+"label": "Red Apostolic Cassock — Gold Pleats, Piping and Buttons / Size XL",
+"name": "Red Apostolic Cassock + Gold Pleats, Piping and Buttons",
+"price_kes": 16400.0,
+"price_usd": 170.0,
+"prices": {
+"KES": 16400.0,
+"USD": 170.0,
+"ZMW": 3280.0
+},
+"sku": "CLE-RAC-001-GOL-XL"
+},
+{
+"attributes": {
+"Colour": "Gold",
+"Features": "Pleats, Piping and Buttons",
+"Size": "XXL"
+},
+"is_default": false,
+"label": "Red Apostolic Cassock — Gold Pleats, Piping and Buttons / Size XXL",
+"name": "Red Apostolic Cassock + Gold Pleats, Piping and Buttons",
+"price_kes": 16400.0,
+"price_usd": 170.0,
+"prices": {
+"KES": 16400.0,
+"USD": 170.0,
+"ZMW": 3280.0
+},
+"sku": "CLE-RAC-001-GOL-XXL"
+}
+]
+},
+{
+"aliases": [
+"ladies princes dress",
+"princess dress",
+"ladies clergy dress",
+"women clergy dress",
+"female pastor dress",
+"deaconess dress",
+"ladies clergy wear",
+"clergy dress kenya"
+],
+"category": "Clergy Vestments",
+"description": "Princess-line ladies' clergy dress with collar insert — a fitted, elegant cut in colours for every rank and season.",
+"hub_product_id": 107,
+"in_stock": false,
+"is_producible": true,
+"measurements": [],
+"name": "Ladies Princes Dress",
+"price": 10000.0,
+"price_kes": 10000.0,
+"price_max_kes": 10000.0,
+"price_max_usd": 100.0,
+"price_min_kes": 10000.0,
+"price_min_usd": 100.0,
+"price_usd": 100.0,
+"prices": {
+"KES": 10000.0,
+"USD": 100.0,
+"ZMW": 2000.0
+},
+"product_type": "variable",
+"sku": "CLE-LPD-001",
+"slug": "ladies-princes-dress",
+"unit": "",
+"variants": [
+{
+"attributes": {
+"Colour": "Red",
+"Size": "M"
+},
+"is_default": false,
+"label": "Ladies Princes Dress — Red / Size M",
+"name": "Red Ladies Princes Dress",
+"price_kes": 10000.0,
+"price_usd": 100.0,
+"prices": {
+"KES": 10000.0,
+"USD": 100.0,
+"ZMW": 2000.0
+},
+"sku": "CLE-LPD-001-RED-M"
+},
+{
+"attributes": {
+"Colour": "Red",
+"Size": "L"
+},
+"is_default": false,
+"label": "Ladies Princes Dress — Red / Size L",
+"name": "Red Ladies Princes Dress",
+"price_kes": 10000.0,
+"price_usd": 100.0,
+"prices": {
+"KES": 10000.0,
+"USD": 100.0,
+"ZMW": 2000.0
+},
+"sku": "CLE-LPD-001-RED-L"
+},
+{
+"attributes": {
+"Colour": "Red",
+"Size": "XL"
+},
+"is_default": false,
+"label": "Ladies Princes Dress — Red / Size XL",
+"name": "Red Ladies Princes Dress",
+"price_kes": 10000.0,
+"price_usd": 100.0,
+"prices": {
+"KES": 10000.0,
+"USD": 100.0,
+"ZMW": 2000.0
+},
+"sku": "CLE-LPD-001-RED-XL"
+},
+{
+"attributes": {
+"Colour": "Purple Red",
+"Size": "S"
+},
+"is_default": false,
+"label": "Ladies Princes Dress — Purple Red / Size S",
+"name": "Purple Red Ladies Princes Dress",
+"price_kes": 10000.0,
+"price_usd": 100.0,
+"prices": {
+"KES": 10000.0,
+"USD": 100.0,
+"ZMW": 2000.0
+},
+"sku": "CLE-LPD-001-PUR-S"
+},
+{
+"attributes": {
+"Colour": "White",
+"Size": "S"
+},
+"is_default": true,
+"label": "Ladies Princes Dress — White / Size S",
+"name": "White Ladies Princes Dress",
+"price_kes": 10000.0,
+"price_usd": 100.0,
+"prices": {
+"KES": 10000.0,
+"USD": 100.0,
+"ZMW": 2000.0
+},
+"sku": "CLE-LPD-001-WHI-S"
+},
+{
+"attributes": {
+"Colour": "White",
+"Size": "M"
+},
+"is_default": false,
+"label": "Ladies Princes Dress — White / Size M",
+"name": "White Ladies Princes Dress",
+"price_kes": 10000.0,
+"price_usd": 100.0,
+"prices": {
+"KES": 10000.0,
+"USD": 100.0,
+"ZMW": 2000.0
+},
+"sku": "CLE-LPD-001-WHI-M"
+},
+{
+"attributes": {
+"Colour": "White",
+"Size": "L"
+},
+"is_default": false,
+"label": "Ladies Princes Dress — White / Size L",
+"name": "White Ladies Princes Dress",
+"price_kes": 10000.0,
+"price_usd": 100.0,
+"prices": {
+"KES": 10000.0,
+"USD": 100.0,
+"ZMW": 2000.0
+},
+"sku": "CLE-LPD-001-WHI-L"
+},
+{
+"attributes": {
+"Colour": "White",
+"Size": "XL"
+},
+"is_default": false,
+"label": "Ladies Princes Dress — White / Size XL",
+"name": "White Ladies Princes Dress",
+"price_kes": 10000.0,
+"price_usd": 100.0,
+"prices": {
+"KES": 10000.0,
+"USD": 100.0,
+"ZMW": 2000.0
+},
+"sku": "CLE-LPD-001-WHI-XL"
+},
+{
+"attributes": {
+"Colour": "Red",
+"Size": "S"
+},
+"is_default": false,
+"label": "Ladies Princes Dress — Red / Size S",
+"name": "Red Ladies Princes Dress",
+"price_kes": 10000.0,
+"price_usd": 100.0,
+"prices": {
+"KES": 10000.0,
+"USD": 100.0,
+"ZMW": 2000.0
+},
+"sku": "CLE-LPD-001-RED-S"
+},
+{
+"attributes": {
+"Colour": "Purple Red",
+"Size": "M"
+},
+"is_default": false,
+"label": "Ladies Princes Dress — Purple Red / Size M",
+"name": "Purple Red Ladies Princes Dress",
+"price_kes": 10000.0,
+"price_usd": 100.0,
+"prices": {
+"KES": 10000.0,
+"USD": 100.0,
+"ZMW": 2000.0
+},
+"sku": "CLE-LPD-001-PUR-M"
+},
+{
+"attributes": {
+"Colour": "Purple Red",
+"Size": "L"
+},
+"is_default": false,
+"label": "Ladies Princes Dress — Purple Red / Size L",
+"name": "Purple Red Ladies Princes Dress",
+"price_kes": 10000.0,
+"price_usd": 100.0,
+"prices": {
+"KES": 10000.0,
+"USD": 100.0,
+"ZMW": 2000.0
+},
+"sku": "CLE-LPD-001-PUR-L"
+},
+{
+"attributes": {
+"Colour": "Purple Red",
+"Size": "XL"
+},
+"is_default": false,
+"label": "Ladies Princes Dress — Purple Red / Size XL",
+"name": "Purple Red Ladies Princes Dress",
+"price_kes": 10000.0,
+"price_usd": 100.0,
+"prices": {
+"KES": 10000.0,
+"USD": 100.0,
+"ZMW": 2000.0
+},
+"sku": "CLE-LPD-001-PUR-XL"
+}
+]
+},
+{
+"aliases": [
+"altar bread",
+"hosts for mass",
+"eucharist bread",
+"altar breads 1000",
+"mkate wa ushirika",
+"ekaristi takatifu",
+"communion wafers",
+"host bread",
+"sacramental bread"
+],
+"category": "Communion Items",
+"description": "Unleavened altar breads for the Eucharist — 1,000 hosts per pack, ready for the ciborium and the faithful at the rail.",
+"hub_product_id": 98,
+"in_stock": false,
+"is_producible": false,
+"measurements": [],
+"name": "Communion Hosts — 1,000 pieces",
+"price": 1500.0,
+"price_kes": 1500.0,
+"price_usd": 20.0,
+"prices": {
+"KES": 1500.0,
+"USD": 20.0,
+"ZMW": 300.0
+},
+"product_type": "simple",
+"sku": "SF-HST-01",
+"slug": "communion-hosts",
+"unit": "",
+"variants": []
+},
+{
+"aliases": [
+"embroidered chasuble",
+"chasuble kenya",
+"catholic chasuble",
+"priest chasuble nairobi",
+"mass vestments kenya",
+"chasable",
+"chasible",
+"eucharistic vestments"
+],
+"category": "Gowns",
+"description": "A richly embroidered chasuble for the celebrant at the Eucharist — made to order in Nairobi in your liturgical colour.",
+"hub_product_id": 100,
+"in_stock": false,
+"is_producible": true,
+"measurements": [
+{
+"name": "Neck",
+"required": true,
+"unit": "in"
+},
+{
+"name": "Shoulders",
+"required": true,
+"unit": "in"
+},
+{
+"name": "Sleeves",
+"required": true,
+"unit": "in"
+},
+{
+"name": "Chest",
+"required": true,
+"unit": "in"
+},
+{
+"name": "Waist",
+"required": false,
+"unit": "in"
+},
+{
+"name": "Hips",
+"required": false,
+"unit": "in"
+},
+{
+"name": "Full Length",
+"required": true,
+"unit": "in"
+}
+],
+"name": "Ornate Chasuble — Embroidered",
+"price": 14000.0,
+"price_kes": 14000.0,
+"price_usd": 140.0,
+"prices": {
+"KES": 14000.0,
+"USD": 140.0,
+"ZMW": 2800.0
+},
+"product_type": "simple",
+"sku": "SF-CHS-01",
+"slug": "ornate-chasuble",
+"unit": "",
+"variants": []
+},
+{
+"aliases": [
+"chalice and paten",
+"chalice set with paten",
+"communion chalice set",
+"gold chalice kenya",
+"ordination gift chalice",
+"paten set",
+"holy communion set"
+],
+"category": "Chalice",
+"description": "Chalice and paten in one radiant gold-tone set — the vessels of Holy Communion, matched and ready for the altar together.",
+"hub_product_id": 95,
+"in_stock": false,
+"is_producible": false,
+"measurements": [],
+"name": "Golden Chalice Cup with Paten Set",
+"price": 65000.0,
+"price_kes": 65000.0,
+"price_usd": 650.0,
+"prices": {
+"KES": 65000.0,
+"USD": 650.0,
+"ZMW": 13000.0
+},
+"product_type": "simple",
+"sku": "SF-CHL-01",
+"slug": "chalice-royale",
+"unit": "",
+"variants": []
+},
+{
+"aliases": [
+"ladies cassock set",
+"princess cassock set",
+"women cassock set",
+"ordination set for women",
+"cassock full set",
+"lady minister robes",
+"cassock and stole set",
+"clergy set for ladies"
+],
+"category": "Vestments",
+"description": "Complete five-piece ladies' cassock set — cassock, shirt, collar, stole and cincture belt — ordination-ready in one order.",
+"hub_product_id": 99,
+"in_stock": false,
+"is_producible": true,
+"measurements": [
+{
+"name": "Neck",
+"required": true,
+"unit": "in"
+},
+{
+"name": "Shoulders",
+"required": true,
+"unit": "in"
+},
+{
+"name": "Sleeves",
+"required": true,
+"unit": "in"
+},
+{
+"name": "Chest",
+"required": true,
+"unit": "in"
+},
+{
+"name": "Waist",
+"required": false,
+"unit": "in"
+},
+{
+"name": "Hips",
+"required": false,
+"unit": "in"
+},
+{
+"name": "Full Length",
+"required": true,
+"unit": "in"
+}
+],
+"name": "Classic Princes Cassock Set",
+"price": 19000.0,
+"price_kes": 19000.0,
+"price_usd": 190.0,
+"prices": {
+"KES": 19000.0,
+"USD": 190.0,
+"ZMW": 3800.0
+},
+"product_type": "simple",
+"sku": "SF-CSK-01",
+"slug": "clergy-cassock",
+"unit": "",
+"variants": []
+},
+{
+"aliases": [
+"pectoral cross",
+"gold pectoral cross",
+"bishop cross",
+"episcopal cross",
+"golden cross for bishops",
+"msalaba wa askofu",
+"clergy cross nairobi",
+"bishop regalia kenya"
+],
+"category": "Vestments",
+"description": "Bishop's pectoral cross in a bright gold finish — the historic insignia of the shepherd's office, resting at the sternum.",
+"hub_product_id": 103,
+"in_stock": true,
+"is_producible": false,
+"measurements": [],
+"name": "Pectoral Cross — Gold Finish",
+"price": 4000.0,
+"price_kes": 4000.0,
+"price_usd": 40.0,
+"prices": {
+"KES": 4000.0,
+"USD": 40.0,
+"ZMW": 800.0
+},
+"product_type": "simple",
+"sku": "SF-PCX-01",
+"slug": "pectoral-cross",
+"unit": "",
+"variants": []
+},
+{
+"aliases": [
+"clergy shirts kenya",
+"round collar shirt nairobi",
+"dog collar shirt",
+"reverend collar shirt",
+"full collar clergy shirt",
+"pastors shirt kenya",
+"neckband clergy shirt",
+"clergy wear nairobi",
+"clergy shirts in kenya"
+],
+"category": "Vestments",
+"description": "Clergy shirt with the full round collar — the white band showing all round for a clean, classic ministerial look.",
+"hub_product_id": 102,
+"in_stock": true,
+"is_producible": true,
+"measurements": [
+{
+"name": "Neck",
+"required": true,
+"unit": "Inches"
+},
+{
+"name": "Shoulders",
+"required": true,
+"unit": "Inches"
+},
+{
+"name": "Sleeves",
+"required": true,
+"unit": "Inches"
+},
+{
+"name": "Wrist",
+"required": true,
+"unit": "Inches"
+},
+{
+"name": "Arm Hole",
+"required": true,
+"unit": "Inches"
+},
+{
+"name": "Upper Arm",
+"required": true,
+"unit": "Inches"
+},
+{
+"name": "Bodice",
+"required": true,
+"unit": "Inches"
+},
+{
+"name": "Waist",
+"required": true,
+"unit": "Inches"
+},
+{
+"name": "Hips",
+"required": true,
+"unit": "Inches"
+},
+{
+"name": "Blouse Length",
+"required": true,
+"unit": "Inches"
+},
+{
+"name": "Full Length",
+"required": true,
+"unit": "Inches"
+},
+{
+"name": "Shoulder Width",
+"required": true,
+"unit": "Inches"
+},
+{
+"name": "Sleeve Length",
+"required": true,
+"unit": "Inches"
+}
+],
+"name": "Round Collar Clergy Shirt",
+"price": 3000.0,
+"price_kes": 3000.0,
+"price_usd": 30.0,
+"prices": {
+"KES": 3000.0,
+"USD": 30.0,
+"ZMW": 600.0
+},
+"product_type": "simple",
+"sku": "SF-SHT-01",
+"slug": "clergy-shirt",
+"unit": "",
+"variants": []
+},
+{
+"aliases": [
+"daily devotional book",
+"365 devotional",
+"one year devotional",
+"devotional kenya",
+"morning devotion book",
+"christian devotional nairobi",
+"new year devotional gift",
+"365 days with jesus"
+],
+"category": "Books & Gifts",
+"description": "365 Days With Jesus — a daily devotional companion for a year of walking with Christ, one day at a time.",
+"hub_product_id": 105,
+"in_stock": true,
+"is_producible": false,
+"measurements": [],
+"name": "365 Days With Jesus — Devotional",
+"price": 1950.0,
+"price_kes": 1950.0,
+"price_usd": 20.0,
+"prices": {
+"KES": 1950.0,
+"USD": 20.0,
+"ZMW": 390.0
+},
+"product_type": "simple",
+"sku": "SF-DEV-01",
+"slug": "devotional-365",
+"unit": "",
+"variants": []
+},
+{
+"aliases": [
+"garment bag",
+"vestment bag",
+"cassock bag",
+"clergy garment bag",
+"robe bag",
+"gown carrier",
+"suit bag for clergy",
+"vestment cover"
+],
+"category": "Clergy Accessories",
+"description": "Clergy garment bag that carries and protects cassocks, gowns and vestments — in the vestry, and on the road between congregations.",
+"hub_product_id": 94,
+"in_stock": true,
+"is_producible": false,
+"measurements": [],
+"name": "Bag",
+"price": 6600.0,
+"price_kes": 6600.0,
+"price_usd": 70.0,
+"prices": {
+"KES": 6600.0,
+"USD": 70.0,
+"ZMW": 1320.0
+},
+"product_type": "simple",
+"sku": "CLE-B-009",
+"slug": "bag",
+"unit": "",
+"variants": []
+},
+{
+"aliases": [
+"niv holy bible",
+"new international version bible",
+"holy bible nairobi",
+"first bible gift",
+"english bible kenya",
+"biblia",
+"church bulk bibles",
+"new convert bible"
+],
+"category": "Bibles",
+"description": "The everyday NIV Bible — clear, accurate and trusted for personal reading, fellowship groups, schools and Sunday services.",
+"hub_product_id": 93,
+"in_stock": true,
+"is_producible": false,
+"measurements": [],
+"name": "NIV BIBLE",
+"price": 3000.0,
+"price_kes": 3000.0,
+"price_usd": 30.0,
+"prices": {
+"KES": 3000.0,
+"USD": 30.0,
+"ZMW": 600.0
+},
+"product_type": "simple",
+"sku": "BIB-NB-001",
+"slug": "niv-bible",
+"unit": "",
+"variants": []
+},
+{
+"aliases": [
+"clergy bib kenya",
+"rabat",
+"clergy rabat",
+"shirtfront clergy",
+"clergy vest",
+"collar bib nairobi",
+"clerical vest kenya",
+"bib for clergy collar"
+],
+"category": "Clergy Vestments",
+"description": "Clergy bib (rabat) with a collar insert slot — the smart shirtfront that completes the clerical look over any shirt.",
+"hub_product_id": 92,
+"in_stock": true,
+"is_producible": false,
+"measurements": [],
+"name": "Bib",
+"price": 1500.0,
+"price_kes": 1500.0,
+"price_usd": 20.0,
+"prices": {
+"KES": 1500.0,
+"USD": 20.0,
+"ZMW": 300.0
+},
+"product_type": "simple",
+"sku": "CLE-B-001",
+"slug": "bib",
+"unit": "",
+"variants": []
+},
+{
+"aliases": [
+"communion bread plate",
+"gold bread plate",
+"bread plate",
+"host plate",
+"wafer tray",
+"bread tray with lid",
+"golden bread tray",
+"sinia ya mkate",
+"communion plate"
+],
+"category": "Golden Communion Trays",
+"description": "Shallow gold-tone bread tray with a fitted lid — keeps communion bread dignified and dust-free from preparation to distribution.",
+"hub_product_id": 91,
+"in_stock": true,
+"is_producible": false,
+"measurements": [],
+"name": "Gold bread tray",
+"price": 14000.0,
+"price_kes": 14000.0,
+"price_usd": 140.0,
+"prices": {
+"KES": 14000.0,
+"USD": 140.0,
+"ZMW": 2800.0
+},
+"product_type": "simple",
+"sku": "COL-GBT-001",
+"slug": "gold-bread-tray",
+"unit": "",
+"variants": []
+},
+{
+"aliases": [
+"white princess cassock",
+"ladies white cassock",
+"white cassock dress",
+"festal cassock",
+"white princess dress",
+"women white clergy dress",
+"white casock",
+"easter clergy dress",
+"white ladies cassock",
+"princess cassock white",
+"white cassock for women",
+"deaconess cassock",
+"ladies white robe",
+"white cassok",
+"women clergy cassock",
+"ladies cassock white kenya"
+],
+"category": "Clergy Vestments",
+"description": "White ladies' princess cassock for festal seasons — Christmas, Easter, weddings and celebration Sundays, made to order in Nairobi.",
+"hub_product_id": 90,
+"in_stock": true,
+"is_producible": true,
+"measurements": [
+{
+"name": "Neck",
+"required": true,
+"unit": "Inches"
+},
+{
+"name": "Shoulders",
+"required": true,
+"unit": "Inches"
+},
+{
+"name": "Sleeves",
+"required": true,
+"unit": "Inches"
+},
+{
+"name": "Wrist",
+"required": true,
+"unit": "Inches"
+},
+{
+"name": "Arm Hole",
+"required": true,
+"unit": "Inches"
+},
+{
+"name": "Upper Arm",
+"required": true,
+"unit": "Inches"
+},
+{
+"name": "Bodice",
+"required": true,
+"unit": "Inches"
+},
+{
+"name": "Waist",
+"required": true,
+"unit": "Inches"
+},
+{
+"name": "Hips",
+"required": true,
+"unit": "Inches"
+},
+{
+"name": "Blouse Length",
+"required": true,
+"unit": "Inches"
+},
+{
+"name": "Full Length",
+"required": true,
+"unit": "Inches"
+}
+],
+"name": "White Princes Cassock",
+"price": 13000.0,
+"price_kes": 13000.0,
+"price_max_kes": 13000.0,
+"price_max_usd": 130.0,
+"price_min_kes": 13000.0,
+"price_min_usd": 130.0,
+"price_usd": 130.0,
+"prices": {
+"KES": 13000.0,
+"USD": 130.0,
+"ZMW": 2600.0
+},
+"product_type": "variable",
+"sku": "CLE-PCB-001",
+"slug": "white-princes-cassock",
+"unit": "",
+"variants": [
+{
+"attributes": {
+"Button & Piping": "Purple Red",
+"Colour": "Black",
+"Pleats": "black"
+},
+"is_default": false,
+"label": "White Princes Cassock — Black Pleats, Purple Red Button & Piping",
+"name": "White Princes Cassock + Black Pleats, Purple Red Button & Piping",
+"price_kes": 13000.0,
+"price_usd": 130.0,
+"prices": {
+"KES": 13000.0,
+"USD": 130.0,
+"ZMW": 2600.0
+},
+"sku": "CLE-PCB-001-BLA-BLA-PUR"
+},
+{
+"attributes": {
+"Colour": "Grey",
+"Features": "Pleats, Piping and Buttons",
+"Size": "L"
+},
+"is_default": false,
+"label": "White Princes Cassock — Grey Pleats, Piping and Buttons / Size L",
+"name": "White Princes Cassock + Grey Pleats, Piping and Buttons",
+"price_kes": 13000.0,
+"price_usd": 130.0,
+"prices": {
+"KES": 13000.0,
+"USD": 130.0,
+"ZMW": 2600.0
+},
+"sku": "CLE-PCB-001-GRE-L-2"
+},
+{
+"attributes": {
+"Colour": "Black",
+"Features": "Pleats, Piping and Buttons",
+"Size": "S"
+},
+"is_default": true,
+"label": "White Princes Cassock — Black Pleats, Piping and Buttons / Size S",
+"name": "White Princes Cassock + Black Pleats, Piping and Buttons",
+"price_kes": 13000.0,
+"price_usd": 130.0,
+"prices": {
+"KES": 13000.0,
+"USD": 130.0,
+"ZMW": 2600.0
+},
+"sku": "CLE-PCB-001-BLA-S"
+},
+{
+"attributes": {
+"Colour": "Black",
+"Features": "Pleats, Piping and Buttons",
+"Size": "M"
+},
+"is_default": false,
+"label": "White Princes Cassock — Black Pleats, Piping and Buttons / Size M",
+"name": "White Princes Cassock + Black Pleats, Piping and Buttons",
+"price_kes": 13000.0,
+"price_usd": 130.0,
+"prices": {
+"KES": 13000.0,
+"USD": 130.0,
+"ZMW": 2600.0
+},
+"sku": "CLE-PCB-001-BLA-M"
+},
+{
+"attributes": {
+"Colour": "Black",
+"Features": "Pleats, Piping and Buttons",
+"Size": "L"
+},
+"is_default": false,
+"label": "White Princes Cassock — Black Pleats, Piping and Buttons / Size L",
+"name": "White Princes Cassock + Black Pleats, Piping and Buttons",
+"price_kes": 13000.0,
+"price_usd": 130.0,
+"prices": {
+"KES": 13000.0,
+"USD": 130.0,
+"ZMW": 2600.0
+},
+"sku": "CLE-PCB-001-BLA-L"
+},
+{
+"attributes": {
+"Colour": "Black",
+"Features": "Pleats, Piping and Buttons",
+"Size": "XL"
+},
+"is_default": false,
+"label": "White Princes Cassock — Black Pleats, Piping and Buttons / Size XL",
+"name": "White Princes Cassock + Black Pleats, Piping and Buttons",
+"price_kes": 13000.0,
+"price_usd": 130.0,
+"prices": {
+"KES": 13000.0,
+"USD": 130.0,
+"ZMW": 2600.0
+},
+"sku": "CLE-PCB-001-BLA-XL"
+},
+{
+"attributes": {
+"Colour": "Black",
+"Features": "Pleats, Piping and Buttons",
+"Size": "XXL"
+},
+"is_default": false,
+"label": "White Princes Cassock — Black Pleats, Piping and Buttons / Size XXL",
+"name": "White Princes Cassock + Black Pleats, Piping and Buttons",
+"price_kes": 13000.0,
+"price_usd": 130.0,
+"prices": {
+"KES": 13000.0,
+"USD": 130.0,
+"ZMW": 2600.0
+},
+"sku": "CLE-PCB-001-BLA-XXL"
+},
+{
+"attributes": {
+"Colour": "White",
+"Features": "Pleats, Piping and Buttons",
+"Size": "S"
+},
+"is_default": false,
+"label": "White Princes Cassock — White Pleats, Piping and Buttons / Size S",
+"name": "White Princes Cassock + White Pleats, Piping and Buttons",
+"price_kes": 13000.0,
+"price_usd": 130.0,
+"prices": {
+"KES": 13000.0,
+"USD": 130.0,
+"ZMW": 2600.0
+},
+"sku": "CLE-PCB-001-WHI-S"
+},
+{
+"attributes": {
+"Colour": "White",
+"Features": "Pleats, Piping and Buttons",
+"Size": "M"
+},
+"is_default": false,
+"label": "White Princes Cassock — White Pleats, Piping and Buttons / Size M",
+"name": "White Princes Cassock + White Pleats, Piping and Buttons",
+"price_kes": 13000.0,
+"price_usd": 130.0,
+"prices": {
+"KES": 13000.0,
+"USD": 130.0,
+"ZMW": 2600.0
+},
+"sku": "CLE-PCB-001-WHI-M"
+},
+{
+"attributes": {
+"Colour": "White",
+"Features": "Pleats, Piping and Buttons",
+"Size": "L"
+},
+"is_default": false,
+"label": "White Princes Cassock — White Pleats, Piping and Buttons / Size L",
+"name": "White Princes Cassock + White Pleats, Piping and Buttons",
+"price_kes": 13000.0,
+"price_usd": 130.0,
+"prices": {
+"KES": 13000.0,
+"USD": 130.0,
+"ZMW": 2600.0
+},
+"sku": "CLE-PCB-001-WHI-L"
+},
+{
+"attributes": {
+"Colour": "White",
+"Features": "Pleats, Piping and Buttons",
+"Size": "XL"
+},
+"is_default": false,
+"label": "White Princes Cassock — White Pleats, Piping and Buttons / Size XL",
+"name": "White Princes Cassock + White Pleats, Piping and Buttons",
+"price_kes": 13000.0,
+"price_usd": 130.0,
+"prices": {
+"KES": 13000.0,
+"USD": 130.0,
+"ZMW": 2600.0
+},
+"sku": "CLE-PCB-001-WHI-XL"
+},
+{
+"attributes": {
+"Colour": "White",
+"Features": "Pleats, Piping and Buttons",
+"Size": "XXL"
+},
+"is_default": false,
+"label": "White Princes Cassock — White Pleats, Piping and Buttons / Size XXL",
+"name": "White Princes Cassock + White Pleats, Piping and Buttons",
+"price_kes": 13000.0,
+"price_usd": 130.0,
+"prices": {
+"KES": 13000.0,
+"USD": 130.0,
+"ZMW": 2600.0
+},
+"sku": "CLE-PCB-001-WHI-XXL"
+},
+{
+"attributes": {
+"Colour": "Navy",
+"Features": "Pleats, Piping and Buttons",
+"Size": "S"
+},
+"is_default": false,
+"label": "White Princes Cassock — Navy Pleats, Piping and Buttons / Size S",
+"name": "White Princes Cassock + Navy Pleats, Piping and Buttons",
+"price_kes": 13000.0,
+"price_usd": 130.0,
+"prices": {
+"KES": 13000.0,
+"USD": 130.0,
+"ZMW": 2600.0
+},
+"sku": "CLE-PCB-001-NAV-S"
+},
+{
+"attributes": {
+"Colour": "Navy",
+"Features": "Pleats, Piping and Buttons",
+"Size": "M"
+},
+"is_default": false,
+"label": "White Princes Cassock — Navy Pleats, Piping and Buttons / Size M",
+"name": "White Princes Cassock + Navy Pleats, Piping and Buttons",
+"price_kes": 13000.0,
+"price_usd": 130.0,
+"prices": {
+"KES": 13000.0,
+"USD": 130.0,
+"ZMW": 2600.0
+},
+"sku": "CLE-PCB-001-NAV-M"
+},
+{
+"attributes": {
+"Colour": "Navy",
+"Features": "Pleats, Piping and Buttons",
+"Size": "L"
+},
+"is_default": false,
+"label": "White Princes Cassock — Navy Pleats, Piping and Buttons / Size L",
+"name": "White Princes Cassock + Navy Pleats, Piping and Buttons",
+"price_kes": 13000.0,
+"price_usd": 130.0,
+"prices": {
+"KES": 13000.0,
+"USD": 130.0,
+"ZMW": 2600.0
+},
+"sku": "CLE-PCB-001-NAV-L"
+},
+{
+"attributes": {
+"Colour": "Navy",
+"Features": "Pleats, Piping and Buttons",
+"Size": "XL"
+},
+"is_default": false,
+"label": "White Princes Cassock — Navy Pleats, Piping and Buttons / Size XL",
+"name": "White Princes Cassock + Navy Pleats, Piping and Buttons",
+"price_kes": 13000.0,
+"price_usd": 130.0,
+"prices": {
+"KES": 13000.0,
+"USD": 130.0,
+"ZMW": 2600.0
+},
+"sku": "CLE-PCB-001-NAV-XL"
+},
+{
+"attributes": {
+"Colour": "Navy",
+"Features": "Pleats, Piping and Buttons",
+"Size": "XXL"
+},
+"is_default": false,
+"label": "White Princes Cassock — Navy Pleats, Piping and Buttons / Size XXL",
+"name": "White Princes Cassock + Navy Pleats, Piping and Buttons",
+"price_kes": 13000.0,
+"price_usd": 130.0,
+"prices": {
+"KES": 13000.0,
+"USD": 130.0,
+"ZMW": 2600.0
+},
+"sku": "CLE-PCB-001-NAV-XXL"
+},
+{
+"attributes": {
+"Colour": "Red",
+"Features": "Pleats, Piping and Buttons",
+"Size": "S"
+},
+"is_default": false,
+"label": "White Princes Cassock — Red Pleats, Piping and Buttons / Size S",
+"name": "White Princes Cassock + Red Pleats, Piping and Buttons",
+"price_kes": 13000.0,
+"price_usd": 130.0,
+"prices": {
+"KES": 13000.0,
+"USD": 130.0,
+"ZMW": 2600.0
+},
+"sku": "CLE-PCB-001-RED-S"
+},
+{
+"attributes": {
+"Colour": "Red",
+"Features": "Pleats, Piping and Buttons",
+"Size": "M"
+},
+"is_default": false,
+"label": "White Princes Cassock — Red Pleats, Piping and Buttons / Size M",
+"name": "White Princes Cassock + Red Pleats, Piping and Buttons",
+"price_kes": 13000.0,
+"price_usd": 130.0,
+"prices": {
+"KES": 13000.0,
+"USD": 130.0,
+"ZMW": 2600.0
+},
+"sku": "CLE-PCB-001-RED-M"
+},
+{
+"attributes": {
+"Colour": "Red",
+"Features": "Pleats, Piping and Buttons",
+"Size": "L"
+},
+"is_default": false,
+"label": "White Princes Cassock — Red Pleats, Piping and Buttons / Size L",
+"name": "White Princes Cassock + Red Pleats, Piping and Buttons",
+"price_kes": 13000.0,
+"price_usd": 130.0,
+"prices": {
+"KES": 13000.0,
+"USD": 130.0,
+"ZMW": 2600.0
+},
+"sku": "CLE-PCB-001-RED-L"
+},
+{
+"attributes": {
+"Colour": "Red",
+"Features": "Pleats, Piping and Buttons",
+"Size": "XL"
+},
+"is_default": false,
+"label": "White Princes Cassock — Red Pleats, Piping and Buttons / Size XL",
+"name": "White Princes Cassock + Red Pleats, Piping and Buttons",
+"price_kes": 13000.0,
+"price_usd": 130.0,
+"prices": {
+"KES": 13000.0,
+"USD": 130.0,
+"ZMW": 2600.0
+},
+"sku": "CLE-PCB-001-RED-XL"
+},
+{
+"attributes": {
+"Colour": "Red",
+"Features": "Pleats, Piping and Buttons",
+"Size": "XXL"
+},
+"is_default": false,
+"label": "White Princes Cassock — Red Pleats, Piping and Buttons / Size XXL",
+"name": "White Princes Cassock + Red Pleats, Piping and Buttons",
+"price_kes": 13000.0,
+"price_usd": 130.0,
+"prices": {
+"KES": 13000.0,
+"USD": 130.0,
+"ZMW": 2600.0
+},
+"sku": "CLE-PCB-001-RED-XXL"
+},
+{
+"attributes": {
+"Colour": "Green",
+"Features": "Pleats, Piping and Buttons",
+"Size": "S"
+},
+"is_default": false,
+"label": "White Princes Cassock — Green Pleats, Piping and Buttons / Size S",
+"name": "White Princes Cassock + Green Pleats, Piping and Buttons",
+"price_kes": 13000.0,
+"price_usd": 130.0,
+"prices": {
+"KES": 13000.0,
+"USD": 130.0,
+"ZMW": 2600.0
+},
+"sku": "CLE-PCB-001-GRE-S"
+},
+{
+"attributes": {
+"Colour": "Green",
+"Features": "Pleats, Piping and Buttons",
+"Size": "M"
+},
+"is_default": false,
+"label": "White Princes Cassock — Green Pleats, Piping and Buttons / Size M",
+"name": "White Princes Cassock + Green Pleats, Piping and Buttons",
+"price_kes": 13000.0,
+"price_usd": 130.0,
+"prices": {
+"KES": 13000.0,
+"USD": 130.0,
+"ZMW": 2600.0
+},
+"sku": "CLE-PCB-001-GRE-M"
+},
+{
+"attributes": {
+"Colour": "Green",
+"Features": "Pleats, Piping and Buttons",
+"Size": "L"
+},
+"is_default": false,
+"label": "White Princes Cassock — Green Pleats, Piping and Buttons / Size L",
+"name": "White Princes Cassock + Green Pleats, Piping and Buttons",
+"price_kes": 13000.0,
+"price_usd": 130.0,
+"prices": {
+"KES": 13000.0,
+"USD": 130.0,
+"ZMW": 2600.0
+},
+"sku": "CLE-PCB-001-GRE-L"
+},
+{
+"attributes": {
+"Colour": "Green",
+"Features": "Pleats, Piping and Buttons",
+"Size": "XL"
+},
+"is_default": false,
+"label": "White Princes Cassock — Green Pleats, Piping and Buttons / Size XL",
+"name": "White Princes Cassock + Green Pleats, Piping and Buttons",
+"price_kes": 13000.0,
+"price_usd": 130.0,
+"prices": {
+"KES": 13000.0,
+"USD": 130.0,
+"ZMW": 2600.0
+},
+"sku": "CLE-PCB-001-GRE-XL"
+},
+{
+"attributes": {
+"Colour": "Green",
+"Features": "Pleats, Piping and Buttons",
+"Size": "XXL"
+},
+"is_default": false,
+"label": "White Princes Cassock — Green Pleats, Piping and Buttons / Size XXL",
+"name": "White Princes Cassock + Green Pleats, Piping and Buttons",
+"price_kes": 13000.0,
+"price_usd": 130.0,
+"prices": {
+"KES": 13000.0,
+"USD": 130.0,
+"ZMW": 2600.0
+},
+"sku": "CLE-PCB-001-GRE-XXL"
+},
+{
+"attributes": {
+"Colour": "Grey",
+"Features": "Pleats, Piping and Buttons",
+"Size": "S"
+},
+"is_default": false,
+"label": "White Princes Cassock — Grey Pleats, Piping and Buttons / Size S",
+"name": "White Princes Cassock + Grey Pleats, Piping and Buttons",
+"price_kes": 13000.0,
+"price_usd": 130.0,
+"prices": {
+"KES": 13000.0,
+"USD": 130.0,
+"ZMW": 2600.0
+},
+"sku": "CLE-PCB-001-GRE-S-2"
+},
+{
+"attributes": {
+"Colour": "Grey",
+"Features": "Pleats, Piping and Buttons",
+"Size": "M"
+},
+"is_default": false,
+"label": "White Princes Cassock — Grey Pleats, Piping and Buttons / Size M",
+"name": "White Princes Cassock + Grey Pleats, Piping and Buttons",
+"price_kes": 13000.0,
+"price_usd": 130.0,
+"prices": {
+"KES": 13000.0,
+"USD": 130.0,
+"ZMW": 2600.0
+},
+"sku": "CLE-PCB-001-GRE-M-2"
+},
+{
+"attributes": {
+"Colour": "Grey",
+"Features": "Pleats, Piping and Buttons",
+"Size": "XL"
+},
+"is_default": false,
+"label": "White Princes Cassock — Grey Pleats, Piping and Buttons / Size XL",
+"name": "White Princes Cassock + Grey Pleats, Piping and Buttons",
+"price_kes": 13000.0,
+"price_usd": 130.0,
+"prices": {
+"KES": 13000.0,
+"USD": 130.0,
+"ZMW": 2600.0
+},
+"sku": "CLE-PCB-001-GRE-XL-2"
+},
+{
+"attributes": {
+"Colour": "Grey",
+"Features": "Pleats, Piping and Buttons",
+"Size": "XXL"
+},
+"is_default": false,
+"label": "White Princes Cassock — Grey Pleats, Piping and Buttons / Size XXL",
+"name": "White Princes Cassock + Grey Pleats, Piping and Buttons",
+"price_kes": 13000.0,
+"price_usd": 130.0,
+"prices": {
+"KES": 13000.0,
+"USD": 130.0,
+"ZMW": 2600.0
+},
+"sku": "CLE-PCB-001-GRE-XXL-2"
+},
+{
+"attributes": {
+"Colour": "White",
+"Material for Pleats": "Self Print",
+"Pleats": "White"
+},
+"is_default": false,
+"label": "White Princes Cassock — White Pleats, Self Print Material for Pleats",
+"name": "White Princes Cassock + White Pleats, Self Print Material for Pleats",
+"price_kes": 13000.0,
+"price_usd": 130.0,
+"prices": {
+"KES": 13000.0,
+"USD": 130.0,
+"ZMW": 2600.0
+},
+"sku": "CLE-PC-001-WHI-WHI-SEL-M"
+},
+{
+"attributes": {
+"Colour": "White",
+"Material for Pleats": "Self Print",
+"Pleats": "Blue"
+},
+"is_default": false,
+"label": "White Princes Cassock — Blue Pleats, Self Print Material for Pleats",
+"name": "White Princes Cassock + Blue Pleats, Self Print Material for Pleats",
+"price_kes": 13000.0,
+"price_usd": 130.0,
+"prices": {
+"KES": 13000.0,
+"USD": 130.0,
+"ZMW": 2600.0
+},
+"sku": "CLE-PC-001-WHI-BLU-SEL-M"
+},
+{
+"attributes": {
+"Colour": "White",
+"Material for Pleats": "Mint Cotton",
+"Pleats": "Red"
+},
+"is_default": false,
+"label": "White Princes Cassock — Red Pleats, Mint Cotton Material for Pleats",
+"name": "White Princes Cassock + Red Pleats, Mint Cotton Material for Pleats",
+"price_kes": 13000.0,
+"price_usd": 130.0,
+"prices": {
+"KES": 13000.0,
+"USD": 130.0,
+"ZMW": 2600.0
+},
+"sku": "CLE-PC-001-WHI-RED-MIN-M"
+},
+{
+"attributes": {
+"Colour": "White",
+"Material for Pleats": "Self Print",
+"Pleats": "Red"
+},
+"is_default": false,
+"label": "White Princes Cassock — Red Pleats, Self Print Material for Pleats",
+"name": "White Princes Cassock + Red Pleats, Self Print Material for Pleats",
+"price_kes": 13000.0,
+"price_usd": 130.0,
+"prices": {
+"KES": 13000.0,
+"USD": 130.0,
+"ZMW": 2600.0
+},
+"sku": "CLE-PC-001-WHI-RED-SEL-M"
+},
+{
+"attributes": {
+"Colour": "White",
+"Material for Pleats": "Mint Cotton",
+"Pleats": "Green"
+},
+"is_default": false,
+"label": "White Princes Cassock — Green Pleats, Mint Cotton Material for Pleats",
+"name": "White Princes Cassock + Green Pleats, Mint Cotton Material for Pleats",
+"price_kes": 13000.0,
+"price_usd": 130.0,
+"prices": {
+"KES": 13000.0,
+"USD": 130.0,
+"ZMW": 2600.0
+},
+"sku": "CLE-PC-001-WHI-GRE-MIN-M"
+},
+{
+"attributes": {
+"Colour": "White",
+"Material for Pleats": "Mint Cotton",
+"Pleats": "White"
+},
+"is_default": false,
+"label": "White Princes Cassock — White Pleats, Mint Cotton Material for Pleats",
+"name": "White Princes Cassock + White Pleats, Mint Cotton Material for Pleats",
+"price_kes": 13000.0,
+"price_usd": 130.0,
+"prices": {
+"KES": 13000.0,
+"USD": 130.0,
+"ZMW": 2600.0
+},
+"sku": "CLE-PC-001-WHI-WHI-MIN-M"
+},
+{
+"attributes": {
+"Colour": "White",
+"Material for Pleats": "Mint Cotton",
+"Pleats": "Purple Red"
+},
+"is_default": false,
+"label": "White Princes Cassock — Purple Red Pleats, Mint Cotton Material for Pleats",
+"name": "White Princes Cassock + Purple Red Pleats, Mint Cotton Material for Pleats",
+"price_kes": 13000.0,
+"price_usd": 130.0,
+"prices": {
+"KES": 13000.0,
+"USD": 130.0,
+"ZMW": 2600.0
+},
+"sku": "CLE-PC-001-WHI-PUR-MIN-M"
+},
+{
+"attributes": {
+"Colour": "White",
+"Material for Pleats": "Self Print",
+"Pleats": "Purple Red"
+},
+"is_default": false,
+"label": "White Princes Cassock — Purple Red Pleats, Self Print Material for Pleats",
+"name": "White Princes Cassock + Purple Red Pleats, Self Print Material for Pleats",
+"price_kes": 13000.0,
+"price_usd": 130.0,
+"prices": {
+"KES": 13000.0,
+"USD": 130.0,
+"ZMW": 2600.0
+},
+"sku": "CLE-PC-001-WHI-PUR-SEL-M"
+},
+{
+"attributes": {
+"Colour": "White",
+"Material for Pleats": "Mint Cotton",
+"Pleats": "Blue"
+},
+"is_default": false,
+"label": "White Princes Cassock — Blue Pleats, Mint Cotton Material for Pleats",
+"name": "White Princes Cassock + Blue Pleats, Mint Cotton Material for Pleats",
+"price_kes": 13000.0,
+"price_usd": 130.0,
+"prices": {
+"KES": 13000.0,
+"USD": 130.0,
+"ZMW": 2600.0
+},
+"sku": "CLE-PC-001-WHI-BLU-MIN-M"
+},
+{
+"attributes": {
+"Colour": "White",
+"Material for Pleats": "Self Print",
+"Pleats": "Green"
+},
+"is_default": false,
+"label": "White Princes Cassock — Green Pleats, Self Print Material for Pleats",
+"name": "White Princes Cassock + Green Pleats, Self Print Material for Pleats",
+"price_kes": 13000.0,
+"price_usd": 130.0,
+"prices": {
+"KES": 13000.0,
+"USD": 130.0,
+"ZMW": 2600.0
+},
+"sku": "CLE-PC-001-WHI-GRE-SEL-M"
+}
+]
+},
+{
+"aliases": [
+"white alb",
+"priest alb",
+"altar server robe",
+"alb kenya",
+"white church robe",
+"alb vestment",
+"deacon alb"
+],
+"category": "Clergy Vestments",
+"description": "A simple white full-length, long-sleeved alb — the garment of baptismal purity for servers, lectors, deacons and priests.",
+"hub_product_id": 88,
+"in_stock": true,
+"is_producible": false,
+"measurements": [],
+"name": "Alb",
+"price": 8500.0,
+"price_kes": 8500.0,
+"price_usd": 90.0,
+"prices": {
+"KES": 8500.0,
+"USD": 90.0,
+"ZMW": 1700.0
+},
+"product_type": "simple",
+"sku": "CLE-A-001",
+"slug": "alb",
+"unit": "",
+"variants": []
+},
+{
+"aliases": [
+"altar bell",
+"sanctuary bell",
+"mass bell",
+"sanctus bell",
+"church bells set",
+"kengele",
+"communion bell",
+"four bell cluster",
+"altar bells kenya"
+],
+"category": "Clergy Accessories",
+"description": "Altar bells in single, double, triple and four-bell styles — a clear, bright ring for the holiest moments of the Mass.",
+"hub_product_id": 79,
+"in_stock": true,
+"is_producible": false,
+"measurements": [],
+"name": "BELL",
+"price": 2500.03,
+"price_kes": 2500.03,
+"price_max_kes": 3500.0,
+"price_max_usd": 40.0,
+"price_min_kes": 2500.03,
+"price_min_usd": 30.0,
+"price_usd": 40.0,
+"prices": {
+"KES": 2500.03,
+"USD": 40.0,
+"ZMW": 700.0
+},
+"product_type": "variable",
+"sku": "CLE-AB-001",
+"slug": "altar-bell",
+"unit": "",
+"variants": [
+{
+"attributes": {
+"Size": "S"
+},
+"is_default": true,
+"label": "BELL — Size S",
+"name": "BELL",
+"price_kes": 2500.03,
+"price_usd": 30.0,
+"prices": {
+"KES": 2500.03,
+"USD": 30.0,
+"ZMW": 510.0
+},
+"sku": "CLE-AB-001-S"
+},
+{
+"attributes": {
+"Size": "M"
+},
+"is_default": false,
+"label": "BELL — Size M",
+"name": "BELL",
+"price_kes": 3500.0,
+"price_usd": 40.0,
+"prices": {
+"KES": 3500.0,
+"USD": 40.0,
+"ZMW": 700.0
+},
+"sku": "CLE-AB-001-M"
+}
+]
+},
+{
+"aliases": [
+"crosier",
+"crozier",
+"pastoral staff",
+"shepherd staff",
+"shepherds rod",
+"bishop staff",
+"bishop's staff kenya",
+"fimbo ya askofu",
+"shepherd's crook"
+],
+"category": "Vestments",
+"description": "The bishop's crozier — a shepherd's-crook pastoral staff symbolising Christ-like care for the flock of God.",
+"hub_product_id": 80,
+"in_stock": false,
+"is_producible": false,
+"measurements": [],
+"name": "Staff / Crozier / Shepherd Rod",
+"price": 30000.0,
+"price_kes": 30000.0,
+"price_usd": 300.0,
+"prices": {
+"KES": 30000.0,
+"USD": 300.0,
+"ZMW": 6000.0
+},
+"product_type": "simple",
+"sku": "VES-SR-001",
+"slug": "staff-crozier-shepherd-rod",
+"unit": "",
+"variants": []
+},
+{
+"aliases": [
+"large communion chalice",
+"big chalice",
+"concelebration chalice",
+"silver chalice",
+"golden chalice",
+"common cup chalice",
+"chalice for large church"
+],
+"category": "Communion Items",
+"description": "A generously sized chalice in golden or silver finish — made for large congregations, concelebrations and the common cup.",
+"hub_product_id": 86,
+"in_stock": true,
+"is_producible": false,
+"measurements": [],
+"name": "Small Chalice Cup",
+"price": 12000.0,
+"price_kes": 12000.0,
+"price_usd": 120.0,
+"prices": {
+"KES": 12000.0,
+"USD": 120.0,
+"ZMW": 2400.0
+},
+"product_type": "simple",
+"sku": "COM-LC-001",
+"slug": "large-chalice",
+"unit": "",
+"variants": []
+},
+{
+"aliases": [
+"full cassock set",
+"cassock and stole set",
+"complete clergy outfit",
+"ordination cassock set",
+"clergy set",
+"priest cassock set",
+"cassok set",
+"clergy robes set kenya"
+],
+"category": "Clergy Vestments",
+"description": "Complete cassock outfit in one order — cassock, stole, belt, straight collar shirt and a 12 inch clergy collar.",
+"hub_product_id": 84,
+"in_stock": true,
+"is_producible": false,
+"measurements": [],
+"name": "Cassock Set",
+"price": 19500.0,
+"price_kes": 19500.0,
+"price_usd": 200.0,
+"prices": {
+"KES": 19500.0,
+"USD": 200.0,
+"ZMW": 3900.0
+},
+"product_type": "simple",
+"sku": "CLE-CS-001",
+"slug": "cassock-set",
+"unit": "",
+"variants": []
+},
+{
+"aliases": [
+"bishop ring",
+"bishopric ring",
+"episcopal ring",
+"clergy ring",
+"bishop's ring kenya",
+"pete ya askofu",
+"consecration ring",
+"ring for bishops"
+],
+"category": "Clergy Accessories",
+"description": "Bishopric rings in all sizes — the covenant band of a shepherd wedded in fidelity to the church and its people.",
+"hub_product_id": 83,
+"in_stock": true,
+"is_producible": false,
+"measurements": [],
+"name": "Ring",
+"price": 1500.0,
+"price_kes": 1500.0,
+"price_usd": 20.0,
+"prices": {
+"KES": 1500.0,
+"USD": 20.0,
+"ZMW": 300.0
+},
+"product_type": "variable",
+"sku": "CLE-R-001",
+"slug": "bishops-ring",
+"unit": "",
+"variants": []
+},
+{
+"aliases": [
+"head covering",
+"ladies head covering",
+"church head scarf",
+"prayer scarf",
+"head wrap for church",
+"kitambaa cha kichwa",
+"chapel veil",
+"women's head covering kenya"
+],
+"category": "Vestments",
+"description": "Ladies' head covering for prayer and worship in the 1 Corinthians 11 tradition — crowned for worship with quiet dignity.",
+"hub_product_id": 81,
+"in_stock": true,
+"is_producible": false,
+"measurements": [],
+"name": "Kitambaa",
+"price": 1000.0,
+"price_kes": 1000.0,
+"price_usd": 10.0,
+"prices": {
+"KES": 1000.0,
+"USD": 10.0,
+"ZMW": 200.0
+},
+"product_type": "simple",
+"sku": "VES-K-001",
+"slug": "kitambaa",
+"unit": "",
+"variants": []
+},
+{
+"aliases": [
+"aspergillum",
+"holy water sprinkler",
+"holy water shaker",
+"asperges sprinkler",
+"church water sprinkler",
+"blessing sprinkler",
+"aspergilum",
+"water sprinkler for church"
+],
+"category": "Church Supplies",
+"description": "The aspergillum — a holy water sprinkler for blessing congregation, altar and home, used in the Asperges rite and baptisms.",
+"hub_product_id": 77,
+"in_stock": true,
+"is_producible": false,
+"measurements": [],
+"name": "Sprinkler (Aspergillum)",
+"price": 10000.0,
+"price_kes": 10000.0,
+"price_max_kes": 14000.0,
+"price_max_usd": 140.0,
+"price_min_kes": 7000.0,
+"price_min_usd": 70.0,
+"price_usd": 100.0,
+"prices": {
+"KES": 10000.0,
+"USD": 100.0,
+"ZMW": 2000.0
+},
+"product_type": "variable",
+"sku": "GEN-S-001",
+"slug": "sprinkler",
+"unit": "",
+"variants": [
+{
+"attributes": {
+"Brass": "Brass",
+"Size": "S"
+},
+"is_default": false,
+"label": "Sprinkler (Aspergillum) — Brass sprinkler / Size S",
+"name": "Brass sprinkler",
+"price_kes": 7500.0,
+"price_usd": 80.0,
+"prices": {
+"KES": 7500.0,
+"USD": 80.0,
+"ZMW": 1500.0
+},
+"sku": "GEN-S-001-S-BRA"
+},
+{
+"attributes": {
+"Brass": "Silver",
+"Size": "M"
+},
+"is_default": false,
+"label": "Sprinkler (Aspergillum) — Silver sprinkler / Size M",
+"name": "Silver sprinkler",
+"price_kes": 8500.0,
+"price_usd": 90.0,
+"prices": {
+"KES": 8500.0,
+"USD": 90.0,
+"ZMW": 1700.0
+},
+"sku": "GEN-S-001-M-SIL"
+},
+{
+"attributes": {
+"Brass": "Brass",
+"Size": "M"
+},
+"is_default": false,
+"label": "Sprinkler (Aspergillum) — Brass sprinkler / Size M",
+"name": "Brass sprinkler",
+"price_kes": 9000.0,
+"price_usd": 90.0,
+"prices": {
+"KES": 9000.0,
+"USD": 90.0,
+"ZMW": 1800.0
+},
+"sku": "GEN-S-001-M-BRA"
+},
+{
+"attributes": {
+"Brass": "Silver",
+"Size": "L"
+},
+"is_default": false,
+"label": "Sprinkler (Aspergillum) — Silver sprinkler / Size L",
+"name": "Silver sprinkler",
+"price_kes": 13000.0,
+"price_usd": 130.0,
+"prices": {
+"KES": 13000.0,
+"USD": 130.0,
+"ZMW": 2600.0
+},
+"sku": "GEN-S-001-L-SIL"
+},
+{
+"attributes": {
+"Brass": "Brass",
+"Size": "L"
+},
+"is_default": false,
+"label": "Sprinkler (Aspergillum) — Brass sprinkler / Size L",
+"name": "Brass sprinkler",
+"price_kes": 14000.0,
+"price_usd": 140.0,
+"prices": {
+"KES": 14000.0,
+"USD": 140.0,
+"ZMW": 2800.0
+},
+"sku": "GEN-S-001-L-BRA"
+},
+{
+"attributes": {
+"Brass": "Silver",
+"Size": "S"
+},
+"is_default": true,
+"label": "Sprinkler (Aspergillum) — Silver sprinkler / Size S",
+"name": "Silver sprinkler",
+"price_kes": 7000.0,
+"price_usd": 70.0,
+"prices": {
+"KES": 7000.0,
+"USD": 70.0,
+"ZMW": 1400.0
+},
+"sku": "GEN-S-001-S-SIL"
+}
+]
+},
+{
+"aliases": [
+"new joy bible",
+"joy bible blue",
+"joy bible pink",
+"children bible kenya",
+"kids bible nairobi",
+"biblia ya watoto",
+"first bible for child",
+"childrens bible blue pink"
+],
+"category": "Books & Gifts",
+"description": "The New Joy Bible — a children's Bible in blue or pink, full of pictorial illustrations that entice a child's interest in reading.",
+"hub_product_id": 76,
+"in_stock": true,
+"is_producible": false,
+"measurements": [],
+"name": "New Joy Bible",
+"price": 1500.0,
+"price_kes": 1500.0,
+"price_usd": 20.0,
+"prices": {
+"KES": 1500.0,
+"USD": 20.0,
+"ZMW": 300.0
+},
+"product_type": "simple",
+"sku": "GEN-NJB-001",
+"slug": "new-joy-bible",
+"unit": "",
+"variants": []
+},
+{
+"aliases": [
+"silver communion glasses",
+"metal communion cups",
+"individual communion cups",
+"reusable communion cups",
+"communion cups kenya",
+"vikombe vya ushirika",
+"10ml communion cups",
+"communion wares"
+],
+"category": "Communion Items",
+"description": "Reusable silver communion cups, 10 ml each — a dignified, lasting way to serve the Lord's Supper to every member.",
+"hub_product_id": 75,
+"in_stock": true,
+"is_producible": false,
+"measurements": [],
+"name": "Silver Communion Cups",
+"price": 100.0,
+"price_kes": 100.0,
+"price_usd": 10.0,
+"prices": {
+"KES": 100.0,
+"USD": 10.0,
+"ZMW": 20.0
+},
+"product_type": "simple",
+"sku": "COM-SCC-001",
+"slug": "silver-communion-cups",
+"unit": "",
+"variants": []
+},
+{
+"aliases": [
+"zucchetto",
+"zuchetto",
+"bishop cap",
+"bishops cap",
+"calotte",
+"skull cap kenya",
+"clergy cap",
+"purple skull cap"
+],
+"category": "Clergy Vestments",
+"description": "A round bishop's skull cap — a quiet symbol of humility and reverence, made to your preference and head size.",
+"hub_product_id": 74,
+"in_stock": true,
+"is_producible": false,
+"measurements": [],
+"name": "Skull Cap",
+"price": 1500.0,
+"price_kes": 1500.0,
+"price_usd": 20.0,
+"prices": {
+"KES": 1500.0,
+"USD": 20.0,
+"ZMW": 300.0
+},
+"product_type": "simple",
+"sku": "CLE-SC-001",
+"slug": "skull-cap",
+"unit": "",
+"variants": []
+},
+{
+"aliases": [
+"reversible stole kenya",
+"two in one stole",
+"stole two colours",
+"double faced stole",
+"clergy stole nairobi",
+"pastor stole kenya",
+"seasonal church stole",
+"reversible stole",
+"two sided stole",
+"double side stole",
+"reversible clergy stole",
+"two colour stole",
+"priest stole kenya",
+"stole nairobi",
+"clergy stoles kenya",
+"Double Sided Stoles"
+],
+"category": "Clergy Vestments",
+"description": "Two-colour stole worn either way round — flip from one liturgical season to the next without buying a second stole.",
+"hub_product_id": 73,
+"in_stock": true,
+"is_producible": false,
+"measurements": [],
+"name": "Double sided stole",
+"price": 4000.0,
+"price_kes": 4000.0,
+"price_usd": 40.0,
+"prices": {
+"KES": 4000.0,
+"USD": 40.0,
+"ZMW": 800.0
+},
+"product_type": "simple",
+"sku": "CLE-DSS-001",
+"slug": "double-sided-stole",
+"unit": "",
+"variants": []
+},
+{
+"aliases": [
+"communion cup filler",
+"wine filler bottle",
+"cup filling bottle",
+"squeeze bottle for communion",
+"communion wine dispenser",
+"refilling bottle",
+"communion accessories nairobi"
+],
+"category": "Communion Accessories",
+"description": "The deacon's quiet helper — a squeeze bottle that fills each communion cup with 10–15ml of wine, without a drop on the linen.",
+"hub_product_id": 72,
+"in_stock": true,
+"is_producible": false,
+"measurements": [],
+"name": "Refiller Bottle 500ML",
+"price": 1500.0,
+"price_kes": 1500.0,
+"price_usd": 20.0,
+"prices": {
+"KES": 1500.0,
+"USD": 20.0,
+"ZMW": 300.0
+},
+"product_type": "simple",
+"sku": "COM-R-001",
+"slug": "refiller",
+"unit": "",
+"variants": []
+},
+{
+"aliases": [
+"aluminum communion tray",
+"communion cup tray",
+"40 cup tray",
+"communion tray with lid",
+"affordable communion tray",
+"communion trays kenya",
+"aluminium cup tray",
+"sinia"
+],
+"category": "Communion Items",
+"description": "Light, durable aluminium communion tray for 40 cups with its own lid — 40 plastic cups included to start you serving.",
+"hub_product_id": 71,
+"in_stock": true,
+"is_producible": false,
+"measurements": [],
+"name": "Aluminium Tray",
+"price": 7000.0,
+"price_kes": 7000.0,
+"price_usd": 70.0,
+"prices": {
+"KES": 7000.0,
+"USD": 70.0,
+"ZMW": 1400.0
+},
+"product_type": "simple",
+"sku": "COM-AT-001",
+"slug": "aluminium-tray",
+"unit": "",
+"variants": []
+},
+{
+"aliases": [
+"prefilled communion cups",
+"pre-filled communion cups",
+"sealed communion cups",
+"all in one communion cups",
+"communion sets",
+"prefilled cups kenya",
+"communion elements",
+"travel communion set",
+"ushirika mtakatifu"
+],
+"category": "Communion Items",
+"description": "Sealed single-serve communion — one bread and 10ml of wine in one hygienic package, ready for services, visits and crusades.",
+"hub_product_id": 70,
+"in_stock": true,
+"is_producible": false,
+"measurements": [],
+"name": "Pre-Packed Communion Cups",
+"price": 30.0,
+"price_kes": 30.0,
+"price_usd": 10.0,
+"prices": {
+"KES": 30.0,
+"USD": 10.0,
+"ZMW": 10.0
+},
+"product_type": "simple",
+"sku": "COM-PCC-001",
+"slug": "pre-packed-communion-cups",
+"unit": "",
+"variants": []
+},
+{
+"aliases": [
+"disposable communion cups",
+"plastic communion glasses",
+"communion cups for trays",
+"single use communion cups",
+"communion cups kenya",
+"vikombe vya ushirika",
+"tray communion cups",
+"communion wares"
+],
+"category": "Communion Items",
+"description": "Light, hygienic plastic cups made for communion trays — quick to fill, easy to serve at gatherings of any size.",
+"hub_product_id": 69,
+"in_stock": true,
+"is_producible": false,
+"measurements": [],
+"name": "Plastic Communion Cups",
+"price": 10.0,
+"price_kes": 10.0,
+"price_usd": 10.0,
+"prices": {
+"KES": 10.0,
+"USD": 10.0,
+"ZMW": 10.0
+},
+"product_type": "simple",
+"sku": "COM-PC-001",
+"slug": "plastic-cups",
+"unit": "",
+"variants": []
+},
+{
+"aliases": [
+"communion wafers",
+"communion bread",
+"wafer bread 200",
+"altar bread",
+"mkate wa ushirika",
+"small communion wafer pack",
+"lords supper wafers",
+"communion elements kenya",
+"wafer bread",
+"communion bread 200 pieces",
+"small pack communion wafers",
+"lords supper bread"
+],
+"category": "Communion Items",
+"description": "Compact 200-piece communion wafer pack — a quick online restock between bulk orders, ready for your next service.",
+"hub_product_id": 15,
+"in_stock": true,
+"is_producible": false,
+"measurements": [],
+"name": "Communion Wafer Bread 200PCs",
+"price": 400.0,
+"price_kes": 400.0,
+"price_usd": 10.0,
+"prices": {
+"KES": 400.0,
+"USD": 10.0,
+"ZMW": 80.0
+},
+"product_type": "simple",
+"sku": "CWIZIB1ZL",
+"slug": "communion-wafer-bread-200pcs",
+"unit": "",
+"variants": []
+},
+{
+"aliases": [
+"white clergy shirt",
+"white shirt kenya",
+"church shirt nairobi",
+"plain white shirt clergy",
+"shirt for bib",
+"white shirt normal collar",
+"ministers white shirt",
+"clergy wear kenya"
+],
+"category": "Clergy Vestments",
+"description": "Crisp white shirt with a normal collar — the clean foundation beneath a bib, cassock or clergy suit.",
+"hub_product_id": 68,
+"in_stock": true,
+"is_producible": true,
+"measurements": [
+{
+"name": "Neck",
+"required": true,
+"unit": "Inches"
+},
+{
+"name": "Shoulder Width",
+"required": true,
+"unit": "Inches"
+},
+{
+"name": "Chest",
+"required": true,
+"unit": "Inches"
+},
+{
+"name": "Stomach",
+"required": true,
+"unit": "Inches"
+},
+{
+"name": "Sleeve Length",
+"required": true,
+"unit": "Inches"
+},
+{
+"name": "Wrist",
+"required": true,
+"unit": "Inches"
+},
+{
+"name": "Arm Hole",
+"required": true,
+"unit": "Inches"
+},
+{
+"name": "Upper Arm",
+"required": true,
+"unit": "Inches"
+},
+{
+"name": "Height",
+"required": true,
+"unit": "Inches"
+}
+],
+"name": "White Shirt - Normal",
+"price": 2500.0,
+"price_kes": 2500.0,
+"price_usd": 30.0,
+"prices": {
+"KES": 2500.0,
+"USD": 30.0,
+"ZMW": 500.0
+},
+"product_type": "simple",
+"sku": "CLE-WSN-001",
+"slug": "white-shirt-normal",
+"unit": "",
+"variants": []
+},
+{
+"aliases": [
+"golden cross",
+"pectoral cross",
+"bishop's cross",
+"gold clergy cross",
+"msalaba wa dhahabu",
+"cross for clergy",
+"pectoral cross nairobi",
+"golden pectoral cross kenya",
+"bishop cross",
+"clergy cross",
+"msalaba",
+"chest cross",
+"priest cross",
+"pastor cross",
+"pectoral cross kenya",
+"cross for bishops",
+"silver pectoral cross",
+"gold pectoral cross",
+"Pectoral Cross"
+],
+"category": "Vestments",
+"description": "A golden pectoral cross worn at the centre of the chest — a dignified mark of office for bishops and honoured clergy.",
+"hub_product_id": 11,
+"in_stock": true,
+"is_producible": false,
+"measurements": [],
+"name": "Pectoral Cross",
+"price": 4000.0,
+"price_kes": 4000.0,
+"price_usd": 40.0,
+"prices": {
+"KES": 4000.0,
+"USD": 40.0,
+"ZMW": 800.0
+},
+"product_type": "simple",
+"sku": "CSMHIJ6R8",
+"slug": "pectoral-cross-gold",
+"unit": "",
+"variants": []
+},
+{
+"aliases": [
+"prayer shawl medium",
+"medium prayer shawl",
+"tallit medium kenya",
+"talit",
+"tallis",
+"messianic tallit",
+"blue prayer shawl",
+"purple prayer shawl"
+],
+"category": "Clergy Vestments",
+"description": "Medium tallit in royal blue, navy or purple, with the traditional Hebrew blessing inscription and a Scripture verse at each corner.",
+"hub_product_id": 13,
+"in_stock": true,
+"is_producible": false,
+"measurements": [],
+"name": "Tallit (Prayer Shawl) - Medium",
+"price": 6000.0,
+"price_kes": 6000.0,
+"price_usd": 60.0,
+"prices": {
+"KES": 6000.0,
+"USD": 60.0,
+"ZMW": 1200.0
+},
+"product_type": "simple",
+"sku": "OUTOIDPWY",
+"slug": "tallit-prayer-shawl-medium",
+"unit": "",
+"variants": []
+},
+{
+"aliases": [
+"ordination gown kenya",
+"ordination robe",
+"ordination gown nairobi",
+"clergy gown",
+"pastors gown",
+"consecration gown",
+"church robes kenya",
+"joho",
+"minister ordination robe"
+],
+"category": "Gowns",
+"description": "Made-to-measure ordination gown tailored in Nairobi — a dignified robe for the day your calling is confirmed.",
+"hub_product_id": 16,
+"in_stock": false,
+"is_producible": true,
+"measurements": [
+{
+"name": "Neck",
+"required": true,
+"unit": "cm"
+},
+{
+"name": "Shoulder Width",
+"required": true,
+"unit": "cm"
+},
+{
+"name": "Sleeve Length",
+"required": true,
+"unit": "cm"
+},
+{
+"name": "Wrist",
+"required": true
+},
+{
+"name": "Chest",
+"required": true,
+"unit": "cm"
+},
+{
+"name": "Stomach",
+"required": true
+},
+{
+"name": "Full Length",
+"required": true
+}
+],
+"name": "Ordination Gown",
+"price": 13000.0,
+"price_kes": 13000.0,
+"price_max_kes": 13000.0,
+"price_max_usd": 130.0,
+"price_min_kes": 13000.0,
+"price_min_usd": 130.0,
+"price_usd": 130.0,
+"prices": {
+"KES": 13000.0,
+"USD": 130.0,
+"ZMW": 2600.0
+},
+"product_type": "variable",
+"sku": "UE81UOJY5",
+"slug": "ordination-gown",
+"unit": "",
+"variants": [
+{
+"attributes": {
+"Colour": "Black",
+"Size": "XS"
+},
+"is_default": true,
+"label": "Ordination Gown — Black",
+"name": "Black Ordination Gown",
+"price_kes": 13000.0,
+"price_usd": 130.0,
+"prices": {
+"KES": 13000.0,
+"USD": 130.0,
+"ZMW": 2600.0
+},
+"sku": "UE81UOJY5-XS-BLA"
+},
+{
+"attributes": {
+"Colour": "White",
+"Size": "XS"
+},
+"is_default": false,
+"label": "Ordination Gown — White",
+"name": "White Ordination Gown",
+"price_kes": 13000.0,
+"price_usd": 130.0,
+"prices": {
+"KES": 13000.0,
+"USD": 130.0,
+"ZMW": 2600.0
+},
+"sku": "UE81UOJY5-XS-WHI"
+},
+{
+"attributes": {
+"Colour": "Navy",
+"Size": "XS"
+},
+"is_default": false,
+"label": "Ordination Gown — Navy",
+"name": "Navy Ordination Gown",
+"price_kes": 13000.0,
+"price_usd": 130.0,
+"prices": {
+"KES": 13000.0,
+"USD": 130.0,
+"ZMW": 2600.0
+},
+"sku": "UE81UOJY5-XS-NAV"
+},
+{
+"attributes": {
+"Colour": "Red",
+"Size": "XS"
+},
+"is_default": false,
+"label": "Ordination Gown — Red",
+"name": "Red Ordination Gown",
+"price_kes": 13000.0,
+"price_usd": 130.0,
+"prices": {
+"KES": 13000.0,
+"USD": 130.0,
+"ZMW": 2600.0
+},
+"sku": "UE81UOJY5-XS-RED"
+},
+{
+"attributes": {
+"Colour": "Green",
+"Size": "XS"
+},
+"is_default": false,
+"label": "Ordination Gown — Green",
+"name": "Green Ordination Gown",
+"price_kes": 13000.0,
+"price_usd": 130.0,
+"prices": {
+"KES": 13000.0,
+"USD": 130.0,
+"ZMW": 2600.0
+},
+"sku": "UE81UOJY5-XS-GRE"
+}
+]
+},
+{
+"aliases": [
+"divai",
+"communion wine",
+"church wine kenya",
+"altar wine",
+"sacramental wine",
+"mvinyo",
+"divai ya ushirika",
+"communion wine 1 litre",
+"local communion wine"
+],
+"category": "Communion Wines",
+"description": "Locally made sacramental communion wine from grapes, in a full 1-litre bottle — divai for the Lord's Table, by its Swahili name.",
+"hub_product_id": 67,
+"in_stock": true,
+"is_producible": false,
+"measurements": [],
+"name": "Devai",
+"price": 800.0,
+"price_kes": 800.0,
+"price_usd": 10.0,
+"prices": {
+"KES": 800.0,
+"USD": 10.0,
+"ZMW": 160.0
+},
+"product_type": "simple",
+"sku": "COM-D-001",
+"slug": "devai",
+"unit": "",
+"variants": []
+},
+{
+"aliases": [
+"communion wine",
+"church wine kenya",
+"mass wine",
+"sacramental wine",
+"divai",
+"mvinyo",
+"alter wine",
+"wine for holy communion",
+"communion wine for churches"
+],
+"category": "Communion Wines",
+"description": "Wine set apart for Holy Communion — the cup beside the bread at the Lord's Table, for churches across Kenya and East Africa.",
+"hub_product_id": 66,
+"in_stock": true,
+"is_producible": false,
+"measurements": [],
+"name": "Altar Wine",
+"price": 1800.0,
+"price_kes": 1800.0,
+"price_usd": 20.0,
+"prices": {
+"KES": 1800.0,
+"USD": 20.0,
+"ZMW": 360.0
+},
+"product_type": "simple",
+"sku": "COM-AW-001",
+"slug": "altar-wine",
+"unit": "",
+"variants": []
+},
+{
+"aliases": [
+"communion wine from israel",
+"israel altar wine",
+"efrat wine",
+"holy land communion wine",
+"sacramental wine",
+"divai",
+"communion wine kenya"
+],
+"category": "Communion Wines",
+"description": "Efrat communion wine from Israel — wine from the land of the Bible for the Lord's Table, delivered across Kenya and beyond.",
+"hub_product_id": 64,
+"in_stock": true,
+"is_producible": false,
+"measurements": [],
+"name": "EFRAT COMMUNION WINE",
+"price": 3500.0,
+"price_kes": 3500.0,
+"price_usd": 40.0,
+"prices": {
+"KES": 3500.0,
+"USD": 40.0,
+"ZMW": 700.0
+},
+"product_type": "simple",
+"sku": "CLE-ECW-001",
+"slug": "efrat-communion-wine",
+"unit": "",
+"variants": []
+},
+{
+"aliases": [
+"bishop cope",
+"cope set",
+"bishop regalia kenya",
+"ceremonial cope",
+"ordination vestments kenya",
+"bishops cape",
+"cope vestment",
+"mavazi ya askofu"
+],
+"category": "Vestments",
+"description": "A bishop's ceremonial cope supplied as a complete coordinated set — made to order in Nairobi for ordinations and solemn rites.",
+"hub_product_id": 52,
+"in_stock": true,
+"is_producible": true,
+"measurements": [
+{
+"name": "Chest",
+"required": true,
+"unit": "cm"
+},
+{
+"name": "Hips",
+"required": true,
+"unit": "cm"
+},
+{
+"name": "Waist",
+"required": true,
+"unit": "cm"
+},
+{
+"name": "Neck",
+"required": true,
+"unit": "cm"
+},
+{
+"name": "Shoulder Width",
+"required": true,
+"unit": "cm"
+},
+{
+"name": "Height",
+"required": true,
+"unit": "cm"
+},
+{
+"name": "Sleeve Length",
+"required": true,
+"unit": "cm"
+}
+],
+"name": "Cope — Complete Set",
+"price": 45000.0,
+"price_kes": 45000.0,
+"price_usd": 450.0,
+"prices": {
+"KES": 45000.0,
+"USD": 450.0,
+"ZMW": 9000.0
+},
+"product_type": "simple",
+"sku": "VES-CCS-00101",
+"slug": "cope-complete-set",
+"unit": "",
+"variants": []
+},
+{
+"aliases": [
+"self print stole",
+"tone on tone stole",
+"patterned clergy stole",
+"textured stole",
+"clergy stole design",
+"priest stole nairobi",
+"liturgical stole kenya",
+"church stole nairobi"
+],
+"category": "Clergy Vestments",
+"description": "Tone-on-tone stoles with the motif carried in the same shade as the fabric — quiet elegance, made to order in Nairobi.",
+"hub_product_id": 40,
+"in_stock": true,
+"is_producible": true,
+"measurements": [
+{
+"name": "Height",
+"required": true,
+"unit": "Inches"
+},
+{
+"name": "Waist",
+"required": true,
+"unit": "Inches"
+}
+],
+"name": "Self Print Stoles",
+"price": 3000.0,
+"price_kes": 3000.0,
+"price_usd": 30.0,
+"prices": {
+"KES": 3000.0,
+"USD": 30.0,
+"ZMW": 600.0
+},
+"product_type": "simple",
+"sku": "CLF-001",
+"slug": "self-print-stoles",
+"unit": "",
+"variants": []
+},
+{
+"aliases": [
+"communion cup tray",
+"golden cup tray",
+"40 cup communion tray",
+"gold plated communion tray",
+"communion trays kenya",
+"stackable communion tray",
+"communion wares",
+"gold communion tray",
+"sinia ya ushirika"
+],
+"category": "Communion Accessories",
+"description": "Gold-plated communion cup tray holding 40 cups — stackable, dignified, and made to scale with your congregation.",
+"hub_product_id": 50,
+"in_stock": true,
+"is_producible": false,
+"measurements": [],
+"name": "Golden Communion Tray",
+"price": 22000.0,
+"price_kes": 22000.0,
+"price_usd": 220.0,
+"prices": {
+"KES": 22000.0,
+"USD": 220.0,
+"ZMW": 4400.0
+},
+"product_type": "simple",
+"sku": "XYULGK29K-5D98",
+"slug": "golden-communion-tray",
+"unit": "",
+"variants": []
+},
+{
+"aliases": [
+"large prayer shawl",
+"big tallit",
+"tallit large kenya",
+"talit",
+"tallis",
+"intercessors prayer shawl",
+"navy prayer shawl",
+"prayer shawl for ministers"
+],
+"category": "Clergy Vestments",
+"description": "Large tallit with a generous drape for leading prayer and worship — Hebrew blessing inscription, Scripture at each corner.",
+"hub_product_id": 41,
+"in_stock": true,
+"is_producible": false,
+"measurements": [],
+"name": "Large Prayer Shawl / Tallit",
+"price": 7500.0,
+"price_kes": 7500.0,
+"price_usd": 80.0,
+"prices": {
+"KES": 7500.0,
+"USD": 80.0,
+"ZMW": 1500.0
+},
+"product_type": "simple",
+"sku": "OCJN841JK-8CD6",
+"slug": "tallit-prayer-shawl-large",
+"unit": "",
+"variants": []
+},
+{
+"aliases": [
+"large print bible",
+"giant print bible kenya",
+"nkjv bible nairobi",
+"bible for grandmother",
+"bible for seniors",
+"big print bible",
+"new king james bible kenya",
+"lectern bible",
+"bible for wazee"
+],
+"category": "Bibles",
+"description": "The New King James Version in generous giant print — the majesty of the KJV, in the English you speak, easy on every eye.",
+"hub_product_id": 43,
+"in_stock": true,
+"is_producible": false,
+"measurements": [],
+"name": "NKJV Giant Print",
+"price": 6800.0,
+"price_kes": 6800.0,
+"price_usd": 70.0,
+"prices": {
+"KES": 6800.0,
+"USD": 70.0,
+"ZMW": 1360.0
+},
+"product_type": "simple",
+"sku": "XZIQU3RFM-8032",
+"slug": "nkjv-giant-print",
+"unit": "",
+"variants": []
+},
+{
+"aliases": [
+"clergy shirts kenya",
+"straight collar clergy shirt",
+"pastors shirt nairobi",
+"reverend shirt kenya",
+"clergy wear nairobi",
+"minister shirts kenya",
+"clergy apparel kenya",
+"clergy shirts in kenya"
+],
+"category": "Vestments",
+"description": "Smart straight-collar clergy shirt for pastors and reverends — dependable everyday ministry wear, tailored in Nairobi.",
+"hub_product_id": 47,
+"in_stock": true,
+"is_producible": true,
+"measurements": [
+{
+"name": "Neck",
+"required": true,
+"unit": "cm"
+},
+{
+"name": "Shoulder Width",
+"required": true,
+"unit": "cm"
+},
+{
+"name": "Chest",
+"required": true,
+"unit": "cm"
+},
+{
+"name": "Sleeve Length",
+"required": true,
+"unit": "cm"
+},
+{
+"name": "Wrist",
+"required": true
+},
+{
+"name": "Upper Arm",
+"required": true
+},
+{
+"name": "Height",
+"required": true,
+"unit": "cm"
+}
+],
+"name": "Straight Collar Shirt",
+"price": 2500.0,
+"price_kes": 2500.0,
+"price_max_kes": 2500.0,
+"price_max_usd": 30.0,
+"price_min_kes": 2500.0,
+"price_min_usd": 30.0,
+"price_usd": 30.0,
+"prices": {
+"KES": 2500.0,
+"USD": 30.0,
+"ZMW": 500.0
+},
+"product_type": "variable",
+"sku": "YX9PKFQQ5-FDB7-SHIRT",
+"slug": "straight-collar-shirt",
+"unit": "",
+"variants": [
+{
+"attributes": {
+"Colour": "White",
+"Size": "S"
+},
+"is_default": false,
+"label": "Straight Collar Shirt — White / Size S",
+"name": "White Straight Collar Shirt",
+"price_kes": 2500.0,
+"price_usd": 30.0,
+"prices": {
+"KES": 2500.0,
+"USD": 30.0,
+"ZMW": 500.0
+},
+"sku": "YX9PKFQQ5-FDB7-SHIRT-S-WHI"
+},
+{
+"attributes": {
+"Colour": "Navy",
+"Size": "S"
+},
+"is_default": false,
+"label": "Straight Collar Shirt — Navy / Size S",
+"name": "Navy Straight Collar Shirt",
+"price_kes": 2500.0,
+"price_usd": 30.0,
+"prices": {
+"KES": 2500.0,
+"USD": 30.0,
+"ZMW": 500.0
+},
+"sku": "YX9PKFQQ5-FDB7-SHIRT-S-NAV"
+},
+{
+"attributes": {
+"Colour": "Red",
+"Size": "S"
+},
+"is_default": false,
+"label": "Straight Collar Shirt — Red / Size S",
+"name": "Red Straight Collar Shirt",
+"price_kes": 2500.0,
+"price_usd": 30.0,
+"prices": {
+"KES": 2500.0,
+"USD": 30.0,
+"ZMW": 500.0
+},
+"sku": "YX9PKFQQ5-FDB7-SHIRT-S-RED"
+},
+{
+"attributes": {
+"Colour": "Green",
+"Size": "S"
+},
+"is_default": false,
+"label": "Straight Collar Shirt — Green / Size S",
+"name": "Green Straight Collar Shirt",
+"price_kes": 2500.0,
+"price_usd": 30.0,
+"prices": {
+"KES": 2500.0,
+"USD": 30.0,
+"ZMW": 500.0
+},
+"sku": "YX9PKFQQ5-FDB7-SHIRT-S-GRE"
+},
+{
+"attributes": {
+"Colour": "Black",
+"Size": "XS"
+},
+"is_default": false,
+"label": "Straight Collar Shirt — Black / Size XS",
+"name": "Black Straight Collar Shirt",
+"price_kes": 2500.0,
+"price_usd": 30.0,
+"prices": {
+"KES": 2500.0,
+"USD": 30.0,
+"ZMW": 500.0
+},
+"sku": "YX9PKFQQ5-FDB7-XS-BLA"
+},
+{
+"attributes": {
+"Colour": "White",
+"Size": "XS"
+},
+"is_default": false,
+"label": "Straight Collar Shirt — White / Size XS",
+"name": "White Straight Collar Shirt",
+"price_kes": 2500.0,
+"price_usd": 30.0,
+"prices": {
+"KES": 2500.0,
+"USD": 30.0,
+"ZMW": 500.0
+},
+"sku": "YX9PKFQQ5-FDB7-XS-WHI"
+},
+{
+"attributes": {
+"Colour": "Navy",
+"Size": "XS"
+},
+"is_default": false,
+"label": "Straight Collar Shirt — Navy / Size XS",
+"name": "Navy Straight Collar Shirt",
+"price_kes": 2500.0,
+"price_usd": 30.0,
+"prices": {
+"KES": 2500.0,
+"USD": 30.0,
+"ZMW": 500.0
+},
+"sku": "YX9PKFQQ5-FDB7-XS-NAV"
+},
+{
+"attributes": {
+"Colour": "Red",
+"Size": "XS"
+},
+"is_default": false,
+"label": "Straight Collar Shirt — Red / Size XS",
+"name": "Red Straight Collar Shirt",
+"price_kes": 2500.0,
+"price_usd": 30.0,
+"prices": {
+"KES": 2500.0,
+"USD": 30.0,
+"ZMW": 500.0
+},
+"sku": "YX9PKFQQ5-FDB7-XS-RED"
+},
+{
+"attributes": {
+"Colour": "Green",
+"Size": "XS"
+},
+"is_default": false,
+"label": "Straight Collar Shirt — Green / Size XS",
+"name": "Green Straight Collar Shirt",
+"price_kes": 2500.0,
+"price_usd": 30.0,
+"prices": {
+"KES": 2500.0,
+"USD": 30.0,
+"ZMW": 500.0
+},
+"sku": "YX9PKFQQ5-FDB7-XS-GRE"
+},
+{
+"attributes": {
+"Colour": "Black",
+"Size": "S"
+},
+"is_default": false,
+"label": "Straight Collar Shirt — Black / Size S",
+"name": "Black Straight Collar Shirt",
+"price_kes": 2500.0,
+"price_usd": 30.0,
+"prices": {
+"KES": 2500.0,
+"USD": 30.0,
+"ZMW": 500.0
+},
+"sku": "YX9PKFQQ5-FDB7-SHIRT-S-BLA"
+},
+{
+"attributes": {
+"Colour": "White",
+"Size": "M"
+},
+"is_default": false,
+"label": "Straight Collar Shirt — White / Size M",
+"name": "White Straight Collar Shirt",
+"price_kes": 2500.0,
+"price_usd": 30.0,
+"prices": {
+"KES": 2500.0,
+"USD": 30.0,
+"ZMW": 500.0
+},
+"sku": "YX9PKFQQ5-FDB7-SHIRT-M-WHI"
+},
+{
+"attributes": {
+"Colour": "Navy",
+"Size": "M"
+},
+"is_default": false,
+"label": "Straight Collar Shirt — Navy / Size M",
+"name": "Navy Straight Collar Shirt",
+"price_kes": 2500.0,
+"price_usd": 30.0,
+"prices": {
+"KES": 2500.0,
+"USD": 30.0,
+"ZMW": 500.0
+},
+"sku": "YX9PKFQQ5-FDB7-SHIRT-M-NAV"
+},
+{
+"attributes": {
+"Colour": "Red",
+"Size": "M"
+},
+"is_default": false,
+"label": "Straight Collar Shirt — Red / Size M",
+"name": "Red Straight Collar Shirt",
+"price_kes": 2500.0,
+"price_usd": 30.0,
+"prices": {
+"KES": 2500.0,
+"USD": 30.0,
+"ZMW": 500.0
+},
+"sku": "YX9PKFQQ5-FDB7-SHIRT-M-RED"
+},
+{
+"attributes": {
+"Colour": "Green",
+"Size": "M"
+},
+"is_default": false,
+"label": "Straight Collar Shirt — Green / Size M",
+"name": "Green Straight Collar Shirt",
+"price_kes": 2500.0,
+"price_usd": 30.0,
+"prices": {
+"KES": 2500.0,
+"USD": 30.0,
+"ZMW": 500.0
+},
+"sku": "YX9PKFQQ5-FDB7-SHIRT-M-GRE"
+},
+{
+"attributes": {
+"Colour": "Black",
+"Size": "M"
+},
+"is_default": false,
+"label": "Straight Collar Shirt — Black / Size M",
+"name": "Black Straight Collar Shirt",
+"price_kes": 2500.0,
+"price_usd": 30.0,
+"prices": {
+"KES": 2500.0,
+"USD": 30.0,
+"ZMW": 500.0
+},
+"sku": "YX9PKFQQ5-FDB7-SHIRT-M-BLA"
+},
+{
+"attributes": {
+"Colour": "Grey",
+"Size": "S"
+},
+"is_default": true,
+"label": "Straight Collar Shirt — Grey / Size S",
+"name": "Grey Straight Collar Shirt",
+"price_kes": 2500.0,
+"price_usd": 30.0,
+"prices": {
+"KES": 2500.0,
+"USD": 30.0,
+"ZMW": 500.0
+},
+"sku": "YX9PKFQQ5-FDB7-SHIRT-GRE-S"
+},
+{
+"attributes": {
+"Colour": "Grey",
+"Size": "M"
+},
+"is_default": false,
+"label": "Straight Collar Shirt — Grey / Size M",
+"name": "Grey Straight Collar Shirt",
+"price_kes": 2500.0,
+"price_usd": 30.0,
+"prices": {
+"KES": 2500.0,
+"USD": 30.0,
+"ZMW": 500.0
+},
+"sku": "YX9PKFQQ5-FDB7-SHIRT-GRE-M"
+},
+{
+"attributes": {
+"Colour": "Grey",
+"Size": "L"
+},
+"is_default": false,
+"label": "Straight Collar Shirt — Grey / Size L",
+"name": "Grey Straight Collar Shirt",
+"price_kes": 2500.0,
+"price_usd": 30.0,
+"prices": {
+"KES": 2500.0,
+"USD": 30.0,
+"ZMW": 500.0
+},
+"sku": "YX9PKFQQ5-FDB7-SHIRT-GRE-L"
+},
+{
+"attributes": {
+"Colour": "Grey",
+"Size": "XL"
+},
+"is_default": false,
+"label": "Straight Collar Shirt — Grey / Size XL",
+"name": "Grey Straight Collar Shirt",
+"price_kes": 2500.0,
+"price_usd": 30.0,
+"prices": {
+"KES": 2500.0,
+"USD": 30.0,
+"ZMW": 500.0
+},
+"sku": "YX9PKFQQ5-FDB7-SHIRT-GRE-XL"
+},
+{
+"attributes": {
+"Colour": "Grey",
+"Size": "XXL"
+},
+"is_default": false,
+"label": "Straight Collar Shirt — Grey / Size XXL",
+"name": "Grey Straight Collar Shirt",
+"price_kes": 2500.0,
+"price_usd": 30.0,
+"prices": {
+"KES": 2500.0,
+"USD": 30.0,
+"ZMW": 500.0
+},
+"sku": "YX9PKFQQ5-FDB7-SHIRT-GRE-XXL"
+}
+]
+},
+{
+"aliases": [
+"miter",
+"bishop hat",
+"bishops hat",
+"bishop's headdress",
+"mitre kenya",
+"kofia ya askofu",
+"bishop regalia kenya",
+"mitre hat"
+],
+"category": "Clergy Vestments",
+"description": "The bishop's ceremonial mitre — twin peaks recalling the Old and New Testaments, made to order in Nairobi.",
+"hub_product_id": 42,
+"in_stock": true,
+"is_producible": true,
+"measurements": [
+{
+"name": "Head Circumfrence",
+"required": true
+}
+],
+"name": "Mitre",
+"price": 5500.0,
+"price_kes": 5500.0,
+"price_usd": 60.0,
+"prices": {
+"KES": 5500.0,
+"USD": 60.0,
+"ZMW": 1100.0
+},
+"product_type": "simple",
+"sku": "CVB-0010",
+"slug": "mitre",
+"unit": "",
+"variants": []
+},
+{
+"aliases": [
+"silver cup tray",
+"communion cup tray",
+"40 cup communion tray",
+"communion tray with lid",
+"communion trays kenya",
+"silver communion set",
+"cup tray with cover",
+"sinia ya ushirika"
+],
+"category": "Communion Items",
+"description": "Silver-tone communion tray for 40 cups, complete with lid, holder and basin — a full serving set for the Lord's table.",
+"hub_product_id": 51,
+"in_stock": true,
+"is_producible": false,
+"measurements": [],
+"name": "Silver Communion Tray",
+"price": 18000.0,
+"price_kes": 18000.0,
+"price_usd": 180.0,
+"prices": {
+"KES": 18000.0,
+"USD": 180.0,
+"ZMW": 3600.0
+},
+"product_type": "simple",
+"sku": "843GLV9RC-D69A",
+"slug": "silver-communion-tray",
+"unit": "",
+"variants": []
+},
+{
+"aliases": [
+"bishop shirt kenya",
+"bishops clergy shirt",
+"round collar shirt for bishops",
+"askofu shirt",
+"episcopal shirt nairobi",
+"clergy shirts kenya",
+"dog collar shirt",
+"bishop attire nairobi"
+],
+"category": "Vestments",
+"description": "A finely finished round collar shirt cut for bishops — episcopal clergy wear tailored to order in Nairobi.",
+"hub_product_id": 49,
+"in_stock": true,
+"is_producible": true,
+"measurements": [],
+"name": "Round Collar Shirt",
+"price": 4500.0,
+"price_kes": 4500.0,
+"price_usd": 50.0,
+"prices": {
+"KES": 4500.0,
+"USD": 50.0,
+"ZMW": 900.0
+},
+"product_type": "simple",
+"sku": "98UBCKKHD-F3FF",
+"slug": "round-collar-shirt",
+"unit": "",
+"variants": []
+},
+{
+"aliases": [
+"oil horn",
+"anointing oil horn",
+"horn of oil",
+"pembe ya mafuta",
+"samuel anointing horn",
+"biblical anointing horn",
+"horn of anointing oil"
+],
+"category": "Anointing",
+"description": "A horn-shaped vessel for anointing oil, after Samuel's horn that anointed David — a vessel of consecration and a teaching sign.",
+"hub_product_id": 45,
+"in_stock": true,
+"is_producible": false,
+"measurements": [],
+"name": "Anointing horn",
+"price": 2500.0,
+"price_kes": 2500.0,
+"price_usd": 30.0,
+"prices": {
+"KES": 2500.0,
+"USD": 30.0,
+"ZMW": 500.0
+},
+"product_type": "simple",
+"sku": "RONG11JY7-7176",
+"slug": "anointing-horn",
+"unit": "",
+"variants": []
+},
+{
+"aliases": [
+"mafuta ya upako",
+"annointing oil",
+"anointing oil",
+"prayer oil",
+"consecration oil",
+"holy anointing oil",
+"eliad oil"
+],
+"category": "Anointing",
+"description": "Eliad anointing oil — set apart for prayer, blessing and consecration after James 5:14, for pastors and prayer teams alike.",
+"hub_product_id": 46,
+"in_stock": true,
+"is_producible": true,
+"measurements": [],
+"name": "Eliad Anointing Oil",
+"price": 5000.0,
+"price_kes": 5000.0,
+"price_usd": 50.0,
+"prices": {
+"KES": 5000.0,
+"USD": 50.0,
+"ZMW": 1000.0
+},
+"product_type": "simple",
+"sku": "FBU30QUE0-499E",
+"slug": "eliad-anointing-oil",
+"unit": "",
+"variants": []
+},
+{
+"aliases": [
+"shofar",
+"ram's horn",
+"kudu horn",
+"worship horn",
+"trumpet horn",
+"baragumu",
+"shofar for sale nairobi",
+"yemenite shofar",
+"prophetic horn",
+"shofar kenya"
+],
+"category": "Clergy Vestments",
+"description": "Ceremonial worship horn in the shofar tradition — sounded for calls to worship, repentance and celebration (Joel 2:1).",
+"hub_product_id": 37,
+"in_stock": true,
+"is_producible": true,
+"measurements": [],
+"name": "Horn",
+"price": 2500.0,
+"price_kes": 2500.0,
+"price_usd": 30.0,
+"prices": {
+"KES": 2500.0,
+"USD": 30.0,
+"ZMW": 500.0
+},
+"product_type": "simple",
+"sku": "IXOYNZQG8-A1DA",
+"slug": "horn",
+"unit": "",
+"variants": []
+},
+{
+"aliases": [
+"purple cope",
+"red cope",
+"bishop cope purple",
+"bishops cape kenya",
+"ceremonial cope nairobi",
+"cope for bishops",
+"bishop regalia",
+"processional cape"
+],
+"category": "Clergy Vestments",
+"description": "A bishop's ceremonial cope in purple and red, finished with a mint body and self-print front — made to order in Nairobi.",
+"hub_product_id": 36,
+"in_stock": true,
+"is_producible": true,
+"measurements": [
+{
+"name": "Neck",
+"required": true,
+"unit": "cm"
+},
+{
+"name": "Shoulder Width",
+"required": true,
+"unit": "cm"
+},
+{
+"name": "Height",
+"required": true,
+"unit": "cm"
+}
+],
+"name": "Purple Red Cope",
+"price": 15000.0,
+"price_kes": 15000.0,
+"price_usd": 150.0,
+"prices": {
+"KES": 15000.0,
+"USD": 150.0,
+"ZMW": 3000.0
+},
+"product_type": "simple",
+"sku": "GOW-C-001-D71C",
+"slug": "purple-red-cope",
+"unit": "",
+"variants": []
+},
+{
+"aliases": [
+"silver bread plate",
+"communion bread plate",
+"bread plate",
+"host plate",
+"wafer plate",
+"bread tray with lid",
+"silver communion plate",
+"sinia"
+],
+"category": "Communion Accessories",
+"description": "Silver-tone bread plate with matching lid — a cool, quiet elegance for serving the communion bread with reverence.",
+"hub_product_id": 38,
+"in_stock": true,
+"is_producible": false,
+"measurements": [],
+"name": "Silver Bread Tray",
+"price": 13000.0,
+"price_kes": 13000.0,
+"price_usd": 130.0,
+"prices": {
+"KES": 13000.0,
+"USD": 130.0,
+"ZMW": 2600.0
+},
+"product_type": "simple",
+"sku": "ML8FMKZQL-7661",
+"slug": "silver-bread-tray",
+"unit": "",
+"variants": []
+},
+{
+"aliases": [
+"apostle ring",
+"overseer ring",
+"bishop ring",
+"episcopal ring",
+"apostolic ring kenya",
+"ring for apostles",
+"ministers ring",
+"clergy ring nairobi"
+],
+"category": "Clergy Accessories",
+"description": "An apostolic ring for apostles, overseers and senior ministers — a dignified emblem of covenant and commissioning.",
+"hub_product_id": 44,
+"in_stock": true,
+"is_producible": false,
+"measurements": [],
+"name": "Bishopric Ring",
+"price": 4500.0,
+"price_kes": 4500.0,
+"price_usd": 45.0,
+"prices": {
+"GBP": 30.0,
+"KES": 4500.0,
+"USD": 45.0,
+"ZMW": 630.0
+},
+"product_type": "variable",
+"sku": "537OU8Q5Z-E4C6",
+"slug": "apostolic-ring",
+"unit": "",
+"variants": []
+},
+{
+"aliases": [
+"soutane",
+"clergy robe",
+"cassock price in kenya",
+"made to measure cassock",
+"cassocks tailored nairobi",
+"bishop cassock purple",
+"black cassock",
+"kanzu",
+"cassok",
+"casock",
+"church robe kenya",
+"clergy wear nairobi"
+],
+"category": "Vestments",
+"description": "Our signature made-to-measure cassock — breathable premium fabrics in every liturgical colour, custom-tailored in Nairobi.",
+"hub_product_id": 29,
+"in_stock": true,
+"is_producible": true,
+"measurements": [
+{
+"name": "Neck",
+"required": true,
+"unit": "cm"
+},
+{
+"name": "Shoulders",
+"required": true,
+"unit": "Inches"
+},
+{
+"name": "Sleeves",
+"required": true,
+"unit": "Inches"
+},
+{
+"name": "Wrist",
+"required": true
+},
+{
+"name": "Arm Hole",
+"required": true,
+"unit": "Inches"
+},
+{
+"name": "Upper Arm",
+"required": true,
+"unit": "Inches"
+},
+{
+"name": "Chest",
+"required": true
+},
+{
+"name": "Stomach",
+"required": true
+},
+{
+"name": "Shirt Length",
+"required": true,
+"unit": "Inches"
+},
+{
+"name": "Full Length",
+"required": true
+},
+{
+"name": "Shoulder Width",
+"required": true,
+"unit": "cm"
+},
+{
+"name": "Sleeve Length",
+"required": true,
+"unit": "cm"
+}
+],
+"name": "Cassock",
+"price": 13000.0,
+"price_kes": 13000.0,
+"price_max_kes": 13000.0,
+"price_max_usd": 200.0,
+"price_min_kes": 12000.0,
+"price_min_usd": 120.0,
+"price_usd": 120.0,
+"prices": {
+"KES": 13000.0,
+"USD": 120.0,
+"ZMW": 2400.0
+},
+"product_type": "variable",
+"sku": "VES-PC-001",
+"slug": "cassock",
+"unit": "",
+"variants": [
+{
+"attributes": {
+"Colour": "Black",
+"Size": "XS"
+},
+"is_default": false,
+"label": "Cassock — Black",
+"name": "Black Cassock",
+"price_kes": 13000.0,
+"price_usd": 130.0,
+"prices": {
+"KES": 13000.0,
+"USD": 130.0,
+"ZMW": 2600.0
+},
+"sku": "VES-C-001-XS-BLAC"
+},
+{
+"attributes": {
+"Colour": "White",
+"Size": "XS"
+},
+"is_default": false,
+"label": "Cassock — White",
+"name": "White Cassock",
+"price_kes": 13000.0,
+"price_usd": 200.0,
+"prices": {
+"KES": 13000.0,
+"USD": 200.0,
+"ZMW": 4000.0
+},
+"sku": "VES-PC-001-XS-WHI"
+},
+{
+"attributes": {
+"Colour": "Navy",
+"Size": "XS"
+},
+"is_default": false,
+"label": "Cassock — Navy",
+"name": "Navy Cassock",
+"price_kes": 12000.0,
+"price_usd": 120.0,
+"prices": {
+"KES": 12000.0,
+"USD": 120.0,
+"ZMW": 2400.0
+},
+"sku": "VES-PC-001-XS-NAV"
+},
+{
+"attributes": {
+"Colour": "Red",
+"Size": "XS"
+},
+"is_default": false,
+"label": "Cassock — Red",
+"name": "Red Cassock",
+"price_kes": 12000.0,
+"price_usd": 120.0,
+"prices": {
+"KES": 12000.0,
+"USD": 120.0,
+"ZMW": 2400.0
+},
+"sku": "VES-PC-001-XS-RED"
+},
+{
+"attributes": {
+"Colour": "Green",
+"Size": "XS"
+},
+"is_default": false,
+"label": "Cassock — Green",
+"name": "Green Cassock",
+"price_kes": 12000.0,
+"price_usd": 120.0,
+"prices": {
+"KES": 12000.0,
+"USD": 120.0,
+"ZMW": 2400.0
+},
+"sku": "VES-PC-001-XS-GRE"
+}
+]
+},
+{
+"aliases": [
+"italian chasuble",
+"chasuble with golden crosses",
+"priest chasuble kenya",
+"catholic chasuble nairobi",
+"imported chasuble",
+"mass vestment",
+"chausable",
+"chasuble price in kenya"
+],
+"category": "Gowns",
+"description": "Italian hand-made liturgical chasuble in 100% polyester with golden cross embellishment — artisan quality for the celebrant.",
+"hub_product_id": 5,
+"in_stock": true,
+"is_producible": true,
+"measurements": [
+{
+"name": "Neck",
+"required": true,
+"unit": "Inches"
+},
+{
+"name": "Shoulder Width",
+"required": true,
+"unit": "Inches"
+},
+{
+"name": "Chest",
+"required": true,
+"unit": "Inches"
+},
+{
+"name": "Height",
+"required": true,
+"unit": "Inches"
+}
+],
+"name": "Chasuble",
+"price": 12000.0,
+"price_kes": 12000.0,
+"price_max_kes": 14000.0,
+"price_max_usd": 140.0,
+"price_min_kes": 12000.0,
+"price_min_usd": 120.0,
+"price_usd": 120.0,
+"prices": {
+"KES": 12000.0,
+"USD": 120.0,
+"ZMW": 2400.0
+},
+"product_type": "variable",
+"sku": "GOW-C-001",
+"slug": "chasuble",
+"unit": "",
+"variants": [
+{
+"attributes": {
+"Colour": "Purple"
+},
+"is_default": true,
+"label": "Chasuble — Purple",
+"name": "Purple Chasuble",
+"price_kes": 12000.0,
+"price_usd": 120.0,
+"prices": {
+"KES": 12000.0,
+"USD": 120.0,
+"ZMW": 2400.0
+},
+"sku": "GOW-C-001-PUR"
+},
+{
+"attributes": {
+"Colour": "Green"
+},
+"is_default": false,
+"label": "Chasuble — Green",
+"name": "Green Chasuble",
+"price_kes": 12000.0,
+"price_usd": 120.0,
+"prices": {
+"KES": 12000.0,
+"USD": 120.0,
+"ZMW": 2400.0
+},
+"sku": "GOW-C-001-GRE"
+},
+{
+"attributes": {
+"Colour": "White"
+},
+"is_default": false,
+"label": "Chasuble — White",
+"name": "White Chasuble",
+"price_kes": 13000.0,
+"price_usd": 130.0,
+"prices": {
+"KES": 13000.0,
+"USD": 130.0,
+"ZMW": 2600.0
+},
+"sku": "GOW-C-001-WHI"
+},
+{
+"attributes": {
+"Colour": "Black"
+},
+"is_default": false,
+"label": "Chasuble — Black",
+"name": "Black Chasuble",
+"price_kes": 13000.0,
+"price_usd": 130.0,
+"prices": {
+"KES": 13000.0,
+"USD": 130.0,
+"ZMW": 2600.0
+},
+"sku": "GOW-C-001-BLA"
+},
+{
+"attributes": {
+"Colour": "Off-white"
+},
+"is_default": false,
+"label": "Chasuble — Off-white",
+"name": "Off-white Chasuble",
+"price_kes": 13000.0,
+"price_usd": 130.0,
+"prices": {
+"KES": 13000.0,
+"USD": 130.0,
+"ZMW": 2600.0
+},
+"sku": "GOW-C-001-OFF"
+},
+{
+"attributes": {
+"Colour": "Self-print"
+},
+"is_default": false,
+"label": "Chasuble — Self-print",
+"name": "Self-print Chasuble",
+"price_kes": 14000.0,
+"price_usd": 140.0,
+"prices": {
+"KES": 14000.0,
+"USD": 140.0,
+"ZMW": 2800.0
+},
+"sku": "GOW-C-001-SEL"
+}
+]
+},
+{
+"aliases": [
+"ladies clergy dress",
+"custom clergy dress kenya",
+"women clergy wear nairobi",
+"clergy dress for women",
+"bespoke church dress",
+"female pastors dress",
+"deaconess dress kenya",
+"tailored clergy dress"
+],
+"category": "Clergy Vestments",
+"description": "A fully bespoke ladies' clergy dress — designed with you and tailored to your measurements in our Nairobi workshop.",
+"hub_product_id": 27,
+"in_stock": true,
+"is_producible": true,
+"measurements": [
+{
+"name": "Neck",
+"required": true,
+"unit": "cm"
+},
+{
+"name": "Shoulder Width",
+"required": true,
+"unit": "cm"
+},
+{
+"name": "Sleeve Length",
+"required": true,
+"unit": "cm"
+},
+{
+"name": "Wrist",
+"required": true
+},
+{
+"name": "Chest",
+"required": true,
+"unit": "cm"
+},
+{
+"name": "Bodice",
+"required": true
+},
+{
+"name": "Arm Hole",
+"required": true
+},
+{
+"name": "Upper Arm",
+"required": true
+},
+{
+"name": "Hips",
+"required": true
+},
+{
+"name": "Length (Blouse)",
+"required": true
+},
+{
+"name": "Full Length",
+"required": true
+},
+{
+"name": "Waist",
+"required": true
+}
+],
+"name": "Custom Designed Dress",
+"price": 10000.0,
+"price_kes": 10000.0,
+"price_usd": 100.0,
+"prices": {
+"KES": 10000.0,
+"USD": 100.0,
+"ZMW": 2000.0
+},
+"product_type": "simple",
+"sku": "ML8FMKZQL",
+"slug": "custom-designed-dress",
+"unit": "",
+"variants": []
+},
+{
+"aliases": [
+"canon gown catholic",
+"catholic canon robes",
+"choir dress kenya",
+"canon gown nairobi",
+"catholic priest robes kenya",
+"cathedral chapter robes",
+"padri robes",
+"clergy gowns kenya",
+"canon gown kenya",
+"ack canon robes",
+"anglican canon gown",
+"canon robes nairobi",
+"cathedral robes kenya",
+"installation robes",
+"clergy gown kenya",
+"canons gown"
+],
+"category": "Clergy Vestments",
+"description": "Canon gown tailored in Nairobi for Catholic fathers — made-to-measure choir dress for canons and cathedral clergy.",
+"hub_product_id": 26,
+"in_stock": false,
+"is_producible": true,
+"measurements": [
+{
+"name": "Neck",
+"required": true,
+"unit": "cm"
+},
+{
+"name": "Shoulder Width",
+"required": true,
+"unit": "cm"
+},
+{
+"name": "Sleeve Length",
+"required": true,
+"unit": "cm"
+},
+{
+"name": "Wrists",
+"required": true
+},
+{
+"name": "Chest",
+"required": true,
+"unit": "cm"
+},
+{
+"name": "Stomach",
+"required": true,
+"unit": "cm"
+},
+{
+"name": "Length",
+"required": true
+},
+{
+"name": "Full Length",
+"required": true
+}
+],
+"name": "Canon Gown",
+"price": 13000.0,
+"price_kes": 13000.0,
+"price_max_kes": 13000.0,
+"price_max_usd": 130.0,
+"price_min_kes": 13000.0,
+"price_min_usd": 130.0,
+"price_usd": 130.0,
+"prices": {
+"KES": 13000.0,
+"USD": 130.0,
+"ZMW": 2600.0
+},
+"product_type": "variable",
+"sku": "M3BXRUQJC",
+"slug": "canon-gown",
+"unit": "",
+"variants": [
+{
+"attributes": {
+"Color": "Black with Purple Buttons"
+},
+"is_default": true,
+"label": "Canon Gown — Black with Purple Buttons",
+"name": "Black with Purple Buttons Canon Gown",
+"price_kes": 13000.0,
+"price_usd": 130.0,
+"prices": {
+"KES": 13000.0,
+"USD": 130.0,
+"ZMW": 2600.0
+},
+"sku": "M3BXRUQJC-V30"
+}
+]
+},
+{
+"aliases": [
+"365 day childrens bible",
+"one story a day bible",
+"daily bible stories for kids",
+"family devotions bible",
+"kids story bible kenya",
+"children bible nairobi",
+"bedtime bible stories",
+"bible in one year for kids"
+],
+"category": "Children Bibles",
+"description": "One story a day, all year round — a bright, colourful storybook that takes your child through the Bible in one year.",
+"hub_product_id": 25,
+"in_stock": true,
+"is_producible": false,
+"measurements": [],
+"name": "THE 365 DAY CHILDREN'S BIBLE",
+"price": 1900.0,
+"price_kes": 1900.0,
+"price_usd": 19.0,
+"prices": {
+"KES": 1900.0,
+"USD": 19.0,
+"ZMW": 266.0
+},
+"product_type": "simple",
+"sku": "1HNCF393W",
+"slug": "the-365-day-childrens-bible",
+"unit": "",
+"variants": []
+},
+{
+"aliases": [
+"biblia ya watoto",
+"bibilia ya watoto",
+"swahili children bible",
+"kiswahili bible stories",
+"hadithi za biblia",
+"swahili bible kenya",
+"biblia takatifu watoto",
+"tanzania children bible",
+"biblia yangu kubwa niipendayo"
+],
+"category": "Children Bibles",
+"description": "Hadithi 40 za Biblia zinazopendwa mno, kwa Kiswahili — 40 beloved Bible stories retold for children in the language of home.",
+"hub_product_id": 24,
+"in_stock": false,
+"is_producible": false,
+"measurements": [],
+"name": "BIBLIA YANGU KUBWA NIIPENDAYO",
+"price": 1450.0,
+"price_kes": 1450.0,
+"price_usd": 20.0,
+"prices": {
+"KES": 1450.0,
+"USD": 20.0,
+"ZMW": 290.0
+},
+"product_type": "simple",
+"sku": "OCJN841JK",
+"slug": "biblia-yangu-kubwa-niipendayo",
+"unit": "",
+"variants": []
+},
+{
+"aliases": [
+"clergy collar kenya",
+"detachable clergy collar",
+"white collar clergy",
+"priest collar nairobi",
+"dog collar insert",
+"reverend collar",
+"clerical collar kenya",
+"collar for clergy shirt"
+],
+"category": "Clergy Accessories",
+"description": "Detachable white clergy collar — the crisp finishing touch for collar-ready shirts, bibs and cassocks.",
+"hub_product_id": 23,
+"in_stock": true,
+"is_producible": false,
+"measurements": [],
+"name": "Straight Collar",
+"price": 400.0,
+"price_kes": 400.0,
+"price_max_kes": 1200.0,
+"price_max_usd": 12.0,
+"price_min_kes": 350.0,
+"price_min_usd": 3.5,
+"price_usd": 10.0,
+"prices": {
+"KES": 400.0,
+"USD": 10.0,
+"ZMW": 160.0
+},
+"product_type": "variable",
+"sku": "CAC-001-01",
+"slug": "straight-collar",
+"unit": "",
+"variants": [
+{
+"attributes": {
+"Size": "8 Inches"
+},
+"is_default": false,
+"label": "Straight Collar — 8 Inches",
+"name": "Straight Collar",
+"price_kes": 350.0,
+"price_usd": 3.5,
+"prices": {
+"KES": 350.0,
+"USD": 3.5,
+"ZMW": 49.0
+},
+"sku": "9CO393V3R-8 I"
+},
+{
+"attributes": {
+"Size": "10 Inches"
+},
+"is_default": false,
+"label": "Straight Collar — 10 Inches",
+"name": "Straight Collar",
+"price_kes": 400.0,
+"price_usd": 4.0,
+"prices": {
+"KES": 400.0,
+"USD": 4.0,
+"ZMW": 56.0
+},
+"sku": "9CO393V3R-10"
+},
+{
+"attributes": {
+"Size": "12 Inches"
+},
+"is_default": false,
+"label": "Straight Collar — 12 Inches",
+"name": "Straight Collar",
+"price_kes": 600.0,
+"price_usd": 6.0,
+"prices": {
+"KES": 600.0,
+"USD": 6.0,
+"ZMW": 84.0
+},
+"sku": "9CO393V3R-12"
+},
+{
+"attributes": {
+"Size": "14 inches"
+},
+"is_default": false,
+"label": "Straight Collar — 14 inches",
+"name": "Straight Collar",
+"price_kes": 800.0,
+"price_usd": 8.0,
+"prices": {
+"KES": 800.0,
+"USD": 8.0,
+"ZMW": 112.0
+},
+"sku": "9CO393V3R-14"
+},
+{
+"attributes": {
+"Size": "17 inches"
+},
+"is_default": false,
+"label": "Straight Collar — 17 inches",
+"name": "Straight Collar",
+"price_kes": 1000.0,
+"price_usd": 10.0,
+"prices": {
+"KES": 1000.0,
+"USD": 10.0,
+"ZMW": 140.0
+},
+"sku": "9CO393V3R-17"
+},
+{
+"attributes": {
+"Size": "19 inches"
+},
+"is_default": false,
+"label": "Straight Collar — 19 inches",
+"name": "Straight Collar",
+"price_kes": 1200.0,
+"price_usd": 12.0,
+"prices": {
+"KES": 1200.0,
+"USD": 12.0,
+"ZMW": 168.0
+},
+"sku": "9CO393V3R-19"
+}
+]
+},
+{
+"aliases": [
+"motivational water bottle",
+"time marker water bottle",
+"32 oz water bottle",
+"gift water bottle kenya",
+"hydration bottle nairobi",
+"bpa free water bottle",
+"water bottle with times",
+"conference gift kenya"
+],
+"category": "Gifts",
+"description": "32 oz motivational bottle with time markers and a leak-proof flip lid — BPA-free hydration for long services and busy days.",
+"hub_product_id": 22,
+"in_stock": false,
+"is_producible": false,
+"measurements": [],
+"name": "Executive Water Bottle",
+"price": 1500.0,
+"price_kes": 1500.0,
+"price_usd": 20.0,
+"prices": {
+"KES": 1500.0,
+"USD": 20.0,
+"ZMW": 300.0
+},
+"product_type": "simple",
+"sku": "XZIQU3RFM",
+"slug": "executive-water-bottle",
+"unit": "",
+"variants": []
+},
+{
+"aliases": [
+"cincture",
+"alb cincture",
+"rope belt",
+"altar server cincture",
+"sincture",
+"cincture cord",
+"priest rope belt",
+"cincture rope kenya",
+"tasselled rope cincture"
+],
+"category": "Clergy Vestments",
+"description": "Tasselled cincture rope, 118 inches with 4-inch tassels, proudly made in Kenya — girds the alb or cassock for service.",
+"hub_product_id": 18,
+"in_stock": true,
+"is_producible": false,
+"measurements": [],
+"name": "Cincture Rope",
+"price": 2000.0,
+"price_kes": 2000.0,
+"price_max_kes": 2000.0,
+"price_max_usd": 20.0,
+"price_min_kes": 1500.0,
+"price_min_usd": 20.0,
+"price_usd": 20.0,
+"prices": {
+"KES": 2000.0,
+"USD": 20.0,
+"ZMW": 300.0
+},
+"product_type": "variable",
+"sku": "537OU8Q5Z",
+"slug": "cincture-rope",
+"unit": "",
+"variants": [
+{
+"attributes": {
+"Color": "Red"
+},
+"is_default": true,
+"label": "Cincture Rope — Red",
+"name": "Red Cincture Rope",
+"price_kes": 2000.0,
+"price_usd": 20.0,
+"prices": {
+"KES": 2000.0,
+"USD": 20.0,
+"ZMW": 400.0
+},
+"sku": "537OU8Q5Z-V15"
+},
+{
+"attributes": {
+"Color": "Yellow"
+},
+"is_default": false,
+"label": "Cincture Rope — Yellow",
+"name": "Yellow Cincture Rope",
+"price_kes": 1500.0,
+"price_usd": 20.0,
+"prices": {
+"KES": 1500.0,
+"USD": 20.0,
+"ZMW": 300.0
+},
+"sku": "537OU8Q5Z-V16"
+},
+{
+"attributes": {
+"Color": "Purple"
+},
+"is_default": false,
+"label": "Cincture Rope — Purple",
+"name": "Purple Cincture Rope",
+"price_kes": 1500.0,
+"price_usd": 20.0,
+"prices": {
+"KES": 1500.0,
+"USD": 20.0,
+"ZMW": 300.0
+},
+"sku": "537OU8Q5Z-V17"
+},
+{
+"attributes": {
+"Color": "Green"
+},
+"is_default": false,
+"label": "Cincture Rope — Green",
+"name": "Green Cincture Rope",
+"price_kes": 1500.0,
+"price_usd": 20.0,
+"prices": {
+"KES": 1500.0,
+"USD": 20.0,
+"ZMW": 300.0
+},
+"sku": "537OU8Q5Z-V18"
+},
+{
+"attributes": {
+"Color": "White"
+},
+"is_default": false,
+"label": "Cincture Rope — White",
+"name": "White Cincture Rope",
+"price_kes": 1500.0,
+"price_usd": 20.0,
+"prices": {
+"KES": 1500.0,
+"USD": 20.0,
+"ZMW": 300.0
+},
+"sku": "537OU8Q5Z-V19"
+},
+{
+"attributes": {
+"Color": "Black"
+},
+"is_default": false,
+"label": "Cincture Rope — Black",
+"name": "Black Cincture Rope",
+"price_kes": 1500.0,
+"price_usd": 20.0,
+"prices": {
+"KES": 1500.0,
+"USD": 20.0,
+"ZMW": 300.0
+},
+"sku": "537OU8Q5Z-V20"
+},
+{
+"attributes": {
+"Color": "Black and Red Tassel"
+},
+"is_default": false,
+"label": "Cincture Rope — Black and Red Tassel",
+"name": "Black and Red Tassel Cincture Rope",
+"price_kes": 1500.0,
+"price_usd": 20.0,
+"prices": {
+"KES": 1500.0,
+"USD": 20.0,
+"ZMW": 300.0
+},
+"sku": "537OU8Q5Z-V21"
+},
+{
+"attributes": {
+"Color": "White and Red Tassel"
+},
+"is_default": false,
+"label": "Cincture Rope — White and Red Tassel",
+"name": "White and Red Tassel Cincture Rope",
+"price_kes": 1500.0,
+"price_usd": 20.0,
+"prices": {
+"KES": 1500.0,
+"USD": 20.0,
+"ZMW": 300.0
+},
+"sku": "537OU8Q5Z-V22"
+}
+]
+},
+{
+"aliases": [
+"cincture belt",
+"cassock belt",
+"clergy belt",
+"sincture belt",
+"cassock waistband",
+"cincture belt kenya"
+],
+"category": "Clergy Vestments",
+"description": "Cincture belt worn at the waist with the cassock and liturgical vestments — girded for service; made to order in our Nairobi workshop.",
+"hub_product_id": 17,
+"in_stock": true,
+"is_producible": true,
+"measurements": [],
+"name": "CINCTURE BELT",
+"price": 2200.0,
+"price_kes": 2200.0,
+"price_usd": 30.0,
+"prices": {
+"KES": 2200.0,
+"USD": 30.0,
+"ZMW": 440.0
+},
+"product_type": "simple",
+"sku": "RONG11JY7",
+"slug": "cincture-belt",
+"unit": "",
+"variants": []
+},
+{
+"aliases": [
+"white clergy robe",
+"white soutane",
+"choir cassock",
+"white church robe",
+"cassock and surplice",
+"white kanzu",
+"white casock",
+"anglican white cassock"
+],
+"category": "Clergy Vestments",
+"description": "Classic white cassock made in Kenya by Bethany House — for clergy, worship leaders and choirs, worn alone or under a surplice.",
+"hub_product_id": 12,
+"in_stock": true,
+"is_producible": true,
+"measurements": [
+{
+"name": "Neck",
+"required": true,
+"unit": "Inches"
+},
+{
+"name": "Shoulder Width",
+"required": true,
+"unit": "Inches"
+},
+{
+"name": "Sleeve Length",
+"required": true,
+"unit": "Inches"
+},
+{
+"name": "Wrist",
+"required": true,
+"unit": "inches"
+},
+{
+"name": "Chest",
+"required": true,
+"unit": "Inches"
+},
+{
+"name": "Stomach",
+"required": true,
+"unit": "Inches"
+},
+{
+"name": "Length",
+"required": true,
+"unit": "Inches"
+},
+{
+"name": "full Length",
+"required": true,
+"unit": "Inches"
+}
+],
+"name": "White Cassock",
+"price": 13000.0,
+"price_kes": 13000.0,
+"price_usd": 130.0,
+"prices": {
+"KES": 13000.0,
+"USD": 130.0,
+"ZMW": 2600.0
+},
+"product_type": "simple",
+"sku": "FBU30QUE0",
+"slug": "white-cassock",
+"unit": "",
+"variants": []
+},
+{
+"aliases": [
+"communion glasses",
+"glass communion cups",
+"reusable communion cups",
+"beveled communion cups",
+"bevelled communion glasses",
+"communion cups nairobi",
+"vikombe vya ushirika",
+"lords supper cups"
+],
+"category": "Communion Items",
+"description": "Bevelled-glass communion cups, 1½ inches tall for an easy lift from the tray — durable, dishwasher safe and reusable.",
+"hub_product_id": 10,
+"in_stock": false,
+"is_producible": false,
+"measurements": [],
+"name": "Glass Cups",
+"price": 100.0,
+"price_kes": 100.0,
+"price_usd": 10.0,
+"prices": {
+"KES": 100.0,
+"USD": 10.0,
+"ZMW": 20.0
+},
+"product_type": "simple",
+"sku": "YX9PKFQQ5",
+"slug": "glass-cups",
+"unit": "",
+"variants": []
+},
+{
+"aliases": [
+"gold plated chalice",
+"brass chalice medium",
+"engraved chalice",
+"communion goblet",
+"gilt chalice",
+"chalice cup nairobi"
+],
+"category": "Communion Items",
+"description": "Hand-engraved gold-plated brass chalice, medium size, sealed with food-safe lacquer to keep its lustre service after service.",
+"hub_product_id": 9,
+"in_stock": false,
+"is_producible": false,
+"measurements": [],
+"name": "Chalice Cup -Medium",
+"price": 10000.0,
+"price_kes": 10000.0,
+"price_usd": 100.0,
+"prices": {
+"KES": 10000.0,
+"USD": 100.0,
+"ZMW": 2000.0
+},
+"product_type": "simple",
+"sku": "7IM6K8KA4",
+"slug": "golden-chalice-cup-medium",
+"unit": "",
+"variants": []
+},
+{
+"aliases": [
+"preaching gown kenya",
+"pulpit gown",
+"geneva gown",
+"pastors gown nairobi",
+"pulpit robe",
+"pcea minister gown",
+"minister gown kenya",
+"church robes kenya",
+"preaching robe",
+"joho"
+],
+"category": "Clergy Vestments",
+"description": "Wrinkle-resistant preaching gown with cross embroidery — dignified pulpit wear for pastors, priests and choirs.",
+"hub_product_id": 6,
+"in_stock": true,
+"is_producible": false,
+"measurements": [],
+"name": "Preaching Gown",
+"price": 20000.0,
+"price_kes": 20000.0,
+"price_max_kes": 20000.0,
+"price_max_usd": 200.0,
+"price_min_kes": 13000.0,
+"price_min_usd": 130.0,
+"price_usd": 180.0,
+"prices": {
+"KES": 20000.0,
+"USD": 180.0,
+"ZMW": 3600.0
+},
+"product_type": "variable",
+"sku": "843GLV9RC",
+"slug": "preaching-gown-843glv9rc",
+"unit": "",
+"variants": [
+{
+"attributes": {
+"Color": "BLACK PREACHING GOWN"
+},
+"is_default": false,
+"label": "Preaching Gown — BLACK",
+"name": "BLACK PREACHING GOWN",
+"price_kes": 13000.0,
+"price_usd": 130.0,
+"prices": {
+"KES": 13000.0,
+"USD": 130.0,
+"ZMW": 2600.0
+},
+"sku": "843GLV9RC-V28"
+},
+{
+"attributes": {
+"Color": "OFF WHITE PREACHING GOWN"
+},
+"is_default": false,
+"label": "Preaching Gown — OFF WHITE",
+"name": "OFF WHITE PREACHING GOWN",
+"price_kes": 13000.0,
+"price_usd": 130.0,
+"prices": {
+"KES": 13000.0,
+"USD": 130.0,
+"ZMW": 2600.0
+},
+"sku": "843GLV9RC-V29"
+},
+{
+"attributes": {
+"Color": "WHITE PREACHING GOWN"
+},
+"is_default": false,
+"label": "Preaching Gown — WHITE",
+"name": "WHITE PREACHING GOWN",
+"price_kes": 13000.0,
+"price_usd": 130.0,
+"prices": {
+"KES": 13000.0,
+"USD": 130.0,
+"ZMW": 2600.0
+},
+"sku": "843GLV9RC-V53"
+},
+{
+"attributes": {
+"Color": "PURPLE PREACHING GOWN"
+},
+"is_default": false,
+"label": "Preaching Gown — PURPLE",
+"name": "PURPLE PREACHING GOWN",
+"price_kes": 13000.0,
+"price_usd": 130.0,
+"prices": {
+"KES": 13000.0,
+"USD": 130.0,
+"ZMW": 2600.0
+},
+"sku": "843GLV9RC-V54"
+},
+{
+"attributes": {
+"Color": "BLUE PREACHING GOWN"
+},
+"is_default": false,
+"label": "Preaching Gown — BLUE",
+"name": "BLUE PREACHING GOWN",
+"price_kes": 13000.0,
+"price_usd": 130.0,
+"prices": {
+"KES": 13000.0,
+"USD": 130.0,
+"ZMW": 2600.0
+},
+"sku": "843GLV9RC-V79"
+},
+{
+"attributes": {
+"Color": "RED PREACHING GOWN"
+},
+"is_default": false,
+"label": "Preaching Gown — RED",
+"name": "RED PREACHING GOWN",
+"price_kes": 13000.0,
+"price_usd": 130.0,
+"prices": {
+"KES": 13000.0,
+"USD": 130.0,
+"ZMW": 2600.0
+},
+"sku": "843GLV9RC-V80"
+},
+{
+"attributes": {
+"Color": "SELF PRINT PREACHING GOWN"
+},
+"is_default": false,
+"label": "Preaching Gown — SELF PRINT",
+"name": "SELF PRINT PREACHING GOWN",
+"price_kes": 15000.0,
+"price_usd": 150.0,
+"prices": {
+"KES": 15000.0,
+"USD": 150.0,
+"ZMW": 3000.0
+},
+"sku": "843GLV9RC-V81"
+},
+{
+"attributes": {
+"Color": "VELVET DOCTORATE GOWN"
+},
+"is_default": false,
+"label": "Preaching Gown — VELVET DOCTORATE GOWN",
+"name": "VELVET DOCTORATE GOWN",
+"price_kes": 20000.0,
+"price_usd": 200.0,
+"prices": {
+"KES": 20000.0,
+"USD": 200.0,
+"ZMW": 4000.0
+},
+"sku": "843GLV9RC-V111"
+},
+{
+"attributes": {
+"Color": "VELVET DOCTORATE GOWN"
+},
+"is_default": false,
+"label": "Preaching Gown — VELVET DOCTORATE GOWN",
+"name": "VELVET DOCTORATE GOWN",
+"price_kes": 18000.0,
+"price_usd": 180.0,
+"prices": {
+"KES": 18000.0,
+"USD": 180.0,
+"ZMW": 3600.0
+},
+"sku": "843GLV9RC-V112"
+}
+]
+}
+]
