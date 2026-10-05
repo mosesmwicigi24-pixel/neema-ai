@@ -5,7 +5,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { callCardView, canCallBack, actionItems, fmtDuration, whenText, transcriptSlot, mediaSrc, callBackHandle, nearestCallId,
-    transcriptFailure, callLanguage, callFacts }
+    transcriptFailure, callLanguage, callFacts, lastCallBrief }
     from "../src/lib/callCard.ts";
 
 const call = (o) => ({ status: "completed", direction: "inbound", agent_name: null, duration: null,
@@ -145,4 +145,13 @@ test("15 a call notice folds into the nearest call within 15 minutes, else stays
     assert.equal(nearestCallId("2026-10-05T11:55:00Z", calls), "B");    // just before B rang
     assert.equal(nearestCallId("2026-10-05T11:00:00Z", calls), null);   // nowhere near a call
     assert.equal(nearestCallId(null, calls), null);
+});
+
+test("13 profile brief: summary + prices + next; never the no-speech line", () => {
+    assert.deepEqual(lastCallBrief({ summary: "Fr. Otieno wants 2 shirts.", insights: { prices: ["KES 4,500 each"], next_action: "Send M-Pesa details" } }),
+        { summary: "Fr. Otieno wants 2 shirts.", prices: ["KES 4,500 each"], next: "Send M-Pesa details" });
+    assert.equal(lastCallBrief({ summary: "No speech was captured on the recording.", insights: null }), null);
+    assert.equal(lastCallBrief({ summary: "(No clear speech captured.)", insights: null }), null);
+    assert.equal(lastCallBrief({ summary: "  ", insights: null }), null);
+    assert.deepEqual(lastCallBrief({ summary: "Asked about albs.", insights: null }), { summary: "Asked about albs.", prices: [], next: null });
 });

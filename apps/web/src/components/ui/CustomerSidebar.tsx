@@ -19,6 +19,7 @@ import type { Conversation, Order } from "@/types";
 import { whatsappApi, callsApi, askNeema, answerViaNeema, settingsApi, type ApiCall, type CallPermission } from "@/lib/api";
 import { useWs } from "@/lib/websocket";
 import { callStatus, fmtCallDuration, upsertCall, CALL_ICON_PATH, permissionLines, type PermTone } from "@/lib/callStatus";
+import { lastCallBrief } from "@/lib/callCard";
 import { useCallPresence, firstName } from "@/lib/callContext";
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -886,6 +887,10 @@ function SidebarCalls({ waId, psid }: { waId?: string; psid?: string }) {
 
     if (!calls || calls.length === 0) return null;
     const owed = calls.some((c) => c.follow_up_open);
+    // The newest call with a real brief — what the next person to talk to
+    // this customer should know (summary, prices said, the next step).
+    const briefed = calls.find((c) => lastCallBrief(c) !== null) ?? null;
+    const brief = briefed ? lastCallBrief(briefed) : null;
     return (
         <div className="mt-3">
             <div className="flex items-center gap-1.5 mb-1">
@@ -918,6 +923,24 @@ function SidebarCalls({ waId, psid }: { waId?: string; psid?: string }) {
                     );
                 })}
             </ul>
+            {brief && briefed && (
+                <div className="mt-1.5 rounded-lg px-2.5 py-2" style={{ backgroundColor: "#f3f8f1" }} data-last-call-brief>
+                    <div className="text-[10px] font-semibold uppercase tracking-wider" style={{ color: "#128C4B" }}>
+                        Last call{briefed.started_at ? ` · ${timeAgo(briefed.started_at)}` : ""}
+                    </div>
+                    <p className="text-xs leading-relaxed mt-0.5 line-clamp-4" style={{ color: "#1c2917" }}>{brief.summary}</p>
+                    {brief.prices.length > 0 && (
+                        <p className="text-[11px] leading-snug mt-1" style={{ color: "#334155" }}>
+                            <span className="font-semibold">Prices: </span>{brief.prices.join(" · ")}
+                        </p>
+                    )}
+                    {brief.next && (
+                        <p className="text-[11px] leading-snug mt-0.5" style={{ color: "#334155" }}>
+                            <span className="font-semibold">Next: </span>{brief.next}
+                        </p>
+                    )}
+                </div>
+            )}
         </div>
     );
 }

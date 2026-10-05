@@ -219,3 +219,17 @@ export function nearestCallId(at: string | null | undefined,
     }
     return best;
 }
+
+/** The brief worth showing on the customer's profile for one call, or null:
+ *  a summary that says something (never the no-speech line), the prices said
+ *  and the next step. */
+export const NO_SPEECH_SUMMARIES = ["No speech was captured on the recording.", "(No clear speech captured.)"];
+export function lastCallBrief(c: Pick<ApiCall, "summary" | "insights">):
+    { summary: string; prices: string[]; next: string | null } | null {
+    const summary = (c.summary || "").trim();
+    if (!summary || NO_SPEECH_SUMMARIES.includes(summary)) return null;
+    const ins = c.insights ?? null;
+    const prices = (Array.isArray(ins?.prices) ? ins!.prices : []).map((x) => String(x ?? "").trim()).filter(Boolean).slice(0, 4);
+    const next = (ins?.next_action || "").trim() || null;
+    return { summary, prices, next };
+}
