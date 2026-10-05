@@ -152,13 +152,18 @@ def test_voice_note_end_to_end_real_download_real_agent_turn(rig, clips, monkeyp
         n, failed = await wa_native.handle_webhook(wa_payload(wa, wamid), rig.redis)
         assert (n, failed) == (1, 0)
         await drain_tasks()
-        for _ in range(200):                          # the reply task (runtime._bg_tasks)
-            if sent:
+        # The reply task (runtime._bg_tasks) sends FIRST and stores the reply
+        # after — wait for the stored row, not just the send (CI's slower
+        # runner read the thread between the two).
+        rows = []
+        for _ in range(200):
+            async with rig.maker() as db:
+                rows = (await db.execute(sa.select(Message).where(Message.wa_id == wa)
+                                         .order_by(Message.created_at))).scalars().all()
+            if sent and any(r.direction == MsgDirection.outbound for r in rows):
                 break
             await asyncio.sleep(0.05)
-        async with rig.maker() as db:
-            return (await db.execute(sa.select(Message).where(Message.wa_id == wa)
-                                     .order_by(Message.created_at))).scalars().all()
+        return rows
     rows = run(go())
 
     # Hand-off 1: the Graph was asked with the WABA token, then the CDN.
