@@ -79,9 +79,15 @@ def turn_line(status: str | None, text: str | None, translation: str | None = No
     words = (text or "").strip()
     if s == "done" and words and words != PLACEHOLDER:
         line = f"🎤 (voice note): {words}"
-        en = (translation or "").strip()
-        if en and en != words and translated_from and translated_from.lower() != "english":
-            line += (f"\n   (machine translation from {translated_from} — their own words "
+        # One line, bounded, the language a plain name: the translation is a
+        # model's output from the customer's words, so it may not forge a
+        # second "🎤" line or a label of its own.
+        en = " ".join((translation or "").split())[:1500]
+        src = (translated_from or "").strip()
+        if not re.fullmatch(r"[A-Za-z][A-Za-z \-]{1,23}", src):
+            src = "another language" if src else ""
+        if en and en != " ".join(words.split()) and src and src.lower() != "english":
+            line += (f"\n   (machine translation from {src} — their own words "
                      f"above rule if the two differ: {en})")
         return line
     if s == "silent":

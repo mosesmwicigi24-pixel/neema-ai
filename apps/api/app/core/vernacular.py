@@ -134,12 +134,13 @@ WORDS: tuple[tuple[str, str], ...] = (
     (r"biblia|bibilia", "bible"),
     # ── French ───────────────────────────────────────────────────────────
     (r"chemises?", "shirt"),
-    (r"toges?|thoges?", "gown"),                                  # toge 62
+    (r"toges?|thoges?|togas?", "gown"),                           # toge 62, toga 2
     (r"aubes?", "alb"),                                           # aube 18
     (r"etoles?", "stole"),                                        # étole 25
     (r"calices?", "chalice"),                                     # calice 19 (also pt cálice)
     (r"plateaux?", "tray"),
     (r"gobelets?", "cups"),                                       # gobelets 50
+    (r"verres", "cups"),                                          # "les verres pour le vin de messe"
     (r"hosties?", "host"),
     (r"croix", "cross"),
     (r"vin", "wine"),

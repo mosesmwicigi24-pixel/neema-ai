@@ -184,3 +184,22 @@ def test_the_spoken_words_all_find_goods(shelf):
     """Every Swahili / French word taught to the transcriber finds a row."""
     for w in (*vernacular.SPOKEN_SWAHILI, *vernacular.SPOKEN_FRENCH):
         assert _search(w)["results"], w
+
+
+@pytest.mark.parametrize("q", [
+    "communion tray", "clergy shirt", "cassock", "prayer shawl", "altar wine",
+    "pectoral cross", "bishop ring", "chalice", "communion cups", "stole", "mitre",
+    "incense", "candle holder", "offering basket", "choir robe", "graduation gown",
+    "t shirt", "suit", "white collar", "gold chain", "holy water", "red cope",
+])
+def test_english_queries_pass_through_untouched(q):
+    """The agent's ordinary English never collides with a word of the table."""
+    assert vernacular.to_hub(q) == q
+
+
+def test_a_word_in_another_sense_is_left_alone():
+    """Only whole words, only the evidenced sense: 'total' is not a tot,
+    'Peter' is not a ring, 'collaboration' is not a collar, 'vintage' not wine."""
+    for q in ("total", "peter", "collaboration", "vintage", "copacabana", "trainer",
+              "street", "captain"):
+        assert vernacular.to_hub(q) == q, q
