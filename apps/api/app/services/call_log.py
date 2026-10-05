@@ -519,6 +519,8 @@ def follow_up_open(c: Call, later_connected: set[tuple[str, datetime]] | None = 
 def serialize(c: Call, *, person=None, agent_name: str | None = None,
               conversation_id: str | None = None, follow_up: bool = False) -> dict:
     """The one row shape the Calls view, the phone and the thread read."""
+    from app.services.transcribe import describe, status_kind
+    state = status_kind(c.transcript_status)
     return {
         "id": str(c.id), "call_id": c.call_id, "wa_id": c.wa_id,
         "external_id": getattr(c, "external_id", None) or c.wa_id,
@@ -537,6 +539,13 @@ def serialize(c: Call, *, person=None, agent_name: str | None = None,
         "summary": c.summary,
         "insights": c.insights,
         "transcript_status": c.transcript_status or "none",
+        # The status folded to its kind (none | recorded | queued | processing
+        # | done | failed), why in words when it failed, and the language —
+        # so the call card draws every state without fetching the transcript.
+        "transcript_state": state,
+        "transcript_failure": describe(c.transcript_status) if state == "failed" else None,
+        "transcript_lang": getattr(c, "transcript_lang", None),
+        "has_transcript": bool(c.transcript),
         "has_recording": bool(c.recording_url),
         "has_voicemail": bool(getattr(c, "voicemail_message_id", None)),
         "follow_up_open": follow_up,

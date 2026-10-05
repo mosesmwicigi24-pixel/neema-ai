@@ -1,3 +1,4 @@
+import type { MessageMeta } from "@/lib/messageKinds";
 import type { ApiCall } from "@/lib/api";
 
 // ── Channel types ─────────────────────────────────────────────────────────────
@@ -79,6 +80,12 @@ export interface Message {
     // message (either direction), shown gray under the bubble. Dashboard-only.
     translation?: string | null;
     translated_from?: string | null;
+    // A voice note's transcription (API services/voice_notes): none | queued |
+    // processing | done | silent | failed:<reason>; the spoken language (ISO);
+    // and, when it failed or heard nothing, why — in words for the team.
+    transcript_status?: string | null;
+    transcript_lang?: string | null;
+    transcript_note?: string | null;
     agent_name?: string;
     // Populated when type === "system_event"
     event_kind?: SystemEventKind;
@@ -104,6 +111,11 @@ export interface Message {
         thumb?: string;
         reply_to?: string;
     } | null;
+    // What a non-plain inbound message IS (server: services/inbound_kinds.py):
+    // a location, contact, reaction, call-permission reply, cart, or a type
+    // WhatsApp won't show businesses — with Meta's type + error. Rendered by
+    // lib/messageKinds.ts. Null for plain text / media.
+    meta?: MessageMeta | null;
     // When this message is a reply to an earlier one in the same conversation:
     // the quoted message's id + a snippet + who sent it, so the bubble shows it.
     reply_to?: {

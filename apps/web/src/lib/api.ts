@@ -288,6 +288,15 @@ export interface ApiThreadItem {
     mime_type?: string | null;
     filename?: string | null;
     comment_context?: Message["comment_context"];
+    /** What a non-plain message IS (location, contact, reaction, unsupported …). */
+    meta?: Message["meta"];
+    /** English under a foreign message (cached server-side), and its language. */
+    translation?: string | null;
+    translated_from?: string | null;
+    /** A voice note's transcription: status, spoken language, why it failed. */
+    transcript_status?: string | null;
+    transcript_lang?: string | null;
+    transcript_note?: string | null;
     reply_to?: { id: string; text: string | null; sender: string | null;
                  media_type?: string | null; media_url?: string | null } | null;
     // System-event-specific
@@ -320,6 +329,14 @@ function mapThreadItem(raw: ApiThreadItem): Message {
         mime_type:     raw.mime_type ?? null,
         filename:      raw.filename ?? null,
         comment_context: raw.comment_context ?? null,
+        meta:          raw.meta ?? null,
+        // The server sends these on every page; dropping them here meant a
+        // reload lost every translation and every voice note's state.
+        translation:       raw.translation ?? null,
+        translated_from:   raw.translated_from ?? null,
+        transcript_status: raw.transcript_status ?? null,
+        transcript_lang:   raw.transcript_lang ?? null,
+        transcript_note:   raw.transcript_note ?? null,
         reply_to:      raw.reply_to ?? null,
     };
 }
@@ -722,11 +739,15 @@ export const whatsappApi = {
 export interface CallInsights {
     intent?: string | null;
     products?: string[];
+    /** Every price or amount mentioned, with currency and what it was for. */
+    prices?: string[];
     objections?: string[];
     commitments?: string[];
     next_action?: string | null;
     follow_up_message?: string | null;
     sentiment?: string | null;
+    /** The main language spoken, in English ("Swahili"). */
+    language?: string | null;
 }
 
 /** One call row — the shape GET /admin/calls, GET /admin/calls/{id}, the
@@ -754,7 +775,15 @@ export interface ApiCall {
     ended_at?: string | null;
     summary?: string | null;
     insights?: CallInsights | null;
-    transcript_status?: string | null;  // none | recorded | pending | processing | done | failed
+    transcript_status?: string | null;  // none | recorded | queued | processing | done | failed:<reason> (legacy: pending, failed)
+    /** transcript_status folded to its kind: none | recorded | queued | processing | done | failed. */
+    transcript_state?: string | null;
+    /** Why it failed, in words ("today's transcription budget is used up"). */
+    transcript_failure?: string | null;
+    /** The spoken language (ISO-639-1, "sw"). */
+    transcript_lang?: string | null;
+    /** Words were captured (false for a silent recording — nothing to open). */
+    has_transcript?: boolean;
     has_recording?: boolean;
     /** WhatsApp voicemail arrived for this call (the audio is in the chat). */
     has_voicemail?: boolean;
@@ -765,6 +794,11 @@ export interface ApiCall {
 export interface CallTranscriptResp {
     call_id: string;
     status: string;
+    /** none | recorded | queued | processing | done | failed — `status` folded
+     *  to its kind (legacy "pending" = queued, "failed:<reason>" = failed). */
+    state?: string;
+    /** When state is "failed": why, in words ("today's transcription budget is used up"). */
+    failure?: string | null;
     transcript: string | null;
     summary: string | null;
     insights?: CallInsights | null;

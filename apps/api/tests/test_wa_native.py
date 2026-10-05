@@ -8,7 +8,6 @@ import types
 
 import app.main  # noqa: F401 — registers models
 import app.services.wa_native as wn
-from app.core.config import settings
 
 
 def _payload(messages, contacts=None):
@@ -187,30 +186,24 @@ def test_reply_schedules_for_ai_mode(monkeypatch):
     assert captured["reconciled"] is True      # the wa.me ref bridge still runs
 
 
-# ── transcription falls back, never blocks ───────────────────────────────────
+# ── transcription: one engine, never blocks ──────────────────────────────────
 
-def test_transcription_falls_back_to_openai(monkeypatch):
-    from app.services import call_transcribe as ct
+def test_voice_notes_use_the_one_engine(monkeypatch):
+    """The pre-engine fallback chain (faster-whisper → OpenAI whisper-1 on an
+    extensionless file) is gone: every voice note goes to services/transcribe
+    as a voice note, with the app's redis (cache, lock, daily ceiling)."""
+    from app.services import transcribe as stt
+    seen = {}
 
-    def boom(path):
-        raise RuntimeError("faster-whisper not installed")
-
-    monkeypatch.setattr(ct, "_transcribe_sync", boom)
-    monkeypatch.setattr(settings, "openai_api_key", "sk-test", raising=False)
-    monkeypatch.setattr(ct, "_transcribe_openai",
-                        lambda p: ("Nataka mkate wa komunio", "sw"))
-    assert wn._transcribe_path_sync("/x.ogg") == "Nataka mkate wa komunio"
-
-
-def test_transcription_returns_none_when_nothing_works(monkeypatch):
-    from app.services import call_transcribe as ct
-
-    def boom(path):
-        raise RuntimeError("no")
-
-    monkeypatch.setattr(ct, "_transcribe_sync", boom)
-    monkeypatch.setattr(settings, "openai_api_key", "", raising=False)
-    assert wn._transcribe_path_sync("/x.ogg") is None
+    async def fake(path, kind="voice_note", redis=None):
+        seen.update(path=path, kind=kind, redis=redis)
+        return stt.Transcript(status="done", text="Nataka mkate wa komunio", lang="sw")
+    monkeypatch.setattr(stt, "transcribe_file", fake)
+    r = object()
+    out = asyncio.run(wn.transcribe_voice_note("/m/wa_1.ogg", redis=r))
+    assert out.ok and out.text == "Nataka mkate wa komunio"
+    assert seen == {"path": "/m/wa_1.ogg", "kind": "voice_note", "redis": r}
+    assert not hasattr(wn, "_transcribe_path_sync")
 
 
 # ── native is the ONLY pipeline (n8n retired 2026-07-30, code 2026-08-11) ────

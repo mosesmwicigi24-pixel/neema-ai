@@ -23,9 +23,11 @@ _PRICES: dict[str, tuple[float, float, float]] = {
     "claude-sonnet-5":  (3.00, 0.30, 15.00),
     "claude-haiku-4-5": (1.00, 0.10, 5.00),
     "claude-opus-4-8":  (5.00, 0.50, 25.00),
-    # audio (billed per-token on these models; Whisper is billed per-minute
-    # and logged separately by the caller)
+    # audio (billed per-token on these models; speech-to-text is billed per
+    # audio minute — services/transcribe.PRICE_PER_MIN meters it directly)
     "whisper-1":      (0.0, 0.0, 0.0),
+    "gpt-4o-transcribe": (0.0, 0.0, 0.0),
+    "gpt-4o-mini-transcribe": (0.0, 0.0, 0.0),
     "gpt-4o-mini-tts": (0.60, 0.0, 12.00),
 }
 
