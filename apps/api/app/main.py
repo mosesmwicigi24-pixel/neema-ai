@@ -354,6 +354,27 @@ async def lifespan(app: FastAPI):
 
     app.state._meta_enrich_task = _asyncio.create_task(_meta_enrich_loop())
 
+    # Transcription recovery (services/transcript_recovery.py): voice notes
+    # and call recordings whose background task died with a restart, and
+    # transient provider failures, are picked up again. The first pass runs
+    # shortly after boot — the restart that orphaned the work is usually this
+    # one; then every 5 minutes. Redis-locked per tick (one worker); the row
+    # claims make a double pass harmless anyway.
+    async def _transcript_recovery_loop(interval: int = 300):
+        await _asyncio.sleep(45)
+        while True:
+            try:
+                if settings.whisper_enabled and (
+                        redis is None or await redis.set("transcribe:recover:tick", "1",
+                                                         nx=True, ex=interval - 30)):
+                    from app.services.transcript_recovery import sweep
+                    await sweep(redis)
+            except Exception as exc:
+                logger.warning("transcript recovery tick failed: %s", exc)
+            await _asyncio.sleep(interval)
+
+    app.state._transcript_recovery_task = _asyncio.create_task(_transcript_recovery_loop())
+
     # ── Self-heal missed auto-replies ─────────────────────────────────────────
     # Auto-replies are fire-and-forget tasks — a deploy (every push) or a
     # transient LLM/Graph error loses the ones in flight, and the customer's DM
