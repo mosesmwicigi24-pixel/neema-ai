@@ -62,6 +62,9 @@ def describe(tool: str, args: dict, out) -> tuple[str, str | None]:
                 d += f" → total {ccy} {money.num(total)}" if isinstance(total, (int, float)) else f" → total {total}"
             return "Updated the cart", d or None
         if tool == "create_order":
+            if o.get("error"):
+                # never "Created an order" over a failure (six weeks of 403s read so)
+                return "Order NOT placed", None
             num = o.get("order_number") or ""
             total, ccy = o.get("total"), o.get("currency") or ""
             d = f"{num}" + (f" — {ccy} {money.num(total)}" if isinstance(total, (int, float)) else "")
