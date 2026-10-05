@@ -274,7 +274,7 @@ def _wire(monkeypatch, verdicts, facts_rows=None):
                          "out": {"results": [{"name": r["name"]} for r in rows]}})
         return rows
 
-    async def fake_flag(db, channel, key, issues, draft):
+    async def fake_flag(db, channel, key, issues, draft, redis=None):
         flags.append((channel, key, list(issues), draft))
 
     async def fake_tally(redis, outcome, channel=""):

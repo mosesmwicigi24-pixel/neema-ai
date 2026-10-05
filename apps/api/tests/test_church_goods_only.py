@@ -366,7 +366,7 @@ def _gate(reply, *, ask, seen=(), writer_texts=(), transcript=None, monkeypatch,
         return []
     monkeypatch.setattr(rt, "_facts_for_ask", no_facts)
 
-    async def no_flag(db, channel, key, issues, draft):
+    async def no_flag(db, channel, key, issues, draft, redis=None):
         return None
     monkeypatch.setattr(rt, "_flag_held_reply", no_flag)
     return asyncio.run(rt._gate_turn_reply(

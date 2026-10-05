@@ -383,7 +383,7 @@ _FINISH_WORD = {w: f for f, words in FINISHES.items() for w in words}
 KINDS: dict[str, tuple[str, ...]] = {
     "chalice": ("chalice", "chalices", "goblet", "goblets", "paten"),
     "cup": ("cup", "cups", "glasses", "tots", "vikombe"),
-    "tray": ("tray", "trays", "trei"),
+    "tray": ("tray", "trays", "trei", "sinia", "siniya", "siniy", "masinia"),
     "set": ("set", "sets"),
 }
 _KIND_WORD = {w: k for k, words in KINDS.items() for w in words}
@@ -403,11 +403,19 @@ def finishes_of(text: str) -> set[str]:
 # A "chalice cup" is ONE thing — a chalice (the hub's own names: "Chalice Cup
 # -Medium"), not a chalice and some cups.
 _CHALICE_CUP_RE = re.compile(r"\bchalice\s+cups?\b", re.IGNORECASE)
+# Cups as a CAPACITY name the tray that holds them: "the one with 40cups",
+# "holds 100 cups" (2026-10-04: a tray was held as "not a cup" for that ask).
+_CAPACITY_RE = re.compile(r"\b(?:with|holds?|holding|carr(?:y|ies|ying))\s+\d+\s*cups?\b",
+                          re.IGNORECASE)
+_BREAD_RE = re.compile(r"\b(?:bread|mkate|mikate)\b", re.IGNORECASE)
+# The cup tray offered for "the set" without its cups: the right item, half
+# the answer — the rewrite adds the cups; it never holds the sale (soft).
+SET_NEEDS_CUPS = "they asked for a set — the set is the tray WITH its cups: offer the communion cups"
 
 
 def kinds_of(text: str) -> set[str]:
-    return {_KIND_WORD[w] for w in _words(_CHALICE_CUP_RE.sub(" chalice ", text or ""))
-            if w in _KIND_WORD}
+    t = _CAPACITY_RE.sub(" tray ", _CHALICE_CUP_RE.sub(" chalice ", text or ""))
+    return {_KIND_WORD[w] for w in _words(t) if w in _KIND_WORD}
 
 
 # A reply that SAYS we do not have the one they asked and offers the nearest
@@ -524,6 +532,15 @@ def item_issues(ask: str, product: dict | None, answer: str = "") -> list[str]:
         issues.append(f"they asked for {' / '.join(sorted(asked_f))}; '{name}' is "
                       f"{' / '.join(sorted(have_f))} — the finish they asked for is the item")
     asked_k, have_k = kinds_of(ask), kinds_of(name)
+    # THE SET IS THE CUP TRAY WITH ITS CUPS (owner, 2026-10-05: "Tray + cups
+    # together"): "how much is the set?" is answered by a communion tray WITH
+    # the cups offered beside it. A tray offered alone is told to add them; a
+    # bread tray or a chalice is not the set.
+    if ("set" in asked_k and "tray" in have_k and "set" not in have_k
+            and not _BREAD_RE.search(name)):
+        if "cup" not in kinds_of(answer):
+            issues.append(f"{SET_NEEDS_CUPS} beside '{name}', each at its hub price")
+        return issues
     if "chalice" in have_k and "cup" in asked_k and "chalice" not in asked_k:
         issues.append(f"they asked for communion cups — the small cups the tray holds "
                       f"(plastic, silver, glass, pre-packed); '{name}' is a chalice")
@@ -867,7 +884,8 @@ def rule_findings(comment: str, answer: str, seen: list,
     conflicts = [item_issues(comment, r, answer) for r in named_rows]
     if named_rows and all(conflicts):
         for t in conflicts[0]:
-            out.append({"kind": "item", "hard": bool(money_figures(answer)), "text": t})
+            out.append({"kind": "item", "text": t,
+                        "hard": bool(money_figures(answer)) and not t.startswith(SET_NEEDS_CUPS)})
     if where_unanswered(comment, answer):
         out.append({"kind": "where", "hard": False,
                     "text": "their question about where we are / a shop in their country is "

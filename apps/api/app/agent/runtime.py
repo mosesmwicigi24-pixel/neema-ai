@@ -1111,12 +1111,18 @@ async def _facts_for_ask(ctx, user_text: str, tool_log: list) -> list:
         return []
 
 
-async def _flag_held_reply(db, channel: str, key: str, issues: list, draft: str) -> None:
+async def _flag_held_reply(db, channel: str, key: str, issues: list, draft: str,
+                           redis=None) -> None:
     """A held private reply is a colleague's to answer: the conversation is
-    flagged with the reviewer's reasons and the draft (never sent)."""
+    flagged with the reviewer's reasons and the draft (never sent), moved to
+    HUMAN (the Human tab) and the team is alerted the way escalate_to_human
+    alerts it (owner, 2026-10-05: "Move to Human + notify" — the customer was
+    told "one of our team will confirm", and 55 of 65 such threads in a week
+    had no reply from the team). A thread already with a human is not
+    alerted twice."""
     try:
         from sqlalchemy import or_
-        from app.models.conversation import Conversation
+        from app.models.conversation import Conversation, InterceptMode
         from app.models.intercept import Intercept, InterceptAction
         conv = (await db.execute(select(Conversation).where(
             Conversation.channel == channel,
@@ -1124,13 +1130,19 @@ async def _flag_held_reply(db, channel: str, key: str, issues: list, draft: str)
         ))).scalars().first()
         if conv is None:
             return
+        why = "; ".join(str(i) for i in issues)
         note = ("HELD BACK BY THE REVIEWER — Neema's reply did not pass verification and "
                 "was NOT sent; the customer was told a colleague will come back to them "
-                "here. Please answer them from the hub.\n• Why it was held: "
-                + "; ".join(str(i) for i in issues)[:600])
+                "here. Please answer them from the hub.\n• Why it was held: " + why[:600])
+        already_human = conv.intercept_mode == InterceptMode.human
+        conv.intercept_mode = InterceptMode.human
         db.add(Intercept(conversation_id=conv.id, action=InterceptAction.flag, note=note,
                          ai_reply_held=(draft or "")[:2000]))
         await db.commit()
+        if not already_human:
+            await _alert_team(redis, str(conv.id), key, (draft or "")[:2000],
+                              "🛑 Reply held — a customer is waiting for you",
+                              "Held back by the reviewer: " + why)
     except Exception as exc:
         _log.info("held-reply flag not written for %s/%s: %s", channel, key, exc)
 
@@ -1305,7 +1317,7 @@ async def _gate_turn_reply(reply: str, *, user_text: str, transcript: list, tool
         # "let me confirm the details" (owner, 2026-09-25).
         _log.info("held reply to an acknowledgement for %s: silence", key)
         return "", all_issues, "held"
-    await _flag_held_reply(db, channel, key, all_issues, second or reply)
+    await _flag_held_reply(db, channel, key, all_issues, second or reply, redis=redis)
     if await _rv.held_recently(redis, channel, key):
         _log.info("held again for %s within hours: silence, the colleague is flagged", key)
         return "", all_issues, "held"
@@ -2241,6 +2253,25 @@ def is_outside_window(exc_or_text) -> bool:
     return any(m in s for m in _WINDOW_MARKERS)
 
 
+async def _alert_team(redis, conv_id: str, ext: str, draft: str, title: str, body: str) -> None:
+    """The team's alert for a thread handed to them: the held draft on the
+    thread (`ai_draft_ready` — the dashboard's draft card) and one
+    notification to every agent (`draft_ready`, which web and Android both
+    ring). Best-effort; never raises."""
+    if redis is None:
+        return
+    try:
+        await redis.publish(f"ws:channel:{conv_id}", json.dumps({
+            "type": "ai_draft_ready", "conversationId": conv_id, "waId": ext, "draft": draft,
+        }))
+        await redis.publish("ws:channel:agents:all", json.dumps({
+            "event": "notification", "type": "draft_ready", "title": title,
+            "body": (body or "")[:200], "conv_id": conv_id, "wa_id": ext,
+        }))
+    except Exception:
+        pass
+
+
 async def escalate_to_human(channel: str, ext: str, note: str,
                             draft: str | None = None, redis=None) -> bool:
     """Hand this conversation to a person: route it out of AI mode and leave the
@@ -2275,22 +2306,8 @@ async def escalate_to_human(channel: str, ext: str, note: str,
                              ai_reply_held=(draft or None)))
             await db.commit()
             conv_id = str(conv.id)
-        if draft and redis is not None:
-            try:
-                payload = json.dumps({
-                    "type": "ai_draft_ready",
-                    "conversationId": conv_id,
-                    "waId": ext,
-                    "draft": draft,
-                })
-                await redis.publish(f"ws:channel:{conv_id}", payload)
-                await redis.publish("ws:channel:agents:all", json.dumps({
-                    "event": "notification", "type": "draft_ready",
-                    "title": "✍️ Draft ready — one tap to send",
-                    "body": note[:200], "conv_id": conv_id, "wa_id": ext,
-                }))
-            except Exception:
-                pass
+        if draft:
+            await _alert_team(redis, conv_id, ext, draft, "✍️ Draft ready — one tap to send", note)
         return True
     except Exception:
         _log.warning("human escalation failed for %s/%s", channel, ext, exc_info=True)

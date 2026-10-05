@@ -211,7 +211,7 @@ def _turn(draft, monkeypatch, *writer_texts):
     async def no_facts(ctx, user_text, tool_log):
         return []
 
-    async def flag(db, channel, key, issues, draft):
+    async def flag(db, channel, key, issues, draft, redis=None):
         flagged.append(issues)
     monkeypatch.setattr(rt, "_facts_for_ask", no_facts)
     monkeypatch.setattr(rt, "_flag_held_reply", flag)
