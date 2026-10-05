@@ -318,6 +318,10 @@ async def _lines_for(ids: list, channel: str, key: str, wait_seconds: float) -> 
         return {}
     loop = asyncio.get_running_loop()
     deadline = loop.time() + max(0.0, wait_seconds)
+    # Poll quickly at first (the words are usually seconds away), then back
+    # off to 1.5 s: a flat 0.25 s was 4 queries a second, up to 240 per
+    # waiting turn (measured, cycle 7).
+    pause = 0.25
     while True:
         async with AsyncSessionLocal() as db:
             rows = (await db.execute(select(Message).where(Message.id.in_(ids)))).scalars().all()
@@ -330,4 +334,5 @@ async def _lines_for(ids: list, channel: str, key: str, wait_seconds: float) -> 
         pending = [r for r in mine.values() if r.transcript_status in _PENDING]
         if not pending or loop.time() >= deadline:
             return {i: turn_line(r.transcript_status, r.text) for i, r in mine.items()}
-        await asyncio.sleep(0.25)
+        await asyncio.sleep(min(pause, max(0.05, deadline - loop.time())))
+        pause = min(1.5, pause * 1.5)
