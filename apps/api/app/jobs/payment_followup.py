@@ -37,14 +37,21 @@ from sqlalchemy import select, or_
 from app.core import money
 from app.core.config import settings
 from app.database import AsyncSessionLocal
-# Full model set so SQLAlchemy's mapper registry is complete in a standalone job.
-import app.models.agent      # noqa: F401
-import app.models.intercept  # noqa: F401
-import app.models.person     # noqa: F401
-import app.models.user       # noqa: F401
+# Full model set so SQLAlchemy's mapper registry is complete in a standalone
+# job. Every module, not a hand-picked list: the list missed app.models.message
+# and the job raised InvalidRequestError ('Message') on its first query
+# (found 2026-10-05, tests/test_backfill_cli_process_db.py).
+import importlib as _importlib
+import pkgutil as _pkgutil
+
+import app.models as _models
+
 from app.models.conversation import Conversation, ConvStatus, InterceptMode
 from app.models.order_event import OrderEvent
 from app.routers.order_link import customer_link
+
+for _m in _pkgutil.iter_modules(_models.__path__):
+    _importlib.import_module(f"{_models.__name__}.{_m.name}")
 
 _log = logging.getLogger("neema.payment_followup")
 
