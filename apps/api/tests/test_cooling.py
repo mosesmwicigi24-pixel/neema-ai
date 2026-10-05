@@ -506,8 +506,11 @@ def test_the_agent_pause_lifts_on_a_buying_signal():
 def test_a_messenger_voice_note_is_the_message(monkeypatch):
     import app.services.meta_media as mm
 
-    async def _heard(url):
-        return "nataka kasoki mbili nyeusi" if url == "https://cdn/v.mp4" else None
+    from app.services import transcribe as stt
+
+    async def _heard(url, redis=None):
+        return (stt.Transcript(status="done", text="nataka kasoki mbili nyeusi")
+                if url == "https://cdn/v.mp4" else stt.failed("no_file"))
     monkeypatch.setattr(mm, "transcribe_audio_url", _heard)
     text, media = asyncio.run(rt._hear_voice_note("", {"type": "audio", "url": "https://cdn/v.mp4"}))
     assert text == "nataka kasoki mbili nyeusi" and media is None

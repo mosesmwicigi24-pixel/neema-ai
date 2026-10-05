@@ -3679,7 +3679,7 @@ async def calls_upload_recording(
         c = Call(call_id=call_id, status="completed")
         db.add(c)
     c.recording_url = recording_url
-    c.transcript_status = "pending" if auto else "recorded"
+    c.transcript_status = "queued" if auto else "recorded"
     await db.commit()
 
     if auto:
@@ -3700,9 +3700,16 @@ async def calls_get_transcript(
     c = (await db.execute(select(Call).where(Call.call_id == call_id))).scalar_one_or_none()
     if c is None:
         raise HTTPException(status_code=404, detail="Call not found")
+    from app.services import transcribe as stt
     return {
         "call_id": c.call_id,
         "status": c.transcript_status,
+        # none | recorded | queued | processing | done | failed — the stored
+        # status folded to its kind (legacy `pending` = queued), plus the
+        # failure in words the team can act on ("today's … budget is used up").
+        "state": stt.status_kind(c.transcript_status),
+        "failure": (stt.describe(c.transcript_status)
+                    if stt.status_kind(c.transcript_status) == "failed" else None),
         "transcript": c.transcript,
         "summary": c.summary,
         "insights": c.insights,
@@ -3719,28 +3726,31 @@ async def calls_transcribe(
     db: AsyncSession = Depends(get_db),
     agent: Agent = Depends(get_current_agent),
 ):
-    """Transcribe + summarise a recorded call on demand — the free path: spend the
-    box's CPU only on the calls you care about. Needs a recording and Whisper on."""
+    """Transcribe + summarise a recorded call on demand (or retry a failed one).
+    Needs a recording and the engine on (WHISPER_ENABLED). A call already done
+    answers with its result — the same recording is never paid for twice."""
     from app.core.config import settings
     from app.services import call_log
     if not settings.whisper_enabled:
         raise HTTPException(
             status_code=409,
-            detail="Transcription isn't enabled yet. Set WHISPER_ENABLED=1 (self-hosted "
-                   "faster-whisper) on the server to turn it on.")
+            detail="Transcription isn't enabled yet. Set WHISPER_ENABLED=true (and "
+                   "WHISPER_PROVIDER=openai) on the server to turn it on.")
     c = (await db.execute(select(Call).where(Call.call_id == call_id))).scalar_one_or_none()
     if c is None:
         raise HTTPException(status_code=404, detail="Call not found")
     if not c.recording_url:
         raise HTTPException(status_code=409, detail="No recording was captured for this call.")
-    if c.transcript_status in ("pending", "processing"):
+    if c.transcript_status in ("pending", "queued", "processing"):
         return {"ok": True, "call_id": call_id, "status": c.transcript_status}
-    c.transcript_status = "pending"
+    if c.transcript_status == "done" and (c.transcript or c.summary):
+        return {"ok": True, "call_id": call_id, "status": "done"}
+    c.transcript_status = "queued"
     await db.commit()
     from app.services.call_transcribe import schedule_transcription
     schedule_transcription(call_id)
     await call_log.publish_update(getattr(request.app.state, "redis", None), call_id)
-    return {"ok": True, "call_id": call_id, "status": "pending"}
+    return {"ok": True, "call_id": call_id, "status": "queued"}
 
 
 # ── App crash reports ─────────────────────────────────────

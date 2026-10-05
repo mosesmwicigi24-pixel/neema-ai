@@ -1050,16 +1050,21 @@ def test_ai_down_or_garbage_never_breaks_a_call_or_loses_the_transcript(rig, tmp
                                      "WHERE call_id = 'wacid.ai.local'"))
             await db.commit()
         rig.monkeypatch.setattr(ct, "_local_path", lambda url: str(audio))
-        rig.monkeypatch.setattr(ct, "_transcribe_sync", lambda path: ("Agent: habari\nCustomer: sawa", "sw"))
-        await ct._process("wacid.ai.local")
+        from app.services import transcribe as stt
+
+        async def heard(path, kind="voice_note", redis=None):
+            assert kind == "call"
+            return stt.Transcript(status="done", text="Agent: habari\nCustomer: sawa", lang="sw")
+        rig.monkeypatch.setattr(stt, "transcribe_file", heard)
+        assert await ct._process("wacid.ai.local") == "failed:analysis"
         return await rows(rig)
     before = len(analyses)
     logged = run(rig, scenario)
     for cid, c in logged.items():
         assert c.status == "completed", cid                       # the call itself is untouched
         assert c.transcript and c.transcript.startswith("Agent: "), cid   # the transcript is never lost
-    assert logged["wacid.ai.down"].transcript_status == "failed" and logged["wacid.ai.down"].summary is None
-    assert logged["wacid.ai.local"].transcript_status == "failed"
+    assert logged["wacid.ai.down"].transcript_status == "failed:analysis" and logged["wacid.ai.down"].summary is None
+    assert logged["wacid.ai.local"].transcript_status == "failed:analysis"
     assert logged["wacid.ai.prose"].transcript_status == "done"
     assert logged["wacid.ai.prose"].insights is None
     wt = logged["wacid.ai.wrong_types"]

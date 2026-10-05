@@ -2332,7 +2332,8 @@ async def _hear_voice_note(text: str, media: dict | None) -> tuple[str, dict | N
         return text, media
     try:
         from app.services.meta_media import transcribe_audio_url
-        said = await transcribe_audio_url(media["url"])
+        heard = await transcribe_audio_url(media["url"])
+        said = heard.text if heard.ok else None
     except Exception:
         said = None
     if said:

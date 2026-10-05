@@ -198,7 +198,6 @@ async def download_media(media_id: str) -> tuple[str | None, str | None]:
     with the WABA token and rehosted in our served media dir (Meta's CDN links
     expire). None on any failure; the message still lands, just without media."""
     import httpx
-    import mimetypes
     if not media_id or not settings.waba_token:
         return None, None
     try:
@@ -216,7 +215,7 @@ async def download_media(media_id: str) -> tuple[str | None, str | None]:
                 return None, None
         from app.routers.media import MEDIA_DIR
         os.makedirs(MEDIA_DIR, exist_ok=True)
-        ext = mimetypes.guess_extension((info.get("mime_type") or "").split(";")[0]) or ""
+        ext = media_ext(info.get("mime_type"))
         name = f"wa_{media_id}{ext}"
         path = os.path.join(MEDIA_DIR, name)
         import aiofiles
@@ -229,30 +228,28 @@ async def download_media(media_id: str) -> tuple[str | None, str | None]:
         return None, None
 
 
-def _transcribe_path_sync(path: str) -> str | None:
-    """Transcribe a voice note. Tries the configured whisper provider first
-    (faster-whisper when installed = free + private), then falls back to OpenAI
-    whisper-1 when a key exists — the same engine the n8n flow used, so cutover
-    never LOSES transcription. None when neither works."""
-    from app.services import call_transcribe as ct
-    try:
-        text, _lang = ct._transcribe_sync(path)
-        return (text or "").strip() or None
-    except Exception:
-        pass
-    if settings.openai_api_key:
-        try:
-            text, _lang = ct._transcribe_openai(path)
-            return (text or "").strip() or None
-        except Exception as exc:
-            _log.warning("openai transcription failed: %s", exc)
-    return None
+def media_ext(mime: str | None) -> str:
+    """The file extension for a WhatsApp media mime type. NEVER trusts
+    `mimetypes.guess_extension` alone: on the slim Python image (no
+    /etc/mime.types) it answers None for audio/ogg — every voice note was
+    saved as a bare `wa_<id>` from the native cutover (2026-07-30) until
+    2026-10-05, and OpenAI refuses a file whose name carries no format. The
+    n8n-era table (routers/media._mime_to_ext) is the authority; the stdlib
+    is only the fallback for types that table doesn't know."""
+    import mimetypes
+    from app.routers.media import _mime_to_ext
+    base = (mime or "").split(";")[0].strip().lower()
+    ext = _mime_to_ext(base) if base else ".bin"
+    if ext != ".bin":
+        return ext
+    return (mimetypes.guess_extension(base) or "") if base else ""
 
 
-async def transcribe_voice_note(path: str | None) -> str | None:
-    if not path:
-        return None
-    return await asyncio.to_thread(_transcribe_path_sync, path)
+async def transcribe_voice_note(path: str | None, redis=None):
+    """A voice note → services/transcribe.Transcript (status + words +
+    language). The engine never raises; the status says what happened."""
+    from app.services import transcribe as stt
+    return await stt.transcribe_file(path, kind="voice_note", redis=redis)
 
 
 # ── Human presence: blue ticks + "typing…" while Neema composes ──────────────
@@ -510,8 +507,9 @@ async def _ingest_guarded(event: dict, redis) -> None:
     if media and media.get("media_id"):
         media_url, media_path = await download_media(media["media_id"])
         if media["kind"] == "audio":
-            transcript = await transcribe_voice_note(media_path)
-            if transcript:
+            heard = await transcribe_voice_note(media_path, redis=redis)
+            if heard.ok:
+                transcript = heard.text
                 text = transcript            # the voice note IS the message
 
     dto = MessageDto(

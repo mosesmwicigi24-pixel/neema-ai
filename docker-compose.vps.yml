@@ -24,6 +24,18 @@ services:
             # visible and reviewed; compose `environment` beats `env_file`.
             CALL_META_TRANSCRIPTION: "false"
             CALL_META_RECORDING: "false"
+            # Neema hears voice notes and calls (cycles 4-5, 2026-10-05):
+            # every inbound voice note (WhatsApp / Messenger / Instagram) and
+            # every recorded call is transcribed by services/transcribe.py.
+            # The image has no faster-whisper, so production uses OpenAI with
+            # the existing OPENAI_API_KEY. gpt-4o-transcribe ≈ $0.006/audio
+            # minute (~2 audio-hours/month ≈ $1); the daily ceiling refuses
+            # anything past TRANSCRIBE_DAILY_CAP_USD and the team sees why.
+            WHISPER_ENABLED: "true"
+            WHISPER_AUTO: "true"
+            WHISPER_PROVIDER: "openai"
+            TRANSCRIBE_MODEL: "gpt-4o-transcribe"
+            TRANSCRIBE_DAILY_CAP_USD: "3"
 
     web:
         image: ghcr.io/mosesmwicigi24-pixel/neema-ai-web:${IMAGE_TAG:-latest}

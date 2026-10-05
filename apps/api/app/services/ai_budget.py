@@ -119,6 +119,34 @@ async def meter(model: str | None, usage: dict | None, purpose: str = "other",
     return usd
 
 
+async def meter_flat(model: str | None, usd: float, purpose: str = "other",
+                     redis=None) -> float:
+    """A call billed by something other than tokens (speech-to-text is billed
+    per audio minute): its USD into today's total and breakdown, exactly like
+    `meter`. Best-effort; never raises."""
+    r = redis if redis is not None else _sink
+    try:
+        usd = float(usd or 0)
+    except (TypeError, ValueError):
+        return 0.0
+    if r is None or usd < 0:
+        return usd
+    try:
+        key, by = _day_key(), _by_key()
+        p, m = _slug(purpose), _slug(model)
+        if usd > 0:
+            await r.incrbyfloat(key, round(usd, 6))
+            await r.expire(key, _TTL)
+            await r.hincrbyfloat(by, f"usd:{p}", round(usd, 6))
+            await r.hincrbyfloat(by, f"usd:model:{m}", round(usd, 6))
+        await r.hincrby(by, f"calls:{p}", 1)
+        await r.hincrby(by, f"calls:model:{m}", 1)
+        await r.expire(by, _TTL)
+    except Exception:
+        pass
+    return usd
+
+
 async def read_breakdown(redis=None) -> dict:
     """Today, for /api/health: the total against the rungs and the mode, then
     every purpose (USD, calls, tokens) and every model (USD, calls), dearest
