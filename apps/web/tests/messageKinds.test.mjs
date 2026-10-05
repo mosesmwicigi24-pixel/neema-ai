@@ -87,3 +87,10 @@ test("call notice: a centred call-family line with Meta's type as small print", 
     assert.equal(v.centred, true);
     assert.equal(v.details, "type “unsupported” · 131051 Message type unknown");
 });
+
+test("an empty row on OUR side is never called something WhatsApp won't show", () => {
+    assert.equal(viewForRow({ text: "", media_type: null, meta: null, direction: "outbound" }).title, "(empty message)");
+    assert.equal(viewForRow({ text: "Karibu!", media_type: null, meta: null, direction: "outbound" }), null);
+    assert.equal(viewForRow({ text: "", media_type: null, meta: null, direction: "inbound" }).title,
+        "Sent something WhatsApp doesn't let us show here.");
+});

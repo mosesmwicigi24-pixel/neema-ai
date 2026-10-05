@@ -251,8 +251,15 @@ export function kindView(meta: MessageMeta | null | undefined): KindView | null 
     }
 }
 
-/** The view for one thread row: its record, else a legacy reading of its text. */
-export function viewForRow(row: { text?: string | null; media_type?: string | null; meta?: MessageMeta | null }): KindView | null {
-    const meta = row.meta ?? legacyMeta(row.text, !!row.media_type);
-    return kindView(meta);
+/** The view for one thread row: its record, else a legacy reading of its text.
+ *  Only a CUSTOMER's row can be "something WhatsApp won't show us" — an empty
+ *  row on our side is ours, and says so plainly. */
+export function viewForRow(row: { text?: string | null; media_type?: string | null; meta?: MessageMeta | null;
+    direction?: string | null }): KindView | null {
+    if (row.meta) return kindView(row.meta);
+    if (row.direction === "outbound") {
+        return (row.text ?? "").trim() || row.media_type ? null
+            : { icon: "·", title: "(empty message)", lines: [], tone: "muted", centred: false };
+    }
+    return kindView(legacyMeta(row.text, !!row.media_type));
 }

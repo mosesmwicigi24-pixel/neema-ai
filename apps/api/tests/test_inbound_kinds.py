@@ -245,3 +245,20 @@ def test_call_related_unsupported_becomes_a_call_notice():
     assert e["meta"]["kind"] == "call_notice" and e["meta"]["subtype"] == "missed_call"
     assert e["meta"]["errors"][0]["code"] == 131051 and "payload" in e["meta"]
     assert e["wake"] is False
+
+
+# 15 ── a shape nobody anticipated never fails the delivery ──────────────────
+def test_malformed_shapes_fall_back_instead_of_raising():
+    weird = [
+        {"type": "interactive", "interactive": {"type": "nfm_reply",
+                                                "nfm_reply": {"response_json": "[1, 2]"}}},
+        {"type": "contacts", "contacts": ["not-a-dict"]},
+        {"type": "order", "order": {"product_items": [{"quantity": "two", "item_price": "x"}]}},
+        {"type": "location", "location": None},
+        {"type": "reaction", "reaction": None},
+    ]
+    for m in weird:
+        e = _one(m)                      # parse_events must not raise
+        assert e["text"].strip(), m
+    assert _one(weird[0])["text"] == "📝 Submitted a form"
+    assert _one(weird[1])["meta"].get("parse_error") is True

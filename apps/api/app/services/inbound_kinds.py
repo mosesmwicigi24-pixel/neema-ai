@@ -302,6 +302,8 @@ def describe(msg: dict) -> Described:
                 fields = json.loads(nfm.get("response_json") or "{}") or {}
             except Exception:
                 fields = {}
+            if not isinstance(fields, dict):
+                fields = {}
             shown = {str(k)[:40]: str(v)[:120] for k, v in list(fields.items())[:12]
                      if k != "flow_token" and v not in (None, "")}
             name = (nfm.get("name") or "").strip()
@@ -392,6 +394,24 @@ def describe(msg: dict) -> Described:
     return done(text, kind, {"label": label, "advice": advice or _GENERIC_ADVICE,
                              "subtype": None if key == "unknown" else key},
                 agent_text=agent_text, wake=wake, keep_payload=True)
+
+
+def describe_safely(msg: dict) -> Described:
+    """describe(), but a shape no one anticipated can never raise: a raise
+    here would fail the whole webhook delivery (502) and Meta would retry it
+    forever. The fallback is the residual card, with the payload kept."""
+    try:
+        return describe(msg)
+    except Exception:
+        t = str((msg or {}).get("type") or "unknown") if isinstance(msg, dict) else "unknown"
+        return Described(
+            text=f"Sent something WhatsApp doesn't let us show here. {_GENERIC_ADVICE}",
+            agent_text=("(The customer sent a message we could not read. If it seems to matter, "
+                        "kindly ask them to send it as a photo or a text.)"),
+            wake=True,
+            meta={"v": META_VERSION, "type": t[:40], "kind": "unsupported", "advice": _GENERIC_ADVICE,
+                  "parse_error": True,
+                  "payload": _bounded(redact(msg)) if isinstance(msg, dict) else None})
 
 
 def public_meta(meta: dict | None) -> dict | None:

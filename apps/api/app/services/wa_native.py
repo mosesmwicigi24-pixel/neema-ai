@@ -52,8 +52,8 @@ _bg_tasks: set = set()
 def _text_of(msg: dict) -> str:
     """The customer-visible text of one webhook message, whatever its type.
     (services/inbound_kinds.py owns the words; this stays for its callers.)"""
-    from app.services.inbound_kinds import describe
-    d = describe(msg)
+    from app.services.inbound_kinds import describe_safely
+    d = describe_safely(msg)
     if d["meta"] and d["meta"].get("payload"):
         # Still logged (neema.wa_native is surfaced at INFO): the row now keeps
         # the same facts in messages.raw_meta, so this is a convenience only.
@@ -93,8 +93,8 @@ def parse_events(payload: dict) -> list[dict]:
                     ts_ms = int(msg.get("timestamp", "0")) * 1000
                 except (TypeError, ValueError):
                     ts_ms = None
-                from app.services.inbound_kinds import describe
-                d = describe(msg)
+                from app.services.inbound_kinds import describe_safely
+                d = describe_safely(msg)
                 if d["meta"] and d["meta"].get("payload"):
                     _log.info("wa unhandled message type %r keys=%s errors=%s",
                               mtype, sorted(msg.keys()), msg.get("errors"))
