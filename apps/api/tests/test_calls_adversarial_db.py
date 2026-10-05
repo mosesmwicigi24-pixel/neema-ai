@@ -1001,7 +1001,7 @@ def test_ai_down_or_garbage_never_breaks_a_call_or_loses_the_transcript(rig, tmp
     async def no_update(cid):
         return None
 
-    async def no_note(db, wa_id, summary):
+    async def no_note(db, wa_id, summary, **kw):
         return None
     rig.monkeypatch.setattr(wa_calling, "download_media", download)
     rig.monkeypatch.setattr(ct, "_publish_update", no_update)
@@ -1080,7 +1080,7 @@ def test_ai_down_or_garbage_never_breaks_a_call_or_loses_the_transcript(rig, tmp
 def test_garbage_from_analyse_call_itself_is_contained(rig):
     from app.services import call_transcribe as ct
 
-    async def garbage(text):
+    async def garbage(text, context=None):
         return 12345, ["not", "a", "dict"]
 
     async def no_update(cid):

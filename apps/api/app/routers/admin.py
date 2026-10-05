@@ -3673,8 +3673,22 @@ async def calls_upload_recording(
     if len(content) > 60 * MB:
         raise HTTPException(status_code=413, detail="Recording too large — max 60 MB.")
 
+    # A second upload for the same call (the softphone retrying after a lost
+    # answer, two tabs) must not re-transcribe — or note the call twice —
+    # while the first is queued, being transcribed, or done. Only a call with
+    # no recording yet, or whose transcription failed, takes a new one.
+    existing = (await db.execute(select(Call).where(Call.call_id == call_id)
+                                 .with_for_update())).scalar_one_or_none()
+    if existing is not None and existing.recording_url and \
+            (existing.transcript_status or "none") in ("recorded", "pending", "queued", "processing", "done"):
+        return {"ok": True, "call_id": call_id, "will_transcribe": False, "duplicate": True}
+
     os.makedirs(MEDIA_DIR, exist_ok=True)
-    ext = os.path.splitext(file.filename or "")[1] or ".webm"
+    # The stored name is ours; only an audio extension is kept from the
+    # client's (the media dir is served — never ".html" from an upload).
+    ext = os.path.splitext(file.filename or "")[1].lower()
+    if ext not in (".webm", ".ogg", ".opus", ".oga", ".m4a", ".mp3", ".mp4", ".wav", ".aac", ".mpga"):
+        ext = ".webm"
     saved_name = f"call_{uuid.uuid4().hex}{ext}"
     file_path = os.path.join(MEDIA_DIR, saved_name)
     async with aiofiles.open(file_path, "wb") as f:
@@ -3684,7 +3698,7 @@ async def calls_upload_recording(
     recording_url = f"{public_base}/api/admin/media/{saved_name}" if public_base else saved_name
 
     auto = bool(settings.whisper_enabled and settings.whisper_auto)
-    c = (await db.execute(select(Call).where(Call.call_id == call_id))).scalar_one_or_none()
+    c = existing
     if c is None:
         # A recording implies the call happened; keep a row so it can be transcribed.
         c = Call(call_id=call_id, status="completed")

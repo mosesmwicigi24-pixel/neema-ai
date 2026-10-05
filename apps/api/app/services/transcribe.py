@@ -151,7 +151,15 @@ def lang_code(lang: str | None) -> str | None:
     base = s.split("-")[0].split("_")[0]
     if len(base) == 2 and base.isalpha():
         return base
-    return s[:12]
+    # "Swahili and English" / "mostly swahili, some sheng" — the first
+    # language named (the analysis lists the main one first). Before cycle 6
+    # this stored the raw phrase cut to 12 characters ("swahili and ").
+    for w in re.findall(r"[a-z]+", s):
+        if w in _LANG_ISO:
+            return _LANG_ISO[w]
+        if w == "sheng":
+            return "sw"
+    return base if len(base) == 3 and base.isalpha() else None
 
 
 def lang_name(lang: str | None) -> str | None:
