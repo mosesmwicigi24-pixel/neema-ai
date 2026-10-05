@@ -891,3 +891,42 @@ def test_media_route_serves_every_file_we_write_exactly_as_main_did(tmp_path, mo
                 assert b.status_code == 200, n
         # No login is asked of Meta's fetcher (by design — cycle 9).
         assert new.get(f"/api/admin/media/{names[0]}", headers={}).status_code == 200
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# 9 · Cycle 9's minor: the duplicate lock is taken BEFORE the slot wait — a
+#     twin must wait for the holder as long as the lock lives, not give up
+# ═════════════════════════════════════════════════════════════════════════════
+
+def test_a_twin_waits_out_a_holder_queued_behind_busy_slots(rig, clips, monkeypatch, tmp_path):
+    """The same audio on two rows (a forwarded note, a recovery retry): the
+    first takes the lock, then queues for a slot behind long work; the twin
+    used to give up after timeout+30 s and store `failed:busy` — a failure
+    the team saw and the sweeper had to clean up — while the answer was on
+    its way. (asyncio.sleep is scaled ×0.02 here so the old 32 s window is
+    0.64 s.)"""
+    from app.services import transcribe as stt
+    real_sleep = asyncio.sleep
+
+    async def fast_sleep(s, *a, **k):
+        return await real_sleep(s * 0.02, *a, **k)
+    monkeypatch.setattr(stt.asyncio, "sleep", fast_sleep)
+    monkeypatch.setattr(rig.settings, "transcribe_concurrency", 1)      # one slot: the call holds it
+    monkeypatch.setattr(rig.settings, "transcribe_timeout_seconds", 2)  # the old twin window = 32 "s"
+    rig.provider.delay = 1.5
+    rig.provider.answers = [("Nataka sinia mbili.", "sw")]
+    a, b = str(tmp_path / "note_a"), str(tmp_path / "note_b")
+    shutil.copy(clips[6], a)
+    shutil.copy(clips[6], b)                                            # the same bytes
+
+    async def go():
+        call = asyncio.create_task(stt.transcribe_file(clips["call"], kind="call", redis=rig.redis))
+        await real_sleep(0.3)                                           # the call has the slot
+        first = asyncio.create_task(stt.transcribe_file(a, redis=rig.redis))
+        await real_sleep(0.2)                                           # first holds the lock, queued
+        twin = await stt.transcribe_file(b, redis=rig.redis)
+        return await call, await first, twin
+    call, first, twin = run(go())
+    assert call.ok and first.ok and first.text == "Nataka sinia mbili."
+    assert twin.status == "done" and twin.cached and twin.text == first.text, twin.status
+    assert len(rig.provider.calls) == 2                                 # the call + one note: paid once

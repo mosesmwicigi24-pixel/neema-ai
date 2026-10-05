@@ -560,13 +560,21 @@ async def _transcribe(path: str | None, kind: str, redis) -> Transcript:
                 if cached is not None:
                     return cached
             if not await redis.set(lkey, "1", nx=True, ex=_LOCK_TTL):
-                # A twin delivery is mid-flight: wait for its answer.
-                for _ in range(int(settings.transcribe_timeout_seconds) + 30):
+                # A twin delivery is mid-flight: wait for its answer for as
+                # long as its lock lives. The holder takes the lock BEFORE it
+                # queues for a slot, so it may wait behind long calls; giving
+                # up after one request's timeout stored `failed:busy` on audio
+                # whose words were on their way (cycle 10).
+                for _ in range(_LOCK_TTL):
                     await asyncio.sleep(1)
                     hit = await redis.get(ckey)
                     if hit and (cached := Transcript.from_cache(hit)) is not None:
                         return cached
                     if not await redis.get(lkey):
+                        # Released: the answer is cached first, so look once more.
+                        hit = await redis.get(ckey)
+                        if hit and (cached := Transcript.from_cache(hit)) is not None:
+                            return cached
                         break
                 return failed("busy")
         except Exception:
