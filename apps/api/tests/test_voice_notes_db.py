@@ -297,7 +297,11 @@ def test_swahili_note_is_translated_for_the_team_and_answered_in_swahili(rig, cl
     assert m.text == said                                       # verbatim stays the message
     assert m.translated_text == "Hello, I want two black cassocks, how much?"
     assert m.translated_from == "Swahili" and m.transcript_lang == "sw"
-    assert rig.turns[-1]["text"] == f"🎤 (voice note): {said}"    # Neema reads what was SAID
+    # Neema reads what was SAID — and, for a note in another language, the
+    # team's English beneath it, marked as the rough one (2026-10-05)
+    assert rig.turns[-1]["text"] == (f"🎤 (voice note): {said}"
+                                     "\n(machine translation — where it differs, their own words "
+                                     "above rule: Hello, I want two black cassocks, how much?)")
     ev = rig.redis.events("voice_transcript")[-1]
     assert ev["translation"].startswith("Hello, I want") and ev["translatedFrom"] == "Swahili"
     # the transcript reached the translator as DATA, inside JSON, under a data-only system prompt
@@ -424,7 +428,8 @@ def test_the_webhook_never_waits_for_the_provider(rig, clips):
     ack, queued, done = run(go())
     assert queued in ("queued", "processing")
     assert ack < 1500, ack
-    assert rig.turns[-1]["text"] == "🎤 (voice note): Nataka kasoki"
+    assert rig.turns[-1]["text"].split("\n")[0] == "🎤 (voice note): Nataka kasoki"
+    assert rig.turns[-1]["text"].endswith(": I want a cassock)")
     print(f"\n[latency] webhook ack {ack:.0f} ms with a 2000 ms provider; "
           f"note → turn resolved {done:.0f} ms (incl. 1 s debounce)")
 
@@ -513,7 +518,8 @@ def test_messenger_and_instagram_voice_notes(rig, clips, channel, obj):
     assert m.channel == channel and m.external_id == psid
     assert m.text == said and m.transcript_status == "done" and m.transcript_lang == "sw"
     assert m.translated_text == "Do you have purple stoles?"
-    assert heard == f"🎤 (voice note): {said}" and left is None
+    assert heard.split("\n")[0] == f"🎤 (voice note): {said}" and left is None
+    assert heard.endswith("their own words above rule: Do you have purple stoles?)")
     # another channel's customer cannot resolve it
     assert run(voice_notes.resolve(voice_notes.token(m.id), channel="whatsapp", key=psid)) == ""
 

@@ -20,6 +20,7 @@ from app.core.config import settings
 from app.routers.order_link import assign_short_ref
 from app.core.countries import resolve_country
 from app.core.synonyms import canonical as _canonical, range_for as _range_for, range_members as _range_members
+from app.core import vernacular as _vernacular
 from app.models.order_event import OrderEvent
 from app.models.user import User
 from app.services import n8n_bridge as svc
@@ -552,6 +553,26 @@ _SEARCH_STOP = frozenset({
     "price", "prices", "cost", "bei", "gani", "ngapi", "pesa", "na", "ya", "wa",
     "za", "kwa", "sasa", "leo", "is", "it", "its", "of", "in", "on", "to", "at",
     "an", "a", "we", "us", "do", "does", "did", "be", "by", "or", "if", "so",
+    # The same little words in the languages customers write and SPEAK to us
+    # (voice note → sale, 2026-10-05): "nataka kasoki", "hicho kisinia cha
+    # kubebea vikombe pamoja na…", "je cherche une chemise pour…", "quiero
+    # la bandeja para…" — the filler made an all-word match impossible, so a
+    # clear ask fell to the any-word fallback or to nothing.
+    "nataka", "ninataka", "nahitaji", "naitaji", "ninahitaji", "naomba",
+    "ningependa", "natafuta", "nipe", "tafadhali", "habari", "shalom", "cha",
+    "vya", "yake", "yangu", "yetu", "hii", "hiyo", "hizi", "hizo", "ile",
+    "hicho", "kile", "vile", "kama", "pamoja", "bila", "peke", "sana", "moja",
+    "des", "les", "pour", "une", "avec", "mon", "mes", "cherche", "voudrais",
+    "veux", "besoin", "combien", "prix", "para", "con", "com", "una", "uno",
+    "uma", "los", "las", "del", "quiero", "precio", "preco", "quanto",
+    "cuanto", "necesito", "preciso", "pastorale", "pastorales", "several", "couple", "dozen",
+    "hundred", "thousand",
+    # The labels of a voice-note turn ("🎤 (voice note): …", "(machine
+    # translation — where it differs, their own words above rule: …)"): the
+    # gate's own search for "what they asked" (runtime._ask_query) read every
+    # voice turn as "voice note communion tray…" and searched for it.
+    "voice", "note", "notes", "machine", "translation", "differ", "their",
+    "own", "word", "above", "rule",
 })
 
 
@@ -559,7 +580,9 @@ def _search_words(text: str) -> set:
     """The words of a name / caption / query, lowercased, plural 's' stripped,
     the stop-words and 1–2 letter fragments dropped."""
     out = set()
-    for t in re.findall(r"[a-z0-9]+", (text or "").lower()):
+    # Accents folded first: "étole" was the word "tole", "cálice" two
+    # fragments (core/vernacular).
+    for t in re.findall(r"[a-z0-9]+", _vernacular.fold(text)):
         if len(t) < 3 and not t.isdigit():
             continue
         if t in _SEARCH_STOP:
@@ -608,19 +631,29 @@ async def _search_catalog(args: dict, ctx: ToolContext) -> dict:
     # and the little words that carry no product are dropped before matching.
     from app.services.post_catalog import is_set_row, set_components
     from app.core import companions as _companions
-    toks = _search_tokens(query)
+    def _words(p: dict) -> set:
+        return _search_words(" ".join([p.get("name", ""), p.get("category", ""),
+                                       " ".join(p.get("aliases") or [])]))
+
+    # The customer's own words, read as the catalogue's (core/vernacular): a
+    # "kasoki", a "plateau de communion", "vasitos" — words that matched no
+    # hub row and came back empty. The hub's own names and aliases come
+    # first: when the words as asked already find rows ("divai ya ushirika"
+    # is the hub's alias for Devai), they are searched as asked. The query
+    # as asked is kept for the log.
+    toks0 = _search_tokens(query)
+    vquery = query
+    if not (toks0 and any(toks0.issubset(_words(p)) for p in catalog)):
+        vquery = _vernacular.to_hub(query)
+    toks = _search_tokens(vquery)
     # A query made ONLY of little words ("our client from south africa gave us
     # this") names nothing: say so, rather than answering with the whole shelf
     # the way an empty query (a browse) does.
-    only_stop_words = bool(re.findall(r"[a-z0-9]+", query)) and not toks
+    only_stop_words = bool(re.findall(r"[a-z0-9]+", vquery)) and not toks
     if only_stop_words:
         return {"count": 0, "currency": ctx.currency, "results": [],
                 "note": "no product words in the query — nothing to match; ask which "
                         "item they mean, or search by the item's name"}
-
-    def _words(p: dict) -> set:
-        return _search_words(" ".join([p.get("name", ""), p.get("category", ""),
-                                       " ".join(p.get("aliases") or [])]))
 
     def _hay(p: dict) -> set:      # kept name: the word-set the fallback scores
         return _words(p)
@@ -644,7 +677,7 @@ async def _search_catalog(args: dict, ctx: ToolContext) -> dict:
     # in (a chalice, a bag of wafers, a cup). The live miss: three dear sets
     # and a chalice offered for "how much is that Holy communion set?", and
     # nothing under $280 when the range starts at a $50 wooden tray.
-    rng = _range_for(query)
+    rng = _range_for(query) or _range_for(vquery)
     family_note = None
     if rng:
         matched = _range_members(rng, catalog)
@@ -668,6 +701,22 @@ async def _search_catalog(args: dict, ctx: ToolContext) -> dict:
             return sum(t in name for t in toks)
         matched = sorted([p for p in catalog if hit(p)],
                          key=lambda p: (-_name_hits(p), _kes(p)))
+    spelled = {}
+    if not matched and toks and not rng:
+        # A word no hub row carries is often a word misheard or misspelt
+        # ("prayer sholl", "sprinkle", "chausable", a transcription slip):
+        # the closest catalogue word, when it is close, is searched instead —
+        # and SAID, so the agent confirms rather than presumes.
+        spelled = _closest_words(toks, catalog)
+        if spelled:
+            toks2 = {spelled.get(t, t) for t in toks}
+            matched = sorted([p for p in catalog if toks2.issubset(_words(p))],
+                             key=lambda p: (-sum(t in (p.get("name") or "").lower() for t in toks2),
+                                            _kes(p)))
+            if matched:
+                toks = toks2
+            else:
+                spelled = {}
     partial = False
     if not matched and len(toks) > 1:
         # All-token match found nothing ("clerical shirt", "cassock set") — fall
@@ -934,6 +983,38 @@ async def _search_catalog(args: dict, ctx: ToolContext) -> dict:
     out = {"count": len(results), "currency": ctx.currency, "results": results}
     if family_note:
         out["range"] = family_note
+    if spelled and results:
+        heard = ", ".join(f"'{a}' as '{b}'" for a, b in spelled.items())
+        out["spelling"] = (f"no row carries their exact word — read {heard} (the closest "
+                           "catalogue word). Name the item back to them ('the Prayer Shawl?') "
+                           "as you quote it; if they meant something else, ask")
+    return out
+
+
+def _closest_words(toks: set, catalog: list[dict]) -> dict:
+    """{their word: the catalogue word it is closest to} for each word no hub
+    row carries — only a near-miss of a word in a hub product NAME ("sprinkle"
+    → sprinkler, "charlice" → chalice, "cinture" → cincture, "tallith" →
+    tallit): six letters or more, the same first two letters, ≥ 0.9 alike.
+    Measured on every word customers typed (2026-10-05): aliases and
+    categories bent ordinary words onto goods ("professional" → processional,
+    "super" → supper, "wristband" → waistband), and a word for a thing we do
+    not stock ("blanket", "shoes", "rosary") must never be bent at all."""
+    import difflib
+    names: set = set()
+    vocab: set = set()
+    for p in catalog:
+        names |= _search_words(p.get("name") or "")
+        vocab |= _search_words(" ".join([p.get("name", ""), p.get("category", ""),
+                                         " ".join(p.get("aliases") or [])]))
+    out = {}
+    for t in toks:
+        if t in vocab or len(t) < 6 or t.isdigit():
+            continue
+        pool = sorted(w for w in names if len(w) >= 4 and w[:2] == t[:2])
+        near = difflib.get_close_matches(t, pool, n=1, cutoff=0.9)
+        if near:
+            out[t] = near[0]
     return out
 
 

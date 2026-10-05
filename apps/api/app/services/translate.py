@@ -510,7 +510,21 @@ _VOICE_SYSTEM = (
     "the language spoken — the dominant one if mixed (Sheng or Swahili mixed "
     "with English is \"Swahili\")>, \"en\": <faithful English translation; "
     "keep names, sizes, numbers and prices exactly; empty string ONLY when "
-    "the transcript is already entirely English>}. No prose, no code fences."
+    "the transcript is already entirely English>}. No prose, no code fences. "
+    # The shop's words, as customers say them (core/vernacular; 2026-10-05:
+    # "sinia" came out as "paten" and "shati za kora" as "choir robes", and
+    # the team — and the agent — read the wrong item).
+    "The shop's goods, as customers name them — translate them AS these: "
+    "sinia / siniya / trei = tray (a communion tray holds the small cups, a "
+    "bread tray the bread; never 'paten'); vikombe (vya ushirika) = communion "
+    "cups; kikombe kubwa (cha mchungaji) = chalice; kasoki / kanzu = cassock; "
+    "joho = gown; shati ya kola / kora = clergy (collar) shirt; kola / kora = "
+    "clergy collar; stola = stole; mshipi / mkanda = belt; cheni ya msalaba = "
+    "pectoral cross on a chain; kofia ya askofu = mitre; mkate wa ushirika = "
+    "communion bread; divai = communion wine; mafuta ya upako = anointing oil; "
+    "meza ya Bwana = the Lord's table (holy communion); chemise pastorale = "
+    "clergy shirt; toge = gown; aube = alb; étole = stole; plateau = tray; "
+    "gobelets / copas / vasitos = small cups; bandeja = tray."
 )
 
 

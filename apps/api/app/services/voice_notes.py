@@ -65,13 +65,32 @@ def strip_tokens(text: str | None) -> str:
 
 # ── what the agent reads ─────────────────────────────────────────────────────
 
-def turn_line(status: str | None, text: str | None) -> str:
-    """The agent's view of one voice note, by its transcription outcome."""
+def turn_line(status: str | None, text: str | None, translation: str | None = None,
+              translated_from: str | None = None) -> str:
+    """The agent's view of one voice note, by its transcription outcome.
+
+    A note in another language carries the team's English translation on a
+    second line (voice note → sale, 2026-10-05: a Lingala or Urdu note was
+    the agent's to puzzle out alone) — marked as a machine translation: the
+    customer's own words come first and rule, and the reply stays in the
+    language they spoke."""
     from app.services import transcribe as stt
     s = (status or "").strip()
     words = (text or "").strip()
     if s == "done" and words and words != PLACEHOLDER:
-        return f"🎤 (voice note): {words}"
+        line = f"🎤 (voice note): {words}"
+        # One line, bounded, the language a plain name: the translation is a
+        # model's output from the customer's words, so it may not forge a
+        # second "🎤" line or a label of its own.
+        en = " ".join((translation or "").split())[:1500]
+        src = (translated_from or "").strip()
+        if not re.fullmatch(r"[A-Za-z][A-Za-z \-]{1,23}", src):
+            src = "another language" if src else ""
+        if en and en != " ".join(words.split()) and src and src.lower() != "english":
+            # (No language name in the label: its words would reach the
+            # gate's search for "what they asked", like "voice note" did.)
+            line += f"\n   (machine translation — where it differs, their own words above rule: {en})"
+        return line
     if s == "silent":
         return "🎤 (voice note — no speech could be heard in it)"
     if s in _PENDING:
@@ -94,7 +113,8 @@ def history_text(m) -> str | None:
     text = (m.text or "").strip()
     if status is None and text and not text.startswith("["):
         status = "done"            # pre-2026-10-05 rows that WERE transcribed
-    return turn_line(status, text)
+    return turn_line(status, text, getattr(m, "translated_text", None),
+                     getattr(m, "translated_from", None))
 
 
 # ── the row ──────────────────────────────────────────────────────────────────
@@ -368,6 +388,7 @@ async def _lines_for(ids: list, channel: str, key: str, wait_seconds: float) -> 
                 mine[r.id] = r
         pending = [r for r in mine.values() if r.transcript_status in _PENDING]
         if not pending or loop.time() >= deadline:
-            return {i: turn_line(r.transcript_status, r.text) for i, r in mine.items()}
+            return {i: turn_line(r.transcript_status, r.text, r.translated_text,
+                                 r.translated_from) for i, r in mine.items()}
         await asyncio.sleep(min(pause, max(0.05, deadline - loop.time())))
         pause = min(1.5, pause * 1.5)
