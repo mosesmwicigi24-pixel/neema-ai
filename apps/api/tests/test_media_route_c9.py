@@ -63,10 +63,11 @@ def media_app(media_dir):
 
 
 def test_media_files_are_served_without_a_login_by_design(media_app):
-    """FINDING (owner decision, not changed here): /api/admin/media/{name} has
-    no auth. It cannot have a bearer check as built — <audio>/<img> tags in the
-    dashboard can't send one, and Meta fetches outbound media links itself. The
-    protection is the name: uploads and recordings are uuid4 (128-bit)."""
+    """FINDING (owner decision): /api/admin/media/{name} has no bearer check —
+    <audio>/<img> tags can't send one, and Meta fetches outbound media links
+    itself. Superseded by signed, expiring links (test_media_signed_urls.py):
+    an UNSIGNED request like this one is served only while
+    MEDIA_SIGNED_URLS_REQUIRED is off (the rollout default)."""
     status, body = _asgi_get(media_app, "/api/admin/media/call_0123456789abcdef0123456789abcdef.webm")
     assert status == 200 and body == b"RECORDING"
 

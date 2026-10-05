@@ -282,6 +282,20 @@ class Settings(BaseSettings):
     # pre-creates + chowns it. Override with MEDIA_DIR to run the app (or its
     # tests) as a user who cannot write to /var.
     media_dir: str = "/var/neema/media"
+    # Signed, expiring media links (app/core/media_urls.py). Every media URL
+    # the API hands out carries ?exp=<unix>&sig=<hmac>; the key is derived
+    # from SECRET_KEY unless MEDIA_URL_SECRET overrides it (no new required
+    # secret). Dashboard links live ~1 h (re-signed on every read); links we
+    # hand Meta for an outbound send live 24 h (Meta fetches at send time and
+    # caches 10 min — the slack covers retries).
+    # ROLLOUT: while MEDIA_SIGNED_URLS_REQUIRED is false an unsigned request
+    # is still served (logged `media.unsigned`) so a deploy can't break
+    # playback mid-flight; a request that DOES carry a signature is always
+    # checked. Flip to true after live verification (docs in the PR).
+    media_url_secret: str = ""
+    media_signed_urls_required: bool = False
+    media_url_ttl_seconds: int = 3600
+    media_url_meta_ttl_seconds: int = 86400
     # Bethany House hub — single source of truth for catalogue & orders
     hub_api_url: str = "https://hub.bethanyhouse.co.ke"
     hub_api_token: str = ""          # Sanctum token for pushing orders (Part B)

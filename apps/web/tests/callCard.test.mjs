@@ -4,7 +4,7 @@
 // Run: node --test apps/web/tests/*.test.mjs
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { callCardView, canCallBack, actionItems, fmtDuration, whenText, transcriptSlot, mediaSrc, callBackHandle, nearestCallId,
+import { callCardView, canCallBack, actionItems, fmtDuration, whenText, transcriptSlot, mediaSrc, mediaKey, callBackHandle, nearestCallId,
     transcriptFailure, callLanguage, callFacts, lastCallBrief }
     from "../src/lib/callCard.ts";
 
@@ -128,6 +128,21 @@ test("13 recording src: absolute kept, bare file name under the API, anything el
     assert.equal(mediaSrc("call_ab.webm", "https://neema.x/api/"), "https://neema.x/api/admin/media/call_ab.webm");
     assert.equal(mediaSrc("../../etc/passwd", "https://api"), null);
     assert.equal(mediaSrc("", "https://api"), null);
+});
+
+test("13b signed media links are used exactly as given — the query is the key", () => {
+    const sig = "exp=1800000900&sig=" + "ab".repeat(32);
+    assert.equal(mediaSrc(`https://neema.x/api/admin/media/call_ab.webm?${sig}`, "https://api"),
+        `https://neema.x/api/admin/media/call_ab.webm?${sig}`);
+    assert.equal(mediaSrc(`/api/admin/media/wa_1.ogg?${sig}`, "https://api"), `/api/admin/media/wa_1.ogg?${sig}`);
+    assert.equal(mediaSrc(`call_ab.webm?${sig}`, "https://neema.x/api/"), `https://neema.x/api/admin/media/call_ab.webm?${sig}`);
+    assert.equal(mediaSrc("call_ab.webm?a=<script>", "https://api"), null);
+    assert.equal(mediaSrc("call_ab.webm?a=1?b=2", "https://api"), null);
+    assert.equal(mediaSrc("../x?exp=1&sig=2", "https://api"), null);
+    // comparing two links to one file (a live event vs the next poll)
+    assert.equal(mediaKey(`https://n.x/api/admin/media/a.jpg?${sig}`), mediaKey("https://n.x/api/admin/media/a.jpg?exp=1&sig=00"));
+    assert.notEqual(mediaKey("https://n.x/api/admin/media/a.jpg?exp=1"), mediaKey("https://n.x/api/admin/media/b.jpg?exp=1"));
+    assert.equal(mediaKey(null), "");
 });
 
 test("14 durations", () => {

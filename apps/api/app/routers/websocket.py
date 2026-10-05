@@ -2,8 +2,12 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 import redis.asyncio as aioredis
 import asyncio
 import json
+import logging
+
+from app.core.media_urls import sign_ws_text
 
 router = APIRouter()
+_log = logging.getLogger("neema.ws")
 
 # Map: conversation_id → set of connected WebSocket clients
 active_connections: dict[str, set[WebSocket]] = {}
@@ -56,8 +60,16 @@ async def websocket_endpoint(websocket: WebSocket, agent_id: str):
     async def listen_redis():
         async for msg in pubsub.listen():
             if msg["type"] == "pmessage":
+                frame = msg["data"]
+                # Media links are signed HERE, at delivery — the one relay every
+                # publisher goes through (core/media_urls). A signing failure
+                # must not end the feed: relay the frame as published, loudly.
                 try:
-                    await websocket.send_text(msg["data"])
+                    frame = sign_ws_text(frame)
+                except Exception as exc:
+                    _log.warning("ws media signing failed — frame relayed unsigned: %s", exc)
+                try:
+                    await websocket.send_text(frame)
                 except Exception:
                     break
 
