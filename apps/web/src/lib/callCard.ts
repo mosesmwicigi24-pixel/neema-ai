@@ -190,13 +190,24 @@ export function callFacts(ins: CallInsights | null | undefined): [string, string
 }
 
 /** A recording / media URL as the browser can fetch it: absolute and rooted
- *  URLs as they are, a bare stored file name under the API's media path. */
+ *  URLs exactly as given (their signed ?exp=&sig= query included — the server
+ *  signs every media link and refuses an unsigned one), a bare stored file
+ *  name — signed query kept — under the API's media path. */
 export function mediaSrc(url: string | null | undefined, apiBase: string): string | null {
     const u = (url || "").trim();
     if (!u) return null;
     if (/^https?:\/\//i.test(u) || u.startsWith("/")) return u;
-    if (!/^[\w.-]+$/.test(u)) return null;          // never a path the server didn't write
-    return `${apiBase.replace(/\/$/, "")}/admin/media/${u}`;
+    const [name, query, ...rest] = u.split("?");
+    if (rest.length || !/^[\w.-]+$/.test(name)) return null;   // never a path the server didn't write
+    if (query !== undefined && !/^[\w=&.-]*$/.test(query)) return null;
+    return `${apiBase.replace(/\/$/, "")}/admin/media/${name}${query ? `?${query}` : ""}`;
+}
+
+/** Which stored file a media URL names — for COMPARING two links only (a live
+ *  event and the next poll may carry different signatures for one file).
+ *  Never fetch with it: the signature is what lets the browser in. */
+export function mediaKey(url: string | null | undefined): string {
+    return (url || "").split("#")[0].split("?")[0];
 }
 
 /** The call a call-related row belongs to: the call whose start is nearest to

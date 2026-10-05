@@ -32,7 +32,7 @@ import { CALL_ICON_PATH } from "@/lib/callStatus";
 import { viewForRow } from "@/lib/messageKinds";
 import { CallCard } from "@/components/views/CallCard";
 import { VoiceNoteText } from "@/components/ui/VoiceNoteText";
-import { nearestCallId } from "@/lib/callCard";
+import { nearestCallId, mediaKey } from "@/lib/callCard";
 import { MessageKindCard, MessageKindPill } from "@/components/ui/MessageKindCard";
 
 // ── NoChatPane ────────────────────────────────────────────────────────────────
@@ -1458,7 +1458,7 @@ export function ConversationsView({
                     if (
                         existing.some(
                             (x) =>
-                                (x as any).media_url === msg.media_url &&
+                                mediaKey((x as any).media_url) === mediaKey(msg.media_url) &&
                                 x.direction === msg.direction &&
                                 Math.abs(new Date(x.created_at).getTime() - tMs) < 15_000,
                         )

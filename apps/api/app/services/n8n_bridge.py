@@ -15,6 +15,7 @@ import httpx
 from datetime import datetime, timezone, timedelta
 
 from app.core import money
+from app.core.media_urls import sign_for_meta as _sign_for_meta
 from app.models.conversation import Conversation, InterceptMode
 from app.models.message import Message, MsgDirection, MsgSender
 from app.models.user import User
@@ -290,7 +291,7 @@ async def _send_waba_image(wa_id: str, image_url: str, caption: str = "") -> str
     Returns the sent message's wamid."""
     url = (f"https://graph.facebook.com/{settings.waba_api_version}"
            f"/{settings.waba_phone_number_id}/messages")
-    image: dict = {"link": image_url}
+    image: dict = {"link": _sign_for_meta(image_url)}
     if caption:
         image["caption"] = caption
     async with httpx.AsyncClient() as client:
@@ -325,7 +326,7 @@ async def _send_waba_audio(wa_id: str, audio_url: str) -> str | None:
                 "messaging_product": "whatsapp",
                 "to": wa_id,
                 "type": "audio",
-                "audio": {"link": audio_url},
+                "audio": {"link": _sign_for_meta(audio_url)},
             },
             timeout=30.0,
         )
@@ -381,6 +382,7 @@ async def _send_waba_product_card(wa_id: str, *, image_url: str | None, title: s
     endpoint = (f"https://graph.facebook.com/{settings.waba_api_version}"
                 f"/{settings.waba_phone_number_id}/messages")
     headers = {"Authorization": f"Bearer {settings.waba_token}"}
+    image_url = _sign_for_meta(image_url)   # our media store → a link Meta may fetch
 
     # A cta_url card needs a link. Without one (an unpublished item, or the
     # local catalogue fallback) go straight to image+caption — the PHOTO is

@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, UploadFile, File
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, update, func, delete, or_
 from app.core import money
+from app.core.media_urls import sign_media_url
 from app.core.permissions import requires
 from app.database import get_db
 from app.models.conversation import Conversation, InterceptMode
@@ -77,7 +78,8 @@ def _shape_messages_into(thread: list, msgs, agent_name_map: dict) -> None:
             "created_at":    m.created_at.isoformat() if m.created_at else None,
             "media_type":    m.media_type if m.media_type != "note" else None,
             "media_id":      m.media_id,
-            "media_url":     m.media_url,
+            # Signed at read time — the row keeps the unsigned URL (core/media_urls).
+            "media_url":     sign_media_url(m.media_url),
             "media_caption": m.media_caption,
             "mime_type":     m.mime_type,
             "filename":      m.filename,
@@ -89,7 +91,8 @@ def _shape_messages_into(thread: list, msgs, agent_name_map: dict) -> None:
             "reply_to": ({"id": str(m.reply_to_id), "text": m.reply_to_text,
                           "sender": m.reply_to_sender,
                           "media_type": (_q.media_type if _q and _q.media_type != "note" else None),
-                          "media_url": (_q.media_url if _q and _q.media_type != "note" else None)}
+                          "media_url": (sign_media_url(_q.media_url)
+                                        if _q and _q.media_type != "note" else None)}
                          if getattr(m, "reply_to_id", None) else None),
         })
 bearer = HTTPBearer()
@@ -1755,7 +1758,7 @@ async def recover_message_media(
         raise HTTPException(
             status_code=404,
             detail="Meta no longer has this attachment — it can't be recovered.")
-    return {"ok": True, "media_url": url, "media_type": msg.media_type}
+    return {"ok": True, "media_url": sign_media_url(url), "media_type": msg.media_type}
 
 
 @router.delete("/conversations/{conv_id}/messages")
@@ -3752,7 +3755,7 @@ async def calls_get_transcript(
         "insights": c.insights,
         "language": c.transcript_lang,
         "has_recording": bool(c.recording_url),
-        "recording_url": c.recording_url,
+        "recording_url": sign_media_url(c.recording_url),
     }
 
 

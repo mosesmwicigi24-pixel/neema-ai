@@ -38,6 +38,18 @@ class Settings(BaseSettings):
     call_meta_recording: bool = False
     call_recording_purpose: str = "to help us serve your order and train our team"
     call_recording_language: str = "en"
+    # A WRITTEN notice instead (services/recording_notice.py): sent once per
+    # customer, the first time one of their calls connects while
+    # call_recording_enabled — free-form, so only inside the 24 h window.
+    # Wording approved by the owner 2026-10-05: English and Swahili, both.
+    # Switched on in docker-compose.vps.yml (CALL_RECORDING_NOTICE_ENABLED).
+    call_recording_notice_enabled: bool = False
+    call_recording_notice_text: str = (
+        "Just so you know: calls with Bethany House may be recorded, and calls and "
+        "voice notes transcribed, so we can serve you better.\n\n"
+        "Kwa taarifa yako: simu na Bethany House zinaweza kurekodiwa, na simu "
+        "pamoja na jumbe za sauti kunakiliwa kwa maandishi, ili tukuhudumie vyema "
+        "zaidi.")
     # Approved WhatsApp template used to open a thread with a customer who reached
     # us on Messenger/Facebook (Meta requires a template to message first). Body:
     # "Hello {{1}}, this is Bethany House…". Name + language must match the
@@ -282,6 +294,20 @@ class Settings(BaseSettings):
     # pre-creates + chowns it. Override with MEDIA_DIR to run the app (or its
     # tests) as a user who cannot write to /var.
     media_dir: str = "/var/neema/media"
+    # Signed, expiring media links (app/core/media_urls.py). Every media URL
+    # the API hands out carries ?exp=<unix>&sig=<hmac>; the key is derived
+    # from SECRET_KEY unless MEDIA_URL_SECRET overrides it (no new required
+    # secret). Dashboard links live ~1 h (re-signed on every read); links we
+    # hand Meta for an outbound send live 24 h (Meta fetches at send time and
+    # caches 10 min — the slack covers retries).
+    # ROLLOUT: while MEDIA_SIGNED_URLS_REQUIRED is false an unsigned request
+    # is still served (logged `media.unsigned`) so a deploy can't break
+    # playback mid-flight; a request that DOES carry a signature is always
+    # checked. Flip to true after live verification (docs in the PR).
+    media_url_secret: str = ""
+    media_signed_urls_required: bool = False
+    media_url_ttl_seconds: int = 3600
+    media_url_meta_ttl_seconds: int = 86400
     # Bethany House hub — single source of truth for catalogue & orders
     hub_api_url: str = "https://hub.bethanyhouse.co.ke"
     hub_api_token: str = ""          # Sanctum token for pushing orders (Part B)

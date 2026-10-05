@@ -158,7 +158,9 @@ def test_recording_url_never_ships_in_the_thread_only_from_the_authorised_endpoi
     assert c["insights"]["commitments"] == ["Deliver Friday"]
     assert b"call_0123abcd" not in raw                                 # not in the thread payload
     r = env.client.get("/api/admin/calls/wacid.REC/transcript", headers=_as(env.ids["ann"]))
-    assert r.status_code == 200 and r.json()["recording_url"].endswith("call_0123abcd.webm")
+    # signed at read time (core/media_urls): the file, plus ?exp=&sig=
+    assert r.status_code == 200 and r.json()["recording_url"].split("?")[0].endswith("call_0123abcd.webm")
+    assert "?exp=" in r.json()["recording_url"] and "&sig=" in r.json()["recording_url"]
     assert env.client.get("/api/admin/calls/wacid.REC/transcript").status_code in (401, 403)
 
 

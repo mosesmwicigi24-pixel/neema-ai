@@ -818,7 +818,13 @@ async def send_agent_media(
     filename: str | None,
     redis=None,
 ) -> dict:
-    """Send an image / document / video / audio to the customer via WABA."""
+    """Send an image / document / video / audio to the customer via WABA.
+
+    `media_url` is stored unsigned (a client may hand back a link it was
+    given, signature and all); the send to Meta signs it with the long
+    lifetime, the response with the dashboard one (core/media_urls)."""
+    from app.core.media_urls import canonical_media_url, sign_media_url
+    media_url = canonical_media_url(media_url)
     result = await db.execute(select(Conversation).where(Conversation.id == conv_id))
     conv = result.scalar_one_or_none()
     if not conv:
@@ -882,7 +888,7 @@ async def send_agent_media(
         "direction": "outbound",
         "sender": "human_agent",
         "media_type": media_type,
-        "media_url": media_url,
+        "media_url": sign_media_url(media_url),
         "text": caption,
         "created_at": msg.created_at.isoformat() if msg.created_at else None,
     }
@@ -904,7 +910,8 @@ async def _send_waba_media(
         f"/{settings.waba_phone_number_id}/messages"
     )
 
-    media_obj: dict = {"link": media_url}
+    from app.core.media_urls import sign_for_meta
+    media_obj: dict = {"link": sign_for_meta(media_url)}
     if caption:
         media_obj["caption"] = caption
     if filename and media_type == "document":
