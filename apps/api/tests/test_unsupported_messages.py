@@ -26,15 +26,22 @@ def test_a_catalog_cart_is_summarised():
         "catalog_id": "1", "product_items": [
             {"product_retailer_id": "tray", "quantity": 2},
             {"product_retailer_id": "cups", "quantity": 1}]}}))
-    assert evts[0]["text"] == "🛒 Sent a cart from the catalog: 3 items"
+    # The count still leads; the SKUs follow so the agent can see WHAT is in
+    # the cart (cycle 2, 2026-10-05) — it used to be told only "3 items".
+    assert evts[0]["text"].startswith("🛒 Sent a cart from the catalog: 3 items")
+    assert "tray ×2" in evts[0]["text"] and "cups ×1" in evts[0]["text"]
 
 
-def test_an_unknown_type_is_named_never_blank():
+def test_an_unknown_type_is_never_blank_and_keeps_metas_reason():
+    # Cycle 2 (2026-10-05): the old line ("… (unsupported type) — ask them to
+    # resend as text") named OUR parser's blind spot, not the message. Now the
+    # words are calm and the record keeps Meta's type + error for the team.
     evts = parse_events(_payload({"type": "unsupported",
                                   "errors": [{"code": 131051}]}))
-    assert "unsupported" in evts[0]["text"]
-    assert "resend as text" in evts[0]["text"]
     assert evts[0]["text"].strip()
+    assert "WhatsApp doesn't let us show" in evts[0]["text"]
+    assert evts[0]["meta"]["type"] == "unsupported"
+    assert evts[0]["meta"]["errors"] == [{"code": 131051}]
 
 
 def test_plain_text_and_captions_are_untouched():
