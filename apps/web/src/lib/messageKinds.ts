@@ -166,7 +166,8 @@ export function kindView(meta: MessageMeta | null | undefined): KindView | null 
             const to = (meta.to_text || "").trim();
             const quoted = to ? `“${to.length > 80 ? `${to.slice(0, 79)}…` : to}”` : "your message";
             return emoji
-                ? { icon: emoji, title: `Reacted ${emoji} to ${quoted}`, lines: [], tone: "neutral", centred: false }
+                // The emoji lives in the sentence; the glyph is the quiet "reply" mark.
+                ? { icon: "↩︎", title: `Reacted ${emoji} to ${quoted}`, lines: [], tone: "neutral", centred: false }
                 : { icon: "↩︎", title: `Removed their reaction${to ? ` to ${quoted}` : ""}`, lines: [], tone: "muted", centred: false };
         }
         case "call_permission": {
