@@ -139,6 +139,11 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements-dev.txt
 
+      # The voice-note battery decodes real audio (as the API image does); the
+      # step below fails on any skip, so ffmpeg must be here too.
+      - name: Install ffmpeg
+        run: command -v ffmpeg || (sudo apt-get update -q && sudo apt-get install -y -q --no-install-recommends ffmpeg)
+
       # `alembic heads` reads the versions directory only — it never opens a
       # connection and never executes env.py, so this needs no env vars.
       - name: Assert exactly one alembic head
@@ -178,7 +183,7 @@ jobs:
           SECRET_KEY: ci-not-a-real-secret
         run: |
           set -o pipefail
-          python -m pytest tests/test_security_db.py tests/test_calls_db.py tests/test_calls_adversarial_db.py tests/test_client_crashes_db.py tests/test_inbound_kinds_db.py tests/test_call_cards_db.py -q -rs | tee /tmp/sec.log
+          python -m pytest tests/test_security_db.py tests/test_calls_db.py tests/test_calls_adversarial_db.py tests/test_client_crashes_db.py tests/test_inbound_kinds_db.py tests/test_call_cards_db.py tests/test_voice_notes_db.py tests/test_messenger_calls_db.py tests/test_calls_audio_integration_db.py -q -rs | tee /tmp/sec.log
           if grep -q "skipped" /tmp/sec.log || ! grep -qE "[0-9]+ passed" /tmp/sec.log; then
             echo "::error::the security tests did not run (Postgres unreachable?) — treating as failure"
             exit 1

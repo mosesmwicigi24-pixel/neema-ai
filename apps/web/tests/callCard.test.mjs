@@ -4,7 +4,8 @@
 // Run: node --test apps/web/tests/*.test.mjs
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { callCardView, canCallBack, actionItems, fmtDuration, whenText, transcriptSlot, mediaSrc, callBackHandle, nearestCallId }
+import { callCardView, canCallBack, actionItems, fmtDuration, whenText, transcriptSlot, mediaSrc, callBackHandle, nearestCallId,
+    transcriptFailure, callLanguage, callFacts }
     from "../src/lib/callCard.ts";
 
 const call = (o) => ({ status: "completed", direction: "inbound", agent_name: null, duration: null,
@@ -80,7 +81,38 @@ test("11 transcript slot states", () => {
     assert.equal(transcriptSlot("done"), "ready");
     assert.equal(transcriptSlot("processing"), "working");
     assert.equal(transcriptSlot("failed"), "failed");
-    assert.equal(transcriptSlot("recorded"), "none");
+    assert.equal(transcriptSlot("recorded"), "recorded");
+    // Cycle 5's lifecycle: queued, failed:<reason>, legacy pending; the
+    // server's folded state wins when present.
+    assert.equal(transcriptSlot("queued"), "working");
+    assert.equal(transcriptSlot("pending"), "working");
+    assert.equal(transcriptSlot("failed:over_budget"), "failed");
+    assert.equal(transcriptSlot("whatever", "done"), "ready");
+    assert.equal(transcriptSlot("none"), "none");
+    assert.equal(transcriptSlot(null), "none");
+});
+
+test("11b failure words: the server's, else the reason code made readable", () => {
+    assert.equal(transcriptFailure({ transcript_status: "failed:over_budget", transcript_failure: "today's transcription budget is used up" }),
+        "today's transcription budget is used up");
+    assert.equal(transcriptFailure({ transcript_status: "failed:provider_timeout" }), "provider timeout");
+    assert.equal(transcriptFailure({ transcript_status: "failed" }), null);
+    assert.equal(transcriptFailure({ transcript_status: "done" }), null);
+});
+
+test("11c language: the analysis names it, else the ISO code", () => {
+    assert.equal(callLanguage("Swahili and English", "sw"), "Swahili and English");
+    assert.equal(callLanguage(null, "sw"), "Swahili");
+    assert.equal(callLanguage("", "en-US"), "English");
+    assert.equal(callLanguage(null, "xx"), "XX");
+    assert.equal(callLanguage(null, null), null);
+});
+
+test("11d facts a salesperson acts on: products, prices, objections — empties dropped", () => {
+    assert.deepEqual(callFacts({ products: ["Clergy shirt, size 16, black ×2"], prices: ["KES 4,500 each", " "], objections: [] }),
+        [["Products", ["Clergy shirt, size 16, black ×2"]], ["Prices", ["KES 4,500 each"]]]);
+    assert.deepEqual(callFacts(null), []);
+    assert.deepEqual(callFacts({ prices: "KES 100" }), []);   // never a string spread into letters
 });
 
 test("12 when: clock today, waiting time for a missed call", () => {

@@ -136,12 +136,57 @@ export function actionItems(ins: (CallInsights & { action_items?: unknown }) | n
     return (Array.isArray(raw) ? raw : []).map((x) => String(x ?? "").trim()).filter(Boolean).slice(0, 8);
 }
 
-/** The transcript slot's state, in one word. */
-export function transcriptSlot(status: string | null | undefined): "ready" | "working" | "failed" | "none" {
-    if (status === "done") return "ready";
-    if (status === "pending" || status === "processing") return "working";
-    if (status === "failed") return "failed";
+/** The transcript slot's state, in one word. Reads the server's folded
+ *  `transcript_state` when present, else folds `transcript_status` itself
+ *  (queued | processing | legacy pending → working; failed:<reason> | failed →
+ *  failed; recorded → a recording nobody has transcribed yet). */
+export type TranscriptSlot = "ready" | "working" | "failed" | "recorded" | "none";
+export function transcriptSlot(status: string | null | undefined, state?: string | null): TranscriptSlot {
+    const k = (state || "").trim() || (() => {
+        const s = (status || "").trim();
+        if (s === "pending") return "queued";
+        if (s === "failed" || s.startsWith("failed:")) return "failed";
+        return s;
+    })();
+    if (k === "done") return "ready";
+    if (k === "queued" || k === "processing") return "working";
+    if (k === "failed") return "failed";
+    if (k === "recorded") return "recorded";
     return "none";
+}
+
+/** Why a call's transcript failed, in words: the server's (`transcript_failure`)
+ *  or, from an older server, the reason code made readable. */
+export function transcriptFailure(c: Pick<ApiCall, "transcript_status" | "transcript_failure">): string | null {
+    if (c.transcript_failure) return c.transcript_failure;
+    const s = (c.transcript_status || "").trim();
+    return s.startsWith("failed:") ? s.slice(7).replace(/_/g, " ") || null : null;
+}
+
+const LANGS: Record<string, string> = {
+    en: "English", sw: "Swahili", fr: "French", ar: "Arabic", pt: "Portuguese", es: "Spanish",
+    de: "German", it: "Italian", am: "Amharic", so: "Somali", rw: "Kinyarwanda", lg: "Luganda",
+    zu: "Zulu", xh: "Xhosa", af: "Afrikaans", ha: "Hausa", yo: "Yoruba", ig: "Igbo", zh: "Chinese",
+    hi: "Hindi", ru: "Russian", bg: "Bulgarian", nl: "Dutch", ny: "Chichewa", sn: "Shona", st: "Sesotho",
+};
+
+/** The language the call was in, as a word: insights' "Swahili" first (the
+ *  analysis names mixes), else the transcriber's ISO code. Null when unknown. */
+export function callLanguage(insightsLang: string | null | undefined, iso: string | null | undefined): string | null {
+    const named = (insightsLang || "").trim();
+    if (named) return named.charAt(0).toUpperCase() + named.slice(1);
+    const code = (iso || "").trim().toLowerCase().split(/[-_]/)[0];
+    if (!code) return null;
+    return LANGS[code] ?? (code.length > 3 ? code.charAt(0).toUpperCase() + code.slice(1) : code.toUpperCase());
+}
+
+/** The facts on a call's brief that a salesperson acts on, in order. */
+export function callFacts(ins: CallInsights | null | undefined): [string, string[]][] {
+    if (!ins) return [];
+    const rows: [string, unknown][] = [["Products", ins.products], ["Prices", ins.prices], ["Objections", ins.objections]];
+    return rows
+        .map(([k, x]) => [k, (Array.isArray(x) ? x : []).map((v) => String(v ?? "").trim()).filter(Boolean)] as [string, string[]])
+        .filter(([, x]) => x.length > 0);
 }
 
 /** A recording / media URL as the browser can fetch it: absolute and rooted

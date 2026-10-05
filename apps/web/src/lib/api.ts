@@ -290,6 +290,13 @@ export interface ApiThreadItem {
     comment_context?: Message["comment_context"];
     /** What a non-plain message IS (location, contact, reaction, unsupported …). */
     meta?: Message["meta"];
+    /** English under a foreign message (cached server-side), and its language. */
+    translation?: string | null;
+    translated_from?: string | null;
+    /** A voice note's transcription: status, spoken language, why it failed. */
+    transcript_status?: string | null;
+    transcript_lang?: string | null;
+    transcript_note?: string | null;
     reply_to?: { id: string; text: string | null; sender: string | null;
                  media_type?: string | null; media_url?: string | null } | null;
     // System-event-specific
@@ -323,6 +330,13 @@ function mapThreadItem(raw: ApiThreadItem): Message {
         filename:      raw.filename ?? null,
         comment_context: raw.comment_context ?? null,
         meta:          raw.meta ?? null,
+        // The server sends these on every page; dropping them here meant a
+        // reload lost every translation and every voice note's state.
+        translation:       raw.translation ?? null,
+        translated_from:   raw.translated_from ?? null,
+        transcript_status: raw.transcript_status ?? null,
+        transcript_lang:   raw.transcript_lang ?? null,
+        transcript_note:   raw.transcript_note ?? null,
         reply_to:      raw.reply_to ?? null,
     };
 }
@@ -762,6 +776,14 @@ export interface ApiCall {
     summary?: string | null;
     insights?: CallInsights | null;
     transcript_status?: string | null;  // none | recorded | queued | processing | done | failed:<reason> (legacy: pending, failed)
+    /** transcript_status folded to its kind: none | recorded | queued | processing | done | failed. */
+    transcript_state?: string | null;
+    /** Why it failed, in words ("today's transcription budget is used up"). */
+    transcript_failure?: string | null;
+    /** The spoken language (ISO-639-1, "sw"). */
+    transcript_lang?: string | null;
+    /** Words were captured (false for a silent recording — nothing to open). */
+    has_transcript?: boolean;
     has_recording?: boolean;
     /** WhatsApp voicemail arrived for this call (the audio is in the chat). */
     has_voicemail?: boolean;

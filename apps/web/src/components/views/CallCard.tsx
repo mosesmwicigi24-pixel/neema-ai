@@ -10,7 +10,9 @@ import React, { useCallback, useState } from "react";
 import type { Message } from "@/types";
 import { callsApi, type CallTranscriptResp } from "@/lib/api";
 import { callStatus, CALL_ICON_PATH, speakerTurns } from "@/lib/callStatus";
-import { callCardView, canCallBack, callBackHandle, actionItems, transcriptSlot, whenText, mediaSrc, type CallTone } from "@/lib/callCard";
+import { callCardView, canCallBack, callBackHandle, actionItems, transcriptSlot, transcriptFailure, callLanguage, callFacts, whenText, mediaSrc, type CallTone } from "@/lib/callCard";
+import { voiceWords } from "@/lib/voiceNote";
+import { VoiceNoteText } from "@/components/ui/VoiceNoteText";
 import { useCallPresence } from "@/lib/callContext";
 import { ChannelGlyph } from "@/components/CallStage";
 import { detailsLine } from "@/lib/messageKinds";
@@ -44,12 +46,15 @@ export function CallCard({ msg, voicemail, notices, onUseReply, composerReady = 
     const [showTranscript, setShowTranscript] = useState(false);
     const [more, setMore] = useState(false);
     const [used, setUsed] = useState(false);
+    const [retrying, setRetrying] = useState(false);
 
     // Recording URL + transcript come from the authorised per-call endpoint —
     // never shipped in the thread payload. Fetched once, on first need.
     const loadDetails = useCallback(async (why: "play" | "transcript") => {
         if (!call) return null;
-        if (details) return details;
+        // Cached until the call's transcript moves on (queued → done): a stale
+        // copy would open an empty transcript after the summary landed.
+        if (details && details.status === call.transcript_status) return details;
         setLoading(why); setLoadErr(null);
         try {
             const d = await callsApi.transcript(call.call_id);
@@ -79,14 +84,17 @@ export function CallCard({ msg, voicemail, notices, onUseReply, composerReady = 
     const ins = call.insights ?? null;
     const summary = (call.summary || "").trim() || null;
     const items = actionItems(ins);
-    const facts = ([["Products", ins?.products], ["Objections", ins?.objections]] as const)
-        .filter(([, x]) => Array.isArray(x) && x.length > 0) as [string, string[]][];
+    const facts = callFacts(ins);
+    const lang = callLanguage(ins?.language, call.transcript_lang);
     const followUp = ins?.follow_up_message?.trim() || null;
-    const slot = transcriptSlot(call.transcript_status);
+    const slot = transcriptSlot(call.transcript_status, call.transcript_state);
+    const failure = slot === "failed" ? transcriptFailure(call) : null;
+    // A silent recording is "done" with no words: no transcript to open.
+    const hasWords = call.has_transcript !== false;
     const at = call.started_at || msg.created_at;
     const recSrc = mediaSrc(details?.recording_url, API_BASE);
     const vmSrc = voicemail?.media_url ? mediaSrc(voicemail.media_url, API_BASE) : null;
-    const vmText = (voicemail?.media_caption || "").trim() || null;
+    const vmText = voicemail ? voiceWords(voicemail.text) : null;
     const long = !!summary && summary.length > 220;
 
     const callBack = async () => {
@@ -99,6 +107,19 @@ export function CallCard({ msg, voicemail, notices, onUseReply, composerReady = 
         const d = await loadDetails("play");
         if (d?.recording_url) setPlaying(true);
         else if (d) setLoadErr("No recording was saved for this call.");
+    };
+    // Transcribe a recording nobody has yet, or try a failed one again. The
+    // server claims the row (a double tap transcribes once); the card moves
+    // with the call_update that follows.
+    const transcribeNow = async () => {
+        if (retrying) return;
+        setRetrying(true); setLoadErr(null);
+        try { await callsApi.transcribe(call.call_id); }
+        catch (e) {
+            setLoadErr(String((e as Error)?.message || "").includes("409")
+                ? "Transcription is switched off on the server."
+                : "Couldn't start the transcription — try again.");
+        } finally { setRetrying(false); }
     };
     const toggleTranscript = async () => {
         if (!showTranscript) await loadDetails("transcript");
@@ -204,7 +225,10 @@ export function CallCard({ msg, voicemail, notices, onUseReply, composerReady = 
                         <div className="text-[10px] font-semibold uppercase tracking-wider mb-1" style={{ color: "#57534e" }}>Voicemail</div>
                         {vmSrc ? <audio src={vmSrc} controls preload="none" className="w-full h-9" aria-label="Voicemail" />
                             : <p className="text-xs" style={{ color: "#57534e" }}>The voicemail audio couldn&apos;t be fetched.</p>}
-                        {vmText && <p className="text-xs leading-relaxed whitespace-pre-wrap mt-1" style={{ color: "#334155" }}>{vmText}</p>}
+                        <div className="mt-1">
+                            <VoiceNoteText label="voicemail" status={voicemail.transcript_status} note={voicemail.transcript_note}
+                                transcription={vmText} translation={voicemail.translation} translatedFrom={voicemail.translated_from} />
+                        </div>
                     </div>
                 )}
 
@@ -227,13 +251,35 @@ export function CallCard({ msg, voicemail, notices, onUseReply, composerReady = 
                     <p className="mt-2.5 text-xs" style={{ color: "#A15C00" }} aria-live="polite">Transcribing the call…</p>
                 )}
                 {slot === "failed" && (
-                    <p className="mt-2.5 text-xs" style={{ color: "#78716c" }}>The transcript couldn&apos;t be made for this call.</p>
+                    <div className="mt-2.5 flex items-center gap-2 flex-wrap">
+                        <p className="text-xs" style={{ color: "#78716c" }}>
+                            The transcript couldn&apos;t be made{failure ? ` — ${failure}` : ""}.
+                        </p>
+                        {call.has_recording && (
+                            <button type="button" onClick={transcribeNow} disabled={retrying}
+                                className="text-[11px] font-semibold min-h-8 underline-offset-2 hover:underline disabled:opacity-60" style={{ color: "#128C4B" }}>
+                                {retrying ? "Starting…" : "Try again"}
+                            </button>
+                        )}
+                    </div>
+                )}
+                {slot === "recorded" && call.has_recording && (
+                    <div className="mt-2.5">
+                        <button type="button" onClick={transcribeNow} disabled={retrying}
+                            className="inline-flex items-center h-9 px-3 rounded-full text-xs font-semibold border hover:brightness-95 disabled:opacity-60"
+                            style={{ color: "#57534e", borderColor: "#e2e8e0", backgroundColor: "#fff" }}>
+                            {retrying ? "Starting…" : "Transcribe and summarise"}
+                        </button>
+                    </div>
                 )}
 
                 {/* AI summary · next step · action items */}
                 {(summary || ins?.next_action || items.length > 0 || facts.length > 0) && (
                     <div className="mt-2.5 pt-2.5 border-t" style={{ borderColor: "#eef2ea" }}>
-                        <div className="text-[10px] font-semibold uppercase tracking-wider mb-1" style={{ color: "#128C4B" }}>Call summary</div>
+                        <div className="flex items-baseline gap-1.5 mb-1">
+                            <span className="text-[10px] font-semibold uppercase tracking-wider" style={{ color: "#128C4B" }}>Call summary</span>
+                            {lang && <span className="text-[10px]" style={{ color: "#78716c" }}>· spoken in {lang}</span>}
+                        </div>
                         {summary && (
                             <>
                                 <p className={`text-xs leading-relaxed whitespace-pre-wrap ${long && !more ? "line-clamp-3" : ""}`} style={{ color: "#1c2917" }}>{summary}</p>
@@ -295,13 +341,13 @@ export function CallCard({ msg, voicemail, notices, onUseReply, composerReady = 
                 )}
 
                 {/* Full transcript, on demand */}
-                {slot === "ready" && (
+                {slot === "ready" && hasWords && (
                     <div className="mt-2">
                         <button type="button" onClick={toggleTranscript} aria-expanded={showTranscript}
                             disabled={loading === "transcript"}
                             className="text-[11px] font-semibold min-h-8" style={{ color: "#128C4B" }}>
                             {loading === "transcript" ? "Loading…" : showTranscript ? "Hide transcript"
-                                : `Show transcript${details?.language ? ` · ${details.language}` : ""}`}
+                                : "Show transcript"}
                         </button>
                         {showTranscript && details?.transcript && (turns ? (
                             <ol aria-label="Transcript" className="mt-1 space-y-1.5 max-h-72 overflow-y-auto pr-1">

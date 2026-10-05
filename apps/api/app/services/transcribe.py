@@ -77,6 +77,7 @@ REASON_WORDS = {
     "provider_rejected": "the transcription service refused the audio",
     "busy": "another worker is transcribing this audio",
     "error": "an unexpected error",
+    "analysis": "the AI summary couldn't be made (the transcript is kept)",
 }
 
 # USD per audio minute. gpt-4o-transcribe is token-billed; OpenAI quotes it at
