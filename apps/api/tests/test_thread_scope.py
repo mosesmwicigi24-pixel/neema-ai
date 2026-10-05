@@ -13,7 +13,7 @@ quote. These tests pin the four legs of the fix:
 2. a reply inside a thread carries the comment it answers and our reply;
 3. the webhook keeps `parent_id` (and never mistakes the post for a parent);
 4. the caption scorer runs inside the ladder, so "Premium Bishop's Ring" is
-   the hub's "Ring" before any model reads the post — and a model's lead on
+   the hub's Bishopric Ring before any model reads the post — and a model's lead on
    record is re-read by the ladder once an hour, not kept for 30 days.
 """
 import asyncio
@@ -76,15 +76,19 @@ DANIEL = [
 RING = {"name": "Ring", "slug": "bishops-ring", "price": 1500, "price_usd": 20,
         "aliases": [], "images": [{"url": "https://hub/x/ring.webp"}],
         "description": "Bishop's ring", "product_type": "simple", "hub_product_id": 71}
-APOSTOLIC = {"name": "Apostolic Ring", "slug": "apostolic-ring", "price": 3500,
-             "price_usd": 40, "aliases": [], "images": [{"url": "https://hub/x/ring.webp"}],
+# The hub's names today (owner, 2026-10-02): the plain "Ring" (KES 1,500; its
+# slug still reads bishops-ring) and the BISHOPRIC RING (KES 4,500, slug
+# apostolic-ring) — "a bishop's ring", "an apostolic ring" and "pete ya
+# askofu" are the Bishopric Ring (core/synonyms).
+BISHOPRIC = {"name": "Bishopric Ring", "slug": "apostolic-ring", "price": 4500,
+             "price_usd": 45, "aliases": [], "images": [{"url": "https://hub/x/ring.webp"}],
              "description": "Gold ring with a deep red stone", "product_type": "simple",
              "hub_product_id": 72}
 CASSOCK_SET = {"name": "Classic Princes Cassock Set", "slug": "clergy-cassock",
                "price": 19000, "price_usd": 190, "aliases": [], "images": [],
                "description": "Cassock, shirt, collar, stole and belt",
                "product_type": "variable", "hub_product_id": 73}
-CATALOG = [RING, APOSTOLIC, CASSOCK_SET]
+CATALOG = [RING, BISHOPRIC, CASSOCK_SET]
 
 
 # ── 1. the transcript is THIS post's thread only ────────────────────────────
@@ -269,25 +273,28 @@ def _offline_ladder(monkeypatch):
     monkeypatch.setattr(pc, "product_from_vision", none)
 
 
-def test_premium_bishops_ring_caption_is_the_hubs_ring_by_the_ladder(monkeypatch):
+def test_premium_bishops_ring_caption_is_the_bishopric_ring_by_the_ladder(monkeypatch):
+    """Owner, 2026-10-02: the bishop's rings in the post are the Bishopric Ring
+    (KES 4,500 — "45 USD"), never the plain Ring the caption scorer used to
+    pick on the bare word."""
     _offline_ladder(monkeypatch)
     hit = asyncio.run(pc.resolve_post(None, {
         "post_id": "P-RING",
         "title": "We have beautiful Premium Bishop's Ring. We have the ring with green, "
                  "Red, Golden Yellow, Purple and Blue stone.",
         "thumb": ""}, CATALOG))
-    assert hit is not None and hit["name"] == "Ring" and hit["slug"] == "bishops-ring"
+    assert hit is not None and hit["name"] == "Bishopric Ring" and hit["slug"] == "apostolic-ring"
     assert hit["_identity_source"] == "caption"
     assert pc.identity_trusted({"name": hit["name"], "source": hit["_identity_source"],
                                 "confidence": hit["_identity_confidence"]})
 
 
-def test_an_apostolic_ring_caption_stays_the_apostolic_ring(monkeypatch):
+def test_an_apostolic_ring_caption_is_the_bishopric_ring(monkeypatch):
     _offline_ladder(monkeypatch)
     hit = asyncio.run(pc.resolve_post(None, {
         "post_id": "P-AR", "title": "Apostolic Ring — gold with a deep red stone",
         "thumb": ""}, CATALOG))
-    assert hit is not None and hit["name"] == "Apostolic Ring"
+    assert hit is not None and hit["name"] == "Bishopric Ring"
     assert hit["_identity_source"] == "caption"
 
 
@@ -341,21 +348,21 @@ def _wire_ladder(monkeypatch, hit, calls):
 
 
 def test_a_models_lead_on_record_is_replaced_by_the_ladders_trusted_read(monkeypatch):
-    """The ring post carried the model's "Apostolic Ring"; the ladder now
-    re-reads the caption and the hub's "Ring" replaces it."""
+    """The ring post carried the model's plain "Ring"; the ladder re-reads the
+    caption and the hub's Bishopric Ring replaces it (owner, 2026-10-02)."""
     calls = []
-    _wire_ladder(monkeypatch, pc.with_provenance(RING, "caption"), calls)
+    _wire_ladder(monkeypatch, pc.with_provenance(BISHOPRIC, "caption"), calls)
     key = rt._post_product_key("facebook", "P-RING")
-    r = _Redis({key: json.dumps({"name": "Apostolic Ring", "slug": "apostolic-ring",
+    r = _Redis({key: json.dumps({"name": "Ring", "slug": "bishops-ring",
                                  "source": "model", "confidence": 0.6})})
     pctx = {"post_id": "P-RING", "title": "We have beautiful Premium Bishop's Ring", "thumb": ""}
     got = asyncio.run(rt._post_identity(r, "facebook", pctx))
-    assert got["name"] == "Ring" and got["source"] == "caption"
+    assert got["name"] == "Bishopric Ring" and got["source"] == "caption"
     assert calls == ["P-RING"]
-    assert json.loads(r.store[key])["name"] == "Ring"
+    assert json.loads(r.store[key])["name"] == "Bishopric Ring"
     # the retry is once an hour per post: the next turn does not re-run the ladder
     got2 = asyncio.run(rt._post_identity(r, "facebook", pctx))
-    assert got2["name"] == "Ring" and calls == ["P-RING"]
+    assert got2["name"] == "Bishopric Ring" and calls == ["P-RING"]
 
 
 def test_a_lead_stays_a_lead_when_the_ladder_cannot_do_better(monkeypatch):
@@ -377,7 +384,7 @@ def test_a_lead_stays_a_lead_when_the_ladder_cannot_do_better(monkeypatch):
 
 def test_a_trusted_record_is_never_re_read(monkeypatch):
     calls = []
-    _wire_ladder(monkeypatch, pc.with_provenance(APOSTOLIC, "caption"), calls)
+    _wire_ladder(monkeypatch, pc.with_provenance(BISHOPRIC, "caption"), calls)
     key = rt._post_product_key("facebook", "P-T")
     rec = {"name": "Ring", "slug": "bishops-ring", "source": "caption", "confidence": 0.95}
     r = _Redis({key: json.dumps(rec)})

@@ -28,126 +28,12 @@ import type {
     OpenChatRequest,
 } from "@/types";
 import { useSession } from "next-auth/react";
-import { callStatus, CALL_ICON_PATH } from "@/lib/callStatus";
-import { ChannelGlyph } from "@/components/CallStage";
-
-// ── CallPill ──────────────────────────────────────────────────────────────────
-// A WhatsApp or Messenger call where it happened in the thread (docs/CALLING_UX.md §7): a
-// centred pill — direction / missed icon, the label ("Incoming call · 4:12",
-// "Missed call"), who took it, when. When the call was transcribed, a card
-// under it: the summary, the next action, and the suggested follow-up with
-// "Use as reply" (puts it in the composer — never sends it).
-function CallPill({ msg, onUseReply, composerReady = true }: { msg: Message; onUseReply?: (text: string) => void; composerReady?: boolean }) {
-    const call = msg.call;
-    const st = callStatus(call ?? { status: "", direction: msg.direction });
-    const ins = call?.insights ?? null;
-    const summary = (call?.summary || msg.event_reason || "").trim() || null;
-    const followUp = ins?.follow_up_message?.trim() || null;
-    // Products / objections / commitments: one compact line each, only when there.
-    const facts = ([
-        ["Products", ins?.products],
-        ["Objections", ins?.objections],
-        ["Commitments", ins?.commitments],
-    ] as const).filter(([, v]) => Array.isArray(v) && v.length > 0) as [string, string[]][];
-    const showCard = !!(summary || ins?.next_action || followUp || facts.length);
-    const [more, setMore] = useState(false);
-    const [used, setUsed] = useState(false);
-    // Who took it — not for calls nobody answered.
-    const agent = msg.agent_name && !["missed", "no_answer", "cancelled", "failed"].includes(call?.status ?? "")
-        ? msg.agent_name.split(" ")[0] : null;
-    const at = call?.started_at || msg.created_at;
-    // WhatsApp voicemail for this call: the audio is the voice note right here in the chat.
-    const baseLabel = msg.text || st.word;
-    const label = call?.has_voicemail && !/voicemail/i.test(baseLabel) ? `${baseLabel} · voicemail` : baseLabel;
-    const long = !!summary && summary.length > 220;
-    // Which app the call was on — a badge, so a mixed history is never ambiguous.
-    const messengerCall = call?.channel === "messenger";
-    const app = messengerCall ? "Messenger" : "WhatsApp";
-    return (
-        <div className="flex flex-col items-center gap-1.5 my-2.5">
-            <div className="flex items-center gap-2 w-full">
-                <div className="flex-1 h-px bg-stone-200" />
-                <div className="flex flex-wrap items-center justify-center gap-x-1.5 gap-y-0.5 px-3 py-1 rounded-full border bg-white max-w-[88%]"
-                    style={{ borderColor: st.live ? "#b7e4c7" : "#e2e8e0" }}
-                    title={at ? new Date(at).toLocaleString() : undefined}>
-                    {st.live
-                        ? <span className="w-2 h-2 rounded-full flex-shrink-0 animate-pulse motion-reduce:animate-none" style={{ backgroundColor: "#25D366" }} aria-hidden="true" />
-                        : (
-                            <svg width={12} height={12} viewBox="0 0 24 24" fill="none" stroke={st.light} strokeWidth={2.4}
-                                strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" className="flex-shrink-0">
-                                <path d={CALL_ICON_PATH[st.icon]} />
-                            </svg>
-                        )}
-                    <span data-call-channel={messengerCall ? "messenger" : "whatsapp"}
-                        className="inline-flex items-center gap-1 text-[10px] font-semibold rounded-full pl-0.5 pr-1.5"
-                        style={{ color: messengerCall ? "#0066D6" : "#128C4B", backgroundColor: messengerCall ? "#EAF3FF" : "#E7F6EC" }}>
-                        <ChannelGlyph channel={messengerCall ? "messenger" : "whatsapp"} size={11} color={messengerCall ? undefined : "#128C4B"} />
-                        {app}
-                    </span>
-                    <span className="text-[11px] font-semibold" style={{ color: st.icon === "missed" || st.word === "Missed" ? st.light : "#1c2917" }}>
-                        <span className="sr-only">{app} call: </span>{label}
-                    </span>
-                    {agent && <span className="text-[10px]" style={{ color: "#57534e" }}>· {agent}</span>}
-                    {at && <span className="text-[10px] tabular-nums" style={{ color: "#78716c" }}>· {clockTime(at)}</span>}
-                </div>
-                <div className="flex-1 h-px bg-stone-200" />
-            </div>
-            {showCard && (
-                <section aria-label="Call summary" className="w-full max-w-[88%] sm:max-w-md rounded-xl border bg-white px-3 py-2.5"
-                    style={{ borderColor: "#d7ecd9" }}>
-                    <div className="text-[10px] font-semibold uppercase tracking-wider mb-1" style={{ color: "#128C4B" }}>
-                        Call summary
-                    </div>
-                    {summary && (
-                        <>
-                            <p className={`text-xs leading-relaxed whitespace-pre-wrap ${long && !more ? "line-clamp-3" : ""}`} style={{ color: "#1c2917" }}>{summary}</p>
-                            {long && (
-                                <button type="button" onClick={() => setMore((v) => !v)} aria-expanded={more}
-                                    className="text-[11px] font-semibold mt-0.5 min-h-6" style={{ color: "#128C4B" }}>
-                                    {more ? "Show less" : "Show more"}
-                                </button>
-                            )}
-                        </>
-                    )}
-                    {ins?.next_action && (
-                        <p className="text-xs leading-relaxed mt-1.5" style={{ color: "#1c2917" }}>
-                            <span className="font-semibold">Next: </span>{ins.next_action}
-                        </p>
-                    )}
-                    {facts.length > 0 && (
-                        <dl className="mt-1.5 space-y-0.5 text-[11px] leading-snug">
-                            {facts.map(([k, v]) => (
-                                <div key={k} className="flex gap-1.5">
-                                    <dt className="font-semibold flex-shrink-0" style={{ color: "#57534e" }}>{k}:</dt>
-                                    <dd className="min-w-0" style={{ color: "#334155" }}>{v.join(" · ")}</dd>
-                                </div>
-                            ))}
-                        </dl>
-                    )}
-                    {followUp && (
-                        <div className="mt-2 rounded-lg px-2.5 py-2" style={{ backgroundColor: "#f3f8f1" }}>
-                            <div className="text-[10px] font-semibold uppercase tracking-wider" style={{ color: "#57534e" }}>Suggested reply</div>
-                            <p className="text-xs leading-relaxed whitespace-pre-wrap mt-0.5" style={{ color: "#334155" }}>{followUp}</p>
-                            {onUseReply && (
-                                <div className="mt-1.5 flex items-center gap-2">
-                                    <button type="button" onClick={() => { onUseReply(followUp); setUsed(true); }}
-                                        className="h-9 px-3 rounded-lg text-xs font-semibold text-white active:scale-95 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#128C4B]"
-                                        style={{ backgroundColor: "#128C4B" }}>
-                                        Use as reply
-                                    </button>
-                                    <span className="text-[11px]" style={{ color: "#57534e" }} aria-live="polite">
-                                        {!composerReady ? (used ? "Saved — pick up the chat to send it" : "Pick up the chat to send it — nothing is sent")
-                                            : used ? "In the reply box — edit, then send" : "Goes in the reply box — not sent"}
-                                    </span>
-                                </div>
-                            )}
-                        </div>
-                    )}
-                </section>
-            )}
-        </div>
-    );
-}
+import { CALL_ICON_PATH } from "@/lib/callStatus";
+import { viewForRow } from "@/lib/messageKinds";
+import { CallCard } from "@/components/views/CallCard";
+import { VoiceNoteText } from "@/components/ui/VoiceNoteText";
+import { nearestCallId, mediaKey } from "@/lib/callCard";
+import { MessageKindCard, MessageKindPill } from "@/components/ui/MessageKindCard";
 
 // ── NoChatPane ────────────────────────────────────────────────────────────────
 // "Open chat" / "Message" for a caller who has only ever CALLED: there is no
@@ -227,21 +113,44 @@ function NoChatPane({ waId, name, prefill, onBack, onToast }: {
 }
 
 // ── AudioBubble ───────────────────────────────────────────────────────────────
-// Renders an audio player with a collapsible transcription toggle.
-// The transcript is hidden by default; agents expand it on demand.
+// An audio player with the words under it.
+// Inbound voice notes (customers): the transcript shows under the player —
+// in English when the note was in another language ("Translated from Swahili",
+// with the verbatim original one tap away), or verbatim when it was English.
+// While it is being transcribed the bubble says so; when it could not be
+// (silence, budget, a refused file) it says WHY, so the team never guesses.
+// Outbound audio (TTS replies) keeps the collapsible transcript + cart text.
 function AudioBubble({
     src,
     transcription,
     cartText,
     isInbound,
+    status,
+    note,
+    translation,
+    translatedFrom,
 }: {
     src: string;
     transcription: string | null;
     cartText: string | null;
     isInbound: boolean;
+    status?: string | null;
+    note?: string | null;
+    translation?: string | null;
+    translatedFrom?: string | null;
 }) {
     const [open, setOpen] = React.useState(false);
     const hasTranscript   = !!transcription;
+
+    if (isInbound) {
+        return (
+            <div className="flex flex-col gap-1 w-full min-w-[220px]">
+                <audio src={src} controls className="w-full" style={{ minWidth: 220 }} />
+                <VoiceNoteText status={status} note={note} transcription={transcription}
+                    translation={translation} translatedFrom={translatedFrom} />
+            </div>
+        );
+    }
 
     return (
         <div className="flex flex-col gap-1 w-full min-w-[220px]">
@@ -253,9 +162,7 @@ function AudioBubble({
                     className={[
                         "flex items-center gap-1.5 text-[10px] font-medium",
                         "transition-colors w-fit rounded-full px-2 py-0.5",
-                        isInbound
-                            ? "text-[#699a32] hover:text-[#427425] bg-[#f0f9e8]"
-                            : "text-white/70 hover:text-white bg-white/15",
+                        "text-white/70 hover:text-white bg-white/15",
                     ].join(" ")}
                 >
                     <svg className="w-3 h-3 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -268,15 +175,12 @@ function AudioBubble({
             )}
 
             {open && transcription && (
-                <p className={[
-                    "text-[11px] leading-relaxed px-1 whitespace-pre-wrap",
-                    isInbound ? "italic text-[#3a5c28]/70" : "text-white/80",
-                ].join(" ")}>
+                <p className="text-[11px] leading-relaxed px-1 whitespace-pre-wrap text-white/80">
                     {transcription}
                 </p>
             )}
 
-            {!isInbound && cartText && (
+            {cartText && (
                 <div className="text-[11px] px-2 py-1.5 rounded-lg bg-white/20 font-medium whitespace-pre-wrap leading-relaxed">
                     {cartText}
                 </div>
@@ -1230,6 +1134,30 @@ export function ConversationsView({
             && new Date(m.created_at ?? 0).getTime() < floor));
     }, [sortedActiveMessages, threadHasMore, activeConvId]);
 
+    // A WhatsApp voicemail is part of its call: when that call's card is in the
+    // thread, the audio plays inside the card instead of as a separate bubble.
+    // A call notice Meta sends (a call-related type it won't show businesses)
+    // folds into the nearest call card the same way.
+    const { voicemailByCall, noticesByCall, foldedIds } = useMemo(() => {
+        const callRows = threadItems.filter((m) => m.call?.call_id).map((m) => m.call!);
+        const calls = new Set(callRows.map((c) => c.call_id));
+        const vm = new Map<string, Message>();
+        const notices = new Map<string, Message[]>();
+        const folded = new Set<string>();
+        for (const m of threadItems) {
+            const cid = m.meta?.kind === "voicemail" ? m.meta.call_id : undefined;
+            if (cid && calls.has(cid) && !vm.has(cid)) { vm.set(cid, m); folded.add(m.id); continue; }
+            if (m.meta?.kind === "call_notice") {
+                const near = nearestCallId(m.created_at, callRows);
+                if (near) {
+                    notices.set(near, [...(notices.get(near) ?? []), m]);
+                    folded.add(m.id);
+                }
+            }
+        }
+        return { voicemailByCall: vm, noticesByCall: notices, foldedIds: folded };
+    }, [threadItems]);
+
     // WhatsApp-style albums: runs of ≥2 consecutive image messages from the same
     // side collapse into one collage bubble (the first message renders the grid;
     // the rest render nothing). Clicking opens the sequential viewer.
@@ -1245,7 +1173,8 @@ export function ConversationsView({
         };
         for (const m of sortedActiveMessages) {
             const isImg = m.type !== "system_event" && !m.isNote &&
-                (m as any).media_type === "image" && (m as any).media_url;
+                (m as any).media_type === "image" && (m as any).media_url &&
+                m.meta?.kind !== "sticker";        // a sticker is never part of a photo album
             const prevM = run[run.length - 1];
             if (isImg && (!prevM || (prevM.direction === m.direction && prevM.sender === m.sender))) {
                 run.push(m);
@@ -1508,9 +1437,13 @@ export function ConversationsView({
                 media_caption: event.mediaCaption ?? undefined,
                 mime_type: event.mimeType ?? undefined,
                 filename: event.filename ?? undefined,
+                // What a non-plain message IS (location, reaction, unsupported …)
+                meta: event.meta ?? null,
                 // Sent-in-their-language replies carry the human's English
                 translation: event.translation ?? undefined,
                 translated_from: event.translatedFrom ?? undefined,
+                // A voice note arrives "queued" — its words follow (voice_transcript).
+                transcript_status: event.transcriptStatus ?? undefined,
             };
             setMessages((m) => {
                 const existing = m[activeConvId] ?? [];
@@ -1525,7 +1458,7 @@ export function ConversationsView({
                     if (
                         existing.some(
                             (x) =>
-                                (x as any).media_url === msg.media_url &&
+                                mediaKey((x as any).media_url) === mediaKey(msg.media_url) &&
                                 x.direction === msg.direction &&
                                 Math.abs(new Date(x.created_at).getTime() - tMs) < 15_000,
                         )
@@ -1533,6 +1466,33 @@ export function ConversationsView({
                         return m;
                 }
                 return { ...m, [activeConvId]: [...existing, msg] };
+            });
+        }
+        if (
+            event.type === "voice_transcript" &&
+            event.conversationId === activeConvId &&
+            event.id
+        ) {
+            // A voice note's words (or why it couldn't be heard) — patch the
+            // bubble in place.
+            setMessages((m) => {
+                const existing = m[activeConvId] ?? [];
+                let changed = false;
+                const next = existing.map((x) => {
+                    if (String(x.id) !== String(event.id)) return x;
+                    changed = true;
+                    return {
+                        ...x,
+                        transcript_status: event.transcriptStatus ?? x.transcript_status,
+                        transcript_note: event.transcriptNote ?? null,
+                        transcript_lang: event.transcriptLang ?? x.transcript_lang,
+                        ...(typeof event.text === "string" ? { text: event.text } : {}),
+                        ...(event.translation
+                            ? { translation: event.translation, translated_from: event.translatedFrom ?? null }
+                            : {}),
+                    };
+                });
+                return changed ? { ...m, [activeConvId]: next } : m;
             });
         }
         if (
@@ -3352,6 +3312,8 @@ export function ConversationsView({
                                     // Album members render inside the lead's collage.
                                     const album = albumOf.get(msg.id);
                                     if (album && !album.lead) return null;
+                                    // A voicemail / call notice folded into its call card renders there.
+                                    if (foldedIds.has(msg.id)) return null;
 
                                     // ── System event card ────────────────────
                                     if (msg.type === "system_event") {
@@ -3552,7 +3514,10 @@ export function ConversationsView({
                                                             <div className="flex-1 h-px bg-[#427425]/30" />
                                                         </div>
                                                     )}
-                                                    <CallPill msg={msg} onUseReply={putInComposer} composerReady={canCompose} />
+                                                    <CallCard msg={msg}
+                                                        voicemail={msg.call ? voicemailByCall.get(msg.call.call_id) ?? null : null}
+                                                        notices={msg.call ? noticesByCall.get(msg.call.call_id) : undefined}
+                                                        onUseReply={putInComposer} composerReady={canCompose} onToast={onToast} />
                                                 </React.Fragment>
                                             );
                                         }
@@ -3586,6 +3551,27 @@ export function ConversationsView({
                                                     </div>
                                                     <div className="flex-1 h-px bg-stone-200" />
                                                 </div>
+                                            </React.Fragment>
+                                        );
+                                    }
+
+                                    // ── Things that HAPPENED in the chat (a call-permission
+                                    // tap, a number change, a first open): a centred line,
+                                    // not a bubble the customer "said".
+                                    const eventKind = !isNote && msg.meta ? viewForRow(msg) : null;
+                                    if (eventKind?.centred) {
+                                        return (
+                                            <React.Fragment key={msg.id ?? `msg-${idx}`}>
+                                                {showDivider && (
+                                                    <div className="flex items-center gap-2 my-1">
+                                                        <div className="flex-1 h-px bg-[#427425]/30" />
+                                                        <span className="text-[10px] font-semibold text-[#427425] bg-[#e6f3d8] px-2 py-0.5 rounded-full whitespace-nowrap">
+                                                            {snap} new {snap === 1 ? "message" : "messages"}
+                                                        </span>
+                                                        <div className="flex-1 h-px bg-[#427425]/30" />
+                                                    </div>
+                                                )}
+                                                <MessageKindPill view={eventKind} at={msg.created_at} />
                                             </React.Fragment>
                                         );
                                     }
@@ -3823,15 +3809,14 @@ export function ConversationsView({
                                                                     />
                                                                 );
                                                             }
-                                                            if (!rawText.trim()) {
-                                                                // A truly empty row (a message type the
-                                                                // ingester couldn't extract) must never
-                                                                // render as a blank bubble.
-                                                                return (
-                                                                    <p className="leading-relaxed italic text-stone-400">
-                                                                        Message can&apos;t be displayed (unsupported type) — ask them to resend as text.
-                                                                    </p>
-                                                                );
+                                                            // A non-plain message drawn as what it IS
+                                                            // (a location, a contact, a reaction, a
+                                                            // cart …); a type WhatsApp won't show us —
+                                                            // or an old empty / warning row — as a calm
+                                                            // card that names it. Never a bare warning.
+                                                            const kindCard = viewForRow(msg);
+                                                            if (kindCard) {
+                                                                return <MessageKindCard view={kindCard} isInbound={isInbound} />;
                                                             }
                                                             return (
                                                                 <p className="leading-relaxed whitespace-pre-wrap">
@@ -3845,6 +3830,19 @@ export function ConversationsView({
                                                                 "image/",
                                                             )
                                                         ) {
+                                                            // A sticker is an emoji-sized reaction, not a
+                                                            // product photo: drawn small, no analysis toggle.
+                                                            if (msg.meta?.kind === "sticker") {
+                                                                return (
+                                                                    <figure className="flex flex-col items-start gap-0.5">
+                                                                        <img src={mu} alt="Sticker" loading="lazy"
+                                                                            className="w-28 h-28 object-contain" />
+                                                                        <figcaption className="text-[10px]" style={{ color: isInbound ? "#78716c" : "inherit" }}>
+                                                                            Sticker
+                                                                        </figcaption>
+                                                                    </figure>
+                                                                );
+                                                            }
                                                             if (album?.lead) {
                                                                 const items = albumItemsOf(album.items);
                                                                 return (
@@ -3913,9 +3911,9 @@ export function ConversationsView({
                                                                 "audio/",
                                                             )
                                                         ) {
-                                                            // inbound : transcription = msg.text
-                                                            //   patch_message writes the Whisper transcript
-                                                            //   to msg.text after transcription completes.
+                                                            // inbound : transcription = msg.text — the API's
+                                                            //   voice_notes writes the verbatim transcript there
+                                                            //   (status in transcript_status, English in translation).
                                                             // outbound: text    = full AI reply (transcript label)
                                                             //           caption = cart summary
                                                             const transcription = isInbound
@@ -3930,6 +3928,10 @@ export function ConversationsView({
                                                                     transcription={transcription}
                                                                     cartText={cartText}
                                                                     isInbound={isInbound}
+                                                                    status={msg.transcript_status}
+                                                                    note={msg.transcript_note}
+                                                                    translation={msg.translation}
+                                                                    translatedFrom={msg.translated_from}
                                                                 />
                                                             );
                                                         }
@@ -3989,7 +3991,7 @@ export function ConversationsView({
                                                     {/* Reading glass: English under a foreign message —
                                                         the customer's Bulgarian AND Neema's mirrored reply
                                                         alike — so the human can follow the whole sale. */}
-                                                    {(msg as any).translation && (
+                                                    {(msg as any).translation && !(isInbound && msg.media_type === "audio") && (
                                                         <div
                                                             className={`mt-1.5 pt-1 text-[11px] leading-relaxed italic whitespace-pre-wrap border-t border-dashed ${
                                                                 isInbound

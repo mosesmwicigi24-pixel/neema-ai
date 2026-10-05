@@ -1,0 +1,246 @@
+// The words on a call card in the conversation (calls & audio programme,
+// cycle 3, 2026-10-05): direction, outcome, who took it, when, how long, what
+// to do next. Pure data — CallCard draws it; tests/callCard.test.mjs proves it.
+//
+// One rule per line, so the card reads the same for every call the log can
+// hold: inbound / outbound × answered / missed / declined / callback /
+// no answer / declined by customer / cancelled / failed / live, on WhatsApp
+// or Messenger. No imports with runtime effect: node runs the tests directly.
+import type { ApiCall, CallInsights } from "./api";
+
+export type CallTone = "good" | "bad" | "warn" | "muted" | "live";
+
+export interface CallCardView {
+    /** "Incoming call" / "Outgoing call" / "Missed call" … */
+    title: string;
+    /** One word or two: "Answered", "Missed", "Callback requested" … */
+    outcome: string;
+    tone: CallTone;
+    /** "Answered by Ann" / "Called by Ben" / "Declined by Ann" — null when nobody took it. */
+    who: string | null;
+    /** "1:16" — only for a call that connected. */
+    duration: string | null;
+    live: boolean;
+    /** A missed / callback call nobody has returned yet. */
+    owed: boolean;
+    /** It was owed, and someone called back (or marked it done). */
+    returned: boolean;
+    app: "WhatsApp" | "Messenger";
+}
+
+const OWED = new Set(["missed", "callback"]);
+const CONNECTED = new Set(["completed", "ended", "answered"]);
+
+export function fmtDuration(s: number | null | undefined): string | null {
+    if (!s || s <= 0 || !Number.isFinite(s)) return null;
+    const h = Math.floor(s / 3600);
+    const m = Math.floor((s % 3600) / 60);
+    const sec = Math.floor(s % 60);
+    return h > 0 ? `${h}:${String(m).padStart(2, "0")}:${String(sec).padStart(2, "0")}`
+        : `${m}:${String(sec).padStart(2, "0")}`;
+}
+
+/** The first word that isn't a title — "Ann Wanjiru" → "Ann". */
+const first = (name: string | null | undefined) => (name || "").trim().split(/\s+/)[0] || null;
+
+export function callCardView(c: Pick<ApiCall, "status" | "direction" | "agent_name" | "duration" | "channel"
+    | "follow_up_open" | "follow_up_done_at">): CallCardView {
+    const out = c.direction === "outbound";
+    const agent = first(c.agent_name);
+    const app = String(c.channel || "").toLowerCase() === "messenger" ? "Messenger" : "WhatsApp";
+    const status = c.status === "ended" ? "completed" : c.status;
+    const base = { app, live: false, owed: false, returned: false, duration: null as string | null } as const;
+    const dir = out ? "Outgoing call" : "Incoming call";
+    switch (status) {
+        case "ringing":
+            return { ...base, title: out ? "Calling…" : "Incoming call", outcome: out ? "Ringing" : "Ringing now",
+                tone: "live", who: out && agent ? `Called by ${agent}` : null, live: true };
+        case "answered":
+            return { ...base, title: dir, outcome: "On the call now", tone: "live",
+                who: agent ? (out ? `Called by ${agent}` : `Answered by ${agent}`) : null, live: true };
+        case "completed":
+            return { ...base, title: dir, outcome: "Answered", tone: "good",
+                who: agent ? (out ? `Called by ${agent}` : `Answered by ${agent}`) : null,
+                duration: fmtDuration(c.duration) };
+        case "missed":
+        case "callback": {
+            const owed = OWED.has(status) && c.follow_up_open !== false && !c.follow_up_done_at;
+            return { ...base, title: "Missed call", outcome: status === "callback" ? "Callback requested" : "Missed",
+                tone: "bad", who: status === "callback" && agent ? `${agent} chose to call back` : null,
+                owed, returned: !owed };
+        }
+        case "declined":
+            return { ...base, title: "Incoming call", outcome: "Declined", tone: "warn",
+                who: agent ? `Declined by ${agent}` : null };
+        case "no_answer":
+            return { ...base, title: "Outgoing call", outcome: "No answer", tone: "bad",
+                who: agent ? `Called by ${agent}` : null };
+        case "rejected":
+            return { ...base, title: "Outgoing call", outcome: "Declined by customer", tone: "bad",
+                who: agent ? `Called by ${agent}` : null };
+        case "cancelled":
+            return { ...base, title: "Outgoing call", outcome: "Cancelled", tone: "muted",
+                who: agent ? `Called by ${agent}` : null };
+        case "failed":
+            return { ...base, title: "Outgoing call", outcome: "Didn't go through", tone: "bad",
+                who: agent ? `Called by ${agent}` : null };
+        default:
+            return { ...base, title: dir, outcome: "Call", tone: "muted", who: null,
+                duration: CONNECTED.has(status) ? fmtDuration(c.duration) : null };
+    }
+}
+
+/** "14:05" today, "Yesterday 14:05", else "3 Oct 14:05" — plus "· 2 h ago"
+ *  when `relative` (a missed call: how long they've been waiting). */
+export function whenText(iso: string | null | undefined, now = Date.now(), relative = false): string {
+    if (!iso) return "";
+    const d = new Date(iso);
+    const t = d.getTime();
+    if (!Number.isFinite(t)) return "";
+    const hm = d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+    const today = new Date(now);
+    const yest = new Date(now - 86_400_000);
+    const day = d.toDateString() === today.toDateString() ? hm
+        : d.toDateString() === yest.toDateString() ? `Yesterday ${hm}`
+        : `${d.toLocaleDateString([], { day: "numeric", month: "short" })} ${hm}`;
+    if (!relative) return day;
+    const mins = Math.max(0, Math.round((now - t) / 60_000));
+    const ago = mins < 1 ? "just now" : mins < 60 ? `${mins} min ago`
+        : mins < 48 * 60 ? `${Math.round(mins / 60)} h ago` : `${Math.round(mins / 1440)} days ago`;
+    return `${day} · ${ago}`;
+}
+
+/** The handle a call back dials: the number on WhatsApp, the PSID on Messenger. */
+export function callBackHandle(c: Pick<ApiCall, "channel" | "wa_id" | "external_id">): string {
+    return String(c.channel || "").toLowerCase() === "messenger"
+        ? String(c.external_id || "") : String(c.wa_id || c.external_id || "");
+}
+
+/** Whether "Call back" can be offered: a call owed to the customer, on an app
+ *  that can place calls now (Messenger only while the server says it can). The
+ *  calling flow itself still applies WhatsApp's permission + 24h rules. */
+export function canCallBack(c: Pick<ApiCall, "status" | "channel" | "wa_id" | "external_id"
+    | "follow_up_open" | "follow_up_done_at" | "direction" | "agent_name" | "duration">,
+    messengerOutbound: boolean): boolean {
+    if (!callCardView(c).owed) return false;
+    const handle = callBackHandle(c).replace(/\D/g, "");
+    if (String(c.channel || "").toLowerCase() === "messenger") return !!handle && messengerOutbound;
+    return handle.length >= 7;
+}
+
+/** What the brief says to do next: Meta's / our summariser's action items when
+ *  present (a later cycle may add `action_items`), else the commitments. */
+export function actionItems(ins: (CallInsights & { action_items?: unknown }) | null | undefined): string[] {
+    if (!ins) return [];
+    const raw = Array.isArray(ins.action_items) ? ins.action_items : ins.commitments;
+    return (Array.isArray(raw) ? raw : []).map((x) => String(x ?? "").trim()).filter(Boolean).slice(0, 8);
+}
+
+/** The transcript slot's state, in one word. Reads the server's folded
+ *  `transcript_state` when present, else folds `transcript_status` itself
+ *  (queued | processing | legacy pending → working; failed:<reason> | failed →
+ *  failed; recorded → a recording nobody has transcribed yet). */
+export type TranscriptSlot = "ready" | "working" | "failed" | "recorded" | "none";
+export function transcriptSlot(status: string | null | undefined, state?: string | null): TranscriptSlot {
+    const k = (state || "").trim() || (() => {
+        const s = (status || "").trim();
+        if (s === "pending") return "queued";
+        if (s === "failed" || s.startsWith("failed:")) return "failed";
+        return s;
+    })();
+    if (k === "done") return "ready";
+    if (k === "queued" || k === "processing") return "working";
+    if (k === "failed") return "failed";
+    if (k === "recorded") return "recorded";
+    return "none";
+}
+
+/** Why a call's transcript failed, in words: the server's (`transcript_failure`)
+ *  or, from an older server, the reason code made readable. */
+export function transcriptFailure(c: Pick<ApiCall, "transcript_status" | "transcript_failure">): string | null {
+    if (c.transcript_failure) return c.transcript_failure;
+    const s = (c.transcript_status || "").trim();
+    return s.startsWith("failed:") ? s.slice(7).replace(/_/g, " ") || null : null;
+}
+
+const LANGS: Record<string, string> = {
+    en: "English", sw: "Swahili", fr: "French", ar: "Arabic", pt: "Portuguese", es: "Spanish",
+    de: "German", it: "Italian", am: "Amharic", so: "Somali", rw: "Kinyarwanda", lg: "Luganda",
+    zu: "Zulu", xh: "Xhosa", af: "Afrikaans", ha: "Hausa", yo: "Yoruba", ig: "Igbo", zh: "Chinese",
+    hi: "Hindi", ru: "Russian", bg: "Bulgarian", nl: "Dutch", ny: "Chichewa", sn: "Shona", st: "Sesotho",
+};
+
+/** The language the call was in, as a word: insights' "Swahili" first (the
+ *  analysis names mixes), else the transcriber's ISO code. Null when unknown. */
+export function callLanguage(insightsLang: string | null | undefined, iso: string | null | undefined): string | null {
+    const named = (insightsLang || "").trim();
+    if (named) return named.charAt(0).toUpperCase() + named.slice(1);
+    const code = (iso || "").trim().toLowerCase().split(/[-_]/)[0];
+    if (!code) return null;
+    return LANGS[code] ?? (code.length > 3 ? code.charAt(0).toUpperCase() + code.slice(1) : code.toUpperCase());
+}
+
+/** The facts on a call's brief that a salesperson acts on, in order. */
+export function callFacts(ins: CallInsights | null | undefined): [string, string[]][] {
+    if (!ins) return [];
+    const rows: [string, unknown][] = [["Products", ins.products], ["Prices", ins.prices], ["Objections", ins.objections]];
+    return rows
+        .map(([k, x]) => [k, (Array.isArray(x) ? x : []).map((v) => String(v ?? "").trim()).filter(Boolean)] as [string, string[]])
+        .filter(([, x]) => x.length > 0);
+}
+
+/** A recording / media URL as the browser can fetch it: absolute and rooted
+ *  URLs exactly as given (their signed ?exp=&sig= query included — the server
+ *  signs every media link and refuses an unsigned one), a bare stored file
+ *  name — signed query kept — under the API's media path. */
+export function mediaSrc(url: string | null | undefined, apiBase: string): string | null {
+    const u = (url || "").trim();
+    if (!u) return null;
+    if (/^https?:\/\//i.test(u) || u.startsWith("/")) return u;
+    const [name, query, ...rest] = u.split("?");
+    if (rest.length || !/^[\w.-]+$/.test(name)) return null;   // never a path the server didn't write
+    if (query !== undefined && !/^[\w=&.-]*$/.test(query)) return null;
+    return `${apiBase.replace(/\/$/, "")}/admin/media/${name}${query ? `?${query}` : ""}`;
+}
+
+/** Which stored file a media URL names — for COMPARING two links only (a live
+ *  event and the next poll may carry different signatures for one file).
+ *  Never fetch with it: the signature is what lets the browser in. */
+export function mediaKey(url: string | null | undefined): string {
+    return (url || "").split("#")[0].split("?")[0];
+}
+
+/** The call a call-related row belongs to: the call whose start is nearest to
+ *  `at`, within `windowMs` (default 15 min) — or null. Used to fold a voicemail
+ *  or a call notice Meta sends into its card instead of a separate row. */
+export function nearestCallId(at: string | null | undefined,
+    calls: { call_id: string; started_at?: string | null; ended_at?: string | null }[],
+    windowMs = 15 * 60_000): string | null {
+    const t = at ? new Date(at).getTime() : NaN;
+    if (!Number.isFinite(t)) return null;
+    let best: string | null = null;
+    let bestGap = Infinity;
+    for (const c of calls) {
+        const s = c.started_at ? new Date(c.started_at).getTime() : NaN;
+        if (!Number.isFinite(s)) continue;
+        const e = c.ended_at ? new Date(c.ended_at).getTime() : s;
+        // Inside the call → 0; otherwise the distance to its nearer edge.
+        const gap = t >= s && t <= e ? 0 : Math.min(Math.abs(t - s), Math.abs(t - (Number.isFinite(e) ? e : s)));
+        if (gap <= windowMs && gap < bestGap) { best = c.call_id; bestGap = gap; }
+    }
+    return best;
+}
+
+/** The brief worth showing on the customer's profile for one call, or null:
+ *  a summary that says something (never the no-speech line), the prices said
+ *  and the next step. */
+export const NO_SPEECH_SUMMARIES = ["No speech was captured on the recording.", "(No clear speech captured.)"];
+export function lastCallBrief(c: Pick<ApiCall, "summary" | "insights">):
+    { summary: string; prices: string[]; next: string | null } | null {
+    const summary = (c.summary || "").trim();
+    if (!summary || NO_SPEECH_SUMMARIES.includes(summary)) return null;
+    const ins = c.insights ?? null;
+    const prices = (Array.isArray(ins?.prices) ? ins!.prices : []).map((x) => String(x ?? "").trim()).filter(Boolean).slice(0, 4);
+    const next = (ins?.next_action || "").trim() || null;
+    return { summary, prices, next };
+}

@@ -78,6 +78,83 @@ def currency_gap(item: dict, rate: float) -> dict | None:
             "factor": round(usd / expect, 2) if expect else None}
 
 
+# THE QUOTE (owner, 2026-10-02: "the bishopric ring is 45 USD… the normal
+# rings are 15 USD" — KES 4,500 and KES 1,500 at the house rate, while the
+# hub's own USD row for the ring said 20, and Facebook repeated it). THE KES
+# PRICE IS THE TRUTH. A hub USD row is quoted only when it agrees with
+# KES / rate within QUOTE_TOLERANCE_PCT (a deliberate $12.75 on KES 1,300
+# stands); farther off it is a stale or hand-set number, and KES / rate is
+# quoted instead. The audit above still names every row past 1% so the hub
+# gets fixed — a checkout runs on the hub's own figures.
+QUOTE_TOLERANCE_PCT = 0.05
+
+
+def usd_quote(kes, usd, rate: float):
+    """The USD figure Neema QUOTES for a row: the hub's own when it agrees
+    with KES / rate (within QUOTE_TOLERANCE_PCT), else KES / rate to the
+    cent; the hub's own when there is no KES; None when there is neither."""
+    k, u = _num(kes), _num(usd)
+    if k is None or not rate:
+        return u
+    expect = k / float(rate)
+    if u is not None and abs(u - expect) <= QUOTE_TOLERANCE_PCT * expect + 1e-9:
+        return u
+    return round(expect, 2)
+
+
+def quoted_from_kes(gap: dict | None) -> bool:
+    """Is this currency gap wide enough that Neema quotes KES / rate instead
+    of the hub's USD row?"""
+    if not gap:
+        return False
+    exp = float(gap.get("usd_expected") or 0)
+    return abs(float(gap.get("usd") or 0) - exp) > QUOTE_TOLERANCE_PCT * exp + 1e-9
+
+
+def health_summary_from(catalog: list[dict], rate: float, worst: int = 3) -> dict:
+    """The /api/health `prices` block: the rate, how many hub rows carry a USD
+    that disagrees with KES / rate, how many of those Neema quotes from KES,
+    and the worst rows by name — what the team fixes in the hub."""
+    rep = audit(catalog, rate)
+    gaps = rep.get("currency_gaps") or []
+    over = [g for g in gaps if quoted_from_kes(g)]
+    return {
+        "rate": rate,
+        "checked": rep.get("checked", 0),
+        "hub_usd_gaps": len(gaps),
+        "quoted_from_kes": len(over),
+        "policy": f"the hub's USD only within {int(QUOTE_TOLERANCE_PCT * 100)}% of KES/{int(rate)}, else KES/{int(rate)}",
+        "worst": [{"name": g.get("name"), "kes": g.get("kes"), "hub_usd": g.get("usd"),
+                   "quoted_usd": usd_quote(g.get("kes"), g.get("usd"), rate)}
+                  for g in over[:worst]],
+    }
+
+
+async def health_summary(redis) -> dict:
+    """health_summary_from on the live catalogue, cached an hour in Redis."""
+    import json
+    key = "prices:health"
+    if redis is not None:
+        try:
+            cached = await redis.get(key)
+            if cached:
+                return json.loads(cached)
+        except Exception:
+            pass
+    from app.core.config import settings
+    from app.database import AsyncSessionLocal
+    from app.services import n8n_bridge as svc
+    async with AsyncSessionLocal() as db:
+        catalog = await svc.catalog_items(db, redis)
+    out = health_summary_from(catalog, float(settings.usd_kes_rate or 100))
+    if redis is not None:
+        try:
+            await redis.set(key, json.dumps(out), ex=3600)
+        except Exception:
+            pass
+    return out
+
+
 def audit(catalog: list[dict], rate: float) -> dict:
     """Every finding, grouped — the shape both the self-check and the Catalog
     screen read. Variants are checked like products: a size L with its own

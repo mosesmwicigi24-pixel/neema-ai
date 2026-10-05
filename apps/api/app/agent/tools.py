@@ -20,6 +20,7 @@ from app.core.config import settings
 from app.routers.order_link import assign_short_ref
 from app.core.countries import resolve_country
 from app.core.synonyms import canonical as _canonical, range_for as _range_for, range_members as _range_members
+from app.core import vernacular as _vernacular
 from app.models.order_event import OrderEvent
 from app.models.user import User
 from app.services import n8n_bridge as svc
@@ -95,6 +96,15 @@ def _to_display(kes, ctx: "ToolContext", price_usd=None, prices=None):
     own = (prices or {}).get(ctx.currency)
     if own is None and ctx.currency == "USD":
         own = price_usd
+    if ctx.currency == "USD":
+        # THE KES PRICE IS THE TRUTH (owner, 2026-10-02): the hub's USD row is
+        # quoted only when it agrees with KES / rate; a stale or hand-set
+        # dollar (the ring's $20 on KES 1,500) is never repeated.
+        from app.services.price_audit import usd_quote
+        q = usd_quote(kes, own, _kes_rate_for(ctx, "USD"))
+        if q is not None and q > 0:
+            return money.exact(q, floor_cent=True)
+        return _display(kes, ctx)
     try:
         v = float(own)
         if v > 0:
@@ -160,7 +170,10 @@ TOOLS: list[dict] = [
     {
         "name": "update_cart",
         "description": "Add, set the quantity of, remove, or clear an item in the cart. "
-                       "The product must exist in the catalogue (call search_catalog if unsure).",
+                       "The product must exist in the catalogue (call search_catalog if unsure). "
+                       "`set` = the quantity the customer wants IN TOTAL — use it when they "
+                       "confirm or restate an item already in the cart. `add` = that many MORE "
+                       "on top of what is already there.",
         "input_schema": {
             "type": "object",
             "properties": {
@@ -180,7 +193,10 @@ TOOLS: list[dict] = [
                        "everything the workshop and the delivery team must know from this "
                        "conversation. Returns the order number, the total as quoted in the "
                        "customer's currency, and the ONE secure order link to give them (it "
-                       "shows the order, the amount and the payment options).",
+                       "shows the order, the amount and the payment options). If it returns "
+                       "an error, the order was NOT placed: never say it is placed or being "
+                       "placed, never give an order number — say a colleague has their order "
+                       "and will confirm it with them here.",
         "input_schema": {"type": "object", "properties": {
             "notes": {"type": "string",
                       "description": "One line per fact, from the chat: colour / design / fabric per "
@@ -543,6 +559,26 @@ _SEARCH_STOP = frozenset({
     "price", "prices", "cost", "bei", "gani", "ngapi", "pesa", "na", "ya", "wa",
     "za", "kwa", "sasa", "leo", "is", "it", "its", "of", "in", "on", "to", "at",
     "an", "a", "we", "us", "do", "does", "did", "be", "by", "or", "if", "so",
+    # The same little words in the languages customers write and SPEAK to us
+    # (voice note → sale, 2026-10-05): "nataka kasoki", "hicho kisinia cha
+    # kubebea vikombe pamoja na…", "je cherche une chemise pour…", "quiero
+    # la bandeja para…" — the filler made an all-word match impossible, so a
+    # clear ask fell to the any-word fallback or to nothing.
+    "nataka", "ninataka", "nahitaji", "naitaji", "ninahitaji", "naomba",
+    "ningependa", "natafuta", "nipe", "tafadhali", "habari", "shalom", "cha",
+    "vya", "yake", "yangu", "yetu", "hii", "hiyo", "hizi", "hizo", "ile",
+    "hicho", "kile", "vile", "kama", "pamoja", "bila", "peke", "sana", "moja",
+    "des", "les", "pour", "une", "avec", "mon", "mes", "cherche", "voudrais",
+    "veux", "besoin", "combien", "prix", "para", "con", "com", "una", "uno",
+    "uma", "los", "las", "del", "quiero", "precio", "preco", "quanto",
+    "cuanto", "necesito", "preciso", "pastorale", "pastorales", "several", "couple", "dozen",
+    "hundred", "thousand",
+    # The labels of a voice-note turn ("🎤 (voice note): …", "(machine
+    # translation — where it differs, their own words above rule: …)"): the
+    # gate's own search for "what they asked" (runtime._ask_query) read every
+    # voice turn as "voice note communion tray…" and searched for it.
+    "voice", "note", "notes", "machine", "translation", "differ", "their",
+    "own", "word", "above", "rule",
 })
 
 
@@ -550,7 +586,9 @@ def _search_words(text: str) -> set:
     """The words of a name / caption / query, lowercased, plural 's' stripped,
     the stop-words and 1–2 letter fragments dropped."""
     out = set()
-    for t in re.findall(r"[a-z0-9]+", (text or "").lower()):
+    # Accents folded first: "étole" was the word "tole", "cálice" two
+    # fragments (core/vernacular).
+    for t in re.findall(r"[a-z0-9]+", _vernacular.fold(text)):
         if len(t) < 3 and not t.isdigit():
             continue
         if t in _SEARCH_STOP:
@@ -599,19 +637,29 @@ async def _search_catalog(args: dict, ctx: ToolContext) -> dict:
     # and the little words that carry no product are dropped before matching.
     from app.services.post_catalog import is_set_row, set_components
     from app.core import companions as _companions
-    toks = _search_tokens(query)
+    def _words(p: dict) -> set:
+        return _search_words(" ".join([p.get("name", ""), p.get("category", ""),
+                                       " ".join(p.get("aliases") or [])]))
+
+    # The customer's own words, read as the catalogue's (core/vernacular): a
+    # "kasoki", a "plateau de communion", "vasitos" — words that matched no
+    # hub row and came back empty. The hub's own names and aliases come
+    # first: when the words as asked already find rows ("divai ya ushirika"
+    # is the hub's alias for Devai), they are searched as asked. The query
+    # as asked is kept for the log.
+    toks0 = _search_tokens(query)
+    vquery = query
+    if not (toks0 and any(toks0.issubset(_words(p)) for p in catalog)):
+        vquery = _vernacular.to_hub(query)
+    toks = _search_tokens(vquery)
     # A query made ONLY of little words ("our client from south africa gave us
     # this") names nothing: say so, rather than answering with the whole shelf
     # the way an empty query (a browse) does.
-    only_stop_words = bool(re.findall(r"[a-z0-9]+", query)) and not toks
+    only_stop_words = bool(re.findall(r"[a-z0-9]+", vquery)) and not toks
     if only_stop_words:
         return {"count": 0, "currency": ctx.currency, "results": [],
                 "note": "no product words in the query — nothing to match; ask which "
                         "item they mean, or search by the item's name"}
-
-    def _words(p: dict) -> set:
-        return _search_words(" ".join([p.get("name", ""), p.get("category", ""),
-                                       " ".join(p.get("aliases") or [])]))
 
     def _hay(p: dict) -> set:      # kept name: the word-set the fallback scores
         return _words(p)
@@ -635,7 +683,7 @@ async def _search_catalog(args: dict, ctx: ToolContext) -> dict:
     # in (a chalice, a bag of wafers, a cup). The live miss: three dear sets
     # and a chalice offered for "how much is that Holy communion set?", and
     # nothing under $280 when the range starts at a $50 wooden tray.
-    rng = _range_for(query)
+    rng = _range_for(query) or _range_for(vquery)
     family_note = None
     if rng:
         matched = _range_members(rng, catalog)
@@ -659,6 +707,22 @@ async def _search_catalog(args: dict, ctx: ToolContext) -> dict:
             return sum(t in name for t in toks)
         matched = sorted([p for p in catalog if hit(p)],
                          key=lambda p: (-_name_hits(p), _kes(p)))
+    spelled = {}
+    if not matched and toks and not rng:
+        # A word no hub row carries is often a word misheard or misspelt
+        # ("prayer sholl", "sprinkle", "chausable", a transcription slip):
+        # the closest catalogue word, when it is close, is searched instead —
+        # and SAID, so the agent confirms rather than presumes.
+        spelled = _closest_words(toks, catalog)
+        if spelled:
+            toks2 = {spelled.get(t, t) for t in toks}
+            matched = sorted([p for p in catalog if toks2.issubset(_words(p))],
+                             key=lambda p: (-sum(t in (p.get("name") or "").lower() for t in toks2),
+                                            _kes(p)))
+            if matched:
+                toks = toks2
+            else:
+                spelled = {}
     partial = False
     if not matched and len(toks) > 1:
         # All-token match found nothing ("clerical shirt", "cassock set") — fall
@@ -925,6 +989,38 @@ async def _search_catalog(args: dict, ctx: ToolContext) -> dict:
     out = {"count": len(results), "currency": ctx.currency, "results": results}
     if family_note:
         out["range"] = family_note
+    if spelled and results:
+        heard = ", ".join(f"'{a}' as '{b}'" for a, b in spelled.items())
+        out["spelling"] = (f"no row carries their exact word — read {heard} (the closest "
+                           "catalogue word). Name the item back to them ('the Prayer Shawl?') "
+                           "as you quote it; if they meant something else, ask")
+    return out
+
+
+def _closest_words(toks: set, catalog: list[dict]) -> dict:
+    """{their word: the catalogue word it is closest to} for each word no hub
+    row carries — only a near-miss of a word in a hub product NAME ("sprinkle"
+    → sprinkler, "charlice" → chalice, "cinture" → cincture, "tallith" →
+    tallit): six letters or more, the same first two letters, ≥ 0.9 alike.
+    Measured on every word customers typed (2026-10-05): aliases and
+    categories bent ordinary words onto goods ("professional" → processional,
+    "super" → supper, "wristband" → waistband), and a word for a thing we do
+    not stock ("blanket", "shoes", "rosary") must never be bent at all."""
+    import difflib
+    names: set = set()
+    vocab: set = set()
+    for p in catalog:
+        names |= _search_words(p.get("name") or "")
+        vocab |= _search_words(" ".join([p.get("name", ""), p.get("category", ""),
+                                         " ".join(p.get("aliases") or [])]))
+    out = {}
+    for t in toks:
+        if t in vocab or len(t) < 6 or t.isdigit():
+            continue
+        pool = sorted(w for w in names if len(w) >= 4 and w[:2] == t[:2])
+        near = difflib.get_close_matches(t, pool, n=1, cutoff=0.9)
+        if near:
+            out[t] = near[0]
     return out
 
 
@@ -940,8 +1036,8 @@ async def _cart_display(cart: dict, ctx: ToolContext) -> tuple[list, object]:
     cached), so the common Kenyan turn does no extra work."""
     # `in_stock`/`price_usd`/`prices` on a cart line are internal bookkeeping —
     # never shown to the model (in_stock feeds the sourcing flag; the price
-    # fields feed non-KES display).
-    _hidden = ("in_stock", "price_usd", "prices")
+    # fields feed non-KES display; variant_id is the line's identity).
+    _hidden = ("in_stock", "price_usd", "prices", "variant_id")
     items = [{k: v for k, v in i.items() if k not in _hidden} for i in cart.get("items", [])]
     raw = cart.get("items", [])
     if ctx.currency == "KES":
@@ -1005,24 +1101,48 @@ async def _update_cart(args: dict, ctx: ToolContext) -> dict:
 
     key = (line or {}).get("name") or prod
 
-    def find(name):
-        return next((i for i in items if i.get("name", "").lower() == name.lower()), None)
-
     def _is_line_of(i: dict, name: str) -> bool:
         n = i.get("name", "").lower()
         # the base name removes its variants too ("Straight Collar" takes
         # "Straight Collar — 10 inch" with it)
         return n == name.lower() or n.startswith(name.lower() + " —")
 
-    existing = find(key)
+    # ONE PRODUCT, ONE LINE (2026-10-05): a line is found by WHAT it is — the
+    # hub product and variant — never by the words used to name it. The same
+    # tray by SKU, slug, name or alias is one line; a stored line whose label
+    # has since changed is still that line. Different variants stay apart.
+    ident = hub_client.line_identity(line) if line else None
+    same = ([i for i in items if hub_client.cart_line_identity(i, catalog) == ident]
+            if ident is not None else [])
+    note = None
     if action == "remove":
-        kept = [i for i in items if not _is_line_of(i, key) and not _is_line_of(i, prod)]
+        if line and line.get("product_id") is not None and line.get("variant_id") is None:
+            # the base product takes every variant of it with it
+            pid = line["product_id"]
+            gone = [i for i in items if hub_client.cart_line_identity(i, catalog)[0] == pid]
+        else:
+            gone = list(same)
+        kept = [i for i in items if not any(i is g for g in gone)
+                and not _is_line_of(i, key) and not _is_line_of(i, prod)]
         if len(kept) == len(items):
             return {"ok": False, "error": f"'{prod}' is not in the cart",
                     "items": (await _cart_display(cart, ctx))[0], "currency": ctx.currency}
         cart["items"] = kept
     elif action in ("add", "set"):
-        new_qty = qty if action == "set" else (int(existing["qty"]) + qty if existing else qty)
+        had = 0
+        for i in same:
+            try:
+                had += int(i.get("qty") or 0)
+            except (TypeError, ValueError):
+                pass
+        new_qty = qty if action == "set" else had + qty
+        if action == "add" and had:
+            # 243 of 839 adds in six weeks re-added an item already in the
+            # cart — usually the customer only confirming it again. Say what
+            # happened, so a doubled quantity is never silent.
+            note = (f"'{line['name']}' was already in the cart ×{had}; add put {qty} MORE on "
+                    f"top → now ×{new_qty}. If the customer did not ask for more, call "
+                    f"update_cart set with the quantity they want.")
         cat = next((p for p in catalog if p.get("hub_product_id") == line["product_id"]), {})
         row = {
             "hub_product_id": line["product_id"],
@@ -1031,6 +1151,7 @@ async def _update_cart(args: dict, ctx: ToolContext) -> dict:
             # re-resolution finds the exact variant (its price + variant_id) and
             # the order total matches what was quoted.
             "sku": (line.get("variant_sku") or cat.get("sku") or ""),
+            "variant_id": line.get("variant_id"),
             "qty": new_qty,
             "unit_price": line["unit_price"],
             "price_usd": line.get("unit_price_usd"),   # variant's own USD (for USD display)
@@ -1038,15 +1159,21 @@ async def _update_cart(args: dict, ctx: ToolContext) -> dict:
             "in_stock": bool(cat.get("in_stock", True)),
             "made_to_order": bool(line.get("is_producible")),
         }
-        if existing:
-            items[items.index(existing)] = row
+        if same:
+            # the line keeps its place; any duplicate of it (an old cart) folds in
+            first = same[0]
+            items = [row if i is first else i for i in items
+                     if not any(i is d for d in same[1:])]
         else:
             items.append(row)
         cart["items"] = items
 
     cart = await cartmod.save_cart(ctx.db, ctx.wa_id, cart, ctx.channel)
     items, total = await _cart_display(cart, ctx)
-    return {"ok": True, "items": items, "total": total, "currency": ctx.currency}
+    out = {"ok": True, "items": items, "total": total, "currency": ctx.currency}
+    if note:
+        out["note"] = note
+    return out
 
 
 def _sourcing_gaps(cart_items: list, catalog: list) -> list[str]:
@@ -1254,11 +1381,20 @@ async def _create_order(args: dict, ctx: ToolContext) -> dict:
             # Everything the workshop and the rider must know, on the order.
             measurement_note=(order_note or None),
         )
-    except ValueError as exc:
-        return {"error": "none of the cart items could be matched to the hub",
-                "unmatched": getattr(exc, "unmatched", [])}
+    except Exception as exc:
+        # AN ORDER THAT FAILS IS NEVER SILENT (2026-10-05): six weeks of 403s
+        # reached nobody but the model, which told customers "I'm placing the
+        # order now". Every failure here hands the thread and the cart to the
+        # team and tells the model plainly that nothing was placed.
+        return await _order_failed(ctx, cart, exc, phone=order_wa_id,
+                                   quoted=(quoted_total, ctx.currency), notes=order_note)
 
     hub_order_id = pushed.get("order_id")
+    try:
+        from app.services import hub_health
+        await hub_health.record(ctx.redis, ok=True, http_status=200, source="order")
+    except Exception:
+        _log.info("hub order health not recorded", exc_info=True)
 
     # The DURABLE customer link — the hub's /order/{public_token}: their receipt
     # when paid, their checkout when not, and it never expires. The 72-hour pay
@@ -1372,6 +1508,154 @@ async def _create_order(args: dict, ctx: ToolContext) -> dict:
         except Exception:
             pass
     return result
+
+
+# What the customer hears when an order did not go through: short, warm and
+# true — nothing was placed, a person has it, they answer here.
+ORDER_FAILED_SAY = ("I'm sorry — I couldn't complete your order from my side just now 🙏 "
+                    "One of our team has your order details and will confirm it with you "
+                    "right here shortly.")
+
+
+def _hub_failure(exc: Exception) -> tuple[int | None, str, str, bool]:
+    """(http status, coarse kind, short reason, may_exist) for a failed push.
+    `may_exist`: the hub may have created the order anyway (it timed out, or
+    accepted it and sent back something unreadable) — staff must look before
+    placing it by hand. Never carries the token or the URL."""
+    import httpx as _httpx
+    from app.services.hub_health import kind_of
+    if isinstance(exc, _httpx.HTTPStatusError):
+        status = exc.response.status_code
+        reason = ""
+        try:
+            body = exc.response.json()
+            if isinstance(body, dict):
+                reason = str(body.get("message") or body.get("error") or "")
+        except Exception:
+            reason = ""
+        if not reason:
+            reason = (exc.response.reason_phrase or "").strip() or "error"
+        # a 5xx can come after the hub saved the order; a 4xx is a refusal
+        return status, kind_of(status), " ".join(reason.split())[:120], status >= 500
+    if isinstance(exc, ValueError) and hasattr(exc, "unmatched"):
+        return None, "validation", "no cart line matched a hub product", False
+    if isinstance(exc, ValueError):          # the hub answered 2xx with a body we can't read
+        return None, "unreadable_reply", "the hub's reply could not be read", True
+    if isinstance(exc, (_httpx.ConnectError, _httpx.ConnectTimeout)):
+        return None, "network", "the hub could not be reached", False
+    if isinstance(exc, _httpx.TimeoutException):
+        return None, "timeout", "the hub did not answer in time", True
+    if isinstance(exc, _httpx.RequestError):  # the line dropped mid-request
+        return None, "network", "the connection to the hub broke", True
+    return None, "error", " ".join(str(exc).split())[:120] or type(exc).__name__, False
+
+
+async def _order_failed(ctx: ToolContext, cart: dict, exc: Exception, *, phone: str,
+                        quoted: tuple, notes: str = "") -> dict:
+    """create_order could not place the order. Log it loudly; hand the thread
+    to the team the way a held reply is (intercept_mode=human + one
+    `draft_ready` ring to every agent); leave a flag with the full cart and the
+    error so a colleague can place it by hand; and tell the model, in words it
+    cannot misread, that NOTHING was placed. One alert per cart, not per retry."""
+    status, kind, reason, may_exist = _hub_failure(exc)
+    total, ccy = quoted
+    lines = cart.get("items") or []
+    items_txt = "; ".join(f"{i.get('name') or i.get('product') or 'item'} ×{i.get('qty') or i.get('quantity') or 1}"
+                          for i in lines)
+    total_txt = f"{ccy} {money.num(total) or total}"
+    why = (f"hub {status} ({reason})" if status else f"{kind} ({reason})")
+    _log.error("ORDER NOT PLACED for %s/%s — %s; cart: %s = %s",
+               ctx.channel, ctx.wa_id, why, items_txt, total_txt)
+
+    try:
+        from app.services import hub_health
+        if hub_health.path_broken(status, kind):
+            await hub_health.record(ctx.redis, ok=False, http_status=status, kind=kind,
+                                    source="order")
+    except Exception:
+        _log.warning("hub order health not recorded", exc_info=True)
+
+    team_has_it = False
+    if not ctx.read_only:
+        team_has_it = await _hand_failed_order_to_team(
+            ctx, phone=phone, why=why, may_exist=may_exist, lines=lines,
+            items_txt=items_txt, total_txt=total_txt, notes=notes)
+
+    return {
+        "error": f"ORDER NOT PLACED — {why}. Nothing was created in the hub.",
+        "order_placed": False,
+        "team_has_it": team_has_it,
+        "say_to_customer": ORDER_FAILED_SAY,
+        "rule": ("The order did NOT go through. Never say it is placed, being placed or that "
+                 "you are placing it; never give or promise an order number or a payment "
+                 "link. Say, in your own warm words, what say_to_customer says: a colleague "
+                 "has their order and will confirm it with them here. Do not call "
+                 "create_order again."),
+    }
+
+
+async def _hand_failed_order_to_team(ctx: ToolContext, *, phone: str, why: str, may_exist: bool,
+                                     lines: list, items_txt: str, total_txt: str,
+                                     notes: str) -> bool:
+    """Thread → HUMAN, a flag with the cart and the error, one ring. The ring
+    and the flag go out once per cart (a retry of the same cart is quiet);
+    without redis, once per thread hand-over. True when the team has it."""
+    from sqlalchemy import or_
+    from app.models.conversation import Conversation, InterceptMode
+    from app.models.intercept import Intercept, InterceptAction
+    try:
+        conv = (await ctx.db.execute(select(Conversation).where(
+            Conversation.channel == ctx.channel,
+            or_(Conversation.external_id == ctx.wa_id, Conversation.wa_id == ctx.wa_id),
+        ))).scalars().first()
+        if conv is None:
+            _log.error("ORDER NOT PLACED and no %s conversation for %s — nobody was told",
+                       ctx.channel, ctx.wa_id)
+            return False
+        already_human = conv.intercept_mode == InterceptMode.human
+        first = not already_human
+        if ctx.redis is not None:
+            try:
+                key = f"order:failed:{ctx.channel}:{ctx.wa_id}:{_order_fingerprint(phone, lines)}"
+                first = bool(await ctx.redis.set(key, "1", nx=True, ex=24 * 3600))
+            except Exception:
+                _log.warning("order-failure dedupe unavailable — alerting", exc_info=True)
+                first = True
+        conv.intercept_mode = InterceptMode.human
+        if first:
+            cart_rows = "\n".join(
+                f"  • {i.get('name')} ×{i.get('qty') or 1} @ {i.get('unit_price')}"
+                f" (hub #{i.get('hub_product_id')}"
+                + (f", SKU {i.get('sku')}" if i.get("sku") else "") + ")"
+                for i in lines)
+            note = ("ORDER NOT PLACED — Neema could not create this order in the hub; the "
+                    "customer was told a colleague will confirm it here. Please place it by "
+                    f"hand.\n• Error: {why}\n• Customer phone: {phone}\n• Cart (quoted "
+                    f"{total_txt}):\n{cart_rows}"
+                    + (f"\n• Notes: {notes}" if notes else "")
+                    + ("\n• The hub may have created it anyway — check WhatsApp Orders "
+                       "before placing it again." if may_exist else ""))
+            ctx.db.add(Intercept(conversation_id=conv.id, action=InterceptAction.flag, note=note))
+        await ctx.db.commit()
+        if first and ctx.redis is not None:
+            try:
+                await ctx.redis.publish("ws:channel:agents:all", json.dumps({
+                    "event": "notification", "type": "draft_ready",
+                    "title": "🛒 Order failed — place it by hand",
+                    "body": f"Order NOT placed: {why}. Cart: {items_txt} = {total_txt}"[:200],
+                    "conv_id": str(conv.id), "wa_id": ctx.wa_id,
+                }))
+            except Exception:
+                _log.warning("order-failure ring not sent for %s", ctx.wa_id, exc_info=True)
+        return True
+    except Exception:
+        _log.error("ORDER NOT PLACED and the hand-over failed for %s/%s",
+                   ctx.channel, ctx.wa_id, exc_info=True)
+        try:
+            await ctx.db.rollback()
+        except Exception:
+            pass
+        return False
 
 
 async def _check_order_status(args: dict, ctx: ToolContext) -> dict:

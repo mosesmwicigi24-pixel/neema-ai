@@ -20,6 +20,7 @@ so deploying this changes nothing until you switch it on in the Meta app.
 import hashlib
 import hmac
 import logging
+import uuid
 
 from fastapi import APIRouter, Form, Request, Response, Depends
 from fastapi.responses import HTMLResponse, PlainTextResponse, RedirectResponse
@@ -232,6 +233,7 @@ async def _capture_events(db: AsyncSession, channel: str, payload: dict, redis=N
     broadcasts: list[tuple[str, dict]] = []
     replies: list[tuple[str, str, str | None, str]] = []   # (sender, text, mid, page_id)
     media_rehosts: list[tuple[str, str, str]] = []    # (mid, cdn_url, media_type) to re-host
+    voice_jobs: list = []                             # (message row id, cdn_url) to transcribe
     captured = 0
     attributed = False
     for entry in payload.get("entry", []):
@@ -271,21 +273,36 @@ async def _capture_events(db: AsyncSession, channel: str, payload: dict, redis=N
                 if dup is not None:
                     continue
 
-            text = _event_text(message)
+            from app.services import voice_notes
+            text = voice_notes.strip_tokens(_event_text(message))
             media_type, media_url = _event_media(message)
             # A sticker is a reaction, not a photo: the thumbs-up is "👍", and
             # no image is loaded, described or priced from it.
             sticker = _sticker(message)
+            raw_meta = None
             if sticker:
                 text, media_type, media_url = sticker, None, None
+                raw_meta = {"v": 1, "type": "sticker", "kind": "sticker",
+                            **({"emoji": "👍"} if sticker == "👍" else {})}
+            else:
+                # An unsent message, Meta's `is_unsupported`, a story mention, a
+                # share without a usable link, a legacy location pin: words a
+                # person understands + a record (services/inbound_kinds.py).
+                from app.services.inbound_kinds import describe_meta_dm
+                dm_text, raw_meta = describe_meta_dm(message, channel)
+                if dm_text and (not text or text.startswith("[")
+                                or raw_meta.get("kind") in ("deleted", "unsupported")):
+                    text = dm_text
             # No caption on a media message → give it a clean placeholder that
             # matches the resolved media_type (so "[fallback]" becomes "[image]").
             if media_type and (not text or text.startswith("[")):
                 text = f"[{media_type}]"
             # Never persist an empty row — an empty bubble reads as a bug and
-            # hides that the customer said something we couldn't ingest.
+            # hides that the customer said something we couldn't ingest. The
+            # record keeps a redacted copy so the next one is identifiable.
             if not text and not media_type:
-                text = "⚠️ Sent a message we can't display here — ask them to resend as text."
+                from app.services.inbound_kinds import unsupported_social
+                text, raw_meta = unsupported_social(channel, None, message)
 
             # Enrich name + photo from Meta's User Profile API, once per contact
             # (redis-gated) so a phone-less DM becomes a named, pictured lead. Best
@@ -352,19 +369,35 @@ async def _capture_events(db: AsyncSession, channel: str, payload: dict, redis=N
 
             conv = await get_or_create_conversation(db, channel, sender, person_id=ident.person_id)
 
+            # A voice note is transcribed in the background (services/
+            # voice_notes) — the row carries its outcome from `queued` on.
+            row_id = uuid.uuid4()
+            row_at = datetime.now(timezone.utc)
+            is_voice = bool(media_url and media_type == "audio")
             db.add(Message(
+                id=row_id,
                 channel=channel, external_id=sender, wa_id=None,
                 person_id=ident.person_id, conversation_id=conv.id,
                 direction=MsgDirection.inbound, sender=MsgSender.user,
                 text=text, waba_msg_id=mid,
                 media_type=media_type, media_url=media_url,
+                raw_meta=raw_meta,
+                transcript_status="queued" if is_voice else None,
+                created_at=row_at,
             ))
+            if is_voice:
+                voice_jobs.append((row_id, media_url))
             conv.last_message_at = datetime.now(timezone.utc)
             conv.last_message_preview = (text or f"[{channel} message]")[:100]
             broadcasts.append((str(conv.id), {
                 "type": "new_message", "conversationId": str(conv.id),
+                "id": str(row_id), "direction": "inbound",
+                "created_at": row_at.isoformat(),
+                "transcriptStatus": "queued" if is_voice else None,
                 "channel": channel, "sender": "user", "text": text,
                 "mediaType": media_type, "mediaUrl": media_url,
+                "meta": ({k: v for k, v in raw_meta.items() if k != "payload"}
+                         if raw_meta else None),
             }))
             # Meta CDN links expire — queue a background download so the row's
             # media_url is swapped to a permanently-served copy (needs the mid to
@@ -381,9 +414,11 @@ async def _capture_events(db: AsyncSession, channel: str, payload: dict, redis=N
             turn_media = ({"type": "image", "url": media_url, "caption": turn_text}
                           if media_url and media_type == "image" else None)
             if turn_media is None and media_url and media_type == "audio":
-                # A voice note is a turn: transcribed on the send path
+                # A voice note is a turn: its words (transcribed in the
+                # background) are resolved on the send path
                 # (runtime._run_and_send_meta), so the webhook stays fast.
-                turn_media = {"type": "audio", "url": media_url}
+                turn_media = {"type": "audio", "url": media_url,
+                              "message_id": str(row_id)}
             if (turn_text or turn_media) and conv.intercept_mode == InterceptMode.ai:
                 replies.append((sender, turn_text, mid, page_id, turn_media))
             elif turn_text and conv.intercept_mode == InterceptMode.human:
@@ -411,6 +446,10 @@ async def _capture_events(db: AsyncSession, channel: str, payload: dict, redis=N
         # ── Re-host attachments (Meta CDN links expire) ───────────────────────
         # Fires after the rows are committed so each task can locate its message
         # by (channel, mid) and rewrite media_url to a stable served copy.
+        if voice_jobs:
+            from app.services import voice_notes as _vn
+            for row_id, cdn_url in voice_jobs:
+                _vn.schedule(row_id, url=cdn_url, redis=redis)
         if media_rehosts:
             from app.services import meta_media
             for mid, cdn_url, mtype in media_rehosts:
@@ -661,6 +700,9 @@ def _parse_comment(change: dict) -> dict | None:
             # item in KES, not whatever this person last discussed elsewhere
             # (owner, 2026-09-23).
             "parent_id": parent if parent and parent != str(post_id) else "",
+            # A photo / sticker / GIF comment carries the image here (no words).
+            "photo": str(value.get("photo") or "") or None,
+            "video": str(value.get("video") or "") or None,
         }
     if field == "comments":  # Instagram — every event is a new comment
         return {
@@ -748,11 +790,22 @@ async def _capture_comment_events(db: AsyncSession, channel: str, payload: dict,
             # Store the raw comment text (no "[comment]" prefix — the inbox now
             # shows a proper "commented on your post" context card instead) plus
             # the source-post context for that card.
+            # A comment with no words (a photo, sticker or GIF comment) used to
+            # land EMPTY — "Message can't be displayed" on the dashboard. The
+            # stored line says what it was; the engage path keeps c["text"].
+            stored_text = c["text"] or (
+                "📷 Commented with a photo or sticker" if c.get("photo")
+                else "🎥 Commented with a video" if c.get("video")
+                else "💬 Commented without words (a sticker or GIF)")
+            c_meta = None if c["text"] else {
+                "v": 1, "type": "comment", "kind": "comment_media",
+                **({"photo": c["photo"]} if c.get("photo") else {}),
+                **({"video": c["video"]} if c.get("video") else {})}
             db.add(Message(
                 channel=comment_channel, external_id=c["from_id"], wa_id=None,
                 person_id=ident.person_id, conversation_id=conv.id,
                 direction=MsgDirection.inbound, sender=MsgSender.user,
-                text=(c["text"] or ""),
+                text=stored_text, raw_meta=c_meta,
                 waba_msg_id=c["comment_id"],   # the comment id, so a reply can target it
                 comment_context=(ctx or None),
             ))

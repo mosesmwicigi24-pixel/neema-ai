@@ -38,6 +38,18 @@ class Settings(BaseSettings):
     call_meta_recording: bool = False
     call_recording_purpose: str = "to help us serve your order and train our team"
     call_recording_language: str = "en"
+    # A WRITTEN notice instead (services/recording_notice.py): sent once per
+    # customer, the first time one of their calls connects while
+    # call_recording_enabled — free-form, so only inside the 24 h window.
+    # Wording approved by the owner 2026-10-05: English and Swahili, both.
+    # Switched on in docker-compose.vps.yml (CALL_RECORDING_NOTICE_ENABLED).
+    call_recording_notice_enabled: bool = False
+    call_recording_notice_text: str = (
+        "Just so you know: calls with Bethany House may be recorded, and calls and "
+        "voice notes transcribed, so we can serve you better.\n\n"
+        "Kwa taarifa yako: simu na Bethany House zinaweza kurekodiwa, na simu "
+        "pamoja na jumbe za sauti kunakiliwa kwa maandishi, ili tukuhudumie vyema "
+        "zaidi.")
     # Approved WhatsApp template used to open a thread with a customer who reached
     # us on Messenger/Facebook (Meta requires a template to message first). Body:
     # "Hello {{1}}, this is Bethany House…". Name + language must match the
@@ -282,6 +294,20 @@ class Settings(BaseSettings):
     # pre-creates + chowns it. Override with MEDIA_DIR to run the app (or its
     # tests) as a user who cannot write to /var.
     media_dir: str = "/var/neema/media"
+    # Signed, expiring media links (app/core/media_urls.py). Every media URL
+    # the API hands out carries ?exp=<unix>&sig=<hmac>; the key is derived
+    # from SECRET_KEY unless MEDIA_URL_SECRET overrides it (no new required
+    # secret). Dashboard links live ~1 h (re-signed on every read); links we
+    # hand Meta for an outbound send live 24 h (Meta fetches at send time and
+    # caches 10 min — the slack covers retries).
+    # ROLLOUT: while MEDIA_SIGNED_URLS_REQUIRED is false an unsigned request
+    # is still served (logged `media.unsigned`) so a deploy can't break
+    # playback mid-flight; a request that DOES carry a signature is always
+    # checked. Flip to true after live verification (docs in the PR).
+    media_url_secret: str = ""
+    media_signed_urls_required: bool = False
+    media_url_ttl_seconds: int = 3600
+    media_url_meta_ttl_seconds: int = 86400
     # Bethany House hub — single source of truth for catalogue & orders
     hub_api_url: str = "https://hub.bethanyhouse.co.ke"
     hub_api_token: str = ""          # Sanctum token for pushing orders (Part B)
@@ -369,6 +395,40 @@ class Settings(BaseSettings):
     whisper_model: str = "base"            # base (light) | small | medium — bigger = better Swahili, slower
     whisper_compute_type: str = "int8"     # ctranslate2 compute type for faster-whisper on CPU
     groq_api_key: str = ""                 # only used when whisper_provider="groq"
+    # ── The transcription engine (services/transcribe.py) ─────────────────────
+    # One engine for every voice note (WhatsApp / Messenger / Instagram) and
+    # every call recording. whisper_enabled is the master switch for ALL of it;
+    # whisper_provider picks the backend. Production runs "openai" (the image
+    # has no faster-whisper); the switch lives in docker-compose.vps.yml.
+    # Model (cycle 4, 2026-10-05): gpt-4o-transcribe — OpenAI's most accurate
+    # speech model on the low-resource languages our customers speak (Swahili,
+    # code-mixed Sheng) at the same $0.006/min as whisper-1. whisper-1 stays
+    # selectable (it returns the detected language itself); the language is
+    # otherwise detected from the words by the translation pass.
+    transcribe_model: str = "gpt-4o-transcribe"
+    # The vocabulary hint sent as the provider's prompt. None = the built-in
+    # bilingual trade list (services/transcribe.VOCABULARY); "" = send none.
+    transcribe_vocabulary: str | None = None
+    groq_transcribe_model: str = "whisper-large-v3"
+    # Daily ceiling on transcription spend (USD, UTC day). Reserved BEFORE each
+    # provider call and refunded on failure, so concurrent notes can't overrun
+    # it. ~40x a normal day (≈4 audio-minutes/day ≈ $0.03). 0 = no ceiling.
+    transcribe_daily_cap_usd: float = 3.0
+    transcribe_voice_max_seconds: int = 600     # a voice note longer than 10 min is refused (abuse/cost)
+    transcribe_call_max_seconds: int = 3600     # a call longer than an hour is refused
+    transcribe_max_bytes: int = 60_000_000      # raw file ceiling (the recording upload cap is 60 MB)
+    transcribe_chunk_seconds: int = 600         # long audio is sent in 10-minute pieces
+    transcribe_timeout_seconds: int = 90        # per provider request
+    transcribe_retries: int = 2                 # extra attempts on timeout / 429 / 5xx (backoff 1s, 4s)
+    # How many transcriptions run at once per worker (decode + provider). The
+    # provider call is blocking HTTP on the shared default thread pool: a
+    # burst left unbounded parked every other to_thread caller in the app
+    # (measured, cycle 7: 9.2 s wait during a 40-note burst on 8 threads).
+    transcribe_concurrency: int = 4
+    transcribe_silence_db: float = -50.0        # peak below this = silence; never sent to a provider
+    # English under a non-English voice note (Swahili included — spoken Sheng
+    # is harder to skim than written Swahili). Light model, once per note.
+    transcribe_translate: bool = True
 
     @field_validator("cors_origins", mode="before")
     @classmethod

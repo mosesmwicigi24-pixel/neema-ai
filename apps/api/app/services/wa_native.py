@@ -37,6 +37,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import uuid
 
 from sqlalchemy import select
 
@@ -50,44 +51,16 @@ _bg_tasks: set = set()
 
 
 def _text_of(msg: dict) -> str:
-    """The customer-visible text of one webhook message, whatever its type."""
-    t = msg.get("type")
-    if t == "text":
-        return ((msg.get("text") or {}).get("body") or "").strip()
-    if t == "button":
-        return ((msg.get("button") or {}).get("text") or "").strip()
-    if t == "interactive":
-        i = msg.get("interactive") or {}
-        for k in ("button_reply", "list_reply"):
-            if i.get(k):
-                return (i[k].get("title") or "").strip()
-        return ""
-    if t == "location":
-        loc = msg.get("location") or {}
-        parts = [p for p in (loc.get("name"), loc.get("address")) if p]
-        coords = f"{loc.get('latitude')},{loc.get('longitude')}"
-        return "📍 Location: " + (", ".join(parts) + f" ({coords})" if parts else coords)
-    if t == "contacts":
-        names = [((c.get("name") or {}).get("formatted_name") or "")
-                 for c in (msg.get("contacts") or [])]
-        return "👤 Shared contact: " + ", ".join(n for n in names if n)
-    if t == "reaction":
-        emoji = ((msg.get("reaction") or {}).get("emoji") or "").strip()
-        return f"{emoji} (reacted to your message)".strip()
-    if t == "order":
-        items = (msg.get("order") or {}).get("product_items") or []
-        n = sum(int(i.get("quantity") or 1) for i in items)
-        return f"🛒 Sent a cart from the catalog: {n} item{'s' if n != 1 else ''}"
-    if t in ("image", "audio", "video", "document", "sticker"):
-        # media types carry their text as a caption
-        return ((msg.get(t) or {}).get("caption") or "").strip()
-    # Anything else (Meta's "unsupported", polls, future types): NEVER an empty
-    # row — an empty bubble reads as a bug and hides that the customer said
-    # something we couldn't ingest. Log the raw shape so we learn what these
-    # actually are (Meta's `errors` block carries the reason, e.g. 131051).
-    _log.info("wa unhandled message type %r keys=%s errors=%s",
-              t, sorted(msg.keys()), msg.get("errors"))
-    return f"⚠️ Sent a message we can't display here ({t or 'unknown'} type) — ask them to resend as text."
+    """The customer-visible text of one webhook message, whatever its type.
+    (services/inbound_kinds.py owns the words; this stays for its callers.)"""
+    from app.services.inbound_kinds import describe_safely
+    d = describe_safely(msg)
+    if d["meta"] and d["meta"].get("payload"):
+        # Still logged (neema.wa_native is surfaced at INFO): the row now keeps
+        # the same facts in messages.raw_meta, so this is a convenience only.
+        _log.info("wa unhandled message type %r keys=%s errors=%s",
+                  msg.get("type"), sorted(msg.keys()), msg.get("errors"))
+    return d["text"]
 
 
 def parse_events(payload: dict) -> list[dict]:
@@ -121,9 +94,21 @@ def parse_events(payload: dict) -> list[dict]:
                     ts_ms = int(msg.get("timestamp", "0")) * 1000
                 except (TypeError, ValueError):
                     ts_ms = None
+                from app.services.inbound_kinds import describe_safely
+                d = describe_safely(msg)
+                if d["meta"] and d["meta"].get("payload"):
+                    _log.info("wa unhandled message type %r keys=%s errors=%s",
+                              mtype, sorted(msg.keys()), msg.get("errors"))
+                meta = d["meta"]
+                # WhatsApp voicemail: an inbound audio whose id is the call's
+                # WACID. Marked so the dashboard folds it into that call's card.
+                if mtype == "audio" and str(wamid).startswith("wacid."):
+                    meta = {"v": 1, "type": "audio", "kind": "voicemail", "call_id": wamid}
                 out.append({"wa_id": wa_id, "wamid": wamid,
                             "name": names.get(wa_id), "type": mtype,
-                            "text": _text_of(msg), "media": media, "ts_ms": ts_ms,
+                            "text": d["text"], "agent_text": d["agent_text"],
+                            "wake": d["wake"], "meta": meta,
+                            "media": media, "ts_ms": ts_ms,
                             # Click-to-WhatsApp-ad attribution rides the message.
                             "referral": msg.get("referral") or None,
                             # WhatsApp reply-quote: the wamid they replied to.
@@ -198,7 +183,6 @@ async def download_media(media_id: str) -> tuple[str | None, str | None]:
     with the WABA token and rehosted in our served media dir (Meta's CDN links
     expire). None on any failure; the message still lands, just without media."""
     import httpx
-    import mimetypes
     if not media_id or not settings.waba_token:
         return None, None
     try:
@@ -216,7 +200,7 @@ async def download_media(media_id: str) -> tuple[str | None, str | None]:
                 return None, None
         from app.routers.media import MEDIA_DIR
         os.makedirs(MEDIA_DIR, exist_ok=True)
-        ext = mimetypes.guess_extension((info.get("mime_type") or "").split(";")[0]) or ""
+        ext = media_ext(info.get("mime_type"))
         name = f"wa_{media_id}{ext}"
         path = os.path.join(MEDIA_DIR, name)
         import aiofiles
@@ -229,30 +213,28 @@ async def download_media(media_id: str) -> tuple[str | None, str | None]:
         return None, None
 
 
-def _transcribe_path_sync(path: str) -> str | None:
-    """Transcribe a voice note. Tries the configured whisper provider first
-    (faster-whisper when installed = free + private), then falls back to OpenAI
-    whisper-1 when a key exists — the same engine the n8n flow used, so cutover
-    never LOSES transcription. None when neither works."""
-    from app.services import call_transcribe as ct
-    try:
-        text, _lang = ct._transcribe_sync(path)
-        return (text or "").strip() or None
-    except Exception:
-        pass
-    if settings.openai_api_key:
-        try:
-            text, _lang = ct._transcribe_openai(path)
-            return (text or "").strip() or None
-        except Exception as exc:
-            _log.warning("openai transcription failed: %s", exc)
-    return None
+def media_ext(mime: str | None) -> str:
+    """The file extension for a WhatsApp media mime type. NEVER trusts
+    `mimetypes.guess_extension` alone: on the slim Python image (no
+    /etc/mime.types) it answers None for audio/ogg — every voice note was
+    saved as a bare `wa_<id>` from the native cutover (2026-07-30) until
+    2026-10-05, and OpenAI refuses a file whose name carries no format. The
+    n8n-era table (routers/media._mime_to_ext) is the authority; the stdlib
+    is only the fallback for types that table doesn't know."""
+    import mimetypes
+    from app.routers.media import _mime_to_ext
+    base = (mime or "").split(";")[0].strip().lower()
+    ext = _mime_to_ext(base) if base else ".bin"
+    if ext != ".bin":
+        return ext
+    return (mimetypes.guess_extension(base) or "") if base else ""
 
 
-async def transcribe_voice_note(path: str | None) -> str | None:
-    if not path:
-        return None
-    return await asyncio.to_thread(_transcribe_path_sync, path)
+async def transcribe_voice_note(path: str | None, redis=None):
+    """A voice note → services/transcribe.Transcript (status + words +
+    language). The engine never raises; the status says what happened."""
+    from app.services import transcribe as stt
+    return await stt.transcribe_file(path, kind="voice_note", redis=redis)
 
 
 # ── Human presence: blue ticks + "typing…" while Neema composes ──────────────
@@ -405,6 +387,15 @@ async def _reply_after_debounce(redis, wa_id: str, token: int | None,
         if drained is None:
             return                            # superseded — a later flush owns it
         text, media = drained
+    # Voice notes: their tokens become the customer's words (or the reason
+    # they couldn't be heard) — waited for, bounded, if still transcribing.
+    try:
+        from app.services import voice_notes
+        text = await voice_notes.resolve(text, channel="whatsapp", key=wa_id)
+    except Exception as exc:
+        _log.warning("native: voice-note resolution failed for %s: %s", wa_id, exc)
+        from app.services.voice_notes import TOKEN_RE
+        text = TOKEN_RE.sub("(the customer sent a voice note)", text or "")
     if not (text or media):
         return
 
@@ -504,24 +495,48 @@ async def _ingest_guarded(event: dict, redis) -> None:
     from app.services import n8n_bridge as svc
 
     wa_id, wamid = event["wa_id"], event["wamid"]
-    text = event.get("text") or ""
+    from app.services import voice_notes
+    # Typed text never carries a voice token (defence in depth — resolution
+    # checks ownership too).
+    text = voice_notes.strip_tokens(event.get("text") or "")
     media = event.get("media")
-    media_url, media_path, transcript = None, None, None
+    meta = dict(event["meta"]) if isinstance(event.get("meta"), dict) else None
+    media_url, media_path = None, None
+    # A reaction names the message it reacts to: keep a snippet of it so the
+    # thread reads "Reacted ❤️ to “the brass chalice is KES 12,000”".
+    if meta and meta.get("kind") == "reaction" and meta.get("to_wamid"):
+        try:
+            from app.models.message import Message as _RMsg
+            from app.database import AsyncSessionLocal as _RASL
+            async with _RASL() as _rdb:
+                target = (await _rdb.execute(select(_RMsg).where(
+                    _RMsg.waba_msg_id == meta["to_wamid"])
+                    .order_by(_RMsg.created_at.desc()).limit(1))).scalar_one_or_none()
+            if target is not None:
+                snippet = (target.text or "").strip()[:90] or (
+                    f"[{target.media_type}]" if target.media_type else "")
+                if snippet:
+                    meta["to_text"] = snippet
+                meta["to_sender"] = getattr(target.sender, "value", str(target.sender or "")) or None
+        except Exception:
+            pass
     if media and media.get("media_id"):
         media_url, media_path = await download_media(media["media_id"])
-        if media["kind"] == "audio":
-            transcript = await transcribe_voice_note(media_path)
-            if transcript:
-                text = transcript            # the voice note IS the message
+    # A VOICE NOTE IS THE MESSAGE. Saved now as `queued` (the thread shows
+    # "Transcribing…"), transcribed in the background — Meta's webhook never
+    # waits on a provider — and the turn carries a token the reply resolves
+    # into the customer's words after the debounce window (services/voice_notes).
+    voice_id = uuid.uuid4() if (media and media.get("kind") == "audio") else None
 
     dto = MessageDto(
         wa_id=wa_id, name=event.get("name"), direction="inbound",
         text=text, ts_ms=event.get("ts_ms"), docid=wamid,
         media_type=(media or {}).get("kind"), media_url=media_url,
         media_id=(media or {}).get("media_id"),
-        media_caption=(media or {}).get("caption") or (transcript if media else None),
+        media_caption=(media or {}).get("caption"),
         mime_type=(media or {}).get("mime_type"),
         filename=(media or {}).get("filename"),
+        raw_meta=meta,
     )
     # WhatsApp-native quote: resolve which of OUR messages they replied to, so
     # the thread shows the quote (with thumbnail) and the agent knows exactly
@@ -549,7 +564,8 @@ async def _ingest_guarded(event: dict, redis) -> None:
             Conversation.wa_id == svc._normalize_wa_id(wa_id)))).scalar_one_or_none() is None
         # The SAME persistence n8n used: conversation upsert, provision_user
         # (name + country), previews, broadcast, video/document escalation.
-        await svc.upsert_message(db, redis, dto)
+        await svc.upsert_message(db, redis, dto, message_id=voice_id,
+                                 transcript_status="queued" if voice_id else None)
         if quoted is not None:
             try:
                 from app.models.message import Message as _Msg
@@ -580,9 +596,15 @@ async def _ingest_guarded(event: dict, redis) -> None:
         except Exception:
             pass
 
-    # A reaction is presence, not a question — show it in the thread but never
-    # wake the agent for it (a 👍 must not earn the customer a sales reply).
-    if event.get("type") == "reaction":
+    if voice_id is not None:
+        voice_notes.schedule(voice_id, path=media_path, redis=redis)
+
+    # Presence and plumbing are not questions — a reaction, a sticker, a number
+    # change, a call-permission tap, a deleted or edited message: show them in
+    # the thread but never wake the agent (a 👍 must not earn a sales reply).
+    # (inbound_kinds.describe decides; a reaction stays silent even when an
+    # older event dict carries no `wake`.)
+    if event.get("wake") is False or event.get("type") == "reaction":
         return
 
     # What the agent should respond to for THIS message.
@@ -591,7 +613,15 @@ async def _ingest_guarded(event: dict, redis) -> None:
         turn_media = {"type": "image", "url": media_url,
                       "caption": media.get("caption") or ""}
     turn_text = text
-    if not turn_text and media and not turn_media:
+    # A type whose stored line is for people (a welcome, an unsupported
+    # message) hands the agent its own instruction-free description instead.
+    # (Never for a voice note — its words arrive through the token below.)
+    agent_text = voice_notes.strip_tokens(event.get("agent_text") or "")
+    if agent_text and agent_text != event.get("text") and voice_id is None:
+        turn_text = text.replace(event.get("text") or "", agent_text, 1) if event.get("text") else agent_text
+    if voice_id is not None:
+        turn_text = "\n".join(p for p in (text, voice_notes.token(voice_id)) if p)
+    elif not turn_text and media and not turn_media:
         turn_text = media.get("caption") or f"(the customer sent a {media['kind']})"
 
     token = await _enqueue(redis, wa_id, turn_text, turn_media)

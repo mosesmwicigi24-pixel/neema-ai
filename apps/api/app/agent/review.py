@@ -51,6 +51,7 @@ import re
 from datetime import datetime, timezone
 
 from app.core.config import settings
+from app.services.price_audit import usd_quote
 
 _log = logging.getLogger("neema.review")
 
@@ -151,25 +152,33 @@ def _row_figures(p: dict, currency: str = "USD") -> set[float]:
         k, u = _num(kes), _num(usd)
         if k:
             out.add(k)
-            if not u:
-                out.add(round(k / usd_rate, 2))
+            # THE KES PRICE IS THE TRUTH (owner, 2026-10-02): the USD a reply
+            # may state is the one the writer was shown — the hub's own only
+            # when it agrees with KES / rate, else KES / rate. A stale hub
+            # dollar is not a figure the reply may repeat.
+            q = usd_quote(k, u, usd_rate)
+            if q:
+                out.add(round(q, 2))
             if (currency or "").upper() == "ZMW":
                 out.add(round(k / zmw_rate, 2))
-        if u:
+        elif u:
             out.add(u)
-            if not k:
-                out.add(round(u * usd_rate, 2))
+            out.add(round(u * usd_rate, 2))
+    def _add_map(prices: dict | None, kes):
+        for cur, v in (prices or {}).items():
+            f = _num(v)
+            if not f:
+                continue
+            if str(cur).upper() == "USD":
+                f = usd_quote(kes or (prices or {}).get("KES"), f, usd_rate)
+            if f:
+                out.add(round(float(f), 2))
+
     _add_pair(p.get("price") or p.get("price_kes"), p.get("price_usd"))
-    for v in (p.get("prices") or {}).values():
-        f = _num(v)
-        if f:
-            out.add(f)
+    _add_map(p.get("prices"), p.get("price") or p.get("price_kes"))
     for vr in (p.get("variants") or []):
         _add_pair(vr.get("price_kes") or vr.get("price"), vr.get("price_usd"))
-        for v in (vr.get("prices") or {}).values():
-            f = _num(v)
-            if f:
-                out.add(f)
+        _add_map(vr.get("prices"), vr.get("price_kes") or vr.get("price"))
     for r in (p.get("bundle_rows") or []):
         out |= _row_figures(r, currency)
     return out
@@ -242,10 +251,9 @@ def _usd_of(base: set[float], seen: list) -> set[float]:
     for p in seen or []:
         u = _num(p.get("price_usd"))
         k = _num(p.get("price") or p.get("price_kes"))
-        if u:
-            out.add(u)
-        elif k:
-            out.add(round(k / float(settings.usd_kes_rate or 100), 2))
+        q = usd_quote(k, u, float(settings.usd_kes_rate or 100))
+        if q:
+            out.add(round(q, 2))
         for v in (p.get("variants") or []):
             u = _num(v.get("price_usd"))
             if u:
@@ -375,7 +383,7 @@ _FINISH_WORD = {w: f for f, words in FINISHES.items() for w in words}
 KINDS: dict[str, tuple[str, ...]] = {
     "chalice": ("chalice", "chalices", "goblet", "goblets", "paten"),
     "cup": ("cup", "cups", "glasses", "tots", "vikombe"),
-    "tray": ("tray", "trays", "trei"),
+    "tray": ("tray", "trays", "trei", "sinia", "siniya", "siniy", "masinia"),
     "set": ("set", "sets"),
 }
 _KIND_WORD = {w: k for k, words in KINDS.items() for w in words}
@@ -392,8 +400,22 @@ def finishes_of(text: str) -> set[str]:
             if w in _FINISH_WORD}
 
 
+# A "chalice cup" is ONE thing — a chalice (the hub's own names: "Chalice Cup
+# -Medium"), not a chalice and some cups.
+_CHALICE_CUP_RE = re.compile(r"\bchalice\s+cups?\b", re.IGNORECASE)
+# Cups as a CAPACITY name the tray that holds them: "the one with 40cups",
+# "holds 100 cups" (2026-10-04: a tray was held as "not a cup" for that ask).
+_CAPACITY_RE = re.compile(r"\b(?:with|holds?|holding|carr(?:y|ies|ying))\s+\d+\s*cups?\b",
+                          re.IGNORECASE)
+_BREAD_RE = re.compile(r"\b(?:bread|mkate|mikate)\b", re.IGNORECASE)
+# The cup tray offered for "the set" without its cups: the right item, half
+# the answer — the rewrite adds the cups; it never holds the sale (soft).
+SET_NEEDS_CUPS = "they asked for a set — the set is the tray WITH its cups: offer the communion cups"
+
+
 def kinds_of(text: str) -> set[str]:
-    return {_KIND_WORD[w] for w in _words(text) if w in _KIND_WORD}
+    t = _CAPACITY_RE.sub(" tray ", _CHALICE_CUP_RE.sub(" chalice ", text or ""))
+    return {_KIND_WORD[w] for w in _words(t) if w in _KIND_WORD}
 
 
 # A reply that SAYS we do not have the one they asked and offers the nearest
@@ -510,10 +532,21 @@ def item_issues(ask: str, product: dict | None, answer: str = "") -> list[str]:
         issues.append(f"they asked for {' / '.join(sorted(asked_f))}; '{name}' is "
                       f"{' / '.join(sorted(have_f))} — the finish they asked for is the item")
     asked_k, have_k = kinds_of(ask), kinds_of(name)
+    # THE SET IS THE CUP TRAY WITH ITS CUPS (owner, 2026-10-05: "Tray + cups
+    # together"): "how much is the set?" is answered by a communion tray WITH
+    # the cups offered beside it. A tray offered alone is told to add them; a
+    # bread tray or a chalice is not the set.
+    if ("set" in asked_k and "tray" in have_k and "set" not in have_k
+            and not _BREAD_RE.search(name)):
+        if "cup" not in kinds_of(answer):
+            issues.append(f"{SET_NEEDS_CUPS} beside '{name}', each at its hub price")
+        return issues
     if "chalice" in have_k and "cup" in asked_k and "chalice" not in asked_k:
         issues.append(f"they asked for communion cups — the small cups the tray holds "
                       f"(plastic, silver, glass, pre-packed); '{name}' is a chalice")
-    elif "chalice" in asked_k and have_k and "chalice" not in have_k:
+    elif "chalice" in asked_k and have_k and not (asked_k & have_k):
+        # "a communion tray, several cups and a chalice cup" asked for three
+        # things: the tray they asked for is not "not a chalice" (2026-10-05)
         issues.append(f"they asked for a chalice; '{name}' is not one")
     elif asked_k and have_k and not (asked_k & have_k) and "set" not in have_k:
         issues.append(f"they asked for a {'/'.join(sorted(asked_k))}; '{name}' is a "
@@ -851,7 +884,8 @@ def rule_findings(comment: str, answer: str, seen: list,
     conflicts = [item_issues(comment, r, answer) for r in named_rows]
     if named_rows and all(conflicts):
         for t in conflicts[0]:
-            out.append({"kind": "item", "hard": bool(money_figures(answer)), "text": t})
+            out.append({"kind": "item", "text": t,
+                        "hard": bool(money_figures(answer)) and not t.startswith(SET_NEEDS_CUPS)})
     if where_unanswered(comment, answer):
         out.append({"kind": "where", "hard": False,
                     "text": "their question about where we are / a shop in their country is "
@@ -929,13 +963,36 @@ def parse_verdict(text: str) -> dict | None:
     return {"ok": ok, "issues": issues}
 
 
-def rows_text(seen: list, currency: str) -> str:
+def rows_text(seen: list, currency: str, limit: int = 30) -> str:
+    """EVERY hub row the writer was shown this turn, priced exactly as the
+    writer saw it (tools._to_display, in the turn's currency) — the reviewer
+    and the rewrite judge against the same facts as the agent. Live,
+    2026-10-05: "a communion tray, several cups and a chalice cup" took three
+    searches (6 + 4 + 5 rows); only the first 8 reached the reviewer, so the
+    five chalices the agent had found were judged "not in hub inventory" and
+    NOT OUR GOODS. And a Zambian turn's rows were shown in KES under its ZMW
+    reply, so right prices read as wrong ones."""
+    from types import SimpleNamespace
+    from app.agent.tools import _to_display
+    ccy = (currency or "KES").upper()
+    view = SimpleNamespace(currency=ccy, usd_rate=settings.usd_kes_rate)   # as runtime builds it
+    rows, keys = [], set()
+    for p in seen or []:
+        k = p.get("sku") or p.get("slug") or p.get("name")
+        if k in keys:
+            continue
+        keys.add(k)
+        rows.append(p)
     lines = []
-    for p in (seen or [])[:8]:
-        price = p.get("price_usd") if currency == "USD" else p.get("price")
-        unit = "USD" if currency == "USD" else "KES"
+    for p in rows[:limit]:
+        price = _to_display(p.get("price") or p.get("price_kes"), view, p.get("price_usd"),
+                            prices=p.get("prices"))
+        shown = f"{ccy} {price}" if price else "no price set in the hub"
         d = " ".join(str(p.get("description") or "").split())[:140]
-        lines.append(f"- {p.get('name')} — {unit} {price}" + (f" — {d}" if d else ""))
+        lines.append(f"- {p.get('name')} — {shown}" + (f" — {d}" if d else ""))
+    if len(rows) > limit:
+        lines.append(f"- (+{len(rows) - limit} more rows looked up and not listed — an item "
+                     "missing from this list is NOT proof we do not stock it)")
     return "\n".join(lines) or "- (none — the draft looked nothing up)"
 
 

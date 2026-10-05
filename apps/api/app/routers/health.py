@@ -47,6 +47,15 @@ async def health(request: Request):
             out["agent"] = {"replies": "ok"}
     except Exception:
         pass
+    # CAN NEEMA STILL PLACE AN ORDER? (2026-10-05): the hub refused every
+    # order for six weeks and nothing said so. The last probe / order outcome,
+    # coarse only — never the token, the URL or the hub's reply.
+    try:
+        from app.services import hub_health
+        out["hub_orders"] = hub_health.health_view(
+            await hub_health.read(getattr(request.app.state, "redis", None)))
+    except Exception:
+        pass
     # THE GATE BEFORE POSTING (owner, 2026-09-25): what the reviewer did today
     # — replies passed, rewritten once, held back for a colleague.
     try:
@@ -76,6 +85,14 @@ async def health(request: Request):
                           "deferred": c.get("deferred", 0), "question": c.get("question", 0),
                           "silenced": c.get("silenced", 0), "lifted": c.get("lifted", 0),
                           "duplicate": c.get("duplicate", 0)}
+    except Exception:
+        pass
+    # THE KES PRICE IS THE TRUTH (owner, 2026-10-02): the hub rows whose own
+    # USD disagrees with KES / rate — Neema quotes KES / rate past 5%, and the
+    # team fixes the hub. Cached an hour.
+    try:
+        from app.services.price_audit import health_summary as _prices_summary
+        out["prices"] = await _prices_summary(getattr(request.app.state, "redis", None))
     except Exception:
         pass
     # WE SELL CHURCH GOODS ONLY (owner, 2026-09-25): what the guard did today

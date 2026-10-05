@@ -1148,7 +1148,7 @@ def _meta_media(env, monkeypatch, payloads: dict, fail=False):
         return payloads[media_id], "application/json"
     monkeypatch.setattr(wa_calling, "download_media", download)
 
-    async def analyse(text):
+    async def analyse(text, context=None):
         assert text.startswith("Agent: ")
         return "Wants two cassocks.", {"next_action": "Send price"}
     monkeypatch.setattr(ct, "analyse_call", analyse)

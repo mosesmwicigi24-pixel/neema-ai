@@ -51,8 +51,9 @@ class Call(Base):
     transcript       : Mapped[str | None]   = mapped_column(Text, nullable=True)          # full STT text
     transcript_lang  : Mapped[str | None]   = mapped_column(String(12), nullable=True)    # detected language
     summary          : Mapped[str | None]   = mapped_column(Text, nullable=True)          # LLM call brief
-    # none | recorded | pending | processing | done | failed
-    transcript_status: Mapped[str]          = mapped_column(String(20), default="none")
+    # none | recorded | queued | processing | done | failed:<reason>
+    # (rows before 2026-10-05 may say `pending` = queued, bare `failed`).
+    transcript_status: Mapped[str]          = mapped_column(String(40), default="none")
     # Structured post-call brief from the transcript (services/call_transcribe.py):
     # {intent, products[], objections[], commitments[], next_action,
     #  follow_up_message, sentiment}. NULL until a transcript is summarised.

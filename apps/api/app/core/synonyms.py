@@ -99,6 +99,20 @@ FAMILIES: tuple[dict, ...] = (
         ),
     },
     {
+        # Owner, 2026-10-02: a "Bishop's rings" post priced the hub's plain
+        # "Ring" (KES 1,500) under photos of the KES 4,500 one. The bishop's
+        # ring, the episcopal ring, the apostolic ring (its storefront slug)
+        # and "pete ya askofu" are the hub's BISHOPRIC RING.
+        "hub": "bishopric ring",
+        "said": (
+            r"bishops?['’]?s?\s+rings?",
+            r"episcopal\s+rings?",
+            r"apostolic\s+rings?",
+            r"rings?\s+(?:for|of)\s+(?:a\s+|the\s+)?bishops?",
+            r"pete\s+(?:ya|za)\s+(?:askofu|maaskofu)",
+        ),
+    },
+    {
         # "Kasoki 2 na saples" (Messenger, 2026-09-25): a surplice, as Kenyans
         # say and spell it — never a guess at something else.
         "hub": "surplice",

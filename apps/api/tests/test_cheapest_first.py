@@ -104,7 +104,8 @@ def test_search_catalog_lists_the_range_cheapest_first_with_the_note(monkeypatch
     out = asyncio.run(_search_catalog({"query": "how much is that Holy communion set"},
                                       _ctx(monkeypatch)))
     prices = [r["price"] for r in out["results"]]
-    assert prices == sorted(prices) and prices[0] == 50 and prices[-1] == 600
+    # the tray set's hub $600 on KES 36,000 is a stale figure: KES/100 (owner, 2026-10-02)
+    assert prices == sorted(prices) and prices[0] == 50 and prices[-1] == 360
     assert [r["name"] for r in out["results"]][:2] == ["Wooden tray", "Aluminium Tray"]
     assert out["range"]["range"] == "communion trays and sets"
     assert "CHEAPEST FIRST" in out["range"]["order"]

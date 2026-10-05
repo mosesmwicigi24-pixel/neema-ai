@@ -61,13 +61,16 @@ COLLAR_DIFF = _row("Straight Collar", 400, 10, "Detachable white clergy collar."
                    variants=_variants("Straight Collar", ({"size": "8 inch"}, 350, 3.5), ({"size": "10 inch"}, 400, 4.0),
                                       ({"size": "12 inch"}, 450, 4.5), ({"size": "14 inch"}, 500, 5.0),
                                       ({"size": "17 inch"}, 550, 5.5), ({"size": "19 inch"}, 600, 6.0)))
-COLLAR_FLAT = _row("Straight Collar", 400, 10, "Detachable white clergy collar.",
+# rows whose hub USD agrees with KES / 100 (the quote policy, 2026-10-02: a
+# disagreeing hub dollar — the old $10 floor, $30 on KES 2,500 — is never
+# quoted, so these scenarios test the variant rules, not that policy)
+COLLAR_FLAT = _row("Straight Collar", 400, 4, "Detachable white clergy collar.",
                    variants=[{"sku": f"V{i}", "name": "Straight Collar", "attributes": {}, "price_kes": 400,
-                              "price_usd": 10, "prices": {"KES": 400, "USD": 10}} for i in range(6)])
-SHIRT_COLOURS = _row("Straight Collar Shirt", 2500, 30, "Smart straight-collar clergy shirt.",
+                              "price_usd": 4, "prices": {"KES": 400, "USD": 4}} for i in range(6)])
+SHIRT_COLOURS = _row("Straight Collar Shirt", 2500, 25, "Smart straight-collar clergy shirt.",
                      product_type="variable", is_producible=True,
-                     variants=_variants("Straight Collar Shirt", ({"colour": "White"}, 2500, 30), ({"colour": "Navy"}, 2500, 30),
-                                        ({"colour": "Black"}, 2500, 30)))
+                     variants=_variants("Straight Collar Shirt", ({"colour": "White"}, 2500, 25), ({"colour": "Navy"}, 2500, 25),
+                                        ({"colour": "Black"}, 2500, 25)))
 THURIBLE = _row("Thurible", 12000, 120, "Brass thurible.",
                 variants=_variants("Thurible", ({"size": "small"}, 12000, 120), ({"size": "large"}, 15000, 150)))
 
@@ -100,10 +103,10 @@ S = [
      "or WhatsApp us on +254785490805. Ready to place your order for 1 Medium Tallit in navy at $60?",
      [], [], _msgs(("assistant", "The Medium Tallit in navy is $60."), ("user", "0779174313")), None, "pass"),
     ("rands-rate", "how much that in rands",
-     "The Cassock is $120 — about R1,971.60 at today's rate; USD stays the order's currency.",
+     "The Cassock is $130 — about R2,135.90 at today's rate; USD stays the order's currency.",
      _seen("cassock"), [], [], {"ZAR": 16.43}, "pass"),
     ("rands-norate", "how much that in rands",
-     "The Cassock is $120 — it's charged in USD and converts at the day's rate when you pay.",
+     "The Cassock is $130 — it's charged in USD and converts at the day's rate when you pay.",
      _seen("cassock"), [], [], None, "pass"),
     ("ok", "I'm saying ok", "Wonderful 🙏 whenever you're ready, tell me which one and I'll take your order.",
      [], [], [], None, "pass"),
@@ -157,11 +160,11 @@ S = [
     ("chalice-cup", "how much is the chalice cup?", "The Small Chalice Cup is $120.", _seen("smallchalice"), [], [], None, "pass"),
     ("set", "the silver set", "The Double Stacked Silver Tray Set is $360.", _seen("dss"), [], [], None, "pass"),
     ("no-finish", "I need a stole", "Our stoles are made to order — which colour?", [], [], [], None, "pass"),
-    ("black", "black cassock", "The Cassock in black is $120, made to your measurements.", _seen("cassock"), [], [], None, "pass"),
+    ("black", "black cassock", "The Cassock in black is $130, made to your measurements.", _seen("cassock"), [], [], None, "pass"),
     ("where-answered", "where are you located?", "We're in Nairobi, Kenya — and we deliver worldwide by DHL.", [], [], [], None, "pass"),
     ("where-can-i-get", "Where can I get it", "Order right here with me — tell me the colour and I'll reserve it.", [], [], [], None, "pass"),
     ("live-in", "I live in Kenya", "Lovely — then it's KES 13,000 for the Cassock.", _seen("cassock"), [], [], None, "pass"),
-    ("filler", "communion cup filler", "The Refiller Bottle 500ML is $20.", _seen("refiller"), [], [], None, "pass"),
+    ("filler", "communion cup filler", "The Refiller Bottle 500ML is $15.", _seen("refiller"), [], [], None, "pass"),
     ("earlier-price", "and the tallit?", "As I said, the Medium Tallit is $60.",
      [], [], _msgs(("assistant", "The Medium Tallit is $60."), ("user", "and the tallit?")), None, "pass"),
     ("usd-of-kes", "in dollars?", "That's $180.", _seen("silver"), [], [], None, "pass"),
@@ -203,11 +206,13 @@ S = [
     ("percent-only", "discount?", "There's 10% off this week on the Golden Communion Tray, KES 22,000 list.",
      _seen("golden"), [], [], None, "pass"),
     ("usd-rate-conv", "in dollars?", "KES 13,000 is $130 at our rate.", [_row("Alb", 13000, None)], [], [], None, "pass"),
-    ("hub-usd-wins", "in dollars?", "KES 13,000 is $130.", _seen("cassock"), [], [], None, "hard"),   # the hub says $120
+    # THE KES PRICE IS THE TRUTH (owner, 2026-10-02): the hub's $120 on KES 13,000 is past 5% — $130 is the quote, $120 is held
+    ("kes-over-hub-usd", "in dollars?", "KES 13,000 is $130.", _seen("cassock"), [], [], None, "pass"),
+    ("stale-hub-usd", "in dollars?", "The Cassock is $120.", _seen("cassock"), [], [], None, "hard"),
     ("zmw-customer", "how much in kwacha", "It is ZMW 2,600.", _seen("cassock"), [], [], None, "hard"),  # not a Zambian-market turn here
-    ("naira", "in naira?", "The Cassock is $120 — about ₦159,348 at today's rate.", _seen("cassock"), [], [], {"NGN": 1327.9}, "pass"),
-    ("pounds", "how much in pounds", "The Cassock is $120 — about £90.77 at today's rate.", _seen("cassock"), [], [], {"GBP": 0.7564}, "pass"),
-    ("qty-word-rate", "two in rands", "Two cassocks come to about R3,943.20 at today's rate.", _seen("cassock"), [], [], {"ZAR": 16.43}, "pass"),
+    ("naira", "in naira?", "The Cassock is $130 — about ₦172,627 at today's rate.", _seen("cassock"), [], [], {"NGN": 1327.9}, "pass"),
+    ("pounds", "how much in pounds", "The Cassock is $130 — about £98.33 at today's rate.", _seen("cassock"), [], [], {"GBP": 0.7564}, "pass"),
+    ("qty-word-rate", "two in rands", "Two cassocks come to about R4,271.80 at today's rate.", _seen("cassock"), [], [], {"ZAR": 16.43}, "pass"),
     ("link-in-prompt", "where do I order?", "Order on our website https://bethanyhouse.co.ke/product/cassock — ready in 5 days.",
      _seen("cassock"), [_tool("share_catalog", {"url": "https://bethanyhouse.co.ke/product/cassock"})], [], None, "pass"),
     ("tracking-given", "tracking?", "Your tracking number is DHL123456789.", [], [], [], None, "hard"),
@@ -266,9 +271,9 @@ S = [
      _seen("golden"), [{"tool": "send_product_cards", "input": {"products": ["Golden Communion Tray"]},
                         "out": {"ok": True, "sent_cards": 1, "album_photos": 0}}], [], None, "hard"),
     # ── variants: sizes and colours priced apart (owner, 2026-09-25) ─────────
-    ("collar-same-price-false", "How much", "The Straight Collar is $10, all sizes the same price. Which size?",
+    ("collar-same-price-false", "How much", "The Straight Collar is $4, all sizes the same price. Which size?",
      [COLLAR_DIFF], [], [], None, "hard"),
-    ("collar-same-price-placeholder", "How much", "The Straight Collar is $10, all sizes the same price. Which size?",
+    ("collar-same-price-placeholder", "How much", "The Straight Collar is $4, all sizes the same price. Which size?",
      [COLLAR_FLAT], [], [], None, "soft"),
     ("collar-flat-for-varied", "How much", "The Straight Collar is $10. Which size — 8, 10, 12, 14, 17 or 19 inches?",
      [COLLAR_DIFF], [], [], None, "soft"),
@@ -277,15 +282,15 @@ S = [
     ("collar-variant-named", "the 10 inch", "The 10-inch Straight Collar is $4. How many?", [COLLAR_DIFF], [], [], None, "pass"),
     ("collar-variant-asked", "how much is the 8 inch collar?", "It's $3.50 — how many?", [COLLAR_DIFF], [], [], None, "pass"),
     ("collar-wrong-variant-price", "the 10 inch", "The 10-inch Straight Collar is $10.", [COLLAR_DIFF], [], [], None, "hard"),
-    ("shirt-colours-flat", "how much is the straight collar shirt", "The Straight Collar Shirt is $30 — which colour would you like?",
+    ("shirt-colours-flat", "how much is the straight collar shirt", "The Straight Collar Shirt is $25 — which colour would you like?",
      [SHIRT_COLOURS], [], [], None, "pass"),
-    ("shirt-colours-claim", "how much", "The Straight Collar Shirt is $30, the same price regardless of colour.",
+    ("shirt-colours-claim", "how much", "The Straight Collar Shirt is $25, the same price regardless of colour.",
      [SHIRT_COLOURS], [], [], None, "soft"),
     ("thurible-range", "thurible?", "The Thurible is from KES 12,000 for the small to KES 15,000 for the large — which size?",
      [THURIBLE], [], [], None, "pass"),
     ("thurible-flat", "thurible?", "The Thurible is KES 12,000.", [THURIBLE], [], [], None, "soft"),
     ("thurible-large", "the large one", "The large Thurible is KES 15,000.", [THURIBLE], [], [], None, "pass"),
-    ("swahili-same-price", "bei", "Kola ni $10, bei moja kwa saizi zote.", [COLLAR_DIFF], [], [], None, "hard"),
+    ("swahili-same-price", "bei", "Kola ni $4, bei moja kwa saizi zote.", [COLLAR_DIFF], [], [], None, "hard"),
     # ── SOFT only (asks for a rewrite, never holds) ──────────────────────────
     ("two-ccy", "how much", "The Silver Communion Tray is $180 (KES 18,000).", _seen("silver"), [], [], None, "soft"),
     ("where-unanswered", "Do you have shops in South Africa?", "The Golden Communion Tray is $220. How many?",
@@ -330,7 +335,7 @@ def _run(reply, *, ask, seen=(), writer_texts=(), tool_log=None, transcript=None
             return []
         monkeypatch.setattr(rt, "_facts_for_ask", no_facts)
 
-        async def no_flag(db, channel, key, issues, draft):
+        async def no_flag(db, channel, key, issues, draft, redis=None):
             return None
         monkeypatch.setattr(rt, "_flag_held_reply", no_flag)
     return asyncio.run(rt._gate_turn_reply(

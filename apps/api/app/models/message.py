@@ -79,6 +79,22 @@ class Message(Base):
     # `text` as the "nothing to do" marker, so it is never re-checked.
     translated_text : Mapped[str | None]       = mapped_column(Text, nullable=True)
     translated_from : Mapped[str | None]       = mapped_column(String(24), nullable=True)
+    # What a non-plain inbound message IS, for the team (services/inbound_kinds.py):
+    #   {"v", "type" (Meta's own), "kind" (location | contacts | reaction | sticker |
+    #    reply | form | order | system | welcome | call_permission | voicemail |
+    #    deleted | edited | unsupported | plain), …render fields…,
+    #    "errors": [{code, title, details}],          # whenever Meta sent any
+    #    "payload": {…redacted structure…}}           # unhandled types only
+    # NULL for plain text / media. Team-only: the thread endpoint drops
+    # `payload`; the agent's history and every send path read `text`, never this.
+    raw_meta        : Mapped[dict | None]      = mapped_column(JSONB, nullable=True)
+    # A voice note's transcription outcome (services/voice_notes.py). The
+    # verbatim words live in `text` (what the thread, the agent's history and
+    # previews already read); this says what happened — none | queued | done |
+    # silent | failed:<reason> — and transcript_lang the spoken language
+    # (ISO-639-1). NULL on every non-audio message.
+    transcript_status: Mapped[str | None]      = mapped_column(String(40), nullable=True)
+    transcript_lang : Mapped[str | None]       = mapped_column(String(12), nullable=True)
     created_at      : Mapped[datetime]         = mapped_column(DateTime(timezone=True), default=datetime.utcnow, index=True)
 
     conversation = relationship("Conversation", back_populates="messages")

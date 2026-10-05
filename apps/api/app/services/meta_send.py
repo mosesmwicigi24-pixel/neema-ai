@@ -101,11 +101,13 @@ async def send_meta_media(recipient_id: str, media_type: str, media_url: str,
     `human_agent=True` claims Meta's HUMAN_AGENT tag, same as text: without it,
     a photo sent by a person in the 24h–7d window is refused with (#10) while
     their words go through — half a reply. Human-only, never set by the AI."""
+    from app.core.media_urls import sign_for_meta
     meta_type = _MEDIA_TYPE_TO_META.get(media_type, "file")
     body: dict = {
         "recipient": {"id": recipient_id},
         "message": {"attachment": {"type": meta_type,
-                                   "payload": {"url": media_url, "is_reusable": True}}},
+                                   "payload": {"url": sign_for_meta(media_url),
+                                               "is_reusable": True}}},
     }
     if human_agent:
         body["messaging_type"] = "MESSAGE_TAG"
@@ -124,7 +126,11 @@ async def send_meta_carousel(recipient_id: str, elements: list[dict],
     'View' button) via the Send API generic template — the NATIVE Messenger /
     Instagram equivalent of the web-chat product cards. Up to 10 cards.
 
-    Each element: {title, subtitle?, image_url?, default_action?, buttons?}."""
+    Each element: {title, subtitle?, image_url?, default_action?, buttons?}.
+    An image_url into our media store is signed for Meta here."""
+    from app.core.media_urls import sign_for_meta
+    elements = [({**el, "image_url": sign_for_meta(el["image_url"])}
+                 if el.get("image_url") else el) for el in elements]
     await _graph_post("me/messages", {
         "recipient": {"id": recipient_id},
         "message": {"attachment": {"type": "template", "payload": {

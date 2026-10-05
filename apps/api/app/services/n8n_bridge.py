@@ -15,6 +15,7 @@ import httpx
 from datetime import datetime, timezone, timedelta
 
 from app.core import money
+from app.core.media_urls import sign_for_meta as _sign_for_meta
 from app.models.conversation import Conversation, InterceptMode
 from app.models.message import Message, MsgDirection, MsgSender
 from app.models.user import User
@@ -290,7 +291,7 @@ async def _send_waba_image(wa_id: str, image_url: str, caption: str = "") -> str
     Returns the sent message's wamid."""
     url = (f"https://graph.facebook.com/{settings.waba_api_version}"
            f"/{settings.waba_phone_number_id}/messages")
-    image: dict = {"link": image_url}
+    image: dict = {"link": _sign_for_meta(image_url)}
     if caption:
         image["caption"] = caption
     async with httpx.AsyncClient() as client:
@@ -325,7 +326,7 @@ async def _send_waba_audio(wa_id: str, audio_url: str) -> str | None:
                 "messaging_product": "whatsapp",
                 "to": wa_id,
                 "type": "audio",
-                "audio": {"link": audio_url},
+                "audio": {"link": _sign_for_meta(audio_url)},
             },
             timeout=30.0,
         )
@@ -381,6 +382,7 @@ async def _send_waba_product_card(wa_id: str, *, image_url: str | None, title: s
     endpoint = (f"https://graph.facebook.com/{settings.waba_api_version}"
                 f"/{settings.waba_phone_number_id}/messages")
     headers = {"Authorization": f"Bearer {settings.waba_token}"}
+    image_url = _sign_for_meta(image_url)   # our media store → a link Meta may fetch
 
     # A cta_url card needs a link. Without one (an unpublished item, or the
     # local catalogue fallback) go straight to image+caption — the PHOTO is
@@ -456,6 +458,11 @@ async def send_wa_template(wa_id: str, template: str, lang: str,
 
 
 # ── Redis Broadcast ───────────────────────────────────────
+
+def _public_meta(meta):
+    from app.services.inbound_kinds import public_meta
+    return public_meta(meta)
+
 
 async def _broadcast(redis, channel: str, payload: dict) -> None:
     await redis.publish(f"ws:channel:{channel}", json.dumps(payload))
@@ -926,7 +933,11 @@ async def upsert_user(db: AsyncSession, body) -> dict:
 # serving the customer instead of going silent while nobody is watching.
 # Returns a Firestore-style document array so n8n can consume the output directly.
 
-async def upsert_message(db: AsyncSession, redis, body) -> list:
+async def upsert_message(db: AsyncSession, redis, body, *, message_id=None,
+                         transcript_status: str | None = None) -> list:
+    """`message_id` / `transcript_status` are set only by in-process callers
+    (wa_native, for a voice note it will transcribe in the background) — never
+    from a request body."""
     # Normalise wa_id so inbound and outbound messages always resolve to the
     # same Conversation row regardless of whether the '+' prefix is present.
     body.wa_id = _normalize_wa_id(body.wa_id)
@@ -986,6 +997,8 @@ async def upsert_message(db: AsyncSession, redis, body) -> list:
         ts_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
 
     msg = Message(
+        **({"id": message_id} if message_id is not None else {}),
+        transcript_status=transcript_status,
         conversation_id=conv.id,
         wa_id=body.wa_id,
         person_id=conv.person_id,
@@ -1000,6 +1013,7 @@ async def upsert_message(db: AsyncSession, redis, body) -> list:
         mime_type=mime_type,
         filename=filename,
         ts_ms=ts_ms,
+        raw_meta=getattr(body, "raw_meta", None),
     )
     # Recover the customer's WhatsApp message id (wamid), captured by the API front
     # door keyed on (wa_id, text-hash), so a human reply can quote it natively (the
@@ -1064,6 +1078,12 @@ async def upsert_message(db: AsyncSession, redis, body) -> list:
         "type":           "new_message",
         "conversationId": str(conv.id),
         "waId":           body.wa_id,
+        # id + direction + time: without them the dashboard appended the live
+        # bubble under a random id, on the OUTBOUND side, until the next reload.
+        "id":             str(msg.id),
+        "direction":      direction.value,
+        "transcriptStatus": msg.transcript_status,
+        "created_at":     msg.created_at.isoformat() if msg.created_at else None,
         "sender":         sender.value,
         "text":           msg.text,
         "mediaType":      media_type,
@@ -1072,6 +1092,7 @@ async def upsert_message(db: AsyncSession, redis, body) -> list:
         "mediaCaption":   media_caption,
         "mimeType":       mime_type,
         "filename":       filename,
+        "meta":           _public_meta(msg.raw_meta),
     })
 
     if intercept_log is not None:

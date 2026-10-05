@@ -173,6 +173,25 @@ MIGRATION_STATEMENTS = [
     "ALTER TABLE messages ADD COLUMN IF NOT EXISTS reply_to_id UUID REFERENCES messages(id) ON DELETE SET NULL",
     "ALTER TABLE messages ADD COLUMN IF NOT EXISTS reply_to_text TEXT",
     "ALTER TABLE messages ADD COLUMN IF NOT EXISTS reply_to_sender VARCHAR(20)",
+    # What a non-plain inbound message IS (models/message.py raw_meta). The
+    # alembic revision adds it too; this keeps a box whose alembic run was
+    # skipped from failing EVERY thread read on a missing column. Idempotent.
+    "ALTER TABLE messages ADD COLUMN IF NOT EXISTS raw_meta JSONB",
+    # A voice note's transcription outcome (alembic 36ed77bde344 adds them
+    # too; same reason as raw_meta — a missing column fails every thread read).
+    "ALTER TABLE messages ADD COLUMN IF NOT EXISTS transcript_status VARCHAR(40)",
+    "ALTER TABLE messages ADD COLUMN IF NOT EXISTS transcript_lang VARCHAR(12)",
+    # calls.transcript_status names its failure reason (failed:provider_timeout
+    # is 23 chars) — widen only when still narrower, so a restart never takes
+    # an exclusive lock on calls for nothing.
+    """
+    DO $$ BEGIN
+      IF (SELECT character_maximum_length FROM information_schema.columns
+          WHERE table_name = 'calls' AND column_name = 'transcript_status') < 40 THEN
+        ALTER TABLE calls ALTER COLUMN transcript_status TYPE VARCHAR(40);
+      END IF;
+    END $$
+    """,
     # Seed: Super Admin (protected, cannot be modified)
     """
     INSERT INTO custom_roles (id, name, description, color, permissions, protected)
@@ -334,6 +353,27 @@ async def lifespan(app: FastAPI):
             await _asyncio.sleep(interval)
 
     app.state._meta_enrich_task = _asyncio.create_task(_meta_enrich_loop())
+
+    # Transcription recovery (services/transcript_recovery.py): voice notes
+    # and call recordings whose background task died with a restart, and
+    # transient provider failures, are picked up again. The first pass runs
+    # shortly after boot — the restart that orphaned the work is usually this
+    # one; then every 5 minutes. Redis-locked per tick (one worker); the row
+    # claims make a double pass harmless anyway.
+    async def _transcript_recovery_loop(interval: int = 300):
+        await _asyncio.sleep(45)
+        while True:
+            try:
+                if settings.whisper_enabled and (
+                        redis is None or await redis.set("transcribe:recover:tick", "1",
+                                                         nx=True, ex=interval - 30)):
+                    from app.services.transcript_recovery import sweep
+                    await sweep(redis)
+            except Exception as exc:
+                logger.warning("transcript recovery tick failed: %s", exc)
+            await _asyncio.sleep(interval)
+
+    app.state._transcript_recovery_task = _asyncio.create_task(_transcript_recovery_loop())
 
     # ── Self-heal missed auto-replies ─────────────────────────────────────────
     # Auto-replies are fire-and-forget tasks — a deploy (every push) or a

@@ -146,12 +146,10 @@ def test_a_percentage_above_the_ceiling_is_a_mistake_not_a_promotion():
 # ── the words ────────────────────────────────────────────────────────────────
 
 def test_the_sentence_names_the_offer_the_size_the_scope_and_the_end():
-    # Relative to today: a fixed end date made this test fail once that day passed.
-    ends = date.today() + timedelta(days=30)
-    c = _c(scope="category", categories=["gowns"], ends_on=ends.isoformat())
+    c = _c(scope="category", categories=["gowns"], ends_on="2099-09-30")
     said = promo.describe(c)
     assert "Harvest Offer" in said and "10%" in said
-    assert "gowns" in said and f"{ends.day} {ends.strftime('%B')} {ends.year}" in said
+    assert "gowns" in said and "30 September 2099" in said
 
 
 def test_an_expired_offer_says_nothing_at_all():
@@ -262,7 +260,7 @@ def test_playing_it_is_a_deliberate_act_with_its_own_tool():
 
 def test_the_prompt_teaches_hold_then_close():
     from app.agent.prompt import build_system_prompt
-    p = build_system_prompt(offer="Harvest Offer — 10% off our oils, until 30 September 2026")
+    p = build_system_prompt(offer="Harvest Offer — 10% off our oils, until 30 September 2099")
     assert "QUOTE THE FULL PRICE FIRST" in p
     assert "closing tool, not an announcement" in p
     assert "ASK FOR THE ORDER in the same message" in p
