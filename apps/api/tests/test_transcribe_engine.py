@@ -310,13 +310,14 @@ def test_a_timeout_is_retried_then_succeeds(on, audio):
     assert out.ok and len(p.calls) == 2
 
 
-def test_every_attempt_timing_out_fails_and_refunds_the_budget(on, audio):
+def test_every_attempt_timing_out_fails_and_keeps_the_budget_spent(on, audio):
+    # cycle 9: a timed-out request may still have been billed — it stays counted
     p = Provider(asyncio.TimeoutError())
     on.setattr(stt, "call_provider", p)
     r = FakeRedis()
     out = run(stt.transcribe_file(audio["voice2"], redis=r))
     assert out.status == "failed:provider_timeout" and len(p.calls) == 3
-    assert run(stt.spent_today(r)) == pytest.approx(0.0, abs=1e-9)
+    assert run(stt.spent_today(r)) > 0
     # a transient failure is NOT cached — the next try really tries
     p2 = Provider(("Nataka stole", None))
     on.setattr(stt, "call_provider", p2)

@@ -30,7 +30,8 @@ What the engine guarantees, whatever the caller:
     without a provider call; a provider answer that is only a known
     no-speech artefact ("♪", "[Music]", "Thanks for watching!") is too.
   · A daily cost ceiling with a counter (redis, UTC day), RESERVED before
-    the call and refunded on failure, so two concurrent notes can't both
+    the call and refunded on a failure the provider can't have billed (a
+    timed-out request stays counted), so two concurrent notes can't both
     squeeze under it. The spend also feeds the AI breaker's day total.
   · Idempotency: the same audio bytes are transcribed once — the result is
     cached by content hash for 30 days and a lock absorbs concurrent
@@ -68,6 +69,7 @@ REASON_WORDS = {
     "too_large": "the audio file is too large",
     "too_long": "the recording is longer than the limit",
     "corrupt": "the audio could not be decoded",
+    "decode_timeout": "the audio took too long to decode (the server was busy)",
     "over_budget": "today's transcription budget is used up",
     "provider_timeout": "the transcription service timed out",
     "provider_busy": "the transcription service was rate-limited",
@@ -513,6 +515,14 @@ async def transcribe_file(path: str | None, *, kind: str = "voice_note", redis=N
     """Transcribe one audio file. kind = "voice_note" | "call" (sets the
     duration limit). Never raises; see the module docstring for guarantees."""
     t0 = time.perf_counter()
+    if redis is None:
+        # A caller that passed none still meets the daily ceiling, the cache
+        # and the duplicate lock: the app's redis, attached at boot.
+        try:
+            from app.services import ai_budget
+            redis = ai_budget._sink
+        except Exception:
+            redis = None
     try:
         out = await _transcribe(path, kind, redis)
     except Exception as exc:                  # noqa: BLE001 — the engine never raises
@@ -593,7 +603,9 @@ async def _work(path: str, kind: str, prov: str, model: str, redis) -> Transcrip
         except ValueError:
             return failed("corrupt", provider=prov, model=model)
         except asyncio.TimeoutError:
-            return failed("corrupt", provider=prov, model=model)
+            # Load (a burst of notes, a busy box), not proof the file is bad:
+            # never cached as `corrupt`, so the same audio can be tried again.
+            return failed("decode_timeout", provider=prov, model=model)
         timings["normalise"] = round((time.perf_counter() - t) * 1000, 1)
         base = dict(duration_s=round(duration, 2), provider=prov, model=model, timings_ms=timings)
         if duration > max_s + 0.5:
@@ -617,8 +629,14 @@ async def _work(path: str, kind: str, prov: str, model: str, redis) -> Transcrip
                     texts.append(text.strip())
                 lang = lang or got
         except Exception as exc:              # noqa: BLE001
-            await _refund(redis, usd)
             reason, _ = classify(exc)
+            if reason == "provider_timeout":
+                # A request cut off by OUR timeout runs on in its thread and
+                # reaches the provider, which bills it: the reservation stays
+                # spent (refunding it let the ceiling be passed).
+                await _meter(redis, model, usd)
+            else:
+                await _refund(redis, usd)
             timings["provider"] = round((time.perf_counter() - t) * 1000, 1)
             return failed(reason, **base)
         timings["provider"] = round((time.perf_counter() - t) * 1000, 1)
