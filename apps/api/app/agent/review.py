@@ -400,8 +400,14 @@ def finishes_of(text: str) -> set[str]:
             if w in _FINISH_WORD}
 
 
+# A "chalice cup" is ONE thing — a chalice (the hub's own names: "Chalice Cup
+# -Medium"), not a chalice and some cups.
+_CHALICE_CUP_RE = re.compile(r"\bchalice\s+cups?\b", re.IGNORECASE)
+
+
 def kinds_of(text: str) -> set[str]:
-    return {_KIND_WORD[w] for w in _words(text) if w in _KIND_WORD}
+    return {_KIND_WORD[w] for w in _words(_CHALICE_CUP_RE.sub(" chalice ", text or ""))
+            if w in _KIND_WORD}
 
 
 # A reply that SAYS we do not have the one they asked and offers the nearest
@@ -521,7 +527,9 @@ def item_issues(ask: str, product: dict | None, answer: str = "") -> list[str]:
     if "chalice" in have_k and "cup" in asked_k and "chalice" not in asked_k:
         issues.append(f"they asked for communion cups — the small cups the tray holds "
                       f"(plastic, silver, glass, pre-packed); '{name}' is a chalice")
-    elif "chalice" in asked_k and have_k and "chalice" not in have_k:
+    elif "chalice" in asked_k and have_k and not (asked_k & have_k):
+        # "a communion tray, several cups and a chalice cup" asked for three
+        # things: the tray they asked for is not "not a chalice" (2026-10-05)
         issues.append(f"they asked for a chalice; '{name}' is not one")
     elif asked_k and have_k and not (asked_k & have_k) and "set" not in have_k:
         issues.append(f"they asked for a {'/'.join(sorted(asked_k))}; '{name}' is a "
@@ -937,15 +945,36 @@ def parse_verdict(text: str) -> dict | None:
     return {"ok": ok, "issues": issues}
 
 
-def rows_text(seen: list, currency: str) -> str:
+def rows_text(seen: list, currency: str, limit: int = 30) -> str:
+    """EVERY hub row the writer was shown this turn, priced exactly as the
+    writer saw it (tools._to_display, in the turn's currency) — the reviewer
+    and the rewrite judge against the same facts as the agent. Live,
+    2026-10-05: "a communion tray, several cups and a chalice cup" took three
+    searches (6 + 4 + 5 rows); only the first 8 reached the reviewer, so the
+    five chalices the agent had found were judged "not in hub inventory" and
+    NOT OUR GOODS. And a Zambian turn's rows were shown in KES under its ZMW
+    reply, so right prices read as wrong ones."""
+    from types import SimpleNamespace
+    from app.agent.tools import _to_display
+    ccy = (currency or "KES").upper()
+    view = SimpleNamespace(currency=ccy, usd_rate=settings.usd_kes_rate)   # as runtime builds it
+    rows, keys = [], set()
+    for p in seen or []:
+        k = p.get("sku") or p.get("slug") or p.get("name")
+        if k in keys:
+            continue
+        keys.add(k)
+        rows.append(p)
     lines = []
-    for p in (seen or [])[:8]:
-        price = (usd_quote(p.get("price") or p.get("price_kes"), p.get("price_usd"),
-                           float(settings.usd_kes_rate or 100))
-                 if currency == "USD" else p.get("price"))
-        unit = "USD" if currency == "USD" else "KES"
+    for p in rows[:limit]:
+        price = _to_display(p.get("price") or p.get("price_kes"), view, p.get("price_usd"),
+                            prices=p.get("prices"))
+        shown = f"{ccy} {price}" if price else "no price set in the hub"
         d = " ".join(str(p.get("description") or "").split())[:140]
-        lines.append(f"- {p.get('name')} — {unit} {price}" + (f" — {d}" if d else ""))
+        lines.append(f"- {p.get('name')} — {shown}" + (f" — {d}" if d else ""))
+    if len(rows) > limit:
+        lines.append(f"- (+{len(rows) - limit} more rows looked up and not listed — an item "
+                     "missing from this list is NOT proof we do not stock it)")
     return "\n".join(lines) or "- (none — the draft looked nothing up)"
 
 
