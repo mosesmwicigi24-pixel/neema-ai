@@ -24,6 +24,11 @@ services:
             # visible and reviewed; compose `environment` beats `env_file`.
             CALL_META_TRANSCRIPTION: "false"
             CALL_META_RECORDING: "false"
+            # Instead of the spoken notice: one written line (English + Swahili,
+            # wording approved by the owner 2026-10-05), sent once per customer
+            # when their first call connects, inside the 24 h window
+            # (services/recording_notice.py).
+            CALL_RECORDING_NOTICE_ENABLED: "true"
             # Neema hears voice notes and calls (cycles 4-5, 2026-10-05):
             # every inbound voice note (WhatsApp / Messenger / Instagram) and
             # every recorded call is transcribed by services/transcribe.py.

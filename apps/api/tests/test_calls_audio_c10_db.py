@@ -508,6 +508,17 @@ console.log(JSON.stringify(DATA.map((m) => {
 # 4 · The deploy's schema step: upgrade FROM origin/main's head with old rows
 # ═════════════════════════════════════════════════════════════════════════════
 
+def _repo_head() -> str:
+    """The chain's head as the repo has it now — later migrations (e.g.
+    recording_notices) must not make this upgrade test lie."""
+    from alembic.config import Config
+    from alembic.script import ScriptDirectory
+    here = os.path.join(os.path.dirname(__file__), "..")
+    cfg = Config(os.path.join(here, "alembic.ini"))
+    cfg.set_main_option("script_location", os.path.join(here, "alembic"))
+    return ScriptDirectory.from_config(cfg).get_current_head()
+
+
 MAIN_HEAD = "d1f3a5c7e9b2"        # origin/main's alembic head when this branch was cut
 
 
@@ -583,7 +594,7 @@ def test_upgrade_from_mains_schema_keeps_old_rows_readable_and_startup_is_a_no_o
         assert cols["transcript_status"]["type"].length == 40 and cols["transcript_lang"]["type"].length == 12
         assert {c["name"]: c for c in insp.get_columns("calls")}["transcript_status"]["type"].length == 40
         with eng.connect() as c:
-            assert c.execute(sa.text("SELECT version_num FROM alembic_version")).scalar() == "36ed77bde344"
+            assert c.execute(sa.text("SELECT version_num FROM alembic_version")).scalar() == _repo_head()
             calls = dict(c.execute(sa.text("SELECT call_id, transcript_status FROM calls")).all())
             msgs = c.execute(sa.text("SELECT count(*) FROM messages WHERE raw_meta IS NULL AND "
                                      "transcript_status IS NULL AND transcript_lang IS NULL")).scalar()
