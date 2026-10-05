@@ -32,6 +32,7 @@ class ProfileScreenshotTest : AreaShots() {
     @Test fun view_2() = profile(ProfilePreview(scroll = 4200))
     @Test fun viewDark_0() = profile(dark = true)
     @Test fun viewDark_1() = profile(ProfilePreview(scroll = 2100), dark = true)
+    @Test fun batteryRestricted() = profile(ProfilePreview(scroll = 2100, batteryUnrestricted = false))
     @Test fun viewDark_2() = profile(ProfilePreview(scroll = 4200), dark = true)
     @Test fun viewTablet_0() = profile(device = Devices.TABLET)
     @Test fun viewTablet_1() = profile(ProfilePreview(scroll = 1600), device = Devices.TABLET)

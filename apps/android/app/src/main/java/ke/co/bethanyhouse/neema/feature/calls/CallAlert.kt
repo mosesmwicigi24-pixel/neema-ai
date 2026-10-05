@@ -209,20 +209,63 @@ data class CallReadiness(
     val notifications: Boolean = true,
     /** Android 14+: full-screen intents allowed, so a call takes over the lock screen. */
     val fullScreen: Boolean = true,
+    /** "Stay connected in background" on: the live connection that hears a call while Neema is closed. */
+    val background: Boolean = true,
+    /**
+     * Battery optimisation off for Neema ("Unrestricted"). Optimised, Android —
+     * and Samsung's "sleeping apps" harder still — cuts the background
+     * connection after a while, and a call to a closed app never rings.
+     */
+    val battery: Boolean = true,
 ) {
-    val ready: Boolean get() = notifications && fullScreen
+    val ready: Boolean get() = notifications && fullScreen && background && battery
+
+    /** The one thing to fix first, most fundamental first; null when ready. */
+    val missing: Missing? get() = when {
+        !notifications -> Missing.Notifications
+        !background -> Missing.Background
+        !battery -> Missing.Battery
+        !fullScreen -> Missing.FullScreen
+        else -> null
+    }
+
+    enum class Missing { Notifications, Background, Battery, FullScreen }
 
     companion object {
-        fun of(ctx: Context): CallReadiness = CallReadiness(
+        fun of(ctx: Context, backgroundLive: Boolean = true): CallReadiness = CallReadiness(
             notifications = runCatching {
                 val nm = NotificationManagerCompat.from(ctx)
                 Notifier.canPost(ctx) && nm.areNotificationsEnabled() &&
                     nm.getNotificationChannelCompat(Notifier.CH_CALLS)?.importance != NotificationManagerCompat.IMPORTANCE_NONE
             }.getOrDefault(true),
             fullScreen = canUseFullScreenIntent(ctx),
+            background = backgroundLive,
+            // Only worth asking while the background connection is wanted.
+            battery = !backgroundLive || ignoresBatteryOptimizations(ctx),
         )
     }
 }
+
+/** True when Android won't put Neema's background connection to sleep (battery "Unrestricted"). */
+fun ignoresBatteryOptimizations(ctx: Context): Boolean =
+    runCatching { ctx.getSystemService(android.os.PowerManager::class.java)?.isIgnoringBatteryOptimizations(ctx.packageName) }
+        .getOrNull() ?: true
+
+/**
+ * The ways to let Neema run in the background, best first: the system's own
+ * "Allow Neema to always run in the background?" dialog (one tap), the battery
+ * optimisation list, then the app's info page (Battery → Unrestricted). A
+ * phone that refuses one falls through to the next.
+ */
+fun batterySettings(ctx: Context): List<Intent> = listOf(
+    Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS, Uri.parse("package:${ctx.packageName}")),
+    Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS),
+    Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:${ctx.packageName}")),
+)
+
+/** Opens the first of [intents] this phone has a page for; false when none. */
+fun openFirst(ctx: Context, intents: List<Intent>): Boolean =
+    intents.any { i -> runCatching { ctx.startActivity(i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }.isSuccess }
 
 /** NotificationManager.canUseFullScreenIntent (Android 14+); always true before. */
 fun canUseFullScreenIntent(ctx: Context): Boolean =

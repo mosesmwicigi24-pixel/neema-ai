@@ -19,6 +19,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.Logout
+import androidx.compose.material.icons.outlined.BatteryAlert
 import androidx.compose.material.icons.outlined.ChevronRight
 import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.outlined.NotificationsActive
@@ -97,6 +98,8 @@ data class ProfilePreview(
     val typed: Map<String, String> = emptyMap(),
     /** Initial scroll offset in px, to render a lower part of the page. */
     val scroll: Int = 0,
+    /** Battery optimisation off for Neema (screenshots can't ask the system). */
+    val batteryUnrestricted: Boolean? = null,
 )
 
 val LocalProfilePreview = staticCompositionLocalOf { ProfilePreview() }
@@ -123,6 +126,13 @@ fun ProfileScreen(dash: DashboardViewModel) {
     val availableOverride by vm.availableOverride.collectAsStateWithLifecycle()
     val c = Neema.colors
     val context = LocalContext.current
+    // Re-read on return from the battery settings page.
+    val batteryOverride = LocalProfilePreview.current.batteryUnrestricted
+    var batteryUnrestricted by remember { mutableStateOf(batteryOverride ?: ke.co.bethanyhouse.neema.feature.calls.ignoresBatteryOptimizations(context)) }
+    androidx.lifecycle.compose.LifecycleResumeEffect(batteryOverride) {
+        batteryUnrestricted = batteryOverride ?: ke.co.bethanyhouse.neema.feature.calls.ignoresBatteryOptimizations(context)
+        onPauseOrDispose {}
+    }
 
     // The team row carries the custom role and its permissions (GET /admin/agents
     // joins custom_roles; /me is the bare agent), so permissions come from it.
@@ -306,6 +316,15 @@ fun ProfileScreen(dash: DashboardViewModel) {
                             "hear about new chats and calls while Neema is open.",
                         backgroundLive,
                     ) { dash.container.prefs.setBackgroundLive(!backgroundLive) }
+                    if (backgroundLive && !batteryUnrestricted) {
+                        Spacer(Modifier.height(8.dp))
+                        // Optimised, Android (Samsung above all) cuts the background connection
+                        // after a while, and a call to a closed app never rings.
+                        LinkRow(
+                            Icons.Outlined.BatteryAlert, "Let Neema run in the background",
+                            "Battery saving can stop calls ringing when the app is closed — tap, then Allow (or Battery → Unrestricted)",
+                        ) { ke.co.bethanyhouse.neema.feature.calls.openFirst(context, ke.co.bethanyhouse.neema.feature.calls.batterySettings(context)) }
+                    }
                     Spacer(Modifier.height(8.dp))
                     LinkRow(Icons.Outlined.NotificationsActive, "System notification settings", "Pop-ups, the lock screen and which alerts Android shows") {
                         val intent = Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS)
