@@ -73,9 +73,16 @@ async def download_media(
 # @router.get("/media/serve/{filename}")
 @router.get("/admin/media/{filename}")
 async def serve_media(filename: str):
-    """Serve a stored media file."""
-    filepath = os.path.join(MEDIA_DIR, filename)
-    if not os.path.exists(filepath):
+    """Serve a stored media file.
+
+    Only a regular, non-hidden file directly inside MEDIA_DIR: routing keeps
+    '/' out of `filename` today, but this handler must not depend on that
+    (".." used to raise a 500 on a directory; `{filename:path}` would have
+    made it a reader of any file the process can open)."""
+    root = os.path.realpath(MEDIA_DIR)
+    filepath = os.path.realpath(os.path.join(root, filename))
+    if (filename.startswith(".") or os.path.dirname(filepath) != root
+            or not os.path.isfile(filepath)):
         raise HTTPException(status_code=404, detail="File not found")
     return FileResponse(filepath)
 
