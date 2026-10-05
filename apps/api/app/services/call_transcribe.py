@@ -429,7 +429,10 @@ async def _save_call_note(db, wa_id: str, summary: str, *, channel: str = "whats
     # Feed the agent's durable memory too (kept short so it stays useful).
     try:
         from app.agent import memory as memorymod
-        await memorymod.add_fact(db, wa_id, f"Phone call: {summary[:300]}", channel=channel)
+        # One line: a brief's words must not pose as more "Known facts" or a
+        # new context block in the agent's memory (cycle 9 audit).
+        await memorymod.add_fact(db, wa_id, f"Phone call: {' '.join(summary.split())[:300]}",
+                                 channel=channel)
     except Exception:
         pass
 
