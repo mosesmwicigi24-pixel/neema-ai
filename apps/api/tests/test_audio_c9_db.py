@@ -253,3 +253,29 @@ def test_a_replaced_failed_recording_does_not_stay_on_disk(rig, clips):
 def test_invented_price_filter_against_how_prices_are_spoken(price, transcript, kept):
     from app.services.call_transcribe import ground_prices
     assert (ground_prices([price], transcript) == [price]) is kept
+
+
+# ── 7. recovery racing a live transcription pays once ──────────────────────
+
+def test_a_sweep_racing_a_slow_live_transcription_pays_once(rig, clips):
+    """The sweeper calls a note 'stuck' 15 min after it ARRIVED, not after
+    its work started — so it can take a note a live run is still on. The
+    engine's duplicate lock must absorb it: one provider call, one charge."""
+    import asyncio
+    from app.services import transcript_recovery as tr
+    from app.services import voice_notes
+    from app.services import transcribe as stt
+    rec._setup(rig)
+    rig.provider.delay = 1.0
+    mid = rec._note(rig, clips[2], status="queued", minutes_ago=20)
+
+    async def race():
+        live = asyncio.create_task(voice_notes.interpret(mid, redis=rig.redis))
+        await asyncio.sleep(0.3)                          # live run has claimed it
+        await tr.sweep(rig.redis, now=rec.NOW)
+        return await live
+    run(race())
+    assert run(rec._msg(rig, mid)).transcript_status == "done"
+    assert len(rig.provider.calls) == 1
+    one = float(run(stt.spent_today(rig.redis)))
+    assert 0 < one < 0.001                                # one 3-second note, charged once
