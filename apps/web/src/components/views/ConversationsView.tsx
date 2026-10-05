@@ -30,6 +30,8 @@ import type {
 import { useSession } from "next-auth/react";
 import { callStatus, CALL_ICON_PATH } from "@/lib/callStatus";
 import { ChannelGlyph } from "@/components/CallStage";
+import { viewForRow } from "@/lib/messageKinds";
+import { MessageKindCard, MessageKindPill } from "@/components/ui/MessageKindCard";
 
 // ── CallPill ──────────────────────────────────────────────────────────────────
 // A WhatsApp or Messenger call where it happened in the thread (docs/CALLING_UX.md §7): a
@@ -1245,7 +1247,8 @@ export function ConversationsView({
         };
         for (const m of sortedActiveMessages) {
             const isImg = m.type !== "system_event" && !m.isNote &&
-                (m as any).media_type === "image" && (m as any).media_url;
+                (m as any).media_type === "image" && (m as any).media_url &&
+                m.meta?.kind !== "sticker";        // a sticker is never part of a photo album
             const prevM = run[run.length - 1];
             if (isImg && (!prevM || (prevM.direction === m.direction && prevM.sender === m.sender))) {
                 run.push(m);
@@ -1508,6 +1511,8 @@ export function ConversationsView({
                 media_caption: event.mediaCaption ?? undefined,
                 mime_type: event.mimeType ?? undefined,
                 filename: event.filename ?? undefined,
+                // What a non-plain message IS (location, reaction, unsupported …)
+                meta: event.meta ?? null,
                 // Sent-in-their-language replies carry the human's English
                 translation: event.translation ?? undefined,
                 translated_from: event.translatedFrom ?? undefined,
@@ -3590,6 +3595,27 @@ export function ConversationsView({
                                         );
                                     }
 
+                                    // ── Things that HAPPENED in the chat (a call-permission
+                                    // tap, a number change, a first open): a centred line,
+                                    // not a bubble the customer "said".
+                                    const eventKind = !isNote && msg.meta ? viewForRow(msg) : null;
+                                    if (eventKind?.centred) {
+                                        return (
+                                            <React.Fragment key={msg.id ?? `msg-${idx}`}>
+                                                {showDivider && (
+                                                    <div className="flex items-center gap-2 my-1">
+                                                        <div className="flex-1 h-px bg-[#427425]/30" />
+                                                        <span className="text-[10px] font-semibold text-[#427425] bg-[#e6f3d8] px-2 py-0.5 rounded-full whitespace-nowrap">
+                                                            {snap} new {snap === 1 ? "message" : "messages"}
+                                                        </span>
+                                                        <div className="flex-1 h-px bg-[#427425]/30" />
+                                                    </div>
+                                                )}
+                                                <MessageKindPill view={eventKind} at={msg.created_at} />
+                                            </React.Fragment>
+                                        );
+                                    }
+
                                     if (isNote) {
                                         return (
                                             <React.Fragment
@@ -3823,15 +3849,14 @@ export function ConversationsView({
                                                                     />
                                                                 );
                                                             }
-                                                            if (!rawText.trim()) {
-                                                                // A truly empty row (a message type the
-                                                                // ingester couldn't extract) must never
-                                                                // render as a blank bubble.
-                                                                return (
-                                                                    <p className="leading-relaxed italic text-stone-400">
-                                                                        Message can&apos;t be displayed (unsupported type) — ask them to resend as text.
-                                                                    </p>
-                                                                );
+                                                            // A non-plain message drawn as what it IS
+                                                            // (a location, a contact, a reaction, a
+                                                            // cart …); a type WhatsApp won't show us —
+                                                            // or an old empty / warning row — as a calm
+                                                            // card that names it. Never a bare warning.
+                                                            const kindCard = viewForRow(msg);
+                                                            if (kindCard) {
+                                                                return <MessageKindCard view={kindCard} isInbound={isInbound} />;
                                                             }
                                                             return (
                                                                 <p className="leading-relaxed whitespace-pre-wrap">
@@ -3845,6 +3870,19 @@ export function ConversationsView({
                                                                 "image/",
                                                             )
                                                         ) {
+                                                            // A sticker is an emoji-sized reaction, not a
+                                                            // product photo: drawn small, no analysis toggle.
+                                                            if (msg.meta?.kind === "sticker") {
+                                                                return (
+                                                                    <figure className="flex flex-col items-start gap-0.5">
+                                                                        <img src={mu} alt="Sticker" loading="lazy"
+                                                                            className="w-28 h-28 object-contain" />
+                                                                        <figcaption className="text-[10px]" style={{ color: isInbound ? "#78716c" : "inherit" }}>
+                                                                            Sticker
+                                                                        </figcaption>
+                                                                    </figure>
+                                                                );
+                                                            }
                                                             if (album?.lead) {
                                                                 const items = albumItemsOf(album.items);
                                                                 return (

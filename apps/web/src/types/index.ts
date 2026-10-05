@@ -1,3 +1,4 @@
+import type { MessageMeta } from "@/lib/messageKinds";
 import type { ApiCall } from "@/lib/api";
 
 // ── Channel types ─────────────────────────────────────────────────────────────
@@ -104,6 +105,11 @@ export interface Message {
         thumb?: string;
         reply_to?: string;
     } | null;
+    // What a non-plain inbound message IS (server: services/inbound_kinds.py):
+    // a location, contact, reaction, call-permission reply, cart, or a type
+    // WhatsApp won't show businesses — with Meta's type + error. Rendered by
+    // lib/messageKinds.ts. Null for plain text / media.
+    meta?: MessageMeta | null;
     // When this message is a reply to an earlier one in the same conversation:
     // the quoted message's id + a snippet + who sent it, so the bubble shows it.
     reply_to?: {
