@@ -79,3 +79,11 @@ test("ordinary rows stay ordinary", () => {
     assert.equal(kindView({ kind: "plain", errors: [{ code: 131052 }] }), null);
     assert.equal(kindView(null), null);
 });
+
+test("call notice: a centred call-family line with Meta's type as small print", () => {
+    const v = kindView({ kind: "call_notice", type: "unsupported", subtype: "missed_call",
+        errors: [{ code: 131051, title: "Message type unknown" }] });
+    assert.equal(v.title, "WhatsApp sent a notice about a call");
+    assert.equal(v.centred, true);
+    assert.equal(v.details, "type “unsupported” · 131051 Message type unknown");
+});

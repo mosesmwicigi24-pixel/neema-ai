@@ -235,3 +235,13 @@ def test_voicemail_audio_is_linked_to_its_call():
          "audio": {"id": "VM1", "mime_type": "audio/ogg"}}]}}]}]}
     e = parse_events(payload)[0]
     assert e["meta"] == {"v": 1, "type": "audio", "kind": "voicemail", "call_id": "wacid.ABC"}
+
+
+# 14 ── a call-related notice is part of the call, not a message ─────────────
+def test_call_related_unsupported_becomes_a_call_notice():
+    e = _one({"type": "unsupported", "unsupported": {"type": "missed_call"},
+              "errors": [{"code": 131051, "title": "Message type unknown"}]})
+    assert e["text"] == "📞 WhatsApp sent a notice about a call"
+    assert e["meta"]["kind"] == "call_notice" and e["meta"]["subtype"] == "missed_call"
+    assert e["meta"]["errors"][0]["code"] == 131051 and "payload" in e["meta"]
+    assert e["wake"] is False

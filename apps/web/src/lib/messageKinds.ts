@@ -230,6 +230,10 @@ export function kindView(meta: MessageMeta | null | undefined): KindView | null 
                 lines: [], tone: "neutral", centred: false,
                 link: meta.photo && /^https:\/\//.test(meta.photo) ? { href: meta.photo, label: "View the comment's image" } : undefined,
             };
+        case "call_notice":
+            // Folded into the nearest call card when there is one (ConversationsView).
+            return { icon: "📞", title: "WhatsApp sent a notice about a call", lines: [], tone: "neutral", centred: true,
+                details: detailsLine(meta) };
         case "story_mention":
             return { icon: "📸", title: "Mentioned us in their story", lines: [], tone: "info", centred: false };
         case "unsupported": {

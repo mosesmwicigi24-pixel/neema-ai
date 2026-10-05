@@ -13,6 +13,7 @@ import { callStatus, CALL_ICON_PATH, speakerTurns } from "@/lib/callStatus";
 import { callCardView, canCallBack, callBackHandle, actionItems, transcriptSlot, whenText, mediaSrc, type CallTone } from "@/lib/callCard";
 import { useCallPresence } from "@/lib/callContext";
 import { ChannelGlyph } from "@/components/CallStage";
+import { detailsLine } from "@/lib/messageKinds";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000/api";
 
@@ -24,10 +25,12 @@ const TONE: Record<CallTone, { ink: string; chip: string; border: string }> = {
     live: { ink: "#128C4B", chip: "#E7F6EC", border: "#b7e4c7" },
 };
 
-export function CallCard({ msg, voicemail, onUseReply, composerReady = true, onToast }: {
+export function CallCard({ msg, voicemail, notices, onUseReply, composerReady = true, onToast }: {
     msg: Message;
     /** The WhatsApp voicemail audio for this call, folded in from the thread. */
     voicemail?: Message | null;
+    /** Call-related notices Meta sent around this call (types it won't show businesses). */
+    notices?: Message[];
     onUseReply?: (text: string) => void;
     composerReady?: boolean;
     onToast?: (text: string, type?: "success" | "error" | "warning") => void;
@@ -203,6 +206,20 @@ export function CallCard({ msg, voicemail, onUseReply, composerReady = true, onT
                             : <p className="text-xs" style={{ color: "#57534e" }}>The voicemail audio couldn&apos;t be fetched.</p>}
                         {vmText && <p className="text-xs leading-relaxed whitespace-pre-wrap mt-1" style={{ color: "#334155" }}>{vmText}</p>}
                     </div>
+                )}
+
+                {/* Notices WhatsApp sent about this call (folded in, never a separate warning row) */}
+                {notices && notices.length > 0 && (
+                    <ul className="mt-2 space-y-0.5">
+                        {notices.map((n) => {
+                            const d = detailsLine(n.meta ?? {});
+                            return (
+                                <li key={n.id} className="text-[11px] leading-snug" style={{ color: "#57534e" }}>
+                                    📞 WhatsApp also sent a call notice{d ? <span style={{ color: "#78716c" }}> · {d}</span> : null}
+                                </li>
+                            );
+                        })}
+                    </ul>
                 )}
 
                 {/* Transcript slot */}

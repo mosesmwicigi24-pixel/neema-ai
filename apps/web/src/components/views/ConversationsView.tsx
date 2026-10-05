@@ -31,6 +31,7 @@ import { useSession } from "next-auth/react";
 import { CALL_ICON_PATH } from "@/lib/callStatus";
 import { viewForRow } from "@/lib/messageKinds";
 import { CallCard } from "@/components/views/CallCard";
+import { nearestCallId } from "@/lib/callCard";
 import { MessageKindCard, MessageKindPill } from "@/components/ui/MessageKindCard";
 
 // ── NoChatPane ────────────────────────────────────────────────────────────────
@@ -1116,14 +1117,26 @@ export function ConversationsView({
 
     // A WhatsApp voicemail is part of its call: when that call's card is in the
     // thread, the audio plays inside the card instead of as a separate bubble.
-    const voicemailByCall = useMemo(() => {
-        const calls = new Set(threadItems.filter((m) => m.call?.call_id).map((m) => m.call!.call_id));
-        const map = new Map<string, Message>();
+    // A call notice Meta sends (a call-related type it won't show businesses)
+    // folds into the nearest call card the same way.
+    const { voicemailByCall, noticesByCall, foldedIds } = useMemo(() => {
+        const callRows = threadItems.filter((m) => m.call?.call_id).map((m) => m.call!);
+        const calls = new Set(callRows.map((c) => c.call_id));
+        const vm = new Map<string, Message>();
+        const notices = new Map<string, Message[]>();
+        const folded = new Set<string>();
         for (const m of threadItems) {
             const cid = m.meta?.kind === "voicemail" ? m.meta.call_id : undefined;
-            if (cid && calls.has(cid) && !map.has(cid)) map.set(cid, m);
+            if (cid && calls.has(cid) && !vm.has(cid)) { vm.set(cid, m); folded.add(m.id); continue; }
+            if (m.meta?.kind === "call_notice") {
+                const near = nearestCallId(m.created_at, callRows);
+                if (near) {
+                    notices.set(near, [...(notices.get(near) ?? []), m]);
+                    folded.add(m.id);
+                }
+            }
         }
-        return map;
+        return { voicemailByCall: vm, noticesByCall: notices, foldedIds: folded };
     }, [threadItems]);
 
     // WhatsApp-style albums: runs of ≥2 consecutive image messages from the same
@@ -3251,9 +3264,8 @@ export function ConversationsView({
                                     // Album members render inside the lead's collage.
                                     const album = albumOf.get(msg.id);
                                     if (album && !album.lead) return null;
-                                    // A voicemail folded into its call card renders there.
-                                    if (msg.meta?.kind === "voicemail" && msg.meta.call_id
-                                        && voicemailByCall.get(msg.meta.call_id)?.id === msg.id) return null;
+                                    // A voicemail / call notice folded into its call card renders there.
+                                    if (foldedIds.has(msg.id)) return null;
 
                                     // ── System event card ────────────────────
                                     if (msg.type === "system_event") {
@@ -3456,6 +3468,7 @@ export function ConversationsView({
                                                     )}
                                                     <CallCard msg={msg}
                                                         voicemail={msg.call ? voicemailByCall.get(msg.call.call_id) ?? null : null}
+                                                        notices={msg.call ? noticesByCall.get(msg.call.call_id) : undefined}
                                                         onUseReply={putInComposer} composerReady={canCompose} onToast={onToast} />
                                                 </React.Fragment>
                                             );

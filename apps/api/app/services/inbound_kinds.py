@@ -35,7 +35,7 @@ PLAIN_TYPES = ("text", "image", "audio", "video", "document")
 # Types the AI should NOT be woken for: presence and plumbing, not a question.
 # (A 👍 must not earn the customer a sales reply; a number change or a call
 # permission tap is bookkeeping.)
-_NO_WAKE_KINDS = {"reaction", "system", "call_permission", "sticker", "deleted", "edited"}
+_NO_WAKE_KINDS = {"reaction", "system", "call_permission", "call_notice", "sticker", "deleted", "edited"}
 
 # ── Unsupported sub-types ────────────────────────────────────────────────────
 # Meta delivers several WhatsApp features to businesses as `type: "unsupported"`
@@ -368,6 +368,12 @@ def describe(msg: dict) -> Described:
 
     # ── Unsupported / unknown: the residual ──────────────────────────────────
     key = _unsupported_key(msg)
+    # A call-related notice (Meta names a call / missed-call feature): part of
+    # that call, not a message — the dashboard folds it into the call's card.
+    if "call" in key:
+        return done("📞 WhatsApp sent a notice about a call", "call_notice",
+                    {"label": key.replace("_", " "), "subtype": key},
+                    wake=False, keep_payload=True)
     label, advice, wake = _UNSUPPORTED_LABELS.get(key, (key.replace("_", " ") or "message",
                                                         _GENERIC_ADVICE, True))
     kind = _UNSUPPORTED_KIND.get(key, "unsupported")

@@ -4,7 +4,7 @@
 // Run: node --test apps/web/tests/*.test.mjs
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { callCardView, canCallBack, actionItems, fmtDuration, whenText, transcriptSlot, mediaSrc, callBackHandle }
+import { callCardView, canCallBack, actionItems, fmtDuration, whenText, transcriptSlot, mediaSrc, callBackHandle, nearestCallId }
     from "../src/lib/callCard.ts";
 
 const call = (o) => ({ status: "completed", direction: "inbound", agent_name: null, duration: null,
@@ -101,4 +101,16 @@ test("13 recording src: absolute kept, bare file name under the API, anything el
 test("14 durations", () => {
     assert.equal(fmtDuration(0), null);
     assert.equal(fmtDuration(9), "0:09");
+});
+
+test("15 a call notice folds into the nearest call within 15 minutes, else stays its own line", () => {
+    const calls = [
+        { call_id: "A", started_at: "2026-10-05T10:00:00Z", ended_at: "2026-10-05T10:01:16Z" },
+        { call_id: "B", started_at: "2026-10-05T12:00:00Z", ended_at: null },
+    ];
+    assert.equal(nearestCallId("2026-10-05T10:03:00Z", calls), "A");    // just after A ended
+    assert.equal(nearestCallId("2026-10-05T10:00:30Z", calls), "A");    // during A
+    assert.equal(nearestCallId("2026-10-05T11:55:00Z", calls), "B");    // just before B rang
+    assert.equal(nearestCallId("2026-10-05T11:00:00Z", calls), null);   // nowhere near a call
+    assert.equal(nearestCallId(null, calls), null);
 });

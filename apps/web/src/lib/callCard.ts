@@ -153,3 +153,24 @@ export function mediaSrc(url: string | null | undefined, apiBase: string): strin
     if (!/^[\w.-]+$/.test(u)) return null;          // never a path the server didn't write
     return `${apiBase.replace(/\/$/, "")}/admin/media/${u}`;
 }
+
+/** The call a call-related row belongs to: the call whose start is nearest to
+ *  `at`, within `windowMs` (default 15 min) — or null. Used to fold a voicemail
+ *  or a call notice Meta sends into its card instead of a separate row. */
+export function nearestCallId(at: string | null | undefined,
+    calls: { call_id: string; started_at?: string | null; ended_at?: string | null }[],
+    windowMs = 15 * 60_000): string | null {
+    const t = at ? new Date(at).getTime() : NaN;
+    if (!Number.isFinite(t)) return null;
+    let best: string | null = null;
+    let bestGap = Infinity;
+    for (const c of calls) {
+        const s = c.started_at ? new Date(c.started_at).getTime() : NaN;
+        if (!Number.isFinite(s)) continue;
+        const e = c.ended_at ? new Date(c.ended_at).getTime() : s;
+        // Inside the call → 0; otherwise the distance to its nearer edge.
+        const gap = t >= s && t <= e ? 0 : Math.min(Math.abs(t - s), Math.abs(t - (Number.isFinite(e) ? e : s)));
+        if (gap <= windowMs && gap < bestGap) { best = c.call_id; bestGap = gap; }
+    }
+    return best;
+}
