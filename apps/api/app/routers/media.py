@@ -1,5 +1,6 @@
 # app/routers/media.py
 import httpx
+import mimetypes
 import os
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import FileResponse
@@ -15,6 +16,30 @@ router = APIRouter()
 # *collection*). Creation happens at startup in app/main.py's lifespan, and
 # again next to every write below so a writer never depends on that having run.
 MEDIA_DIR = settings.media_dir
+
+# The file types we store, by extension. The slim Python image has no
+# /etc/mime.types, so the stdlib can't name .ogg / .m4a / .webp / .docx …
+# and FileResponse served every one as text/plain (verified in production
+# 2026-10-05) — Safari won't play a voice note labelled text/plain, and Meta
+# fetches outbound media by URL and checks its type. We know what we write,
+# so these win over any host table; .webm/.mp4 stay with the platform (one
+# extension holds both call audio and uploaded video).
+_MEDIA_TYPES = {
+    ".ogg": "audio/ogg", ".oga": "audio/ogg", ".opus": "audio/ogg",
+    ".m4a": "audio/mp4", ".aac": "audio/aac", ".amr": "audio/amr",
+    ".wav": "audio/wav", ".webp": "image/webp", ".3gp": "video/3gpp",
+    ".doc": "application/msword",
+    ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+}
+
+
+def _register_media_types() -> None:
+    for ext, mime in _MEDIA_TYPES.items():
+        mimetypes.add_type(mime, ext)
+
+
+_register_media_types()
 
 
 @router.post("/admin/media/download")

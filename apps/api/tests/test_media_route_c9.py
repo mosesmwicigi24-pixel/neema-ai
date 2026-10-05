@@ -96,3 +96,33 @@ def test_an_encoded_traversal_never_matches_the_route(media_app):
     for p in ("/api/admin/media/../outside.txt", "/api/admin/media/..%2Foutside.txt"):
         status, body = _asgi_get(media_app, p)
         assert status == 404 and b"SECRET" not in body
+
+
+# ── 2. content types without a host mime table (the slim image) ──────────────
+
+PROD_UNKNOWN = [   # production's answer, 2026-10-05: guess_type(...) is None
+    (".ogg", "audio/ogg"), (".m4a", "audio/mp4"), (".amr", "audio/amr"),
+    (".webp", "image/webp"), (".docx",
+     "application/vnd.openxmlformats-officedocument.wordprocessingml.document"),
+    (".xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"),
+]
+
+
+@pytest.mark.parametrize("ext,mime", PROD_UNKNOWN)
+def test_stored_media_is_served_with_its_real_type_on_the_slim_image(media_dir, ext, mime):
+    """Production's image has no /etc/mime.types: the stdlib named none of
+    these and FileResponse fell back to text/plain (2026-10-05)."""
+    import mimetypes
+    import app.routers.media as media_router
+    mimetypes.init(files=[])                 # what production has: no table,
+    for e in [x for x, _ in PROD_UNKNOWN]:   # and a stdlib that names none of these
+        mimetypes.types_map.pop(e, None)
+    assert mimetypes.guess_type(f"wa_123{ext}")[0] is None
+    try:
+        media_router._register_media_types()
+        (media_dir / f"wa_123{ext}").write_bytes(b"x")
+        resp = run(media_router.serve_media(f"wa_123{ext}"))
+        assert resp.media_type == mime
+    finally:
+        mimetypes.init()
+        media_router._register_media_types()
