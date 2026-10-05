@@ -3463,6 +3463,17 @@ def _human_note(kind: str, severity: int, comment: str = "", ask: str = "",
     return "\n".join(lines)
 
 
+def _comment_bell_body(comment: str, kind: str, issues: list | None) -> str:
+    """The bell's one line: what they WROTE first (the team acts on that), then
+    why Neema didn't answer it herself. ≤200 chars — the note on the thread
+    carries the rest."""
+    said = " ".join((comment or "").split())[:140]
+    why = (issues or [None])[0] or {"complaint": "a complaint", "mixed": "a complaint",
+                                     "request": "a request", "question": "a question"}.get(kind, "")
+    line = f"\u201c{said}\u201d" if said else "A comment"
+    return (f"{line} \u2014 {why}" if why else line)[:200]
+
+
 async def _route_comment_to_human(channel: str, external_id: str,
                                   comment: str = "", *, kind: str = "complaint",
                                   severity: int = 1, ask: str = "", answered: str = "",
@@ -3495,6 +3506,22 @@ async def _route_comment_to_human(channel: str, external_id: str,
             return
         db.add(Intercept(conversation_id=conv.id, action=InterceptAction.flag, note=note))
         await db.commit()
+        conv_id = str(conv.id)
+    # The team HEARS of it (owner, 2026-10-05: "notify on comments too") — the
+    # same `draft_ready` bell as a held DM, so web and Android ring — while
+    # Neema stays active on the public thread (no human mode, see above). No
+    # draft card: approving a held draft on a comment thread is not this flow.
+    # Grave/serious complaints already rang via record_escalation above.
+    if redis is not None:
+        try:
+            await redis.publish("ws:channel:agents:all", json.dumps({
+                "event": "notification", "type": "draft_ready",
+                "title": f"{channel.title()} comment needs you",
+                "body": _comment_bell_body(comment, kind, issues),
+                "conv_id": conv_id, "wa_id": external_id,
+            }))
+        except Exception as exc:
+            _log.warning("comment hand-off alert failed for %s: %s", external_id, exc)
 
 
 async def _note_silent_decision(channel: str, ext: str, cid: str, intent: str) -> None:
