@@ -43,6 +43,19 @@ from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import or_, select
 
+# Run as its own process (`python -m app.scripts.backfill_transcripts`) nothing
+# else has imported the models, and Message's relationship("Conversation")
+# can't resolve — the first query raised InvalidRequestError on production
+# (2026-10-05). Load every model module before any query, as app.main does
+# implicitly through its routers.
+import importlib
+import pkgutil
+
+import app.models as _models
+
+for _m in pkgutil.iter_modules(_models.__path__):
+    importlib.import_module(f"{_models.__name__}.{_m.name}")
+
 POISON = ("corrupt", "too_long", "too_large")
 REVISIT = ("disabled", "no_provider", "provider_auth", "provider_timeout", "provider_busy",
            "provider_unreachable", "provider_error", "provider_rejected", "error", "busy",
