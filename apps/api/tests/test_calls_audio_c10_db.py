@@ -930,3 +930,90 @@ def test_a_twin_waits_out_a_holder_queued_behind_busy_slots(rig, clips, monkeypa
     assert call.ok and first.ok and first.text == "Nataka sinia mbili."
     assert twin.status == "done" and twin.cached and twin.text == first.text, twin.status
     assert len(rig.provider.calls) == 2                                 # the call + one note: paid once
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# 10 · A Messenger voice note: webhook capture → REAL CDN fetch → words →
+#      the burst → the REAL agent turn → the Send API
+# ═════════════════════════════════════════════════════════════════════════════
+
+def test_messenger_voice_note_end_to_end_real_fetch_real_agent_turn(rig, clips, monkeypatch):
+    import app.agent.runtime as runtime
+    from app.agent.llm import FakeLLM
+    from app.routers import meta_webhook as wh
+    from app.services import meta_media
+    psid, cdn = "psid-c10-msgr", "https://lookaside.fbsbx.com/ig_messaging_cdn/?asset_id=C10&signature=x"
+    with open(clips[7], "rb") as f:
+        mp4ish = f.read()
+
+    def handler(request):
+        import httpx
+        if str(request.url) == cdn:
+            return httpx.Response(200, content=mp4ish, headers={"content-type": "audio/mp4"})
+        return httpx.Response(404)
+    fake = types.SimpleNamespace(handler=handler)
+    _patch_httpx(monkeypatch, fake)
+    monkeypatch.setattr(rig.settings, "meta_agent_reply", True)
+    monkeypatch.setattr(rig.settings, "meta_debounce_seconds", 1)
+    monkeypatch.setattr(meta_media, "schedule_media_rehost", lambda *a, **k: None)
+
+    async def no_profile(*a, **k):
+        return {}
+    monkeypatch.setattr("app.services.meta_send.fetch_profile", no_profile)
+
+    async def no_typing(*a, **k):
+        return None
+    monkeypatch.setattr("app.services.meta_send.send_typing_on", no_typing)
+    sent: list = []
+
+    async def send(channel, to, text, page_id=None, **k):
+        sent.append((channel, to, text))
+        return {"message_id": "m_out"}
+    monkeypatch.setattr("app.services.meta_send.send_to_channel", send)
+    seen: list = []
+
+    class Agent(FakeLLM):
+        async def complete(self, *, system, messages, tools, tool_choice=None):
+            seen.append(messages)
+            return await super().complete(system=system, messages=messages, tools=tools)
+    agent = Agent([{"text": "Ndiyo, tuna stoles za zambarau. Ni za kanisa gani?"}] * 4)
+    monkeypatch.setattr(runtime, "build_llm",
+                        lambda model=None, purpose="other", cache=None:
+                        agent if purpose == "messenger" else rig.llm(model=model, purpose=purpose))
+    rig.provider.answers = [("Je, mna stoles za rangi ya zambarau?", None)]
+    rig.llm.answers["translate-voice"] = json.dumps({"lang": "Swahili", "en": "Do you have purple stoles?"})
+    payload = {"object": "page", "entry": [{"id": "PAGE1", "time": 1, "messaging": [{
+        "sender": {"id": psid}, "recipient": {"id": "PAGE1"},
+        "message": {"mid": "m_c10_voice", "attachments": [{"type": "audio", "payload": {"url": cdn}}]}}]}]}
+
+    before_tmp = _voice_tmp_files()
+
+    async def go():
+        async with rig.maker() as db:
+            await wh._capture_events(db, "messenger", payload, redis=rig.redis)
+        await drain_tasks()
+        for _ in range(200):
+            if sent:
+                break
+            await asyncio.sleep(0.05)
+        return (await vn.voice_rows(rig))
+    rows = run(go())
+    note = next(r for r in rows if r.external_id == psid)
+    assert note.channel == "messenger" and note.media_url == cdn
+    assert (note.transcript_status, note.transcript_lang, note.text) == (
+        "done", "sw", "Je, mna stoles za rangi ya zambarau?")
+    assert note.translated_text == "Do you have purple stoles?"
+    assert len(rig.provider.calls) == 1
+    # The fetched temp file is removed once heard (never left behind).
+    assert _voice_tmp_files() <= before_tmp
+    last_user = [m for m in seen[0] if m["role"] == "user"][-1]
+    content = last_user["content"] if isinstance(last_user["content"], str) else json.dumps(
+        last_user["content"], ensure_ascii=False)
+    assert "🎤 (voice note): Je, mna stoles za rangi ya zambarau?" in content and "⟦voice:" not in content
+    assert sent == [("messenger", psid, "Ndiyo, tuna stoles za zambarau. Ni za kanisa gani?")]
+
+
+def _voice_tmp_files() -> set:
+    import tempfile
+    d = tempfile.gettempdir()
+    return {f for f in os.listdir(d) if f.startswith("neema-voice-")}
