@@ -102,14 +102,25 @@ _ARTEFACTS = {
 }
 _MUSIC_ONLY = re.compile(r"^[\s♪♫🎵🎶.\-–—*]*$")
 
-# Words the transcriber should spell right. Passed as the provider's prompt
-# (vocabulary hint only — it never instructs anything).
+# Words the transcriber should spell right — a vocabulary hint, never an
+# instruction. OpenAI's guide says a prompt "should match the audio language",
+# and an English-only prompt can nudge a Swahili note toward an English
+# rendering; so the hint is deliberately bilingual and noun-only. Replace (or
+# blank, to send none) with TRANSCRIBE_VOCABULARY.
 VOCABULARY = (
-    "Bethany House, Nairobi. Cassock, chasuble, alb, stole, surplice, cope, "
-    "clergy shirt, clerical collar, mitre, zucchetto, pectoral cross, "
-    "communion wafers, communion cups, tray, KES, shillings, M-Pesa, Paybill. "
-    "Kiswahili, English, Sheng."
+    "Bethany House, Nairobi. Habari, nataka kasoki. Cassock, chasuble, alb, stole, "
+    "surplice, cope, clergy shirt, collar, mitre, zucchetto, pectoral cross, "
+    "mkate wa komunio, vikombe vya komunio, sinia, M-Pesa, Paybill, KES, shilingi."
 )
+KEYWORDS = ("Bethany House", "cassock", "kasoki", "chasuble", "alb", "stole", "surplice",
+            "clergy shirt", "mitre", "zucchetto", "komunio", "M-Pesa", "Paybill", "KES")
+LANGUAGES = ("en", "sw", "fr")    # what our customers speak (gpt-transcribe's hint)
+
+
+def vocabulary() -> str:
+    v = settings.transcribe_vocabulary
+    return VOCABULARY if v is None else v.strip()
+
 
 BACKOFF = (1.0, 4.0, 10.0)     # seconds before retry 1, 2, 3 (±20% jitter)
 _CACHE_TTL = 30 * 86400
@@ -306,18 +317,30 @@ async def split(src: str, seconds: int, workdir: str) -> list[str]:
 # ── providers (BLOCKING — always called via asyncio.to_thread) ───────────────
 
 def _openai_transcribe(path: str, model: str) -> tuple[str, str | None]:
+    """One OpenAI transcription request. The file goes up with its `.mp3`
+    name — the SDK's own docs: "The request must include enough format
+    metadata for the file to be identified" (the extensionless notes failed
+    exactly there)."""
     from openai import OpenAI
     client = OpenAI(api_key=settings.openai_api_key,
                     timeout=float(settings.transcribe_timeout_seconds), max_retries=0)
+    hint = vocabulary()
     with open(path, "rb") as f:
+        kw: dict = {"model": model, "file": f}
         if model == "whisper-1":
             # verbose_json carries the detected language ("swahili").
-            resp = client.audio.transcriptions.create(
-                model=model, file=f, response_format="verbose_json", prompt=VOCABULARY)
-            return (getattr(resp, "text", "") or "").strip(), lang_code(getattr(resp, "language", None))
-        resp = client.audio.transcriptions.create(
-            model=model, file=f, response_format="json", prompt=VOCABULARY)
-    return (getattr(resp, "text", "") or "").strip(), None
+            kw["response_format"] = "verbose_json"
+        elif model == "gpt-transcribe":
+            # Newer model: guided by keywords + the languages we expect.
+            kw.update(response_format="json", keywords=list(KEYWORDS), languages=list(LANGUAGES))
+            hint = ""
+        else:
+            kw["response_format"] = "json"      # the only format gpt-4o-*transcribe take
+        if hint:
+            kw["prompt"] = hint
+        resp = client.audio.transcriptions.create(**kw)
+    text = (getattr(resp, "text", "") or "").strip()
+    return text, lang_code(getattr(resp, "language", None))
 
 
 def _groq_transcribe(path: str, model: str) -> tuple[str, str | None]:
@@ -325,8 +348,10 @@ def _groq_transcribe(path: str, model: str) -> tuple[str, str | None]:
     client = Groq(api_key=settings.groq_api_key,
                   timeout=float(settings.transcribe_timeout_seconds), max_retries=0)
     with open(path, "rb") as f:
-        resp = client.audio.transcriptions.create(
-            model=model, file=f, response_format="verbose_json", prompt=VOCABULARY)
+        kw: dict = {"model": model, "file": f, "response_format": "verbose_json"}
+        if vocabulary():
+            kw["prompt"] = vocabulary()
+        resp = client.audio.transcriptions.create(**kw)
     return (getattr(resp, "text", "") or "").strip(), lang_code(getattr(resp, "language", None))
 
 

@@ -216,6 +216,18 @@ def test_whisper1_asks_for_the_language_and_4o_gets_the_vocabulary(on, audio, mo
     clients = [s["client"] for s in seen if "client" in s]
     assert all(c["max_retries"] == 0 and c["timeout"] == float(settings.transcribe_timeout_seconds)
                for c in clients)
+    # the hint is bilingual (OpenAI: a prompt "should match the audio language")
+    assert "kasoki" in reqs[0]["prompt"] and "komunio" in reqs[0]["prompt"]
+    # gpt-transcribe: keywords + the languages we expect, no free-text prompt
+    seen.clear()
+    stt._openai_transcribe(path, "gpt-transcribe")
+    r = [s for s in seen if "model" in s][0]
+    assert r["languages"] == ["en", "sw", "fr"] and "cassock" in r["keywords"] and "prompt" not in r
+    # TRANSCRIBE_VOCABULARY="" sends no prompt at all
+    monkeypatch.setattr(settings, "transcribe_vocabulary", "")
+    seen.clear()
+    stt._openai_transcribe(path, "gpt-4o-transcribe")
+    assert "prompt" not in [s for s in seen if "model" in s][0]
 
 
 # ── silence, music, artefacts ────────────────────────────────────────────────

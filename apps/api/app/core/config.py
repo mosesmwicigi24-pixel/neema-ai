@@ -380,6 +380,9 @@ class Settings(BaseSettings):
     # selectable (it returns the detected language itself); the language is
     # otherwise detected from the words by the translation pass.
     transcribe_model: str = "gpt-4o-transcribe"
+    # The vocabulary hint sent as the provider's prompt. None = the built-in
+    # bilingual trade list (services/transcribe.VOCABULARY); "" = send none.
+    transcribe_vocabulary: str | None = None
     groq_transcribe_model: str = "whisper-large-v3"
     # Daily ceiling on transcription spend (USD, UTC day). Reserved BEFORE each
     # provider call and refunded on failure, so concurrent notes can't overrun
