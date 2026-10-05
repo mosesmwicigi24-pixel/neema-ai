@@ -28,128 +28,10 @@ import type {
     OpenChatRequest,
 } from "@/types";
 import { useSession } from "next-auth/react";
-import { callStatus, CALL_ICON_PATH } from "@/lib/callStatus";
-import { ChannelGlyph } from "@/components/CallStage";
+import { CALL_ICON_PATH } from "@/lib/callStatus";
 import { viewForRow } from "@/lib/messageKinds";
+import { CallCard } from "@/components/views/CallCard";
 import { MessageKindCard, MessageKindPill } from "@/components/ui/MessageKindCard";
-
-// ── CallPill ──────────────────────────────────────────────────────────────────
-// A WhatsApp or Messenger call where it happened in the thread (docs/CALLING_UX.md §7): a
-// centred pill — direction / missed icon, the label ("Incoming call · 4:12",
-// "Missed call"), who took it, when. When the call was transcribed, a card
-// under it: the summary, the next action, and the suggested follow-up with
-// "Use as reply" (puts it in the composer — never sends it).
-function CallPill({ msg, onUseReply, composerReady = true }: { msg: Message; onUseReply?: (text: string) => void; composerReady?: boolean }) {
-    const call = msg.call;
-    const st = callStatus(call ?? { status: "", direction: msg.direction });
-    const ins = call?.insights ?? null;
-    const summary = (call?.summary || msg.event_reason || "").trim() || null;
-    const followUp = ins?.follow_up_message?.trim() || null;
-    // Products / objections / commitments: one compact line each, only when there.
-    const facts = ([
-        ["Products", ins?.products],
-        ["Objections", ins?.objections],
-        ["Commitments", ins?.commitments],
-    ] as const).filter(([, v]) => Array.isArray(v) && v.length > 0) as [string, string[]][];
-    const showCard = !!(summary || ins?.next_action || followUp || facts.length);
-    const [more, setMore] = useState(false);
-    const [used, setUsed] = useState(false);
-    // Who took it — not for calls nobody answered.
-    const agent = msg.agent_name && !["missed", "no_answer", "cancelled", "failed"].includes(call?.status ?? "")
-        ? msg.agent_name.split(" ")[0] : null;
-    const at = call?.started_at || msg.created_at;
-    // WhatsApp voicemail for this call: the audio is the voice note right here in the chat.
-    const baseLabel = msg.text || st.word;
-    const label = call?.has_voicemail && !/voicemail/i.test(baseLabel) ? `${baseLabel} · voicemail` : baseLabel;
-    const long = !!summary && summary.length > 220;
-    // Which app the call was on — a badge, so a mixed history is never ambiguous.
-    const messengerCall = call?.channel === "messenger";
-    const app = messengerCall ? "Messenger" : "WhatsApp";
-    return (
-        <div className="flex flex-col items-center gap-1.5 my-2.5">
-            <div className="flex items-center gap-2 w-full">
-                <div className="flex-1 h-px bg-stone-200" />
-                <div className="flex flex-wrap items-center justify-center gap-x-1.5 gap-y-0.5 px-3 py-1 rounded-full border bg-white max-w-[88%]"
-                    style={{ borderColor: st.live ? "#b7e4c7" : "#e2e8e0" }}
-                    title={at ? new Date(at).toLocaleString() : undefined}>
-                    {st.live
-                        ? <span className="w-2 h-2 rounded-full flex-shrink-0 animate-pulse motion-reduce:animate-none" style={{ backgroundColor: "#25D366" }} aria-hidden="true" />
-                        : (
-                            <svg width={12} height={12} viewBox="0 0 24 24" fill="none" stroke={st.light} strokeWidth={2.4}
-                                strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" className="flex-shrink-0">
-                                <path d={CALL_ICON_PATH[st.icon]} />
-                            </svg>
-                        )}
-                    <span data-call-channel={messengerCall ? "messenger" : "whatsapp"}
-                        className="inline-flex items-center gap-1 text-[10px] font-semibold rounded-full pl-0.5 pr-1.5"
-                        style={{ color: messengerCall ? "#0066D6" : "#128C4B", backgroundColor: messengerCall ? "#EAF3FF" : "#E7F6EC" }}>
-                        <ChannelGlyph channel={messengerCall ? "messenger" : "whatsapp"} size={11} color={messengerCall ? undefined : "#128C4B"} />
-                        {app}
-                    </span>
-                    <span className="text-[11px] font-semibold" style={{ color: st.icon === "missed" || st.word === "Missed" ? st.light : "#1c2917" }}>
-                        <span className="sr-only">{app} call: </span>{label}
-                    </span>
-                    {agent && <span className="text-[10px]" style={{ color: "#57534e" }}>· {agent}</span>}
-                    {at && <span className="text-[10px] tabular-nums" style={{ color: "#78716c" }}>· {clockTime(at)}</span>}
-                </div>
-                <div className="flex-1 h-px bg-stone-200" />
-            </div>
-            {showCard && (
-                <section aria-label="Call summary" className="w-full max-w-[88%] sm:max-w-md rounded-xl border bg-white px-3 py-2.5"
-                    style={{ borderColor: "#d7ecd9" }}>
-                    <div className="text-[10px] font-semibold uppercase tracking-wider mb-1" style={{ color: "#128C4B" }}>
-                        Call summary
-                    </div>
-                    {summary && (
-                        <>
-                            <p className={`text-xs leading-relaxed whitespace-pre-wrap ${long && !more ? "line-clamp-3" : ""}`} style={{ color: "#1c2917" }}>{summary}</p>
-                            {long && (
-                                <button type="button" onClick={() => setMore((v) => !v)} aria-expanded={more}
-                                    className="text-[11px] font-semibold mt-0.5 min-h-6" style={{ color: "#128C4B" }}>
-                                    {more ? "Show less" : "Show more"}
-                                </button>
-                            )}
-                        </>
-                    )}
-                    {ins?.next_action && (
-                        <p className="text-xs leading-relaxed mt-1.5" style={{ color: "#1c2917" }}>
-                            <span className="font-semibold">Next: </span>{ins.next_action}
-                        </p>
-                    )}
-                    {facts.length > 0 && (
-                        <dl className="mt-1.5 space-y-0.5 text-[11px] leading-snug">
-                            {facts.map(([k, v]) => (
-                                <div key={k} className="flex gap-1.5">
-                                    <dt className="font-semibold flex-shrink-0" style={{ color: "#57534e" }}>{k}:</dt>
-                                    <dd className="min-w-0" style={{ color: "#334155" }}>{v.join(" · ")}</dd>
-                                </div>
-                            ))}
-                        </dl>
-                    )}
-                    {followUp && (
-                        <div className="mt-2 rounded-lg px-2.5 py-2" style={{ backgroundColor: "#f3f8f1" }}>
-                            <div className="text-[10px] font-semibold uppercase tracking-wider" style={{ color: "#57534e" }}>Suggested reply</div>
-                            <p className="text-xs leading-relaxed whitespace-pre-wrap mt-0.5" style={{ color: "#334155" }}>{followUp}</p>
-                            {onUseReply && (
-                                <div className="mt-1.5 flex items-center gap-2">
-                                    <button type="button" onClick={() => { onUseReply(followUp); setUsed(true); }}
-                                        className="h-9 px-3 rounded-lg text-xs font-semibold text-white active:scale-95 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#128C4B]"
-                                        style={{ backgroundColor: "#128C4B" }}>
-                                        Use as reply
-                                    </button>
-                                    <span className="text-[11px]" style={{ color: "#57534e" }} aria-live="polite">
-                                        {!composerReady ? (used ? "Saved — pick up the chat to send it" : "Pick up the chat to send it — nothing is sent")
-                                            : used ? "In the reply box — edit, then send" : "Goes in the reply box — not sent"}
-                                    </span>
-                                </div>
-                            )}
-                        </div>
-                    )}
-                </section>
-            )}
-        </div>
-    );
-}
 
 // ── NoChatPane ────────────────────────────────────────────────────────────────
 // "Open chat" / "Message" for a caller who has only ever CALLED: there is no
@@ -1231,6 +1113,18 @@ export function ConversationsView({
         return sortedActiveMessages.filter((m) => !(m.type === "system_event" && m.event_kind === "call"
             && new Date(m.created_at ?? 0).getTime() < floor));
     }, [sortedActiveMessages, threadHasMore, activeConvId]);
+
+    // A WhatsApp voicemail is part of its call: when that call's card is in the
+    // thread, the audio plays inside the card instead of as a separate bubble.
+    const voicemailByCall = useMemo(() => {
+        const calls = new Set(threadItems.filter((m) => m.call?.call_id).map((m) => m.call!.call_id));
+        const map = new Map<string, Message>();
+        for (const m of threadItems) {
+            const cid = m.meta?.kind === "voicemail" ? m.meta.call_id : undefined;
+            if (cid && calls.has(cid) && !map.has(cid)) map.set(cid, m);
+        }
+        return map;
+    }, [threadItems]);
 
     // WhatsApp-style albums: runs of ≥2 consecutive image messages from the same
     // side collapse into one collage bubble (the first message renders the grid;
@@ -3357,6 +3251,9 @@ export function ConversationsView({
                                     // Album members render inside the lead's collage.
                                     const album = albumOf.get(msg.id);
                                     if (album && !album.lead) return null;
+                                    // A voicemail folded into its call card renders there.
+                                    if (msg.meta?.kind === "voicemail" && msg.meta.call_id
+                                        && voicemailByCall.get(msg.meta.call_id)?.id === msg.id) return null;
 
                                     // ── System event card ────────────────────
                                     if (msg.type === "system_event") {
@@ -3557,7 +3454,9 @@ export function ConversationsView({
                                                             <div className="flex-1 h-px bg-[#427425]/30" />
                                                         </div>
                                                     )}
-                                                    <CallPill msg={msg} onUseReply={putInComposer} composerReady={canCompose} />
+                                                    <CallCard msg={msg}
+                                                        voicemail={msg.call ? voicemailByCall.get(msg.call.call_id) ?? null : null}
+                                                        onUseReply={putInComposer} composerReady={canCompose} onToast={onToast} />
                                                 </React.Fragment>
                                             );
                                         }
