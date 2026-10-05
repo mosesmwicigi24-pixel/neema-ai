@@ -232,6 +232,10 @@ async def mark_answered(call_id: str, agent_id, redis=None, *, agent_name: str |
             key = perm_key(row.channel, row.wa_id, row.external_id)
             await forget_meta_permission(redis, key)
             await finish_permission_request(redis, key, sent=False)   # a connected call resets the limits
+            # The call connected — recording starts now. The written notice
+            # (off by default) goes once per customer; never awaited here.
+            from app.services import recording_notice
+            recording_notice.schedule(call_id, redis)
             return moved
     except Exception as exc:
         _log.warning("call_log answered failed: %s", exc)

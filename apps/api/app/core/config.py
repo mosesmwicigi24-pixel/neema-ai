@@ -38,6 +38,17 @@ class Settings(BaseSettings):
     call_meta_recording: bool = False
     call_recording_purpose: str = "to help us serve your order and train our team"
     call_recording_language: str = "en"
+    # A WRITTEN notice instead (services/recording_notice.py): one short line,
+    # once per customer, the first time one of their calls connects while
+    # call_recording_enabled — free-form, so only inside the 24 h window.
+    # OFF until the owner approves the exact wording. Proposed Swahili:
+    # "Kwa taarifa yako: simu na Bethany House zinaweza kurekodiwa, na simu
+    # pamoja na jumbe za sauti kunakiliwa kwa maandishi, ili tukuhudumie vyema
+    # zaidi." (native-speaker review pending).
+    call_recording_notice_enabled: bool = False
+    call_recording_notice_text: str = (
+        "Just so you know: calls with Bethany House may be recorded, and calls and "
+        "voice notes transcribed, so we can serve you better.")
     # Approved WhatsApp template used to open a thread with a customer who reached
     # us on Messenger/Facebook (Meta requires a template to message first). Body:
     # "Hello {{1}}, this is Bethany House…". Name + language must match the
