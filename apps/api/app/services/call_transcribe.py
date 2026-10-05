@@ -191,10 +191,14 @@ def _salvage_summary(text: str) -> str:
 
 
 # Words that carry an amount when the transcriber writes numbers out
-# (English, Swahili, Sheng money slang).
+# (English, Swahili, Sheng money slang). NUMBER words only: a currency word
+# ("shillings", "bob") is in nearly every call, and counting it switched the
+# filter off for every price (cycle 9 audit).
 _AMOUNT_WORDS = re.compile(
-    r"\b(hundred|thousand|million|grand|k|bob|shillings?|elfu|mia|laki|milioni|"
+    r"\b(hundred|thousand|million|grand|elfu|mia|laki|milioni|"
     r"thao|soo|ngiri)\b", re.I)
+# "4.5k" / "12k" — thousands written with a k.
+_K_AMOUNT = re.compile(r"\b(\d+(?:\.\d+)?)\s?k\b", re.I)
 
 
 def ground_prices(prices: list[str] | None, transcript: str) -> list[str]:
@@ -207,6 +211,7 @@ def ground_prices(prices: list[str] | None, transcript: str) -> list[str]:
     if not prices:
         return []
     digits = set(re.findall(r"\d+", (transcript or "").replace(",", "").replace(" 000", "000")))
+    digits |= {str(int(round(float(n) * 1000))) for n in _K_AMOUNT.findall(transcript or "")}
     worded = bool(_AMOUNT_WORDS.search(transcript or ""))
     kept = []
     for p in prices:
