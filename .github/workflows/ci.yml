@@ -173,7 +173,7 @@ jobs:
           SECRET_KEY: ci-not-a-real-secret
         run: |
           set -o pipefail
-          python -m pytest tests/test_security_db.py tests/test_calls_db.py tests/test_calls_adversarial_db.py tests/test_client_crashes_db.py tests/test_inbound_kinds_db.py -q -rs | tee /tmp/sec.log
+          python -m pytest tests/test_security_db.py tests/test_calls_db.py tests/test_calls_adversarial_db.py tests/test_client_crashes_db.py tests/test_inbound_kinds_db.py tests/test_call_cards_db.py -q -rs | tee /tmp/sec.log
           if grep -q "skipped" /tmp/sec.log || ! grep -qE "[0-9]+ passed" /tmp/sec.log; then
             echo "::error::the security tests did not run (Postgres unreachable?) — treating as failure"
             exit 1
