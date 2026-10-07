@@ -483,6 +483,145 @@ def colour_issues(ask: str, answer: str) -> list[dict]:
                      "do not make it and offer the nearest"}]
 
 
+# The words of a giveaway (owner, 2026-10-07: a stole post was answered with
+# "our team will be selecting one recipient for this gift — completely free").
+_CAMPAIGN_TALK_RE = re.compile(
+    r"\b(give-?aways?|giving\s+away|winners?|selected\s+recipient|one\s+recipient|"
+    r"will\s+be\s+selecting|who'?s\s+been\s+selected|if\s+you'?re\s+(?:the\s+one\s+)?(?:selected|chosen)|"
+    r"only\s+cover\s+the\s+shipping|free\s+(?:pair|shoes?)|lucky\s+draw|raffle|"
+    r"mshindi|shindano|atakayechaguliwa|zawadi\s+ya\s+bure)\b",
+    re.IGNORECASE)
+
+
+# THE KINDS OF GOODS (owner, 2026-10-07: "identify the product before
+# answering… keep contexts separate"): the head nouns of the hub's names and
+# the customer's words for them — singular, plural, Swahili — each mapped to
+# one canonical kind. A kind, never a colour, a size or a finish: a stole post
+# answered with trays mixes KINDS. Words that are also ordinary English in a
+# caption ("host", "staff", "cap", "oil", "bag", "glasses") are left out.
+GOODS_KINDS: dict[str, tuple[str, ...]] = {
+    "stole": ("stole", "stoles", "stola"),
+    "cassock": ("cassock", "cassocks", "kasoki", "soutane"),
+    "surplice": ("surplice", "surplices", "sapulisi", "saples", "saplis", "saplice", "cotta"),
+    "alb": ("alb", "albs"),
+    "chasuble": ("chasuble", "chasubles"),
+    "cope": ("cope", "copes"),
+    "mitre": ("mitre", "mitres", "miter", "miters"),
+    "dalmatic": ("dalmatic", "dalmatics"),
+    "cincture": ("cincture", "cinctures", "sash", "sashes", "belt", "belts", "mkanda", "mikanda"),
+    "collar": ("collar", "collars", "kola"),
+    "shirt": ("shirt", "shirts", "shati", "mashati"),
+    "gown": ("gown", "gowns", "joho", "majoho", "gauni", "robe", "robes"),
+    "tunic": ("tunic", "tunics"),
+    "skullcap": ("skullcap", "skullcaps", "zucchetto", "biretta", "kofia"),
+    "tallit": ("tallit", "tallits", "shawl", "shawls"),
+    "kippah": ("kippah", "kippahs", "kippot"),
+    "chalice": ("chalice", "chalices", "goblet", "goblets"),
+    "paten": ("paten", "patens"),
+    "ciborium": ("ciborium", "ciboria"),
+    "tray": ("tray", "trays", "trei", "sinia", "siniya", "masinia"),
+    "cup": ("cup", "cups", "kikombe", "vikombe", "tots"),
+    "set": ("set", "sets"),
+    "candle": ("candle", "candles", "mshumaa", "mishumaa"),
+    "candlestick": ("candlestick", "candlesticks"),
+    "thurible": ("thurible", "thuribles", "censer", "censers", "chetezo"),
+    "bell": ("bell", "bells", "kengele"),
+    "crozier": ("crozier", "croziers", "crosier", "crosiers", "fimbo"),
+    "cross": ("cross", "crosses", "crucifix", "crucifixes", "msalaba", "misalaba", "pendant", "pendants"),
+    "ring": ("ring", "rings", "pete"),
+    "rosary": ("rosary", "rosaries", "rozari"),
+    "banner": ("banner", "banners"),
+    "basket": ("basket", "baskets", "kikapu", "vikapu"),
+    "bible": ("bible", "bibles", "biblia"),
+    "hymnal": ("hymnal", "hymnals", "hymnbook", "hymnbooks"),
+    "shoe": ("shoe", "shoes", "kiatu", "viatu"),
+    "uniform": ("uniform", "uniforms"),
+    "veil": ("veil", "veils"),
+    "linen": ("linen", "linens", "purificator", "purificators", "corporal", "corporals"),
+    "incense": ("incense", "ubani"),
+    "wine": ("wine", "wines", "divai", "devai"),
+    "wafer": ("wafer", "wafers", "mkate", "mikate"),
+}
+_GOODS_WORD = {w: k for k, words in GOODS_KINDS.items() for w in words}
+
+
+def goods_kinds_in(text: str) -> set[str]:
+    """The kinds of goods a text names — "We need it on the Plateau. How can
+    we get supply?" names none; "a stole says we see your service" names the
+    stole; "the one with 40 cups" names a tray (its capacity)."""
+    t = _CAPACITY_RE.sub(" tray ", _CHALICE_CUP_RE.sub(" chalice ", text or ""))
+    return {_GOODS_WORD[w] for w in _words(t) if w in _GOODS_WORD}
+
+
+def row_kind(row: dict | None) -> str:
+    """The canonical kind of a hub row: the last kind word of its name's head
+    segment ("Single Sided Stole" → stole, "CINCTURE BELT" → cincture,
+    "Chalice Cup -Medium" → chalice, "Tallit (Prayer Shawl) - Medium" →
+    tallit), else of the whole name ("Pectoral Cross with Chain" → cross);
+    "set" for a set row; "" when its name holds no kind — never flagged."""
+    if not row or not row.get("name"):
+        return ""
+    from app.services.post_catalog import is_set_row
+    if is_set_row(row):
+        return "set"
+    from app.agent.runtime import _strip_size
+    name = _CHALICE_CUP_RE.sub(" chalice ", _strip_size(str(row.get("name") or "")))
+    head = re.split(r"\s+[—–-]\s+|:|\(", name, maxsplit=1)[0]
+    for seg in (head, name):
+        kinds = [_GOODS_WORD[w] for w in _words(seg) if w in _GOODS_WORD]
+        if kinds:
+            return kinds[-1]
+    return ""
+
+
+def context_issues(comment: str, answer: str, seen: list, *, post_product: str = "",
+                   post_caption: str = "", campaign: bool = False) -> list[dict]:
+    """KEEP CONTEXTS SEPARATE (owner, 2026-10-07): a reply that imports a
+    campaign the post is not, or sells rows of another KIND than the post's
+    product when the customer named no such kind, is held — "We need it on
+    the Plateau. How can we get supply?" under a stole post was answered
+    with the shoe giveaway and a list of communion trays. The post's kind is
+    its product's (the identity), else the kinds its caption names; a reply
+    that sells the post's kind and adds another is a soft finding (the
+    rewrite drops the extra), one that says nothing of it is hard."""
+    out: list[dict] = []
+    if not campaign and _CAMPAIGN_TALK_RE.search(answer or ""):
+        out.append({"kind": "context", "hard": True,
+                    "text": "it speaks of a giveaway, a winner or a selected recipient — this post "
+                            "is not a campaign: a product sold 'as a gift' is sold, never given; "
+                            "drop every campaign line and answer about the post's product"})
+    if post_product:
+        post_kinds = {row_kind({"name": post_product})} - {""}
+    else:
+        post_kinds = goods_kinds_in(post_caption or "")
+    if "set" in post_kinds:
+        # a set post (a tray with its cups) is answered with any of its pieces
+        post_kinds = post_kinds - {"set"} if len(post_kinds) > 1 else set()
+    if not post_kinds:
+        return out
+    asked = goods_kinds_in(comment or "")
+    if asked - post_kinds:
+        return out          # they named another kind: the reply may answer it
+    kinds = {row_kind(r) for r in products_named(answer, seen)} - {""}
+    other = sorted(kinds - post_kinds - {"set"})
+    if not other:
+        return out
+    post = "/".join(sorted(post_kinds))
+    sold = ", ".join(f"{k}s" for k in other)
+    if (kinds & post_kinds) or (goods_kinds_in(answer or "") & post_kinds):
+        out.append({"kind": "context", "hard": False,
+                    "text": f"beside the post's {post} it adds {sold} the customer never asked "
+                            f"for — keep to the {post}; another kind is offered only when they "
+                            "ask, labelled as an alternative"})
+    else:
+        out.append({"kind": "context", "hard": True,
+                    "text": f"the post is about a {post}, yet the reply sells {sold} the customer "
+                            f"never asked for and says nothing of the {post} — answer about the "
+                            f"post's {post}; an alternative is offered only after that, labelled "
+                            "as one"})
+    return out
+
+
 def gift_issues(answer: str, allow=()) -> list[dict]:
     """THE GIFT IS NEVER DISCLAIMED (owner, 2026-09-26: "stop saying we do not
     make shoes, hatuuzi viatu — that shoe is a gift"): under a campaign post a
@@ -846,7 +985,9 @@ def rule_findings(comment: str, answer: str, seen: list,
                   known_figures: set[float] | frozenset[float] = frozenset(), *,
                   tool_results: list | None = None, transcript: list | None = None,
                   known_text: str = "", fx: dict | None = None,
-                  currency: str = "USD", mode: str = "dm", allow=()) -> list[dict]:
+                  currency: str = "USD", mode: str = "dm", allow=(),
+                  post_product: str = "", post_caption: str = "",
+                  campaign: bool = False) -> list[dict]:
     """The deterministic findings on a draft, each with its weight:
     {"kind", "text", "hard"}. HARD findings — a figure from nowhere, the
     wrong item priced, a link no tool gave, an order status with no source —
@@ -905,6 +1046,8 @@ def rule_findings(comment: str, answer: str, seen: list,
     out.extend(colour_issues(comment, answer))
     out.extend(domain_issues(comment, answer, allow))
     out.extend(gift_issues(answer, allow))
+    out.extend(context_issues(comment, answer, seen, post_product=post_product,
+                              post_caption=post_caption, campaign=campaign))
     if mode != "comment":
         sent = cards_sent(tool_results)
         if _NO_PHOTOS_RE.search(answer or ""):
@@ -1030,7 +1173,8 @@ async def reviewer_verdict(comment: str, answer: str, seen: list, *,
                            post_product: str = "", currency: str = "USD",
                            redis=None, transcript: list | None = None,
                            tool_results: list | None = None,
-                           mode: str = "comment", allow=()) -> dict | None:
+                           mode: str = "comment", allow=(), post_caption: str = "",
+                           campaign: bool = False) -> dict | None:
     """One model line on the draft. None when the reviewer is off, the
     budget is stopped, or the model fails — the rules' verdict then stands."""
     if not settings.reply_review:
@@ -1066,6 +1210,12 @@ async def reviewer_verdict(comment: str, answer: str, seen: list, *,
         "jobs, livestock, cosmetics, medicine — we sell church vestments, communion "
         "ware and church supplies ONLY. A one-line polite decline PASSES; guessing "
         "such goods at a customer whose word you do not know FAILS.\n"
+        "8. CONTEXT MIXING — the reply brings in another post's product, another "
+        "customer's thread, or a campaign / giveaway / winner / 'selected recipient' "
+        "the enquiry is not about; or it sells a different kind of item than the "
+        "post's product when they asked for nothing else ('how can we get supply?' "
+        "under a stole post answered with communion trays). Their words refer to "
+        "the post's product unless they explicitly name another.\n"
         + ((f"THE GIFT — under this post, {', '.join(list(allow)[:4])} are the campaign's GIFT "
             "item: one selected recipient receives it free. They are NOT goods we sell and NOT "
             "goods to decline: a reply that speaks of them only as the gift PASSES; a reply "
@@ -1085,7 +1235,11 @@ async def reviewer_verdict(comment: str, answer: str, seen: list, *,
            "6. WRONG LANGUAGE — they wrote in Swahili and the reply is English, or the "
            "reverse (a mix is fine).\n" if mode != "comment" else "")
         + "PASS otherwise. Never fail for tone, warmth, length or emoji.\n\n"
-        + (f"The post is about: {post_product or 'unknown'}\n" if mode == "comment" else "")
+        + (f"The post is about: {post_product or (post_caption or '')[:200] or 'unknown'}\n"
+           if mode == "comment" else "")
+        + ("" if campaign or not (post_product or post_caption) else
+           "This post is NOT a campaign or giveaway: a product sold 'as a gift' is sold, never "
+           "given away.\n")
         + f"Hub rows the colleague looked up ({currency}):\n{rows_text(seen, currency)}\n"
         + (f"Other tool results this turn:\n{other}\n" if other else "")
         + (f"The conversation so far (last turns):\n{convo}\n" if convo else "")
@@ -1128,7 +1282,8 @@ async def review_reply(comment: str, answer: str, seen: list, *,
                        redis=None, transcript: list | None = None,
                        tool_results: list | None = None, mode: str = "comment",
                        known_text: str = "", fx: dict | None = None,
-                       model_review: bool = True, allow=()) -> dict:
+                       model_review: bool = True, allow=(),
+                       post_caption: str = "", campaign: bool = False) -> dict:
     """DOUBLE VERIFICATION of one draft: the rules (deterministic) AND the
     reviewer (a model's reading) both read it, and their findings merge —
     {"ok", "issues", "hard", "soft", "by"}. `hard` are the findings that may
@@ -1139,7 +1294,8 @@ async def review_reply(comment: str, answer: str, seen: list, *,
     findings = rule_findings(comment, answer, seen, set(known_figures or ()),
                              tool_results=tool_results, transcript=transcript,
                              known_text=known_text, fx=fx, currency=currency, mode=mode,
-                             allow=allow)
+                             allow=allow, post_product=post_product, post_caption=post_caption,
+                             campaign=campaign)
     hard = [f["text"] for f in findings if f["hard"]]
     soft = [f["text"] for f in findings if not f["hard"]]
     by = "rules" if findings else ""
@@ -1147,7 +1303,8 @@ async def review_reply(comment: str, answer: str, seen: list, *,
     if model_review:
         v = await reviewer_verdict(comment, answer, seen, post_product=post_product,
                                    currency=currency, redis=redis, transcript=transcript,
-                                   tool_results=tool_results, mode=mode, allow=allow)
+                                   tool_results=tool_results, mode=mode, allow=allow,
+                                   post_caption=post_caption, campaign=campaign)
     if v is not None and not v["ok"]:
         soft.extend(v["issues"] or ["the reviewer rejected the draft"])
         by = (by + "+reviewer").strip("+")
@@ -1178,7 +1335,8 @@ def review_notes(issues: list[str]) -> str:
 
 def rewrite_block(issues: list[str], draft: str, seen: list, currency: str,
                   tool_results: list | None, mode: str = "comment",
-                  fx: dict | None = None, comment: str = "", allow=()) -> str:
+                  fx: dict | None = None, comment: str = "", allow=(),
+                  post_product: str = "", campaign: bool = False) -> str:
     """The reviewer's message to the writer for the ONE rewrite: the reasons,
     the facts (every hub row in hand, every other tool result), the draft —
     and the instruction to write the corrected reply only, from these facts,
@@ -1219,6 +1377,9 @@ def rewrite_block(issues: list[str], draft: str, seen: list, currency: str,
         + ((f"THE GIFT — {', '.join(list(allow)[:3])} in this post is a GIFT to one selected "
             "recipient: never disclaimed (never 'we do not sell', never 'hatuuzi'), never priced, "
             "never sold — speak of it only as the gift and how to be considered; ") if allow else "")
+        + ((f"THE POST'S PRODUCT is {post_product}: their words refer to it unless they "
+            "explicitly name another — never another post's product, never a campaign "
+            "this post is not; ") if post_product and not campaign else "")
         + "keep the warmth and the closing question; write in their language.]"
     )
 

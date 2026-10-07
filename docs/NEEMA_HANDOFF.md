@@ -324,6 +324,40 @@ Last updated: 2026-07-09. Branch of record: work is fused to **`origin/main`**
   shape of something that happened: came, arrived, too small, didn't — all
   silent) is a misread: `_settle_reading` makes it high/other — a person to
   answer, never to apologise to. Tests: `tests/test_campaign_posts.py`.
+- **Anchored to the product** (owner, 2026-10-07: under the stole post "Looking
+  for a gift the pastor in your life will actually treasure? … Single sided:
+  $25, Double sided: $40", "We need it on the Plateau. How can we get supply?!"
+  was answered with the shoe giveaway's lines and a list of communion trays).
+  Cause: the campaign detector's "gifting pastors" marker matched "gift the
+  pastor"; briefed as a giveaway's host with no product, the writer searched
+  "supply" and sold trays. Now: a noun-phrase gift never counts; verb-form
+  gifting of clergy ("gifting pastors…") is a MEDIUM marker read only under a
+  caption that sells nothing (`_SELLS_RE` knows prices, 'order', 'deliver
+  worldwide'; a contact line is no sale); the strong markers (one selected recipient,
+  completely free, only pays shipping, giveaway, winner, draw, Swahili) stand.
+  The prompt carries the owner's six rules verbatim in spirit (ANCHORED TO THE
+  PRODUCT: identify from the post/caption/image/thread; verify against the
+  hub; keep contexts separate — "a gift for your pastor" is never a giveaway;
+  continuity; honest uncertainty, ONE focused question; the pre-send check;
+  the Plateau reference case; apologise briefly if an earlier reply mixed up
+  the product) and the comment addendum its ANCHORED TO THIS POST bullet.
+  The system passes the context: a public comment carries ITS post only
+  (never the person's first post; no post id → no post context); a DM drops a
+  campaign's framing when the person names another catalogue item; a trusted
+  post identity rides with its hub row and price in the turn's currency
+  (`_post_row_context`); a caption whose figures disagree with the hub row is
+  flagged for confirmation (`_caption_price_conflict` → the writer quotes
+  neither; `_flag_price_conflict` tells the team once a day per post). The
+  reviewer's `context_issues` HOLDS a reply that speaks of a giveaway / winner /
+  selected recipient when the post is no campaign, and reads KINDS with its
+  own vocabulary (`GOODS_KINDS`: the hub's head nouns, plurals, Swahili —
+  `row_kind`, `goods_kinds_in`; the post's kind is its product's, else the
+  caption's; the comment's "supply" is no kind): a reply that sells rows of
+  another kind and says nothing of the post's is held (hard); one that keeps
+  the post's kind and adds another is rewritten (soft); a comment naming
+  another kind stands the check down. The reviewer prompt has rule 8 CONTEXT
+  MIXING and the rewrite names THE POST'S PRODUCT. Tests:
+  `tests/test_context_anchoring.py`.
 - **The KES price is the truth** (owner, 2026-10-02: under a post of bishop's
   rings, "Are they consecrated? na ni pesa ngapi?" was answered "Hii ni Ring
   yetu… bei ni USD 20" — the Bishopric Ring is KES 4,500 / "45 USD", the plain
