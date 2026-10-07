@@ -322,6 +322,18 @@ def _public_comment_addendum(currency: str = "USD") -> str:
         "giving shipping details, or as the one clause 'we ship worldwide by "
         "DHL' in a first quote to someone nobody has placed — and then it "
         "reassures: Nairobi workshop, worldwide DHL delivery.\n"
+        "- ANCHORED TO THIS POST (owner, 2026-10-07): under a product post, 'this', "
+        "'it', 'price?', 'we need it', 'how can we get supply?' refer to THAT post's "
+        "product — the caption, the image and the hub row in your context — unless "
+        "they explicitly name another; an explicit change from them wins. Never "
+        "another post's product, another customer's thread, or a campaign this post "
+        "is not: 'a gift for your pastor' is a product sold as a gift — never a "
+        "giveaway, never a selection, never free. Answer their actual question about "
+        "THAT product first (supply → how we deliver there, by DHL from Nairobi, then "
+        "the quantity and the town); an alternative is labelled as one and never "
+        "substituted. If an earlier reply in this thread mixed up the product, "
+        "apologise in a few words, name the right item and answer the original "
+        "question.\n"
         "- CAMPAIGN / GIFTING POSTS (owner, 2026-09-26): a post that gifts an item to "
         "one selected person, runs a draw or a competition is HOSTED, not sold — the "
         "reading context gives you the campaign's facts and the shape of the reply. "
@@ -1205,7 +1217,8 @@ async def _gate_turn_reply(reply: str, *, user_text: str, transcript: list, tool
                            llm, sys_blocks, redis, db, key: str, post_product: str = "",
                            swahili: bool = False, fx: dict | None = None,
                            closer: bool = False, tools: list | None = None,
-                           greeting: bool = False, allow: tuple = ()) -> tuple[str, list[str], str]:
+                           greeting: bool = False, allow: tuple = (),
+                           post_caption: str = "", campaign: bool = False) -> tuple[str, list[str], str]:
     """DOUBLE VERIFICATION (owner, 2026-09-25: "change from gating to double
     verifying"). Every reply is read twice — by the rules and by the reviewer
     — and the reply that goes out is the best VERIFIED draft:
@@ -1244,7 +1257,8 @@ async def _gate_turn_reply(reply: str, *, user_text: str, transcript: list, tool
             user_text, text, seen, post_product=post_product, currency=currency,
             known_figures=known, redis=redis, transcript=transcript, tool_results=tool_log,
             mode=mode, known_text=known_text, fx=fx,
-            model_review=not (plain and _rv.plain_draft(text, seen)), allow=allow)
+            model_review=not (plain and _rv.plain_draft(text, seen)), allow=allow,
+            post_caption=post_caption, campaign=campaign)
 
     v1 = await _verdict(reply)
     if v1["ok"]:
@@ -1256,7 +1270,8 @@ async def _gate_turn_reply(reply: str, *, user_text: str, transcript: list, tool
     if any("asked for" in i for i in issues) or not seen:
         await _facts_for_ask(ctx, user_text, tool_log)
     block = _rv.rewrite_block(issues, reply, seen, currency, tool_log, mode=mode, fx=fx,
-                              comment=user_text, allow=allow)
+                              comment=user_text, allow=allow, post_product=post_product,
+                              campaign=campaign)
     second, v2 = "", None
     # The rewrite rides the loop's own cache: the SAME tools and the same
     # system blocks make its prefix the one the turn already wrote (tools →
@@ -1374,10 +1389,15 @@ async def run_turn(db: AsyncSession, redis, wa_id: str, user_text: str, llm: LLM
         user = None
         currency, loc, customer_name, source_post = await _meta_market(db, channel, key)
         if public_comment and comment_post_id:
-            # A public reply answers the comment under THIS post. The identity
-            # remembers the FIRST post a person ever commented on — under a
-            # later post it named the wrong product (cost audit, 2026-09-26).
+            # A public reply answers the comment under THIS post — never the
+            # FIRST post this person ever commented on (cost audit, 2026-09-26;
+            # owner, 2026-10-07: a stole post answered with another post's
+            # campaign).
             source_post = {"post_id": str(comment_post_id), "comment": ""}
+        elif public_comment:
+            # No post id → no post context at all: the identity's first post
+            # is NOT this post.
+            source_post = None
         # SWAHILI MEANS KENYA (owner rule), BY CONSTRUCTION (2026-10-02: "Are
         # they consecrated? na ni pesa ngapi?" under the ring post was quoted
         # in dollars): a Swahili message, or a Swahili price ask, that names
@@ -1693,6 +1713,8 @@ async def run_turn(db: AsyncSession, redis, wa_id: str, user_text: str, llm: LLM
     # check above (which only looks at the last message).
     lead_ctx: list[str] = []
     _gate_post_product = ""            # the post's product, for the gate's reviewer
+    _gate_post_caption = ""            # the post's caption, for the gate's context check
+    _campaign_post = False
     post_img = None
     if source_post:
         # The customer funnelled in from a specific post — their "How much?"
@@ -1716,7 +1738,12 @@ async def run_turn(db: AsyncSession, redis, wa_id: str, user_text: str, llm: LLM
         if source_post.get("comment"):
             line += f'; their comment there was: "{source_post["comment"]}"'
         _campaign_cap = post_caption(pctx)
-        _campaign_post = bool(_campaign_cap) and is_campaign_post(_campaign_cap)
+        _gate_post_caption = _campaign_cap
+        # A campaign's framing rides a DM only while the DM is about it: a
+        # person who names another product ("I want a stole") is a buyer of
+        # that product (owner, 2026-10-07: never import an unrelated campaign).
+        _campaign_post = bool(_campaign_cap) and is_campaign_post(_campaign_cap) and (
+            public_comment or not _mentions_catalogue_item(user_text or ""))
         # History wisdom: a caption-less video post identified once stays
         # identified — later replies price the SAME product, never a re-guess.
         # On the very first contact, the deterministic ladder (caption
@@ -1751,6 +1778,17 @@ async def run_turn(db: AsyncSession, redis, wa_id: str, user_text: str, llm: LLM
                              f"{_known['name']} — price THAT product; do not "
                              "re-identify it from the image")
                     line += _set_context(_known, _catalog)
+                    # The hub row rides along (owner, 2026-10-07: "pass the
+                    # parent post or caption and relevant catalogue data to the
+                    # agent"), and a caption whose figures disagree with the hub
+                    # is flagged for confirmation, never silently priced.
+                    _row = _post_row(_known, _catalog)
+                    line += _post_row_context(_row, currency)
+                    _conflict = _caption_price_conflict(_campaign_cap, _row, settings.usd_kes_rate or 100)
+                    if _conflict:
+                        line += _conflict
+                        await _flag_price_conflict(db, redis, channel, key,
+                                                   source_post.get("post_id") or "", _conflict)
                 else:
                     # A model's earlier read, or a record from before provenance:
                     # a lead, not a fact (owner, 2026-09-21). The image decides.
@@ -1942,6 +1980,7 @@ async def run_turn(db: AsyncSession, redis, wa_id: str, user_text: str, llm: LLM
                 public_comment=public_comment,
                 llm=llm, sys_blocks=sys_blocks, redis=redis, db=db, key=key,
                 post_product=_gate_post_product, swahili=looks_swahili(user_text or ""),
+                post_caption=_gate_post_caption, campaign=_campaign_post,
                 fx=_fx_rates, closer=is_closer(user_text or ""), tools=tools,
                 greeting=bool(_GREETING_RE.match((user_text or "").strip())),
                 allow=_campaign_allow)
@@ -3037,12 +3076,10 @@ _CAMPAIGN_RE = re.compile(
     r"win\s+(?:a|an|this|these|the|one|yourself|free)\b|winning\s+(?:entry|comment)|"
     r"lucky\s+(?:draw|winner|pastor|reverend|bishop|person|one|servant|man|woman|commenter|entrant)|"
     r"draw\s+(?:on|date|day)|stand\s+a\s+chance|"
-    # the owner's own words (2026-09-26): "gifting pastors, reverends, bishops
-    # a shoe… one person will get the shoe for free — the only cost is shipping"
-    r"(?:gift(?:ing)?|donat(?:e|ing))\s+(?:or\s+(?:gift(?:ing)?|donat(?:e|ing))\s+)?"
-    r"(?:a\s+|one\s+|our\s+|the\s+|to\s+)?"
-    r"(?:pastors?|reverends?|bishops?|priests?|ministers?|clergy|servants?|men\s+of\s+god|"
-    r"women\s+of\s+god|winners?)|"
+    # ("gifting pastors, reverends, bishops a shoe" — the owner's words of
+    # 2026-09-26 — is a MEDIUM marker below, read only under a caption that
+    # sells nothing: "a gift the pastor in your life will treasure… Single
+    # sided: $25" sells a stole as a gift and is no campaign; 2026-10-07)
     r"(?:get|gets|receive|receives|take|takes|have|has|walk\s+away\s+with)\s+(?:\w+\s+){0,4}?"
     r"(?:for\s+free|free\s+of\s+charge|at\s+no\s+cost)|"
     r"only\s+(?:cost|charge|fee|payment)\s+(?:is|will\s+be|being)\s+(?:for\s+)?(?:the\s+)?"
@@ -3074,6 +3111,8 @@ _CAMPAIGN_RE = re.compile(
 # a shop post with a slogan, and must still sell.
 _CAMPAIGN_SOFT_RE = re.compile(
     r"\b(campaigns?|"
+    r"(?:we\s+(?:are\s+|will\s+|shall\s+)?)?(?:gifting|donating|giving|blessing)\s+(?:one\s+|a\s+|our\s+)?"
+    r"(?:pastors?|reverends?|bishops?|priests?|ministers?|clergy|servants?|men\s+of\s+god|women\s+of\s+god)|"
     r"(?:giv(?:e|es|en|ing)|bless(?:ing)?)\s+(?:one|a)\s+(?:lucky\s+)?"
     r"(?:pastors?|reverends?|bishops?|priests?|ministers?|servants?|winners?|"
     r"man\s+of\s+god|woman\s+of\s+god))\b",
@@ -3083,8 +3122,9 @@ _NOT_CAMPAIGN_RE = re.compile(
     re.IGNORECASE)
 _SELLS_RE = re.compile(
     r"(?:%|percent)\s*off|discount|\boffer\b|\bsale\b|\border(?:ed|s|ing)?\b|"
-    r"\b(?:kes|ksh|usd)\s*\.?\s*\d|\$\s*\d|\bprice[sd]?\b|\bbei\b|\bagiza\b|"
-    r"comes?\s+with|in\s+stock|available\s+in|new\s+arrivals?|shop\s+now|buy\s+now",
+    r"\b(?:kes|ksh|usd)\s*\.?\s*\d|\$\s*\d|\d\s*(?:usd|kes|ksh)\b|\bprice[sd]?\b|\bbei\b|\bagiza\b|"
+    r"comes?\s+with|in\s+stock|available\s+in|new\s+arrivals?|shop\s+now|buy\s+now|"
+    r"dm\s+(?:us\s+)?to\s+order|deliver\s+worldwide|ordering\s+from",
     re.IGNORECASE)
 
 
@@ -4798,6 +4838,92 @@ def _set_context(known: dict, catalog: list) -> str:
     return (". It is a SET the hub prices as ONE row: give that one price for the whole "
             f"set{contents} — never one piece's price as the set's; if they ask about one "
             "piece, give that piece's own hub price and the set's total in the same reply")
+
+
+def _post_row(known: dict | None, catalog: list) -> dict:
+    """The hub row behind a recorded post identity — by slug, else by name."""
+    slug = str((known or {}).get("slug") or "").lower()
+    name = " ".join(str((known or {}).get("name") or "").lower().split())
+    for p in catalog or []:
+        if slug and str(p.get("slug") or "").lower() == slug:
+            return p
+    for p in catalog or []:
+        if name and " ".join(str(p.get("name") or "").lower().split()) == name:
+            return p
+    return {}
+
+
+def _post_row_context(row: dict | None, currency: str) -> str:
+    """The post's product as the hub holds it, in the turn's one currency —
+    the figure the writer may state without a blind search (owner,
+    2026-10-07: the system passes the relevant catalogue data to the agent).
+    A row whose sizes or colours are priced apart is searched instead."""
+    if not row or row.get("bundle") or row.get("components"):
+        return ""
+    from app.agent.review import variant_prices_differ, variants_of
+    if variants_of(row) and variant_prices_differ(row):
+        return (". Its sizes / colours are priced apart in the hub — search_catalog it "
+                "and quote the variant they pick, or the range")
+    kes = row.get("price") or row.get("price_kes")
+    usd = row.get("price_usd") or (row.get("prices") or {}).get("USD")
+    if (currency or "").upper() == "KES":
+        txt = money.fmt(kes, "KES") if kes else ""
+    else:
+        from app.services.price_audit import usd_quote
+        q = usd_quote(kes, usd, settings.usd_kes_rate or 100)
+        txt = money.fmt(money.exact(q, floor_cent=True), "USD") if q else ""
+    return f". Its hub row: {row.get('name')} — {txt}" if txt else ""
+
+
+_CAPTION_SEG_RE = re.compile(r"(?:[.!?;\n]|\s[—–|•]\s|[✨🌍💬🙏📦🚚]+)\s*")
+_FEE_SEG_RE = re.compile(r"\b(?:deliver(?:y|ies)?|shipping|courier|postage|fee|usafirishaji|dhl)\b",
+                         re.IGNORECASE)
+
+
+def _caption_price_conflict(caption: str, row: dict | None, rate) -> str:
+    """When the post's caption carries prices that the hub row does not —
+    none of the caption's figures is within 5% of the row's figure in that
+    currency — the writer is told to quote neither as settled (owner,
+    2026-10-07: "flag the discrepancy for confirmation instead of silently
+    choosing a price"). '' when they agree, or the caption has no price."""
+    if not row or not (caption or "").strip():
+        return ""
+    from app.agent.review import money_with_currency
+    from app.services.price_audit import usd_quote
+    # a delivery or shipping fee in the caption is no product price
+    figs = [f for seg in _CAPTION_SEG_RE.split(caption) if not _FEE_SEG_RE.search(seg)
+            for f in money_with_currency(seg)]
+    if not figs:
+        return ""
+    try:
+        kes = float(row.get("price") or row.get("price_kes") or 0) or None
+    except (TypeError, ValueError):
+        kes = None
+    usd = usd_quote(kes, row.get("price_usd") or (row.get("prices") or {}).get("USD"), rate)
+    own = {"KES": kes, "USD": usd}
+    for fam, v in figs:
+        o = own.get(fam)
+        if o and abs(float(v) - float(o)) <= 0.05 * float(o) + 1e-9:
+            return ""
+    said = ", ".join(f"{fam} {v:g}" for fam, v in figs[:4])
+    hub = " / ".join(x for x in ((f"KES {kes:g}" if kes else ""), (f"USD {usd:g}" if usd else "")) if x)
+    return (f". PRICE TO CONFIRM: the post's caption shows {said}, but the hub lists "
+            f"{row.get('name')} at {hub}. Quote neither as settled — say you will confirm "
+            "today's price with the team, take their details (quantity, town), and a "
+            "colleague is told")
+
+
+async def _flag_price_conflict(db, redis, channel: str, key: str, post_id: str, note: str) -> None:
+    """The team learns once a day per post that a caption and the hub disagree."""
+    try:
+        if redis is not None and post_id:
+            from datetime import datetime, timezone
+            k = f"postprice:conflict:{post_id}:{datetime.now(timezone.utc):%Y%m%d}"
+            if not await redis.set(k, "1", nx=True, ex=2 * 24 * 3600):
+                return
+        await _flag_guard(db, channel, key, "PRICE TO CONFIRM — " + note.strip(". ")[:700])
+    except Exception as exc:
+        _log.info("price conflict flag not written for %s/%s: %s", channel, key, exc)
 
 
 def _listed_items_context(caption: str, catalog: list) -> str:
