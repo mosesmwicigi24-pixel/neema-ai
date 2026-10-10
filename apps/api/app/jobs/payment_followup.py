@@ -25,6 +25,11 @@ Guardrails, because chasing money is the easiest way to annoy a good customer:
   · QUIET HOURS — nothing outside 08:00-20:00 Nairobi.
   · AI MODE ONLY — if a human took the conversation over, it's theirs.
   · ONCE PER ORDER — a redis guard keyed by the hub order id.
+  · ONE MESSAGE PER CUSTOMER PER RUN — a customer with two unpaid orders gets
+    ONE reminder listing both (number, amount, its own link), never two
+    messages back to back (preview, 2026-10-10: two reminders to one buyer).
+    Each order's guard is still claimed on its own, so neither is re-chased
+    early; an order already reminded simply drops out of the list.
 """
 from __future__ import annotations
 
@@ -171,10 +176,7 @@ def compose(order: OrderEvent, name: str | None = None) -> str:
     them, never a new one."""
     who = f" {name.split()[0]}" if name else ""
     num = f" {order.hub_order_number}" if order.hub_order_number else ""
-    cur = order.hub_currency or order.currency or "KES"
-    total = order.hub_total if order.hub_total is not None else order.subtotal
-    _n = money.num(total)
-    amount = f"{cur} {_n}" if _n else ""
+    amount = _amount(order)
     return (
         f"Hi{who} 🙏 Just checking in on your order{num}"
         + (f" ({amount})" if amount else "") + ".\n\n"
@@ -184,31 +186,92 @@ def compose(order: OrderEvent, name: str | None = None) -> str:
     )
 
 
+def _amount(order: OrderEvent) -> str:
+    cur = order.hub_currency or order.currency or "KES"
+    total = order.hub_total if order.hub_total is not None else order.subtotal
+    _n = money.num(total)
+    return f"{cur} {_n}" if _n else ""
+
+
+def compose_many(orders: list[OrderEvent], name: str | None = None) -> str:
+    """ONE reminder for all of a customer's unpaid orders. A single order reads
+    exactly as compose(); two or more are listed one line each — number,
+    amount, and that order's OWN link (the hub has no combined payment link,
+    so each order keeps the link we already gave them)."""
+    orders = [o for o in orders if o is not None]
+    if len(orders) <= 1:
+        return compose(orders[0], name) if orders else ""
+    who = f" {name.split()[0]}" if name else ""
+    lines = []
+    for o in orders:
+        num = o.hub_order_number or "your order"
+        amount = _amount(o)
+        lines.append(f"• {num}" + (f" ({amount})" if amount else "") + f": {customer_link(o)}")
+    return (
+        f"Hi{who} 🙏 Just checking in on your {len(orders)} orders.\n\n"
+        "Whenever you're ready, you can complete payment here:\n"
+        + "\n".join(lines) + "\n\n"
+        "Any trouble with a link — or anything you'd like to change — just tell me."
+    )
+
+
 def guard_key(row: dict) -> str:
     return f"payfollow:{row['order'].hub_order_id}"
 
 
-async def _handle(redis, row: dict, *, send: bool, write: bool = True) -> dict:
+def _customer_key(row: dict) -> tuple:
+    """Who this reminder reaches. The PERSON when known — one buyer on
+    WhatsApp and Messenger is one customer — else the thread's recipient."""
+    conv = row["conv"]
+    pid = getattr(conv, "person_id", None)
+    if pid is not None:
+        return ("person", str(pid))
+    return ("to", conv.channel or "whatsapp", str(row["to"]))
+
+
+def group_by_customer(rows: list[dict]) -> list[dict]:
+    """[{conv, to, orders}] — one entry per customer, in the order the first
+    (newest) of their orders appears; the reminder goes to that order's
+    thread."""
+    groups: dict[tuple, dict] = {}
+    for row in rows:
+        g = groups.setdefault(_customer_key(row),
+                              {"conv": row["conv"], "to": row["to"], "orders": []})
+        if all(o.hub_order_id != row["order"].hub_order_id for o in g["orders"]):
+            g["orders"].append(row["order"])
+    return list(groups.values())
+
+
+async def _handle(redis, group: dict, *, send: bool, write: bool = True) -> dict:
+    """One customer: ONE message covering every order of theirs still due a
+    reminder. The guard stays PER ORDER — a live send claims each order's
+    key, a dry run only reads it — and an order already reminded drops out."""
     from app.services import n8n_bridge as svc
     from app.services.meta_send import send_to_channel
     from app.models.user import User
 
-    order, conv, to = row["order"], row["conv"], row["to"]
+    conv, to = group["conv"], group["to"]
     is_wa = (conv.channel or "whatsapp") == "whatsapp"
-    res = {"channel": conv.channel, "to": to, "order": order.hub_order_number or order.hub_order_id,
-           "amount": str(order.hub_total or order.subtotal or ""),
-           "text": "", "sent": False, "skipped": None, "error": None}
-
-    if redis is not None:
-        try:
-            # A live send CLAIMS the guard; a dry run only reads it.
-            ok = (await redis.set(guard_key(row), "1", nx=True, ex=_GUARD_TTL) if send
-                  else not await redis.get(guard_key(row)))
-            if not ok:
-                res["skipped"] = "already reminded"
-                return res
-        except Exception:
-            pass
+    due: list[OrderEvent] = []
+    for order in group["orders"]:
+        if redis is not None:
+            try:
+                key = guard_key({"order": order})
+                ok = (await redis.set(key, "1", nx=True, ex=_GUARD_TTL) if send
+                      else not await redis.get(key))
+                if not ok:
+                    continue                       # this order was already reminded
+            except Exception as exc:
+                _log.warning("payment follow-up: guard unavailable for order %s (%s) — "
+                             "including it", order.hub_order_id, exc)
+        due.append(order)
+    res = {"channel": conv.channel, "to": to,
+           "order": ", ".join(str(o.hub_order_number or o.hub_order_id) for o in due),
+           "amount": ", ".join(str(o.hub_total or o.subtotal or "") for o in due),
+           "orders": len(due), "text": "", "sent": False, "skipped": None, "error": None}
+    if not due:
+        res["skipped"] = "already reminded"
+        return res
     if not write:
         return res
 
@@ -220,8 +283,8 @@ async def _handle(redis, row: dict, *, send: bool, write: bool = True) -> dict:
     except Exception:
         pass
 
-    text = compose(order, name)
-    res["text"] = text[:200]
+    text = compose_many(due, name)
+    res["text"] = text[:300]
     if not send:
         return res
 
@@ -250,11 +313,12 @@ async def run(send: bool, ignore_quiet_hours: bool = False, *, redis=None,
         redis = await _make_redis()
     async with AsyncSessionLocal() as db:
         rows = await find_unpaid(db, redis)
+    groups = group_by_customer(rows)
 
     mode = "LIVE SEND" if send else "DRY RUN (no messages sent)"
     _log.info("── payment follow-up · %s ───────────────────────────", mode)
-    _log.info("%d unpaid order(s) confirmed live with the hub (>%dh old, inside %dh, AI mode)",
-              len(rows), GRACE_HOURS, WINDOW_HOURS)
+    _log.info("%d unpaid order(s) for %d customer(s) confirmed live with the hub "
+              "(>%dh old, inside %dh, AI mode)", len(rows), len(groups), GRACE_HOURS, WINDOW_HOURS)
 
     if send and not ignore_quiet_hours and not within_quiet_hours():
         _log.warning("quiet hours (%02d:00-%02d:00 Nairobi) — nothing sent. "
@@ -263,9 +327,9 @@ async def run(send: bool, ignore_quiet_hours: bool = False, *, redis=None,
 
     sent = failed = skipped = 0
     samples: list[dict] = []
-    for row in rows:
+    for group in groups:
         write = send or max_drafts is None or len(samples) < max_drafts
-        r = await _handle(redis, row, send=send, write=write)
+        r = await _handle(redis, group, send=send, write=write)
         if r["text"] and len(samples) < 3:
             samples.append(sample(r["channel"], r["to"], r["text"]))
         if r["skipped"]:
@@ -282,15 +346,17 @@ async def run(send: bool, ignore_quiet_hours: bool = False, *, redis=None,
         _log.info("[%s] %-9s %s\n    order: %s (%s)\n    text : %s",
                   tag, r["channel"], anonymise(r["to"]), r["order"], r["amount"], r["text"])
 
-    _log.info("── done: %d order(s) · %d reminded · %d skipped · %d failed ──",
-              len(rows), sent, skipped, failed)
+    _log.info("── done: %d order(s) · %d customer(s) · %d reminded · %d skipped · %d failed ──",
+              len(rows), len(groups), sent, skipped, failed)
     if own_redis and redis is not None:
         try:
             await redis.aclose()
         except Exception:
             pass
-    return {"candidates": len(rows), "sent": sent, "skipped": skipped, "failed": failed,
-            "would_send": 0 if send else len(rows) - skipped - failed, "samples": samples}
+    # Candidates are CUSTOMERS (= messages), not orders: one reminder each.
+    return {"candidates": len(groups), "orders": len(rows), "sent": sent, "skipped": skipped,
+            "failed": failed, "would_send": 0 if send else len(groups) - skipped - failed,
+            "samples": samples}
 
 
 if __name__ == "__main__":
