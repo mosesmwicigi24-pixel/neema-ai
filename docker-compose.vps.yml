@@ -46,8 +46,10 @@ services:
             # GET /api/admin/recovery/preview — and switches a job on here.
             # Owner switched on 2026-10-10 after the live preview (3 good samples).
             RECOVERY_CART_ENABLED: "true"
-            RECOVERY_PAYMENT_ENABLED: "false"
-            RECOVERY_REENGAGE_ENABLED: "false"
+            RECOVERY_PAYMENT_ENABLED: "true"
+            # Owner, 2026-10-10: on, at most 15 check-ins a day to start.
+            RECOVERY_REENGAGE_ENABLED: "true"
+            RECOVERY_REENGAGE_DAILY_LIMIT: "15"
             RECOVERY_JOBS_DRY_RUN: "false"
             # Quote follow-ups stay OFF until the owner approves the samples.
             QUOTE_FOLLOW_UP_ENABLED: "true"
