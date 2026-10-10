@@ -168,7 +168,7 @@ def test_no_redis_means_no_run(off, monkeypatch):
 
 @pytest.fixture
 def world(fresh_db, monkeypatch, off):  # noqa: F811
-    """One abandoned cart, one customer waiting on a reply, one unpaid order —
+    """One abandoned cart, one customer gone quiet after a quote, one unpaid order —
     with every send path wired to fail the test if it is ever reached."""
     from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
     from sqlalchemy.pool import NullPool
@@ -197,18 +197,24 @@ def world(fresh_db, monkeypatch, off):  # noqa: F811
             db.add(User(wa_id=CART_WA, name="Grace Wanjiru", state={"agent_cart": {"items": [
                 {"name": "Aluminium Tray", "qty": 2, "unit_price": 7000}]}}))
             for wa, last in ((CART_WA, now - timedelta(hours=2)),
-                             (WAIT_WA, now - timedelta(minutes=30)),
+                             (WAIT_WA, now - timedelta(hours=4)),
                              (PAY_WA, now - timedelta(hours=3))):
                 cid = uuid.uuid4()
                 db.add(Conversation(id=cid, wa_id=wa, channel="whatsapp", external_id=wa,
                                     last_message_at=last))
                 await db.flush()
-                inbound = wa == WAIT_WA
+                if wa == WAIT_WA:
+                    # asked, was quoted, went quiet: a re-engage check-in candidate
+                    db.add(Message(id=uuid.uuid4(), conversation_id=cid, wa_id=wa,
+                                   external_id=wa, channel="whatsapp",
+                                   direction=MsgDirection.inbound, sender=MsgSender.user,
+                                   text="Do you have red stoles?",
+                                   created_at=last - timedelta(minutes=10)))
                 db.add(Message(id=uuid.uuid4(), conversation_id=cid, wa_id=wa, external_id=wa,
-                               channel="whatsapp",
-                               direction=MsgDirection.inbound if inbound else MsgDirection.outbound,
-                               sender=MsgSender.user if inbound else MsgSender.ai,
-                               text="Do you have red stoles?" if inbound else "Here you go 🙏",
+                               channel="whatsapp", direction=MsgDirection.outbound,
+                               sender=MsgSender.ai,
+                               text=("Yes 🙏 the Red Stole is KES 3,500. Would you like one?"
+                                     if wa == WAIT_WA else "Here you go 🙏"),
                                created_at=last))
             db.add(OrderEvent(id=f"{PAY_WA}_1", wa_id=PAY_WA, event_type="confirmed",
                               hub_order_id=501, hub_order_number="BH-501", hub_total=4500,
@@ -225,9 +231,11 @@ def world(fresh_db, monkeypatch, off):  # noqa: F811
         return "Hi Grace 🙏 your 2 Aluminium Trays are still saved — shall I place the order?"
     monkeypatch.setattr(cart_recovery, "_draft", cart_draft)
 
-    async def reply_draft(redis, conv, text, live=False):
-        return "Yes, we do have red stoles 🙏 Which length would you like?"
-    monkeypatch.setattr(reengage, "_draft", reply_draft)
+    async def checkin(system, user, redis=None):
+        return ('{"item": "Red Stole", "text": "Hello 🙏 just checking in on the Red Stole at '
+                'KES 3,500 — would you like me to set one aside for you?"}')
+    monkeypatch.setattr(reengage, "_compose_llm", checkin)
+    monkeypatch.setattr(reengage, "within_quiet_hours", lambda *a, **k: True)
     monkeypatch.setattr(cart_recovery, "within_quiet_hours", lambda *a, **k: True)
     monkeypatch.setattr(payment_followup, "within_quiet_hours", lambda *a, **k: True)
 
