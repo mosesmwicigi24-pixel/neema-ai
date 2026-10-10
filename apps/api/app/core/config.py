@@ -155,6 +155,14 @@ class Settings(BaseSettings):
     # 24h window. Rides the initiative queue above (sent only when
     # AGENT_INITIATIVE is on and the gate passes). False = plan none.
     quote_follow_up_enabled: bool = True
+    # Recovery sweeps on a daily Nairobi-hour timer (services/recovery_jobs.py).
+    # Each OFF until the owner has seen a sample (GET /api/admin/recovery/preview
+    # or `python -m app.services.recovery_jobs --preview`). DRY_RUN composes a
+    # few and sends nothing, still logging each run.
+    recovery_cart_enabled: bool = False
+    recovery_payment_enabled: bool = False
+    recovery_reengage_enabled: bool = False
+    recovery_jobs_dry_run: bool = False
     # Copilot mode (plan C): in human-held threads Neema briefs on handoff,
     # drafts every reply for one-tap send, keeps the CRM scribe running, and
     # pings when a quiet thread should come back to her. Default OFF.

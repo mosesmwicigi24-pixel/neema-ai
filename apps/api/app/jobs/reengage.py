@@ -6,8 +6,9 @@ reply is allowed — and that are in AI intercept mode (human-handled ones are
 skipped). For each, Neema generates a contextual reply to that last message
 using the normal agent loop and sends it on the conversation's native channel.
 
-Deliberately MANUAL and never on a timer — an outbound campaign must be an
-explicit human decision. Defaults to a dry run; pass --send to actually send:
+Manual by default; the daily timer (services/recovery_jobs.py) runs it only
+when RECOVERY_REENGAGE_ENABLED is switched on — an outbound campaign is an
+explicit owner decision. The CLI defaults to a dry run; pass --send to send:
 
     docker compose -f docker-compose.yml -f docker-compose.vps.yml \\
         exec -T api python -m app.jobs.reengage            # preview only
@@ -126,7 +127,12 @@ async def _draft(redis, conv: Conversation, text: str, *, live: bool = False) ->
                                       read_only=not live)
 
 
-async def _handle(redis, conv: Conversation, msg: Message, *, send: bool) -> dict:
+def guard_key(msg: Message) -> str:
+    return f"reengage:{msg.id}"
+
+
+async def _handle(redis, conv: Conversation, msg: Message, *, send: bool,
+                  write: bool = True) -> dict:
     from app.services import n8n_bridge as svc
     from app.services.meta_send import send_to_channel
 
@@ -154,15 +160,18 @@ async def _handle(redis, conv: Conversation, msg: Message, *, send: bool) -> dic
         except Exception:
             pass
 
-    # Double-send guard (only matters for a live send).
-    if send and redis is not None:
+    # Double-send guard: a live send CLAIMS it; a dry run only reads it.
+    if redis is not None:
         try:
-            ok = await redis.set(f"reengage:{msg.id}", "1", nx=True, ex=_GUARD_TTL)
+            ok = (await redis.set(guard_key(msg), "1", nx=True, ex=_GUARD_TTL) if send
+                  else not await redis.get(guard_key(msg)))
             if not ok:
                 res["skipped"] = "already re-engaged"
                 return res
         except Exception:
             pass                           # guard is best-effort; don't block the sweep
+    if not write:
+        return res
 
     try:
         reply = await _draft(redis, conv, text, live=send)
@@ -189,9 +198,13 @@ async def _handle(redis, conv: Conversation, msg: Message, *, send: bool) -> dic
     return res
 
 
-async def run(send: bool) -> dict:
-    logging.basicConfig(level=logging.INFO, format="%(message)s")
-    redis = await _make_redis()
+async def run(send: bool, *, redis=None, max_drafts: int | None = None) -> dict:
+    """One sweep. `redis` given → used and left open (the in-process timer);
+    `max_drafts` caps how many dry-run replies are composed (a preview)."""
+    from app.services.recovery_jobs import anonymise, sample
+    own_redis = redis is None
+    if own_redis:
+        redis = await _make_redis()
     async with AsyncSessionLocal() as db:
         waiting = await find_waiting(db)
 
@@ -201,8 +214,12 @@ async def run(send: bool) -> dict:
               len(waiting), WINDOW_HOURS)
 
     sent = failed = skipped = 0
+    samples: list[dict] = []
     for conv, msg in waiting:
-        r = await _handle(redis, conv, msg, send=send)
+        write = send or max_drafts is None or len(samples) < max_drafts
+        r = await _handle(redis, conv, msg, send=send, write=write)
+        if r["draft"] and len(samples) < 3:
+            samples.append(sample(r["channel"], r["to"], r["draft"]))
         if r["skipped"]:
             skipped += 1
             tag = f"SKIP ({r['skipped']})"
@@ -213,18 +230,19 @@ async def run(send: bool) -> dict:
             sent += 1
             tag = "SENT"
         else:
-            tag = "DRAFT"
+            tag = "DRAFT" if r["draft"] else "WOULD REPLY"
         _log.info("[%s] %-9s %s\n    last : %s\n    reply: %s",
-                  tag, r["channel"], r["to"], r["last_in"], r["draft"])
+                  tag, r["channel"], anonymise(r["to"]), r["last_in"], r["draft"])
 
     _log.info("── done: %d candidate(s) · %d sent · %d skipped · %d failed ──",
               len(waiting), sent, skipped, failed)
-    if redis is not None:
+    if own_redis and redis is not None:
         try:
             await redis.aclose()
         except Exception:
             pass
-    return {"candidates": len(waiting), "sent": sent, "skipped": skipped, "failed": failed}
+    return {"candidates": len(waiting), "sent": sent, "skipped": skipped, "failed": failed,
+            "would_send": 0 if send else len(waiting) - skipped - failed, "samples": samples}
 
 
 if __name__ == "__main__":
@@ -232,4 +250,5 @@ if __name__ == "__main__":
     ap.add_argument("--send", action="store_true",
                     help="actually send. Without this flag it only previews (dry run).")
     args = ap.parse_args()
+    logging.basicConfig(level=logging.INFO, format="%(message)s")
     asyncio.run(run(send=args.send))
