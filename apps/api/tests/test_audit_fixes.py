@@ -124,7 +124,9 @@ def test_dry_run_drafts_are_read_only():
     import inspect
     import app.jobs.reengage as re_job
     import app.jobs.cart_recovery as cr
-    assert "read_only=not live" in inspect.getsource(re_job._draft)
+    # re-engage composes with NO tools at all — it cannot act, preview or not
+    assert "tools=[])" in inspect.getsource(re_job._compose_llm)
+    assert "run_turn" not in inspect.getsource(re_job)
     assert "read_only=True" in inspect.getsource(cr._draft)
 
 

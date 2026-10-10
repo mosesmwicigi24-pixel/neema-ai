@@ -477,11 +477,12 @@ def test_reengage_leaves_a_paced_or_paused_thread_alone():
     msg = types.SimpleNamespace(id="m1", text="hmm so anyway", direction=None)
     r = _R()
     asyncio.run(cl.cool(r, "messenger", "P1"))
-    out = asyncio.run(rj._handle(r, conv, msg, send=False))
+    row = {"conv": conv, "to": "P1", "last_in": msg}
+    out = asyncio.run(rj._handle(r, row, send=False))
     assert out["skipped"] == "left alone (paced / paused)"
     r2 = _R()
     r2.store["agent:pause:messenger:P1"] = "1"
-    assert asyncio.run(rj._handle(r2, conv, msg, send=False))["skipped"] == "left alone (paced / paused)"
+    assert asyncio.run(rj._handle(r2, row, send=False))["skipped"] == "left alone (paced / paused)"
 
 
 def test_the_prompt_closes_when_they_ask_to_pay_and_serves_gift_buyers():
