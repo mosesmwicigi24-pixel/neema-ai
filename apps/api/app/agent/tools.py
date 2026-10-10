@@ -171,9 +171,9 @@ TOOLS: list[dict] = [
         "name": "update_cart",
         "description": "Add, set the quantity of, remove, or clear an item in the cart. "
                        "The product must exist in the catalogue (call search_catalog if unsure). "
-                       "`set` = the quantity the customer wants IN TOTAL — use it when they "
-                       "confirm or restate an item already in the cart. `add` = that many MORE "
-                       "on top of what is already there.",
+                       "`add` = put a NEW item in the cart; an `add` of an item already "
+                       "in it changes nothing. `set` = the quantity the customer wants IN "
+                       "TOTAL — use it to change the number of an item already in the cart.",
         "input_schema": {
             "type": "object",
             "properties": {
@@ -1114,7 +1114,6 @@ async def _update_cart(args: dict, ctx: ToolContext) -> dict:
     ident = hub_client.line_identity(line) if line else None
     same = ([i for i in items if hub_client.cart_line_identity(i, catalog) == ident]
             if ident is not None else [])
-    note = None
     if action == "remove":
         if line and line.get("product_id") is not None and line.get("variant_id") is None:
             # the base product takes every variant of it with it
@@ -1135,14 +1134,19 @@ async def _update_cart(args: dict, ctx: ToolContext) -> dict:
                 had += int(i.get("qty") or 0)
             except (TypeError, ValueError):
                 pass
-        new_qty = qty if action == "set" else had + qty
         if action == "add" and had:
-            # 243 of 839 adds in six weeks re-added an item already in the
-            # cart — usually the customer only confirming it again. Say what
-            # happened, so a doubled quantity is never silent.
-            note = (f"'{line['name']}' was already in the cart ×{had}; add put {qty} MORE on "
-                    f"top → now ×{new_qty}. If the customer did not ask for more, call "
-                    f"update_cart set with the quantity they want.")
+            # A REPEAT ADD CHANGES NOTHING (owner, 2026-10-10): since 2026-08-24
+            # the model re-added an item already in the cart 243 times in 97
+            # conversations — usually the customer only confirming it again —
+            # and every one doubled the total. The cart is left exactly as it
+            # was; a different number is a `set` with the TOTAL.
+            items, total = await _cart_display(cart, ctx)
+            return {"ok": True, "unchanged": True, "items": items, "total": total,
+                    "currency": ctx.currency,
+                    "note": (f"'{line['name']}' is already in the cart ×{had} — nothing was "
+                             f"added. If the customer wants a different number, call "
+                             f"update_cart set with the TOTAL quantity they want.")}
+        new_qty = qty      # set: the total; add: a line not yet in the cart
         cat = next((p for p in catalog if p.get("hub_product_id") == line["product_id"]), {})
         row = {
             "hub_product_id": line["product_id"],
@@ -1170,10 +1174,7 @@ async def _update_cart(args: dict, ctx: ToolContext) -> dict:
 
     cart = await cartmod.save_cart(ctx.db, ctx.wa_id, cart, ctx.channel)
     items, total = await _cart_display(cart, ctx)
-    out = {"ok": True, "items": items, "total": total, "currency": ctx.currency}
-    if note:
-        out["note"] = note
-    return out
+    return {"ok": True, "items": items, "total": total, "currency": ctx.currency}
 
 
 def _sourcing_gaps(cart_items: list, catalog: list) -> list[str]:
