@@ -2979,17 +2979,71 @@ async def calls_update_settings(
             change["voicemail"] = merged_vm
     if not change:
         raise HTTPException(status_code=400, detail="Nothing to change.")
+    sent = change
     try:
         await wa_calling.update_settings(change)
     except Exception as exc:
         info = wa_calling.classify_error(exc)
-        return _call_error(502, f"Couldn't save calling settings: {info['reason']}",
-                           info["code"], info["action"])
+        # Meta's "invalid parameter" (100) on a one-field change (owner,
+        # 2026-10-10: switching callback permission on was "rejected — try
+        # again"): Meta's own sample always sends the WHOLE calling object, so
+        # send it once that way — the current settings with this change on top,
+        # the holiday schedule re-sent so it is not deleted — before giving up.
+        retried = False
+        if info["code"] == "100" and "call_hours" not in change and "voicemail" not in change:
+            try:
+                current = await wa_calling.get_settings()
+                sent = _whole_calling(current, change)
+                retried = bool(sent)
+                if retried:
+                    await wa_calling.update_settings(sent)
+            except Exception as exc2:
+                info, exc, retried = wa_calling.classify_error(exc2), exc2, False
+        if not retried:
+            words = wa_calling.meta_message(exc)
+            return _call_error(502, "WhatsApp refused the calling settings: "
+                               + (words or info["reason"]), info["code"], info["action"],
+                               meta_message=words or None)
     try:
         fresh = _settings_view(await wa_calling.get_settings())
     except Exception:
         fresh = None
-    return {"ok": True, "sent": change, "settings": fresh}
+    return {"ok": True, "sent": sent, "settings": fresh}
+
+
+_WHOLE_VOICEMAIL_KEYS = ("status", "triggers", "timeout_seconds", "audio")
+
+
+def _whole_calling(current: dict, change: dict) -> dict:
+    """The calling object as Meta's sample sends it — status, the call button,
+    callback permission, call hours (holidays re-sent) and voicemail from the
+    current settings, with `change` on top. Read-only parts (restrictions)
+    and what is not ours (sip, audio codecs, call_icons) are left out. {}
+    when the current settings are empty (nothing to send whole)."""
+    current = current or {}
+    out: dict = {}
+    for key in _CALL_SETTING_ENUMS:
+        v = current.get(key)
+        if v:
+            out[key] = str(v).upper()
+    hours = current.get("call_hours")
+    if isinstance(hours, dict) and hours.get("weekly_operating_hours"):
+        merged = dict(hours)
+        if "status" in merged:
+            merged["status"] = str(merged["status"]).upper()
+        merged["holiday_schedule"] = _holidays(hours.get("holiday_schedule"))
+        out["call_hours"] = merged
+    vm = current.get("voicemail")
+    if isinstance(vm, dict) and vm.get("status"):
+        merged_vm = {k: vm[k] for k in _WHOLE_VOICEMAIL_KEYS if vm.get(k) is not None}
+        merged_vm["status"] = str(merged_vm["status"]).upper()
+        if merged_vm.get("triggers") is not None:
+            merged_vm["triggers"] = [str(t).upper() for t in merged_vm["triggers"]]
+        out["voicemail"] = merged_vm
+    if not out:
+        return {}
+    out.update(change)
+    return out
 
 
 @router.get("/calls/{call_id}/offer")

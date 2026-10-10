@@ -512,3 +512,28 @@ def classify_error(msg) -> dict:
 def friendly_error(msg) -> str:
     """The agent-facing reason a request failed, from Meta's error text."""
     return classify_error(msg)["reason"]
+
+
+def meta_message(exc) -> str:
+    """Meta's own words for a refusal — `error_user_msg` (written for people),
+    else `error.message` — or "" when the failure carried none. For an admin
+    changing settings these words are the fix ("(#100) Param calling[...]"),
+    where the call table's "try again" would hide it. Never a token: Meta's
+    error bodies carry none."""
+    body = getattr(exc, "body", None) or {}
+    err = body.get("error") if isinstance(body, dict) else None
+    if not isinstance(err, dict):
+        return ""
+    # Cloud API refusals carry the specific reason in error_data.details
+    # ("Overlapping schedule in call_hours is not allowed") beside the generic
+    # message ("(#100) Invalid parameter").
+    data = err.get("error_data") if isinstance(err.get("error_data"), dict) else {}
+    details = str(data.get("details") or "").strip()
+    for k in ("error_user_msg", "message"):
+        v = str(err.get(k) or "").strip()
+        if v:
+            if details and details not in v:
+                v = f"{v}: {details}"
+            sub = err.get("error_subcode")
+            return f"{v} (subcode {sub})" if sub and k == "message" else v
+    return details

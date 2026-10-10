@@ -22,6 +22,16 @@ clients (web + Android) implement, is `docs/CALLING_UX.md`. In short:
   moment the row exists; a `connect` for a call already logged never rings.
 - Recording (agent device) → self-hosted Whisper transcript → summary and
   structured insights on the call row, shown in the thread and the Calls view.
+- Calling settings (Settings → WhatsApp calling: callback permission, the call
+  button, voicemail, call hours) are Meta's `POST /<PNID>/settings {calling}`.
+  A save that Meta refuses shows Meta's own words (`error_user_msg` /
+  `message` + `error_data.details`, as `meta_message`), never the call
+  table's "try again"; a one-field change Meta calls invalid (100) is sent
+  once more as the WHOLE calling object — current status, call button,
+  callback permission, call hours with the holiday schedule re-sent, voicemail
+  — with the change on top (owner, 2026-10-10: switching callback permission
+  on was "rejected"). Callback permission ON is what lets a customer who
+  called us be called back for 7 days without a request.
 
 ## The good news from Meta's actual API
 The media path is **browser ↔ Meta directly** (WebRTC: ICE + DTLS + SRTP). Our
