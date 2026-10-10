@@ -39,10 +39,11 @@ SWEEP_PASSES = 10           # sweeper passes (each bounded to 20 threads)
 
 
 async def _clear_strikes(redis) -> int:
-    """Drop the outage's burnt 3-strike counters (and stale pacing locks) so
-    the sweeper judges each thread afresh, now that sends work again."""
+    """Drop the outage's burnt 3-strike counters (and stale pacing locks, and
+    the once-per-message escalation claims) so the sweeper judges each thread
+    afresh, now that sends work again."""
     n = 0
-    for pattern in ("agent:missed:tries:*", "agent:missed:lock:*"):
+    for pattern in ("agent:missed:tries:*", "agent:missed:lock:*", "agent:missed:escalated:*"):
         try:
             async for key in redis.scan_iter(match=pattern, count=200):
                 await redis.delete(key)

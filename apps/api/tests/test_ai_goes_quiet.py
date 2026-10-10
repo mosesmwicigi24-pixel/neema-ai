@@ -35,9 +35,11 @@ from app.services import auto_release
 # ── 1. a quiet human-held thread comes back to the AI ────────────────────────
 
 class _FakeDB:
-    """Serves the conversation list, then the 'last human touch' scalar."""
-    def __init__(self, convs, last_touch):
-        self._convs, self._last_touch = convs, last_touch
+    """Serves the conversation list, then the 'last human touch' scalar and the
+    newest-message row (None: no customer message waiting — the DB-backed
+    waiting-customer cases live in test_holds_reach_a_person_db.py)."""
+    def __init__(self, convs, last_touch, newest=None):
+        self._convs, self._last_touch, self._newest = convs, last_touch, newest
         self.added, self.committed = [], False
         self._call = 0
 
@@ -46,7 +48,8 @@ class _FakeDB:
         if self._call == 1:
             return types.SimpleNamespace(
                 scalars=lambda: types.SimpleNamespace(all=lambda: self._convs))
-        return types.SimpleNamespace(scalar_one_or_none=lambda: self._last_touch)
+        return types.SimpleNamespace(scalar_one_or_none=lambda: self._last_touch,
+                                     first=lambda: self._newest)
 
     def add(self, obj): self.added.append(obj)
     async def commit(self): self.committed = True
