@@ -102,16 +102,20 @@ const RESTRICTION_WORDS: Record<string, string> = {
 const box = "rounded-xl border px-3 py-3";
 const inputCls = "h-11 px-2.5 text-sm rounded-lg border border-stone-300 bg-white text-stone-800 focus:outline-none focus:ring-2 focus:ring-[#589b31]";
 
-/** An accessible switch: role=switch, visible On/Off, a 44px target. */
+/** An accessible switch: role=switch, visible On/Off, a 44px target. The knob
+ * is anchored with an explicit `left`: without one its static position follows
+ * the button's centred text (Chrome's `button { text-align: center }`), so the
+ * checked knob slid past the track and sat on the "O" of "On" (owner,
+ * 2026-10-11: every On switch read "n"). */
 function Switch({ checked, onChange, label, disabled }: { checked: boolean; onChange: (v: boolean) => void; label: string; disabled?: boolean }) {
     return (
         <button type="button" role="switch" aria-checked={checked} aria-label={label} disabled={disabled}
             onClick={() => onChange(!checked)}
             className="flex-shrink-0 flex items-center gap-2 rounded-full px-1 disabled:opacity-50" style={{ minHeight: 44 }}>
             <span className={`relative w-11 h-6 rounded-full transition-colors ${checked ? "bg-[#128C4B]" : "bg-stone-300"}`}>
-                <span className={`absolute top-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform ${checked ? "translate-x-5" : "translate-x-0.5"}`} />
+                <span className={`absolute left-0.5 top-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform ${checked ? "translate-x-5" : "translate-x-0"}`} />
             </span>
-            <span className="text-xs font-semibold w-6 text-left" style={{ color: checked ? "#128C4B" : "#57534e" }}>{checked ? "On" : "Off"}</span>
+            <span className="text-xs font-semibold w-6 text-left whitespace-nowrap" style={{ color: checked ? "#128C4B" : "#57534e" }}>{checked ? "On" : "Off"}</span>
         </button>
     );
 }
