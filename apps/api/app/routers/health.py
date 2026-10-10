@@ -105,4 +105,11 @@ async def health(request: Request):
                         "noted": g.get("noted", 0)}
     except Exception:
         pass
+    # RECOVERY SWEEPS (2026-10-10): which daily jobs are switched on and
+    # what their last runs did — counts only, never a handle or a message.
+    try:
+        from app.services.recovery_jobs import health_view as _recovery_view
+        out["recovery_jobs"] = await _recovery_view(getattr(request.app.state, "redis", None))
+    except Exception:
+        pass
     return out

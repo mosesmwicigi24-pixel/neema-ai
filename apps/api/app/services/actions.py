@@ -20,6 +20,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import select, func as sa_func
@@ -31,6 +32,25 @@ _log = logging.getLogger("neema.actions")
 LEADER_KEY = "agentactions:leader"
 SENSITIVE_TOTAL_KES = 50_000
 MAX_AUTO_NUDGES = 2
+
+# WHY an action waits for a human (2026-10-10: 133 follow_up + 93
+# replenishment rows sat in needs_approval and nothing said why — the gate's
+# answer went only into a passing notification). Stored on the row itself, at
+# the end of `reason`, as one marker: no migration, and every surface that
+# already shows `reason` (web, Android) shows it. The list endpoint also
+# returns it on its own as `approval_reason`.
+_HOLD_RE = re.compile(r"\s*\[needs approval: [^\]]*\]")
+
+
+def with_hold_reason(reason: str | None, why: str) -> str:
+    """`reason` with ONE needs-approval marker — any older one replaced."""
+    base = _HOLD_RE.sub("", reason or "").rstrip()
+    return f"{base} [needs approval: {why}]".strip()
+
+
+def hold_reason(reason: str | None) -> str | None:
+    found = re.findall(r"\[needs approval: ([^\]]*)\]", reason or "")
+    return found[-1] if found else None
 
 
 async def upsert_follow_up(db, deal, *, due_at: datetime, kind: str,
@@ -46,6 +66,10 @@ async def upsert_follow_up(db, deal, *, due_at: datetime, kind: str,
         db.add(AgentAction(deal_id=deal.id, conversation_id=deal.conversation_id,
                            due_at=due_at, kind=kind, reason=reason[:500]))
     else:
+        # A quote follow-up's draft is the quote's own text — never carried
+        # into the promise follow-up that replaces it.
+        if row.kind == "quote_follow_up":
+            row.draft = None
         row.due_at = due_at
         row.kind = kind
         row.reason = reason[:500]
@@ -149,8 +173,13 @@ def _norm(s: str) -> str:
     return " ".join((s or "").lower().split())
 
 
-async def _repeats_earlier(db, conv, text: str, *, look_back: int = 6) -> bool:
+async def _repeats_earlier(db, conv, text: str, *, look_back: int = 6,
+                           exact_only: bool = False) -> bool:
     """True when this follow-up is essentially something we already said.
+
+    `exact_only`: a quote follow-up restates the quote BY DESIGN (the item and
+    its figure, then the question), so only a word-for-word repeat — the same
+    nudge already sent — counts for it.
 
     A promise like "let me check on that for you" is exactly the phrasing the
     composer is most likely to echo — and re-sending the stall hours later is
@@ -176,6 +205,8 @@ async def _repeats_earlier(db, conv, text: str, *, look_back: int = 6) -> bool:
             continue
         if p == t:
             return True
+        if exact_only:
+            continue
         pw = set(p.split())
         if not pw or not tw:
             continue
@@ -254,13 +285,16 @@ async def claim(db, action, from_statuses, to_status: str = "sending") -> bool:
     return won
 
 
-async def finish(db, action, status: str, draft: str | None = None) -> None:
+async def finish(db, action, status: str, draft: str | None = None,
+                 reason: str | None = None) -> None:
     """Settle a claimed action (sent / failed / back to where it was)."""
     from sqlalchemy import update
     from app.models.agent_action import AgentAction
     values = {"status": status}
     if draft is not None:
         values["draft"] = draft
+    if reason is not None:
+        values["reason"] = reason
     await db.execute(update(AgentAction).where(AgentAction.id == action.id)
                      .values(**values).execution_options(synchronize_session=False))
     await db.commit()
@@ -290,7 +324,8 @@ async def _recover_interrupted(db, now: datetime) -> int:
                    AgentAction.updated_at < now - timedelta(minutes=10))
             .values(status="needs_approval",
                     reason=sa_func.concat(sa_func.coalesce(AgentAction.reason, ""),
-                                          " [send interrupted — check the thread before sending]"))
+                                          " [needs approval: send interrupted — check "
+                                          "the thread before sending]"))
             .execution_options(synchronize_session=False))
         await db.commit()
         return res.rowcount or 0
@@ -308,6 +343,7 @@ async def process_due(db, redis, *, now: datetime | None = None, limit: int = 10
     from app.models.agent_action import AgentAction
     from app.models.conversation import Conversation
     from app.models.deal import Deal
+    from app.services import quote_followup
     from app.services.hub_events import _within_window, is_quiet_hours
 
     now = now or datetime.now(timezone.utc)
@@ -356,8 +392,8 @@ async def process_due(db, redis, *, now: datetime | None = None, limit: int = 10
                     tries = 0
             if tries > 3:
                 action.status = "needs_approval"
-                action.reason = ((action.reason or "")
-                                 + " [auto-send failed 3× — needs a human]")
+                action.reason = with_hold_reason(action.reason,
+                                                 "auto-send failed 3× — needs a human")
                 await db.commit()
                 _log.warning("planned action %s parked after 3 failed attempts",
                              action.id)
@@ -366,6 +402,19 @@ async def process_due(db, redis, *, now: datetime | None = None, limit: int = 10
                 continue
 
             in_window = await _within_window(db, conv)
+            # A quote follow-up is a nudge on a fresh quote, not a commitment:
+            # once the customer has spoken, ordered, gone to a human or the
+            # window has shut, it is withdrawn — never parked for a tap.
+            is_quote = getattr(action, "kind", None) == quote_followup.QUOTE_KIND
+            if is_quote:
+                stale = await quote_followup.stale_reason(db, conv, action,
+                                                          in_window=in_window, now=now)
+                if stale:
+                    if await claim(db, action, ("planned",), "vetoed"):
+                        await finish(db, action, "vetoed",
+                                     reason=f"{action.reason or ''} [{stale}]")
+                        _log.info("quote follow-up %s withdrawn: %s", action.id, stale)
+                    continue
             gate = await needs_approval(db, deal, conv, in_window)
             # Fit-checks (~6 days after delivery) and customer-agreed
             # replenishment check-ins ("check with me in two weeks") come due
@@ -387,15 +436,19 @@ async def process_due(db, redis, *, now: datetime | None = None, limit: int = 10
                 await finish(db, action, "planned")
             if gate is not None:
                 draft = ""
-                try:
-                    draft = await _compose_follow_up(db, redis, conv, action.reason or "follow up")
-                except Exception:
-                    pass
+                if is_quote:
+                    draft = action.draft or ""   # composed from the quote — kept as is
+                else:
+                    try:
+                        draft = await _compose_follow_up(db, redis, conv,
+                                                         action.reason or "follow up")
+                    except Exception as exc:
+                        _log.info("draft for held action %s not composed: %s", action.id, exc)
                 # Conditional: a veto made while composing stands.
                 if not await claim(db, action, ("planned",), "needs_approval"):
                     continue
-                if draft:
-                    await finish(db, action, "needs_approval", draft=draft)
+                await finish(db, action, "needs_approval", draft=(draft or None),
+                             reason=with_hold_reason(action.reason, gate))
                 await _notify(redis, "⏳ Follow-up needs your approval",
                               f"{gate} — draft ready: {(draft or '')[:80]}", conv)
                 continue
@@ -404,17 +457,24 @@ async def process_due(db, redis, *, now: datetime | None = None, limit: int = 10
                 # Flag off: leave it planned, visible — the trust-building mode.
                 continue
 
-            text = await _compose_follow_up(db, redis, conv, action.reason or "follow up")
+            # A quote follow-up sends the text composed from the quote itself —
+            # its figures can't drift; everything else is composed now.
+            text = ((action.draft or "").strip() if is_quote else
+                    await _compose_follow_up(db, redis, conv, action.reason or "follow up"))
             if not text:
                 action.status = "failed"
                 await db.commit()
                 continue
             # Never nudge someone with a message they've already had. If the
             # composer only managed to echo an earlier line, a human rewords it.
-            if await _repeats_earlier(db, conv, text):
+            repeats = (await _repeats_earlier(db, conv, text, exact_only=True) if is_quote
+                       else await _repeats_earlier(db, conv, text))
+            if repeats:
                 if not await claim(db, action, ("planned",), "needs_approval"):
                     continue
-                await finish(db, action, "needs_approval", draft=text)
+                await finish(db, action, "needs_approval", draft=text,
+                             reason=with_hold_reason(
+                                 action.reason, "draft repeats an earlier message — reword it"))
                 _log.info("planned action %s held — draft repeats an earlier message",
                           action.id)
                 await _notify(redis, "⏳ Follow-up needs a reword",

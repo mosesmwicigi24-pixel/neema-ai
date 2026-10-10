@@ -5,8 +5,9 @@ the customer already said yes. When the payment doesn't land, today nothing
 happens at all. This sweep finds those orders and sends ONE gentle reminder with
 the same payment link.
 
-Deliberately MANUAL and never on a timer — an outbound campaign must be an
-explicit human decision. Defaults to a dry run; pass --send to actually send:
+Manual by default; the daily timer (services/recovery_jobs.py) runs it only
+when RECOVERY_PAYMENT_ENABLED is switched on — an outbound campaign is an
+explicit owner decision. The CLI defaults to a dry run; pass --send to send:
 
     docker compose -f docker-compose.yml -f docker-compose.vps.yml \\
         exec -T api python -m app.jobs.payment_followup            # preview only
@@ -183,7 +184,11 @@ def compose(order: OrderEvent, name: str | None = None) -> str:
     )
 
 
-async def _handle(redis, row: dict, *, send: bool) -> dict:
+def guard_key(row: dict) -> str:
+    return f"payfollow:{row['order'].hub_order_id}"
+
+
+async def _handle(redis, row: dict, *, send: bool, write: bool = True) -> dict:
     from app.services import n8n_bridge as svc
     from app.services.meta_send import send_to_channel
     from app.models.user import User
@@ -194,15 +199,18 @@ async def _handle(redis, row: dict, *, send: bool) -> dict:
            "amount": str(order.hub_total or order.subtotal or ""),
            "text": "", "sent": False, "skipped": None, "error": None}
 
-    if send and redis is not None:
+    if redis is not None:
         try:
-            ok = await redis.set(f"payfollow:{order.hub_order_id}", "1",
-                                 nx=True, ex=_GUARD_TTL)
+            # A live send CLAIMS the guard; a dry run only reads it.
+            ok = (await redis.set(guard_key(row), "1", nx=True, ex=_GUARD_TTL) if send
+                  else not await redis.get(guard_key(row)))
             if not ok:
                 res["skipped"] = "already reminded"
                 return res
         except Exception:
             pass
+    if not write:
+        return res
 
     name = None
     try:
@@ -232,9 +240,14 @@ async def _handle(redis, row: dict, *, send: bool) -> dict:
     return res
 
 
-async def run(send: bool, ignore_quiet_hours: bool = False) -> dict:
-    logging.basicConfig(level=logging.INFO, format="%(message)s")
-    redis = await _make_redis()
+async def run(send: bool, ignore_quiet_hours: bool = False, *, redis=None,
+              max_drafts: int | None = None) -> dict:
+    """One sweep. `redis` given → used and left open (the in-process timer);
+    `max_drafts` caps how many dry-run reminders are composed (a preview)."""
+    from app.services.recovery_jobs import anonymise, sample
+    own_redis = redis is None
+    if own_redis:
+        redis = await _make_redis()
     async with AsyncSessionLocal() as db:
         rows = await find_unpaid(db, redis)
 
@@ -249,8 +262,12 @@ async def run(send: bool, ignore_quiet_hours: bool = False) -> dict:
         send = False
 
     sent = failed = skipped = 0
+    samples: list[dict] = []
     for row in rows:
-        r = await _handle(redis, row, send=send)
+        write = send or max_drafts is None or len(samples) < max_drafts
+        r = await _handle(redis, row, send=send, write=write)
+        if r["text"] and len(samples) < 3:
+            samples.append(sample(r["channel"], r["to"], r["text"]))
         if r["skipped"]:
             skipped += 1
             tag = f"SKIP ({r['skipped']})"
@@ -261,18 +278,19 @@ async def run(send: bool, ignore_quiet_hours: bool = False) -> dict:
             sent += 1
             tag = "SENT"
         else:
-            tag = "DRAFT"
+            tag = "DRAFT" if r["text"] else "WOULD REMIND"
         _log.info("[%s] %-9s %s\n    order: %s (%s)\n    text : %s",
-                  tag, r["channel"], r["to"], r["order"], r["amount"], r["text"])
+                  tag, r["channel"], anonymise(r["to"]), r["order"], r["amount"], r["text"])
 
     _log.info("── done: %d order(s) · %d reminded · %d skipped · %d failed ──",
               len(rows), sent, skipped, failed)
-    if redis is not None:
+    if own_redis and redis is not None:
         try:
             await redis.aclose()
         except Exception:
             pass
-    return {"candidates": len(rows), "sent": sent, "skipped": skipped, "failed": failed}
+    return {"candidates": len(rows), "sent": sent, "skipped": skipped, "failed": failed,
+            "would_send": 0 if send else len(rows) - skipped - failed, "samples": samples}
 
 
 if __name__ == "__main__":
@@ -283,4 +301,5 @@ if __name__ == "__main__":
     ap.add_argument("--ignore-quiet-hours", action="store_true",
                     help="send even outside 08:00-20:00 Nairobi time.")
     args = ap.parse_args()
+    logging.basicConfig(level=logging.INFO, format="%(message)s")
     asyncio.run(run(send=args.send, ignore_quiet_hours=args.ignore_quiet_hours))

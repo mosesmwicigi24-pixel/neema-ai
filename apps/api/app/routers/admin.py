@@ -3856,3 +3856,21 @@ async def client_crash_list(
         "agent_name": r.agent_name, "summary": r.summary, "trace": r.trace, "thread": r.thread,
         "app_version": r.app_version, "build": r.build, "device": r.device, "sdk": r.sdk,
     } for r in rows]
+
+
+@router.get("/recovery/preview")
+async def recovery_preview(
+    request: Request,
+    job: str | None = None,
+    agent: Agent = Depends(requires("manage_settings")),
+):
+    """What the daily recovery sweeps would send if they ran now — counts and
+    up to 3 sample messages per job (handles masked). Sends nothing and claims
+    no guard; composes at most 3 messages per job. The owner reads this before
+    switching a job on (RECOVERY_*_ENABLED)."""
+    from app.services import recovery_jobs
+    if job is not None and job not in recovery_jobs.JOBS:
+        raise HTTPException(status_code=422, detail=f"Unknown job — one of {sorted(recovery_jobs.JOBS)}")
+    redis = getattr(request.app.state, "redis", None)
+    return {"jobs": await recovery_jobs.preview(redis, [job] if job else None),
+            "history": await recovery_jobs.health_view(redis)}

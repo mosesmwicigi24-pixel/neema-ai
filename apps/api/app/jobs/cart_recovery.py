@@ -5,8 +5,9 @@ during the conversation (hub product ids, variant SKUs, hub prices) — and when
 customer goes quiet before confirming, that cart just sits there. This sweep finds
 those carts and sends ONE warm, specific nudge naming what they picked.
 
-Deliberately MANUAL and never on a timer — an outbound campaign must be an
-explicit human decision. Defaults to a dry run; pass --send to actually send:
+Manual by default; the daily timer (services/recovery_jobs.py) runs it only
+when RECOVERY_CART_ENABLED is switched on — an outbound campaign is an
+explicit owner decision. The CLI defaults to a dry run; pass --send to send:
 
     docker compose -f docker-compose.yml -f docker-compose.vps.yml \\
         exec -T api python -m app.jobs.cart_recovery            # preview only
@@ -176,7 +177,12 @@ async def _draft(redis, conv: Conversation, to: str, items: list) -> str:
                                       external_id=to, read_only=True)
 
 
-async def _handle(redis, row: dict, *, send: bool) -> dict:
+def guard_key(row: dict) -> str:
+    owner = row.get("owner") or str(row["conv"].id)
+    return f"cartnudge:{owner}:{cart_fingerprint(row['items'])}"
+
+
+async def _handle(redis, row: dict, *, send: bool, write: bool = True) -> dict:
     from app.services import n8n_bridge as svc
     from app.services.meta_send import send_to_channel
 
@@ -186,16 +192,19 @@ async def _handle(redis, row: dict, *, send: bool) -> dict:
            "total": row["total"], "draft": "", "sent": False,
            "skipped": None, "error": None}
 
-    fp = cart_fingerprint(items)
-    if send and redis is not None:
+    if redis is not None:
         try:
-            owner = row.get("owner") or str(conv.id)
-            ok = await redis.set(f"cartnudge:{owner}:{fp}", "1", nx=True, ex=_GUARD_TTL)
+            # A live send CLAIMS the guard; a dry run only reads it, so its
+            # counts say what a real run would skip.
+            ok = (await redis.set(guard_key(row), "1", nx=True, ex=_GUARD_TTL) if send
+                  else not await redis.get(guard_key(row)))
             if not ok:
                 res["skipped"] = "already nudged for this cart"
                 return res
         except Exception:
             pass
+    if not write:
+        return res
 
     try:
         reply = await _draft(redis, conv, to, items)
@@ -222,9 +231,14 @@ async def _handle(redis, row: dict, *, send: bool) -> dict:
     return res
 
 
-async def run(send: bool, ignore_quiet_hours: bool = False) -> dict:
-    logging.basicConfig(level=logging.INFO, format="%(message)s")
-    redis = await _make_redis()
+async def run(send: bool, ignore_quiet_hours: bool = False, *, redis=None,
+              max_drafts: int | None = None) -> dict:
+    """One sweep. `redis` given → used and left open (the in-process timer);
+    `max_drafts` caps how many dry-run nudges are composed (a preview)."""
+    from app.services.recovery_jobs import anonymise, sample
+    own_redis = redis is None
+    if own_redis:
+        redis = await _make_redis()
     async with AsyncSessionLocal() as db:
         rows = await find_abandoned(db)
 
@@ -239,8 +253,12 @@ async def run(send: bool, ignore_quiet_hours: bool = False) -> dict:
         send = False
 
     sent = failed = skipped = 0
+    samples: list[dict] = []
     for row in rows:
-        r = await _handle(redis, row, send=send)
+        write = send or max_drafts is None or len(samples) < max_drafts
+        r = await _handle(redis, row, send=send, write=write)
+        if r["draft"] and len(samples) < 3:
+            samples.append(sample(r["channel"], r["to"], r["draft"]))
         if r["skipped"]:
             skipped += 1
             tag = f"SKIP ({r['skipped']})"
@@ -251,18 +269,19 @@ async def run(send: bool, ignore_quiet_hours: bool = False) -> dict:
             sent += 1
             tag = "SENT"
         else:
-            tag = "DRAFT"
+            tag = "DRAFT" if r["draft"] else "WOULD NUDGE"
         _log.info("[%s] %-9s %s\n    cart : %s (total %s)\n    nudge: %s",
-                  tag, r["channel"], r["to"], r["cart"], r["total"], r["draft"])
+                  tag, r["channel"], anonymise(r["to"]), r["cart"], r["total"], r["draft"])
 
     _log.info("── done: %d cart(s) · %d sent · %d skipped · %d failed ──",
               len(rows), sent, skipped, failed)
-    if redis is not None:
+    if own_redis and redis is not None:
         try:
             await redis.aclose()
         except Exception:
             pass
-    return {"candidates": len(rows), "sent": sent, "skipped": skipped, "failed": failed}
+    return {"candidates": len(rows), "sent": sent, "skipped": skipped, "failed": failed,
+            "would_send": 0 if send else len(rows) - skipped - failed, "samples": samples}
 
 
 if __name__ == "__main__":
@@ -273,4 +292,5 @@ if __name__ == "__main__":
     ap.add_argument("--ignore-quiet-hours", action="store_true",
                     help="send even outside 08:00-20:00 Nairobi time.")
     args = ap.parse_args()
+    logging.basicConfig(level=logging.INFO, format="%(message)s")
     asyncio.run(run(send=args.send, ignore_quiet_hours=args.ignore_quiet_hours))

@@ -150,6 +150,20 @@ class Settings(BaseSettings):
     # When ON, due planned actions AUTO-SEND (gate permitting). OFF (default):
     # the queue fills visibly but nothing fires — trust-building mode.
     agent_initiative: bool = False
+    # Quote → follow-up (services/quote_followup.py): when Neema's reply priced
+    # a stock item and the customer goes quiet, plan ONE follow-up inside the
+    # 24h window. Rides the initiative queue above (sent only when
+    # AGENT_INITIATIVE is on and the gate passes). False = plan none.
+    # OFF until the owner has seen sample follow-ups (2026-10-10).
+    quote_follow_up_enabled: bool = False
+    # Recovery sweeps on a daily Nairobi-hour timer (services/recovery_jobs.py).
+    # Each OFF until the owner has seen a sample (GET /api/admin/recovery/preview
+    # or `python -m app.services.recovery_jobs --preview`). DRY_RUN composes a
+    # few and sends nothing, still logging each run.
+    recovery_cart_enabled: bool = False
+    recovery_payment_enabled: bool = False
+    recovery_reengage_enabled: bool = False
+    recovery_jobs_dry_run: bool = False
     # Copilot mode (plan C): in human-held threads Neema briefs on handoff,
     # drafts every reply for one-tap send, keeps the CRM scribe running, and
     # pings when a quiet thread should come back to her. Default OFF.

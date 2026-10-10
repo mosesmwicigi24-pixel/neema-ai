@@ -41,6 +41,15 @@ services:
             WHISPER_PROVIDER: "openai"
             TRANSCRIBE_MODEL: "gpt-4o-transcribe"
             TRANSCRIBE_DAILY_CAP_USD: "3"
+            # Recovery sweeps on a daily timer (services/recovery_jobs.py,
+            # 2026-10-10): OFF until the owner has read a sample —
+            # GET /api/admin/recovery/preview — and switches a job on here.
+            RECOVERY_CART_ENABLED: "false"
+            RECOVERY_PAYMENT_ENABLED: "false"
+            RECOVERY_REENGAGE_ENABLED: "false"
+            RECOVERY_JOBS_DRY_RUN: "false"
+            # Quote follow-ups stay OFF until the owner approves the samples.
+            QUOTE_FOLLOW_UP_ENABLED: "false"
 
     web:
         image: ghcr.io/mosesmwicigi24-pixel/neema-ai-web:${IMAGE_TAG:-latest}

@@ -258,7 +258,7 @@ async def lifespan(app: FastAPI):
                   "neema.meta", "neema.startup", "neema.hubevents",
                   "neema.deals", "neema.actions", "neema.copilot",
                   "neema.selfqa", "neema.settings", "neema.video",
-                  "neema.selfcheck", "neema.identity"):
+                  "neema.selfcheck", "neema.identity", "neema.recovery"):
         _lg = logging.getLogger(_name)
         _lg.setLevel(logging.INFO)
         _lg.addHandler(_h)
@@ -430,6 +430,12 @@ async def lifespan(app: FastAPI):
     from app.services import actions as _actions
     app.state._actions_task = _asyncio.create_task(
         _actions.actions_loop(app.state.redis))
+
+    # Recovery sweeps (cart / payment / re-engage) once a day each at a
+    # Nairobi working hour — leader-locked, and inert unless the owner has
+    # switched a job on (RECOVERY_*_ENABLED, all OFF by default).
+    from app.services import recovery_jobs as _recovery
+    app.state._recovery_task = _asyncio.create_task(_recovery.loop(app.state.redis))
 
     yield
 

@@ -162,6 +162,8 @@ export interface ApiAction {
     draft: string | null;
     status: string;
     created_by: string;
+    /** Why a needs_approval action waits for a human (null when not stored). */
+    approval_reason?: string | null;
 }
 export const dealsApi = {
     list: (status = "open") => get<{ deals: ApiDeal[] }>(`/admin/deals?status=${status}`),
