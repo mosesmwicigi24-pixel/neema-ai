@@ -15,6 +15,7 @@ the reply it sends becomes the new latest message so the next tick skips it.
 """
 from __future__ import annotations
 
+import json
 import logging
 from datetime import datetime, timedelta, timezone
 
@@ -225,6 +226,25 @@ async def _unclaim_escalation(redis, msg_id) -> None:
                      "(%s) — it will not be re-flagged until the claim expires", msg_id, exc)
 
 
+async def _ring_team(redis, conv, ext: str, said: str | None, channel: str) -> None:
+    """The team HEARS of an escalated message: one `draft_ready` bell to every
+    agent (web and Android ring it), the way a comment hand-off rings (#255) —
+    no draft card, since there is no draft to approve. Body = the customer's
+    own words first, then why. Called once per message: it rides the same
+    once-per-message claim as the flag. Best-effort, logged on failure."""
+    try:
+        words = " ".join((said or "").split())[:140]
+        why = f"Neema's replies keep failing to send on {channel}"
+        body = (f"\u201c{words}\u201d \u2014 {why}" if words else why)[:200]
+        await redis.publish("ws:channel:agents:all", json.dumps({
+            "event": "notification", "type": "draft_ready",
+            "title": f"{channel.title()} customer is waiting for you",
+            "body": body, "conv_id": str(conv.id), "wa_id": ext,
+        }))
+    except Exception as exc:
+        _log.warning("missed-reply: escalation bell not sent for %s/%s: %s", channel, ext, exc)
+
+
 async def escalate_window_closed(redis=None, *, window_h: int = 23,
                                  reachable_d: int = 7, limit: int = 20) -> int:
     """A DM whose Meta 24-hour window shut with the customer still unanswered:
@@ -388,6 +408,7 @@ async def sweep_missed_replies(redis, *, min_age_s: int = 90, max_age_h: int = 2
                     f"{channel} — please answer from here and check the page connection."):
                 await _unclaim_escalation(redis, msg.id)
                 continue
+            await _ring_team(redis, conv, ext, msg.text, channel)
             _log.warning("missed-reply gave up after 3 attempts for %s/%s — "
                          "handed to a human", channel, ext)
             continue

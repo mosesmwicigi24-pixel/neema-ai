@@ -15,8 +15,11 @@ Two sweeps undid every hand-off before anyone could answer it:
 Pinned here on a real Postgres: a held thread whose newest message is an
 unanswered customer message stays with the person; once a colleague answers,
 the quiet thread is released as before and carries an internal note saying
-why; the sweeper escalates once per unanswered customer message, and a NEW
-unanswered message earns exactly one more.
+why; a thread handed over by a hold (reviewer hold, failed order, sweeper
+escalation) stays with staff until a colleague replies — Neema's own
+"a colleague will confirm" line is not an answer; the sweeper escalates — flag
+and one team bell — once per unanswered customer message, and a NEW unanswered
+message earns exactly one more.
 """
 import asyncio
 import types
@@ -114,6 +117,16 @@ def _msg(rig, conv_id, *, inbound, at, text, sender=None, note=False, channel="w
     return asyncio.run(go())
 
 
+def _hold(rig, conv_id, *, at, note):
+    async def go():
+        from app.models.intercept import Intercept, InterceptAction
+        async with rig.maker() as db:
+            db.add(Intercept(conversation_id=conv_id, action=InterceptAction.flag, note=note,
+                             created_at=at))
+            await db.commit()
+    asyncio.run(go())
+
+
 def _state(rig, conv_id):
     async def go():
         from app.models.conversation import Conversation
@@ -192,6 +205,55 @@ def test_a_colleague_still_on_the_thread_keeps_it(rig):
     assert _state(rig, cid)[0] == "human"
 
 
+# ── a hold stays with staff until a PERSON replies (owner: "held replies → Human + notify")
+
+_HOLDS = [
+    ("HELD BACK BY THE REVIEWER — Neema's reply did not pass verification and was NOT sent",
+     "Let me confirm the exact item and price for you 🙏 One of our team will confirm it right here shortly."),
+    ("ORDER NOT PLACED — Neema could not create this order in the hub; the customer was told "
+     "a colleague will confirm it here.",
+     "Thank you Pastor — a colleague has your order and will confirm it with you here."),
+    ("Neema composed a reply 3 times but delivery keeps failing on whatsapp — please answer "
+     "from here and check the page connection.", None),
+]
+
+
+def _held_by_a_hold(rig, note, hold_line):
+    cid = _conv(rig)                              # a hand-off leaves intercept_since empty
+    _msg(rig, cid, inbound=True, at=_ago(hours=4), text="Habari, do you have stoles?")
+    _msg(rig, cid, inbound=False, sender="human_agent", at=_ago(hours=3), text="Yes Pastor.")
+    _msg(rig, cid, inbound=True, at=_ago(hours=2), text="How much is the purple stole?")
+    _hold(rig, cid, at=_ago(minutes=119), note=note)
+    if hold_line:                                 # Neema's own hand-off line is not an answer
+        _msg(rig, cid, inbound=False, sender="ai", at=_ago(minutes=119), text=hold_line)
+    # a system note written as human_agent (availability check, brief) is not a person replying
+    _msg(rig, cid, inbound=False, sender="human_agent", note=True, at=_ago(minutes=100),
+         text="🔎 AVAILABILITY CHECK — the customer asked for: purple stole")
+    return cid
+
+
+@pytest.mark.parametrize("note,hold_line", _HOLDS)
+def test_a_held_thread_stays_with_staff_until_a_person_replies(rig, note, hold_line):
+    cid = _held_by_a_hold(rig, note, hold_line)
+    assert _release_tick(rig) == 0
+    assert _state(rig, cid)[0] == "human"
+    _msg(rig, cid, inbound=False, sender="human_agent", at=_ago(minutes=60),
+         text="The purple stole is KES 3,500, Pastor.")
+    assert _release_tick(rig) == 1
+    mode, rows, notes = _state(rig, cid)
+    assert mode == "ai" and [r.action.value for r in rows].count("release") == 1
+    assert "Returned to Neema automatically" in notes[-1].text
+    assert "a colleague answered" in notes[-1].text
+
+
+def test_a_held_customer_who_signs_off_has_nothing_pending(rig):
+    note, line = _HOLDS[0]
+    cid = _held_by_a_hold(rig, note, line)
+    _msg(rig, cid, inbound=True, at=_ago(minutes=90), text="🙏")
+    assert _release_tick(rig) == 1
+    assert "polite close" in _state(rig, cid)[2][-1].text
+
+
 # ── reply_sweeper ────────────────────────────────────────────────────────────
 
 def _sweeper_rig(rig, monkeypatch):
@@ -226,6 +288,11 @@ def _sweep_tick(rig, sw, cid):
     asyncio.run(sw.sweep_missed_replies(rig.redis))
 
 
+def _bells(rig):
+    import json
+    return [json.loads(p) for ch, p in rig.redis.published if ch == "ws:channel:agents:all"]
+
+
 def _flags(rig, cid):
     return [r for r in _state(rig, cid)[1] if r.action.value == "flag"]
 
@@ -243,6 +310,12 @@ def test_the_sweeper_escalates_once_per_unanswered_message(rig, monkeypatch):
     assert len(_flags(rig, cid)) == 1
     assert "delivery keeps failing" in _flags(rig, cid)[0].note
     assert len(attempts) == 3                     # and no model turn is bought for it
+    # …and the team HEARS of it: one bell, with the customer's own words
+    assert len(_bells(rig)) == 1
+    bell = _bells(rig)[0]
+    assert bell["type"] == "draft_ready" and bell["conv_id"] == str(cid) and bell["wa_id"] == PSID
+    assert bell["body"].startswith("\u201cIs the purple stole available?\u201d")
+    assert len(bell["body"]) <= 200
 
     # a NEW unanswered message earns its own strikes and exactly one more flag
     _msg(rig, cid, inbound=True, at=_ago(minutes=5), text="Hello? Still there?",
@@ -251,3 +324,4 @@ def test_the_sweeper_escalates_once_per_unanswered_message(rig, monkeypatch):
         _sweep_tick(rig, sw, cid)
     assert len(attempts) == 6
     assert len(_flags(rig, cid)) == 2
+    assert len(_bells(rig)) == 2 and "Still there?" in _bells(rig)[1]["body"]

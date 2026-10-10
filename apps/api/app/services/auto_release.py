@@ -26,7 +26,15 @@ with the person it was handed to: they were alerted, and they get the chance to
 reply. In 30 days 1,500 of 1,544 auto-releases happened on exactly such a
 thread, most of them minutes after the missed-reply sweeper had escalated it —
 a flag→release ping-pong every ~6 minutes that no colleague could ever catch.
-A polite closer ("thanks", "🙏") is not waiting on anyone. The 45-minute clock
+A polite closer ("thanks", "🙏") is not waiting on anyone.
+
+A HOLD STAYS WITH STAFF UNTIL A PERSON REPLIES (owner: "held replies → Human +
+notify"). A thread handed over by a flag — a reviewer hold, a sweeper
+escalation, a failed order — is waiting on a colleague even though Neema's own
+hand-off line ("a colleague will confirm it here") went out after the
+customer's message: that line is a promise, not an answer. Only a colleague's
+sent reply after the hold ends it (a staff take-over or release after the flag
+closes it too, and then the ordinary rules apply). The 45-minute clock
 itself is unchanged: once someone answers, it runs from the last colleague
 message as before. A release leaves an internal note on the thread itself so
 staff can see why Neema has it back.
@@ -36,7 +44,7 @@ from __future__ import annotations
 import logging
 from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import func, or_, select
+from sqlalchemy import and_, func, or_, select
 
 from app.core.config import settings
 from app.models.conversation import Conversation, InterceptMode
@@ -52,11 +60,49 @@ _THREAD_NOTE = ("↩ Returned to Neema automatically — no colleague reply for 
                 "message; take the thread back any time.")
 
 
+# Intercept rows that open a hold (a flag/escalation hands the thread to the
+# team) or close it (a person taking over, or releasing, after it).
+_HOLD_OPENS = (InterceptAction.flag, InterceptAction.escalated)
+_HOLD_ROWS = _HOLD_OPENS + (InterceptAction.intercept, InterceptAction.release)
+# answer_through_neema: the colleague's answer goes out in Neema's voice
+# (sender ai), and this note — written with the colleague's agent_id — records it.
+_TEAM_ANSWER_NOTE = "📣 Team answer delivered via Neema"
+
+
+async def _hold_unanswered(db, conv_id) -> bool:
+    """True when the thread's latest hold (flag/escalation) has had no reply
+    from a colleague since. A colleague reply = a SENT human_agent message, or
+    the record of a team answer delivered through Neema. System notes written
+    as human_agent (availability checks, briefs, hub events) are not one, and
+    neither is any line Neema sent."""
+    row = (await db.execute(
+        select(Intercept.action, Intercept.created_at)
+        .where(Intercept.conversation_id == conv_id, Intercept.action.in_(_HOLD_ROWS))
+        .order_by(Intercept.created_at.desc())
+        .limit(1)
+    )).first()
+    if row is None or row[0] not in _HOLD_OPENS:
+        return False
+    answered = (await db.execute(
+        select(func.count()).select_from(Message).where(
+            Message.conversation_id == conv_id,
+            Message.sender == MsgSender.human_agent,
+            Message.created_at >= row[1],
+            or_(Message.media_type.is_(None), Message.media_type != "note",
+                and_(Message.agent_id.isnot(None),
+                     Message.text.startswith(_TEAM_ANSWER_NOTE))),
+        )
+    )).scalar_one()
+    return not answered
+
+
 async def _customer_waiting(db, conv_id) -> tuple[bool, str]:
     """(waiting, why-not) for a held thread. Waiting = its newest message that
     the customer could see (internal notes excluded — they are never an
-    answer) is an inbound customer message that is not a polite closer. When
-    not waiting, `why` says what the thread's state is, for the release note."""
+    answer) is an inbound customer message that is not a polite closer, OR a
+    hold on it has had no colleague reply (`_hold_unanswered`). A polite
+    closer as the newest message is never waiting. When not waiting, `why`
+    says what the thread's state is, for the release note."""
     from app.agent.runtime import is_closer
     last = (await db.execute(
         select(Message.direction, Message.sender, Message.text)
@@ -65,12 +111,14 @@ async def _customer_waiting(db, conv_id) -> tuple[bool, str]:
         .order_by(Message.created_at.desc())
         .limit(1)
     )).first()
+    if last is not None and last[0] == MsgDirection.inbound and is_closer(last[2] or ""):
+        return False, "the customer's last message was a polite close"
+    if await _hold_unanswered(db, conv_id):
+        return True, ""
     if last is None:
         return False, "there is no customer message waiting"
     direction, sender, text = last
     if direction == MsgDirection.inbound:
-        if is_closer(text or ""):
-            return False, "the customer's last message was a polite close"
         return True, ""
     if sender == MsgSender.human_agent:
         return False, "a colleague answered the customer's last message"
