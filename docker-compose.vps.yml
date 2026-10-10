@@ -44,12 +44,13 @@ services:
             # Recovery sweeps on a daily timer (services/recovery_jobs.py,
             # 2026-10-10): OFF until the owner has read a sample —
             # GET /api/admin/recovery/preview — and switches a job on here.
-            RECOVERY_CART_ENABLED: "false"
+            # Owner switched on 2026-10-10 after the live preview (3 good samples).
+            RECOVERY_CART_ENABLED: "true"
             RECOVERY_PAYMENT_ENABLED: "false"
             RECOVERY_REENGAGE_ENABLED: "false"
             RECOVERY_JOBS_DRY_RUN: "false"
             # Quote follow-ups stay OFF until the owner approves the samples.
-            QUOTE_FOLLOW_UP_ENABLED: "false"
+            QUOTE_FOLLOW_UP_ENABLED: "true"
 
     web:
         image: ghcr.io/mosesmwicigi24-pixel/neema-ai-web:${IMAGE_TAG:-latest}
