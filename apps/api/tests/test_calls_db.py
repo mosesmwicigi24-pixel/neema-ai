@@ -844,6 +844,75 @@ def test_changing_one_setting_sends_only_that_field(env, world, monkeypatch):
     assert r.status_code == 200 and box.sent == [{"callback_permission_status": "ENABLED"}]
 
 
+def test_a_one_field_change_meta_calls_invalid_is_sent_once_more_as_the_whole_object(env, world, monkeypatch):
+    """Owner, 2026-10-10: switching callback permission on came back "The call
+    setup was rejected — try again" (Meta's 100 on the one-field body). The
+    second attempt is the whole calling object with the change on top, the
+    holiday schedule re-sent — and the admin sees it saved."""
+    from app.services import wa_calling
+    from app.services.wa_calling import MetaError
+    box = _settings_meta(monkeypatch, CURRENT_CALLING)
+    sent = []
+
+    async def update_settings(calling):
+        sent.append(calling)
+        if len(sent) == 1:
+            raise MetaError("WA settings update failed (400): {...}", status=400, code=100,
+                            body={"error": {"message": "(#100) Invalid parameter", "code": 100}})
+        box.current = {**box.current, **calling}
+        return {"success": True}
+    monkeypatch.setattr(wa_calling, "update_settings", update_settings)
+    r = env.client.post("/api/admin/calls/settings", json={"callback_permission_status": "enabled"},
+                        headers=_as(world["boss"]))
+    assert r.status_code == 200, r.text
+    assert sent[0] == {"callback_permission_status": "ENABLED"}
+    whole = sent[1]
+    assert whole["callback_permission_status"] == "ENABLED" and whole["status"] == "ENABLED"
+    assert whole["call_icon_visibility"] == "DEFAULT"
+    assert whole["call_hours"]["holiday_schedule"] == [{"date": "2026-12-25", "start_time": "0000", "end_time": "2359"}]
+    assert whole["call_hours"]["weekly_operating_hours"] == CURRENT_CALLING["call_hours"]["weekly_operating_hours"]
+    assert whole["voicemail"] == {"status": "DISABLED", "triggers": ["TIMEOUT"], "timeout_seconds": 20,
+                                  "audio": {"default": {"announcement_media_id": "m1"}}}
+    assert "restrictions" not in whole and "sip" not in whole
+    assert r.json()["sent"] == whole and r.json()["settings"]["callback_permission_status"] == "ENABLED"
+
+
+def test_a_refused_setting_shows_metas_own_words(env, world, monkeypatch):
+    """Still refused as the whole object: the admin reads Meta's reason, not
+    the call table's "try again"."""
+    from app.services import wa_calling
+    from app.services.wa_calling import MetaError, meta_message
+    _settings_meta(monkeypatch, CURRENT_CALLING)
+    calls = []
+
+    async def update_settings(calling):
+        calls.append(calling)
+        raise MetaError("WA settings update failed (400): {...}", status=400, code=100,
+                        body={"error": {"message": "(#100) Param calling[callback_permission_status] is not "
+                                                   "supported", "code": 100, "error_subcode": 2494010}})
+    monkeypatch.setattr(wa_calling, "update_settings", update_settings)
+    r = env.client.post("/api/admin/calls/settings", json={"callback_permission_status": "enabled"},
+                        headers=_as(world["boss"]))
+    assert r.status_code == 502 and len(calls) == 2
+    body = r.json()
+    assert body["detail"] == ("WhatsApp refused the calling settings: (#100) Param "
+                              "calling[callback_permission_status] is not supported (subcode 2494010)")
+    assert body["code"] == "100" and body["meta_message"].startswith("(#100)")
+    # a people-facing message wins; a failure with no body keeps the table's line
+    assert meta_message(MetaError("x", body={"error": {"message": "m", "error_user_msg": "Plain words"}})) == "Plain words"
+    assert meta_message(MetaError("x", status=0)) == ""
+    assert meta_message(MetaError("x", body={"error": {"message": "(#100) Invalid parameter", "code": 100,
+                                                      "error_data": {"messaging_product": "whatsapp",
+                                                                     "details": "Overlapping schedule in call_hours "
+                                                                                "is not allowed"}}})) == \
+        "(#100) Invalid parameter: Overlapping schedule in call_hours is not allowed"
+    # hours or voicemail in the change already go merged — no second attempt
+    calls.clear()
+    r = env.client.post("/api/admin/calls/settings", json={"voicemail": {"status": "ENABLED"}},
+                        headers=_as(world["boss"]))
+    assert r.status_code == 502 and len(calls) == 1
+
+
 def test_changing_hours_never_wipes_the_holiday_schedule(env, world, monkeypatch):
     box = _settings_meta(monkeypatch, CURRENT_CALLING)
     r = env.client.post("/api/admin/calls/settings", json={"call_hours": {"weekly_operating_hours": [
