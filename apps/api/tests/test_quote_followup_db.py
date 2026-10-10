@@ -36,6 +36,14 @@ def run(coro):
     return asyncio.run(coro)
 
 
+@pytest.fixture(autouse=True)
+def _quote_follow_ups_on(monkeypatch):
+    # Production ships with them OFF until the owner approves the samples;
+    # these tests exercise the feature itself, so they switch it on.
+    from app.core.config import settings
+    monkeypatch.setattr(settings, "quote_follow_up_enabled", True)
+
+
 @pytest.fixture
 def maker(fresh_db):  # noqa: F811
     from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
@@ -377,3 +385,13 @@ def test_due_time_respects_quiet_hours_and_the_window():
     # the customer last wrote 20 h ago → 4 h on is past the window's last hour
     assert qf.plan_due(nbo(12, 14) - timedelta(hours=20), nbo(12, 14)) is None
     assert qf.plan_due(None, nbo(12, 14)) is None
+
+
+def test_switched_off_by_default_plans_nothing(maker, monkeypatch):
+    """Ships OFF (owner sees samples first): the default plans no follow-up."""
+    from app.core.config import Settings, settings
+    assert Settings.model_fields["quote_follow_up_enabled"].default is False
+    monkeypatch.setattr(settings, "quote_follow_up_enabled", False)
+    _seed(maker)
+    _scribe(maker)
+    assert _pending(maker) == []

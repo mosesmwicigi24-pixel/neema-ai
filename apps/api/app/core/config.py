@@ -154,7 +154,8 @@ class Settings(BaseSettings):
     # a stock item and the customer goes quiet, plan ONE follow-up inside the
     # 24h window. Rides the initiative queue above (sent only when
     # AGENT_INITIATIVE is on and the gate passes). False = plan none.
-    quote_follow_up_enabled: bool = True
+    # OFF until the owner has seen sample follow-ups (2026-10-10).
+    quote_follow_up_enabled: bool = False
     # Recovery sweeps on a daily Nairobi-hour timer (services/recovery_jobs.py).
     # Each OFF until the owner has seen a sample (GET /api/admin/recovery/preview
     # or `python -m app.services.recovery_jobs --preview`). DRY_RUN composes a

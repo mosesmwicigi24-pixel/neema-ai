@@ -48,6 +48,8 @@ services:
             RECOVERY_PAYMENT_ENABLED: "false"
             RECOVERY_REENGAGE_ENABLED: "false"
             RECOVERY_JOBS_DRY_RUN: "false"
+            # Quote follow-ups stay OFF until the owner approves the samples.
+            QUOTE_FOLLOW_UP_ENABLED: "false"
 
     web:
         image: ghcr.io/mosesmwicigi24-pixel/neema-ai-web:${IMAGE_TAG:-latest}
