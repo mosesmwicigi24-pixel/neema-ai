@@ -1,5 +1,8 @@
 """The missed-reply sweep decides what an unanswered last-inbound message needs.
 Pure logic — no DB — so the answerable/skip rules can't silently regress."""
+import asyncio
+
+from app.services import reply_sweeper
 from app.services.reply_sweeper import _answerable_turn
 from app.agent.runtime import is_outside_window
 
@@ -41,3 +44,42 @@ def test_bare_attachment_placeholder_is_skipped():
     assert _answerable_turn("[file]", "file", "https://cdn/f.pdf") == (None, None)
     assert _answerable_turn("", None, None) == (None, None)
     assert _answerable_turn(None, None, None) == (None, None)
+
+
+def test_escalation_claim_is_once_per_message_and_falls_back_to_the_flags(monkeypatch):
+    class _Redis:
+        def __init__(self):
+            self.kv = {}
+
+        async def set(self, k, v, nx=False, ex=None):
+            if nx and k in self.kv:
+                return None
+            self.kv[k] = v
+            return True
+
+        async def delete(self, k):
+            self.kv.pop(k, None)
+
+    class _Down:
+        async def set(self, *a, **k):
+            raise ConnectionError("redis down")
+
+    import types
+    r = _Redis()
+    claim = reply_sweeper._claim_escalation
+    c1, c2 = types.SimpleNamespace(id="c1"), types.SimpleNamespace(id="c2")
+
+    def m(i):
+        return types.SimpleNamespace(id=i, created_at=None)
+    assert asyncio.run(claim(r, m("m1"), c1)) is True
+    assert asyncio.run(claim(r, m("m1"), c1)) is False     # same message: never again
+    assert asyncio.run(claim(r, m("m2"), c1)) is True      # a new message earns one
+    asyncio.run(reply_sweeper._unclaim_escalation(r, "m2"))  # the escalation did not land
+    assert asyncio.run(claim(r, m("m2"), c1)) is True      # …so the next pass retries it
+    flagged = {"c1": True, "c2": False}
+
+    async def already(conv_id, inbound_at):
+        return flagged[conv_id]
+    monkeypatch.setattr(reply_sweeper, "_already_escalated_since", already)
+    assert asyncio.run(claim(_Down(), m("m3"), c1)) is False
+    assert asyncio.run(claim(_Down(), m("m4"), c2)) is True

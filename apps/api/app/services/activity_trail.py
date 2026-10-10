@@ -60,7 +60,7 @@ def describe(tool: str, args: dict, out) -> tuple[str, str | None]:
             d = " ".join(str(x) for x in (act, item, f"×{qty}" if qty else "") if x).strip()
             if total is not None:
                 d += f" → total {ccy} {money.num(total)}" if isinstance(total, (int, float)) else f" → total {total}"
-            return "Updated the cart", d or None
+            return ("Cart unchanged — already in it" if o.get("unchanged") else "Updated the cart"), d or None
         if tool == "create_order":
             if o.get("error"):
                 # never "Created an order" over a failure (six weeks of 403s read so)

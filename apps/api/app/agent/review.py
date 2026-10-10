@@ -839,6 +839,8 @@ def actions_text(tool_results: list | None) -> str:
                          "photos'; never say you cannot send photos" if n else
                          f"- no photo card of {what} could be sent this turn — describe it in "
                          "words and offer the link; never say you cannot send photos")
+        elif name == "update_cart" and out.get("unchanged"):
+            lines.append("- the cart already held that item — nothing changed (its total is a fact above)")
         elif name == "update_cart" and out.get("ok", True):
             lines.append("- the cart was updated (its total is a fact above)")
         elif name == "create_order":

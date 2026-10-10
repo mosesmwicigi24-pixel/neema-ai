@@ -5,9 +5,9 @@ be two lines: the tray reached by its SKU and then by its storefront slug, or
 a variant saved under a label the catalogue has since renamed. A cart like
 that totals double, and an order placed from it bills twice. Pinned here: a
 product is one line whatever names it (SKU, slug, name, alias) — `set` sets
-that line, `add` accumulates on it; different variants stay apart; an add on
-top of an item already in the cart says so; and the order payload never
-carries the same product + variant twice.
+that line; a repeat `add` of an item already in the cart changes nothing and
+says to use `set` (owner, 2026-10-10); different variants stay apart; and the
+order payload never carries the same product + variant twice.
 """
 import asyncio
 
@@ -84,15 +84,48 @@ def test_name_alias_and_sku_all_land_on_the_same_line(monkeypatch):
     assert out["total"] == 3 * 22000
 
 
-def test_add_twice_accumulates_on_one_line_and_says_so(monkeypatch):
+def test_a_repeat_add_changes_nothing_and_says_how_to_change_the_number(monkeypatch):
+    # owner, 2026-10-10: 243 re-adds in 97 conversations doubled totals, usually
+    # because the customer only confirmed the item again. A repeat `add` of the
+    # same product + variant leaves the quantity alone.
     store, call = _rig(monkeypatch)
     first = call("add", "XYULGK29K-5D98")
     assert "note" not in first
     out = call("add", "golden-communion-tray")
-    assert len(store["items"]) == 1 and store["items"][0]["qty"] == 2
-    assert out["total"] == 44000
-    # the doubling is never silent: the model reads what add did
-    assert "already in the cart ×1" in out["note"] and "set" in out["note"]
+    assert out["ok"] and out["unchanged"] is True
+    assert [(i["hub_product_id"], i["qty"]) for i in store["items"]] == [(50, 1)]
+    assert out["total"] == 22000
+    assert out["note"] == ("'Golden Communion Tray' is already in the cart ×1 — nothing was "
+                           "added. If the customer wants a different number, call update_cart "
+                           "set with the TOTAL quantity they want.")
+    # a bigger repeat add is refused the same way — never silently summed
+    out = call("add", "Golden Communion Tray", 3)
+    assert store["items"][0]["qty"] == 1 and "×1" in out["note"]
+
+
+def test_set_after_a_repeat_add_is_the_way_to_change_the_number(monkeypatch):
+    store, call = _rig(monkeypatch)
+    call("add", "Golden Communion Tray")
+    call("add", "Golden Communion Tray")
+    out = call("set", "Golden Communion Tray", 3)
+    assert [(i["hub_product_id"], i["qty"]) for i in store["items"]] == [(50, 3)]
+    assert out["total"] == 3 * 22000 and "note" not in out
+
+
+def test_add_of_a_new_item_still_adds_it(monkeypatch):
+    store, call = _rig(monkeypatch)
+    call("add", "Golden Communion Tray")
+    out = call("add", "COL-10", 2)
+    assert sorted((i["sku"], i["qty"]) for i in store["items"]) == [("COL-10", 2), ("XYULGK29K-5D98", 1)]
+    assert out["total"] == 22000 + 2 * 400 and "note" not in out
+
+
+def test_another_variant_of_an_item_in_the_cart_is_its_own_line(monkeypatch):
+    store, call = _rig(monkeypatch)
+    call("add", "COL-10")
+    out = call("add", "COL-12")
+    assert sorted((i["sku"], i["qty"]) for i in store["items"]) == [("COL-10", 1), ("COL-12", 1)]
+    assert out["total"] == 400 + 500 and "note" not in out
 
 
 def test_two_variants_are_two_lines_and_the_total_is_right(monkeypatch):
