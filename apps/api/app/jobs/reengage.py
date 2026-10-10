@@ -170,12 +170,16 @@ def _numbers(text: str) -> set[str]:
 
 
 def _norm(text: str) -> str:
-    return " ".join((text or "").lower().split())
+    """Lower-case words only: "Cope — Complete Set" and "cope - complete set"
+    are the same item; punctuation and dashes never decide a match."""
+    return " ".join(re.sub(r"[^\w]+", " ", (text or "").lower()).split())
 
 
-def quality_gate(text: str, item: str, *, transcript: list[tuple[str, str]],
+def quality_gate(text: str, item: str | list[str], *, transcript: list[tuple[str, str]],
                  name: str | None, language: str) -> str | None:
-    """None when this check-in may go; otherwise why it is refused."""
+    """None when this check-in may go; otherwise why it is refused. `item` is
+    the item (or items) the draft says it names: at least one must appear in
+    the thread AND in the draft."""
     from app.agent.voice import looks_swahili
     t = (text or "").strip()
     if not t:
@@ -190,11 +194,15 @@ def quality_gate(text: str, item: str, *, transcript: list[tuple[str, str]],
     for role, said in transcript:
         if role != "customer" and (nt in _norm(said) or nt[:40] == _norm(said)[:40]):
             return "replays an earlier line"
-    thread = _norm(" ".join(x for _, x in transcript))
-    it = _norm(item)
-    if len(it) < 3 or it in _GENERIC_ITEMS or it not in thread:
-        return "names no item from the thread"
-    if it not in _norm(t):
+    thread = f" {_norm(' '.join(x for _, x in transcript))} "
+    named = False
+    for cand in ([item] if isinstance(item, str) else list(item or [])):
+        it = _norm(cand)
+        if len(it) >= 3 and it not in _GENERIC_ITEMS \
+                and f" {it} " in thread and f" {it} " in f" {nt} ":
+            named = True
+            break
+    if not named:
         return "names no item from the thread"
     new_figures = _numbers(t) - _numbers(" ".join(x for _, x in transcript))
     if new_figures:
@@ -213,8 +221,8 @@ def quality_gate(text: str, item: str, *, transcript: list[tuple[str, str]],
     return None
 
 
-def parse_draft(raw: str | None) -> tuple[str, str] | None:
-    """(item, text) from the model's JSON answer; None when it skipped or the
+def parse_draft(raw: str | None) -> tuple[list[str], str] | None:
+    """(items, text) from the model's JSON answer; None when it skipped or the
     answer cannot be read."""
     m = re.search(r"\{.*\}", raw or "", re.DOTALL)
     if not m:
@@ -225,8 +233,13 @@ def parse_draft(raw: str | None) -> tuple[str, str] | None:
         return None
     if not isinstance(data, dict) or data.get("skip"):
         return None
-    item, text = str(data.get("item") or "").strip(), str(data.get("text") or "").strip()
-    return (item, text) if item and text else None
+    raw_items = data.get("items")
+    items = [str(x).strip() for x in raw_items if str(x).strip()] \
+        if isinstance(raw_items, list) else []
+    if str(data.get("item") or "").strip():
+        items.append(str(data["item"]).strip())
+    text = str(data.get("text") or "").strip()
+    return (items, text) if items and text else None
 
 
 # ── composing ────────────────────────────────────────────────────────────────
@@ -252,8 +265,9 @@ def build_prompt(transcript: list[tuple[str, str]], *, name: str | None,
         "colleague or the team are checking or will get back to them, never answer or "
         "continue the last message.\n"
         f"- Write in {_LANG.get(language, 'English')}.\n"
-        'Reply with JSON only: {"item": "<item words as in the conversation>", '
-        '"text": "<the message>"} — or {"skip": "<why>"} when no item was discussed.'
+        'Reply with JSON only: {"items": ["<each item you name, written exactly as in '
+        'the conversation>"], "text": "<the message>"} — or {"skip": "<why>"} when no '
+        'item was discussed.'
     )
     lines = []
     for role, text in transcript[-TRANSCRIPT_TURNS:]:
@@ -342,11 +356,17 @@ async def _has_cart(db, conv: Conversation, key: str) -> bool:
     return bool((cart or {}).get("items"))
 
 
-async def _follow_up_planned(db, conv_id) -> bool:
+async def _followed_up(db, conv_id, since: datetime) -> bool:
+    """A follow-up is planned for this thread, or one was sent after the
+    customer's last message — either way they already have (or will have)
+    their one check-in; this sweep does not add a second."""
+    from sqlalchemy import or_, and_
     from app.models.agent_action import AgentAction
     return (await db.execute(select(AgentAction.id).where(
         AgentAction.conversation_id == conv_id,
-        AgentAction.status.in_(("planned", "needs_approval"))).limit(1))).first() is not None
+        or_(AgentAction.status.in_(("planned", "needs_approval")),
+            and_(AgentAction.status == "sent", AgentAction.updated_at >= since)),
+    ).limit(1))).first() is not None
 
 
 async def why_not(db, conv: Conversation, now: datetime) -> tuple[str | None, dict]:
@@ -383,8 +403,8 @@ async def why_not(db, conv: Conversation, now: datetime) -> tuple[str | None, di
     closes = (_aware(last_in.created_at) or now) + timedelta(hours=WINDOW_HOURS - WINDOW_MARGIN_HOURS)
     if closes <= now:
         return "24h window closed", {}
-    if await _follow_up_planned(db, conv.id):
-        return "a follow-up is already planned", {}
+    if await _followed_up(db, conv.id, _aware(last_in.created_at) or now):
+        return "a follow-up is planned or already sent", {}
     if await order_placed_recently(db, conv, now):
         return "order placed (payment follow-up's)", {}
     if await _has_cart(db, conv, key):
@@ -472,8 +492,8 @@ async def _handle(redis, row: dict, *, send: bool, write: bool = True) -> dict:
     if parsed is None:
         res["skipped"] = res["refused"] = "no item to check in about"
         return res
-    item, text = parsed
-    why = quality_gate(text, item, transcript=transcript, name=name, language=language)
+    items, text = parsed
+    why = quality_gate(text, items, transcript=transcript, name=name, language=language)
     if why:
         res["skipped"] = res["refused"] = why
         res["draft"] = text[:200]

@@ -106,9 +106,10 @@ def test_hand_off_lines_are_recognised():
 
 
 def test_parse_draft_reads_json_and_honours_a_skip():
-    assert rj.parse_draft('{"item": "Red Stole", "text": "Hi 🙏 shall I reserve the Red Stole?"}') \
-        == ("Red Stole", "Hi 🙏 shall I reserve the Red Stole?")
-    assert rj.parse_draft('Sure: {"item": "Red Stole", "text": "x?"} done') == ("Red Stole", "x?")
+    assert rj.parse_draft('{"items": ["Red Stole"], "text": "Hi 🙏 shall I reserve the Red Stole?"}') \
+        == (["Red Stole"], "Hi 🙏 shall I reserve the Red Stole?")
+    assert rj.parse_draft('Sure: {"item": "Red Stole", "text": "x?"} done') == (["Red Stole"], "x?")
+    assert rj.parse_draft('{"items": [], "text": "Hi?"}') is None
     assert rj.parse_draft('{"skip": "nothing discussed"}') is None
     assert rj.parse_draft("Thank you for your patience.") is None
     assert rj.parse_draft('{"item": "", "text": "Hi?"}') is None
@@ -121,3 +122,22 @@ def test_the_prompt_is_a_fresh_brief_not_the_next_turn():
     # the transcript is quoted reference text, never replayed as live turns
     assert user.startswith("The conversation so far")
     assert "Customer: Do you have the chasuble in blue and red?" in user
+
+
+def test_item_matching_ignores_dashes_and_accepts_any_named_item():
+    cope = [("customer", "Prix du Cope - Complete Set ?"),
+            ("neema", "Le Cope - Complete Set est à 450 $ 🙏")]
+    fr = ("Bonjour Laurent, je reviens vers vous au sujet du Cope — Complete Set à 450 $. "
+          "Souhaitez-vous que nous procédions à la commande ?")
+    assert gate(fr, "Cope — Complete Set", transcript=cope, name="Laurent", language="fr") is None
+    trays = [("customer", "communion trays?"),
+             ("neema", "Silver Communion Tray $180, Golden Communion Tray $220.")]
+    text = ("Bonjour Victory, avez-vous une préférence entre le Silver Communion Tray à $180 "
+            "et le Golden Communion Tray à $220 ?")
+    assert gate(text, ["plateaux de communion", "Silver Communion Tray"], transcript=trays,
+                name="Victory", language="fr") is None
+    assert gate(text, ["plateaux de communion"], transcript=trays, name="Victory",
+                language="fr") == "names no item from the thread"
+    # a whole-word match: "Tray" inside "Trays" is not "Golden Tray"
+    assert gate("Hello Victory 🙏 shall I reserve the Golden Tray?", "Golden Tray",
+                transcript=trays, name="Victory") == "names no item from the thread"

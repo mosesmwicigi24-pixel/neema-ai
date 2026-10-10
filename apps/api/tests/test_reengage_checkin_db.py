@@ -252,3 +252,23 @@ def test_a_customer_reply_after_selection_stops_the_send(re, monkeypatch):
     monkeypatch.setattr(reengage, "_compose_llm", compose_then_reply)
     run(reengage.run(send=True, redis=FakeRedis()))
     assert re["sent"] == []
+
+
+def test_a_thread_already_followed_up_is_left_alone(re):
+    """A quote follow-up (actions pipeline) sent after their last message is
+    their one check-in; a planned one is coming — this sweep adds no second."""
+    from app.models.agent_action import AgentAction
+
+    async def add(status):
+        async with re["maker"]() as db:
+            conv_id = (await db.execute(sa.text(
+                "SELECT id FROM conversations WHERE wa_id=:w"), {"w": TRAYS_WA})).scalar()
+            await db.execute(sa.text("DELETE FROM agent_actions"))
+            db.add(AgentAction(conversation_id=conv_id, kind="quote_follow_up", status=status,
+                               due_at=datetime.now(timezone.utc)))
+            await db.commit()
+    for status in ("sent", "planned"):
+        run(add(status))
+        assert _skips(re["maker"])[TRAYS_WA] == "a follow-up is planned or already sent"
+    run(add("vetoed"))
+    assert _skips(re["maker"])[TRAYS_WA] is None
