@@ -163,6 +163,9 @@ class Settings(BaseSettings):
     recovery_cart_enabled: bool = False
     recovery_payment_enabled: bool = False
     recovery_reengage_enabled: bool = False
+    # Re-engage sends at most this many check-ins per run (owner, 2026-10-10:
+    # 15 a day to start; the rest wait for the next run).
+    recovery_reengage_daily_limit: int = 15
     recovery_jobs_dry_run: bool = False
     # Copilot mode (plan C): in human-held threads Neema briefs on handoff,
     # drafts every reply for one-tap send, keeps the CRM scribe running, and

@@ -554,9 +554,16 @@ async def run(send: bool, ignore_quiet_hours: bool = False, *, redis=None,
         send = False
 
     sent = failed = skipped = composed = 0
+    limited = 0
+    limit = max(0, int(getattr(settings, "recovery_reengage_daily_limit", 15) or 0))
     samples: list[dict] = []
     refused: list[dict] = []
     for row in rows:
+        if send and sent >= limit:
+            # Owner's daily ceiling: the rest wait for tomorrow's run — no
+            # draft is composed and nothing is marked, so they stay eligible.
+            limited += 1
+            continue
         write = send or max_drafts is None or composed < max_drafts * 3
         r = await _handle(redis, row, send=send, write=write)
         if write and not r["skipped"] or r["refused"]:
@@ -579,6 +586,8 @@ async def run(send: bool, ignore_quiet_hours: bool = False, *, redis=None,
         _log.info("[%s] %-9s %s\n    last in: %s\n    check-in: %s",
                   tag, r["channel"], anonymise(r["to"]), r["last_in"], r["draft"])
 
+    if limited:
+        _log.info("daily limit %d reached — %d thread(s) left for the next run", limit, limited)
     _log.info("── done: %d candidate(s) · %d sent · %d skipped · %d failed ──",
               len(rows), sent, skipped, failed)
     if own_redis and redis is not None:
@@ -587,6 +596,7 @@ async def run(send: bool, ignore_quiet_hours: bool = False, *, redis=None,
         except Exception:
             pass
     return {"candidates": len(rows), "sent": sent, "skipped": skipped, "failed": failed,
+            "held_for_limit": limited,
             "would_send": 0 if send else len(rows) - skipped - failed, "samples": samples,
             "refused": refused}
 
