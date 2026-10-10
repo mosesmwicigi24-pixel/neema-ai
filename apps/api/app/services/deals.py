@@ -177,14 +177,17 @@ def snapshot_items(items: list) -> list[dict]:
 
 
 async def scribe_update(db, key: str, channel: str, reply: str,
-                        inbound_text: str = "") -> None:
+                        inbound_text: str = "", tools: list | None = None) -> None:
     """File the turn: cart → items/title/stage, promises (Neema's own AND the
     customer's stated timeline) → blocking/next_action + a planned-action row
-    the B2 scheduler executes. Creates the deal on first buying signal; silent
-    otherwise — greetings don't deserve deal rows."""
+    the B2 scheduler executes. A reply that PRICED a stock item (from this
+    turn's tool results, `tools`) with no promise in play plans the quote
+    follow-up (services/quote_followup.py). Creates the deal on first buying
+    signal; silent otherwise — greetings don't deserve deal rows."""
     try:
         from app.agent import cart as cartmod
         from app.models.deal import Deal
+        from app.services import quote_followup
         from app.services.actions import upsert_follow_up
 
         conv = await _conversation_of(db, key, channel)
@@ -195,10 +198,11 @@ async def scribe_update(db, key: str, channel: str, reply: str,
         items = list((cart or {}).get("items") or [])
         promise = detect_own_promise(reply)
         cust = detect_customer_promise(inbound_text)
+        quote = quote_followup.extract_quote(tools, reply)
 
         deal = await open_deal_for(db, conversation_id=conv.id)
         if deal is None:
-            if not items and not promise and not cust:
+            if not items and not promise and not cust and not quote:
                 return                      # nothing worth owning yet
             deal = Deal(conversation_id=conv.id, person_id=conv.person_id)
             db.add(deal)
@@ -225,6 +229,12 @@ async def scribe_update(db, key: str, channel: str, reply: str,
             await upsert_follow_up(db, deal, due_at=due, kind="customer_promise",
                                    reason=f"Customer said they'd respond ({hint}) — "
                                           "warm check-in if they haven't")
+        else:
+            outcome = await quote_followup.on_turn(
+                db, conv, deal, quote=quote, inbound_text=inbound_text,
+                tools=tools, reply=reply)
+            if quote:
+                _log.info("quote follow-up for %s/%s: %s", channel, conv.id, outcome)
         await db.commit()
     except Exception as exc:
         _log.info("deal scribe skipped for %s: %s", key, exc)

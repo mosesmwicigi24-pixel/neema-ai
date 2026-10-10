@@ -907,6 +907,7 @@ async def list_actions(
     """The initiative queue: what Neema plans to do and when, what awaits your
     approval, what she's already sent. `status=pending` = planned+needs_approval."""
     from app.models.agent_action import AgentAction
+    from app.services.actions import hold_reason
     q = select(AgentAction).order_by(AgentAction.due_at).limit(200)
     if status == "pending":
         q = q.where(AgentAction.status.in_(("planned", "needs_approval")))
@@ -920,6 +921,8 @@ async def list_actions(
         "due_at": a.due_at.isoformat() if a.due_at else None,
         "kind": a.kind, "reason": a.reason, "draft": a.draft,
         "status": a.status, "created_by": a.created_by,
+        # WHY it waits for a human (the marker the scheduler stores on reason).
+        "approval_reason": hold_reason(a.reason) if a.status == "needs_approval" else None,
     } for a in rows]}
 
 

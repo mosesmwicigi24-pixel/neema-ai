@@ -105,8 +105,11 @@ export function DealsView({ isMobile, onToast, onOpenConversation }: DealsViewPr
                                     <div className="flex-1 min-w-0">
                                         <div className="text-xs font-medium text-[#1c2917]">
                                             {a.status === "needs_approval" ? "⏳ Needs your approval" : `🕐 ${fmtDue(a.due_at)}`}
-                                            <span className="font-normal text-[#64748b]"> · {a.kind === "customer_promise" ? "their timeline" : "her promise"}</span>
+                                            <span className="font-normal text-[#64748b]"> · {a.kind === "customer_promise" ? "their timeline" : a.kind === "quote_follow_up" ? "after her quote" : "her promise"}</span>
                                         </div>
+                                        {a.status === "needs_approval" && a.approval_reason && (
+                                            <div className="text-[11px] font-medium text-[#92400e] mt-0.5">Why: {a.approval_reason}</div>
+                                        )}
                                         <div className="text-xs text-[#475569] mt-0.5 line-clamp-2">{a.reason}</div>
                                         {a.draft && (
                                             <div className="text-[11px] text-[#1c2917] mt-1 px-2 py-1.5 rounded-lg bg-white border border-stone-100 line-clamp-3">

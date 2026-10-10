@@ -150,6 +150,11 @@ class Settings(BaseSettings):
     # When ON, due planned actions AUTO-SEND (gate permitting). OFF (default):
     # the queue fills visibly but nothing fires — trust-building mode.
     agent_initiative: bool = False
+    # Quote → follow-up (services/quote_followup.py): when Neema's reply priced
+    # a stock item and the customer goes quiet, plan ONE follow-up inside the
+    # 24h window. Rides the initiative queue above (sent only when
+    # AGENT_INITIATIVE is on and the gate passes). False = plan none.
+    quote_follow_up_enabled: bool = True
     # Copilot mode (plan C): in human-held threads Neema briefs on handoff,
     # drafts every reply for one-tap send, keeps the CRM scribe running, and
     # pings when a quiet thread should come back to her. Default OFF.

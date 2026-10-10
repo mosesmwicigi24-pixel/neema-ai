@@ -2207,10 +2207,11 @@ async def _run_and_send(redis, wa_id: str, text: str, media: dict | None = None,
         # A photo turn always takes the main model — vision + catalogue matching
         # is never "light" work, whatever the caption says.
         model = settings.tier2_model if media else route_model(text)
+        facts: dict = {}                 # this turn's tool results, for the scribe
         async with AsyncSessionLocal() as db:
             reply = await run_turn(db, redis, wa_id, text,
                                    build_llm(model=model, purpose="whatsapp"), media=media,
-                                   deferred=deferred)
+                                   deferred=deferred, turn_facts=facts)
             if not (reply or "").strip():
                 _log.info("silence for %s: nothing to send (a closer, or a held acknowledgement)", wa_id)
                 return
@@ -2229,7 +2230,8 @@ async def _run_and_send(redis, wa_id: str, text: str, media: dict | None = None,
         try:
             from app.services.deals import scribe_update
             async with AsyncSessionLocal() as db3:
-                await scribe_update(db3, wa_id, "whatsapp", reply, inbound_text=text)
+                await scribe_update(db3, wa_id, "whatsapp", reply, inbound_text=text,
+                                    tools=facts.get("tools"))
         except Exception:
             pass
     except Exception as exc:
@@ -2440,11 +2442,12 @@ async def _run_and_send_meta(redis, channel: str, external_id: str, text: str,
         except Exception:
             pass
         model = settings.tier2_model if media else route_model(text)
+        facts: dict = {}                 # this turn's tool results, for the scribe
         async with AsyncSessionLocal() as db:
             reply = await run_turn(db, redis, wa_id=external_id, user_text=text,
                                    llm=build_llm(model=model, purpose=channel),
                                    channel=channel, external_id=external_id,
-                                   media=media, deferred=deferred)
+                                   media=media, deferred=deferred, turn_facts=facts)
             if not (reply or "").strip():
                 _log.info("silence on %s for %s: nothing to send (a closer, or a held "
                           "acknowledgement)", channel, external_id)
@@ -2466,7 +2469,8 @@ async def _run_and_send_meta(redis, channel: str, external_id: str, text: str,
         try:
             from app.services.deals import scribe_update
             async with AsyncSessionLocal() as db3:
-                await scribe_update(db3, external_id, channel, reply, inbound_text=text)
+                await scribe_update(db3, external_id, channel, reply, inbound_text=text,
+                                    tools=facts.get("tools"))
         except Exception:
             pass
         return True
