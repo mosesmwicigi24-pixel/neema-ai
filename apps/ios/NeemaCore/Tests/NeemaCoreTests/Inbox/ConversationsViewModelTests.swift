@@ -143,22 +143,34 @@ final class ConversationsViewModelTests: XCTestCase {
 
     func testLoadMoreInFlightIsCancelledByAPageOneReplace() async {
         let vmRef = Ref<InboxViewModel?>(nil)
+        let pageOnes = Ref(0)
         fake.on("GET", "/admin/conversations") { r, _ in
             if r.param("cursor") != nil {
-                // Page one lands (a replace) while the old-cursor page is still in flight.
+                // Page one lands (a replace) while the old-cursor page is still in flight:
+                // Android's fake answers it synchronously, so here the handler waits for
+                // the fresh page one (reordered, so its landing shows) before answering.
                 onMainSync { vmRef.value?.refresh() }
+                let deadline = Date().addingTimeInterval(5)
+                while Date() < deadline {
+                    let ids = Ref<[String]>([])
+                    onMainSync { ids.value = vmRef.value?.inbox.value.orderIds ?? [] }
+                    if ids.value == ["c2", "c1"] { break }
+                    Thread.sleep(forTimeInterval: 0.005)
+                }
                 return (200, InboxFixtures.page(["c6", "c7"], cursor: "cursor-3"))
             }
-            return (200, InboxFixtures.page(["c1", "c2"], cursor: "cursor-2"))
+            pageOnes.value += 1
+            return (200, pageOnes.value == 1 ? InboxFixtures.page(["c1", "c2"], cursor: "cursor-2") : InboxFixtures.page(["c2", "c1"], cursor: "cursor-2b"))
         }
         let (_, vm) = await vm()
         vmRef.value = vm
         vm.loadMore()
         await drain(); await drain()
         let s = vm.inbox.value
-        XCTAssertEqual(s.orderIds, ["c1", "c2"])   // no stale page appended past a moved boundary
+        XCTAssertEqual(s.orderIds, ["c2", "c1"])   // no stale page appended past a moved boundary
         XCTAssertFalse(s.loadingMore)
         XCTAssertTrue(s.hasMore)
+        XCTAssertEqual(pageOnes.value, 2)
     }
 
     func testFiltersEachStartsItsOwnListAndSearchIsDebounced() async {

@@ -12,6 +12,9 @@ final class AppModel: ObservableObject {
     static let FORBIDDEN_COOLDOWN_MS: Int64 = 15_000
 
     let container: AppContainer
+    /// The inbox's view of the shell; its logic lives in NeemaCore and is created per sign-in.
+    let inboxHost: ShellInboxHost
+    @Published private(set) var inboxScreen: InboxScreenModel?
 
     @Published private(set) var session: Session?
     @Published private(set) var me: Agent?
@@ -21,7 +24,9 @@ final class AppModel: ObservableObject {
     @Published private(set) var pendingOrders = 0
     @Published private(set) var nav = NavHistory()
     @Published private(set) var toast: Toast?
-    @Published var sessionExpired = false
+    @Published var sessionExpired = false {
+        didSet { inboxHost.sessionExpired.update(sessionExpired) }
+    }
     @Published private(set) var connected = false
     @Published private(set) var online = true
     @Published private(set) var dark = false
@@ -31,7 +36,9 @@ final class AppModel: ObservableObject {
     @Published var drawerOpen = false
     @Published var accountMenuOpen = false
     /// Cross-view requests: a chat to open (wa_id, external_id, "phone|ref" or id), a caller to focus.
-    @Published var openConvKey: String?
+    @Published var openConvKey: String? {
+        didSet { if inboxHost.openConvKey.value != openConvKey { inboxHost.openConvKey.update(openConvKey) } }
+    }
     @Published var callsFocusKey: String?
 
     private let toasts: ToastPresenter
@@ -48,6 +55,8 @@ final class AppModel: ObservableObject {
         dark = container.prefs.dark.value
         online = container.online.value
         toasts = ToastPresenter(foreground: container.foreground)
+        inboxHost = ShellInboxHost(container: container)
+        inboxHost.onToast = { [weak self] message, type in self?.toast(message, type) }
         forbiddenRefresh = Coalescer(windowMs: Self.FORBIDDEN_WINDOW_MS) { [weak self] in
             await MainActor.run {
                 guard let self = self else { return }
@@ -79,6 +88,16 @@ final class AppModel: ObservableObject {
         subs.append(toasts.current.observe { [weak self] t in
             Task { @MainActor in self?.toast = t }
         })
+        // The inbox keeps the shell's badge fresh, and consumes the open-conversation request.
+        subs.append(inboxHost.inboxSummary.observe { [weak self] s in
+            Task { @MainActor in self?.inboxHuman = s?.human ?? 0 }
+        })
+        subs.append(inboxHost.openConvKey.observe { [weak self] k in
+            Task { @MainActor in
+                guard let self = self else { return }
+                if self.openConvKey != k { self.openConvKey = k }
+            }
+        })
     }
 
     // ── Session ─────────────────────────────────────────────────────────────
@@ -98,6 +117,8 @@ final class AppModel: ObservableObject {
         nav = NavHistory()
         republishAccess()
         startPolls()
+        startInbox()
+        refetchCallChannels()
         refetchMe()
         if let link = pendingLink {
             pendingLink = nil
@@ -135,6 +156,7 @@ final class AppModel: ObservableObject {
 
     private func clearAgentState() {
         stopPolls()
+        stopInbox()
         toasts.cancel()
         me = nil
         agents = []
@@ -150,6 +172,49 @@ final class AppModel: ObservableObject {
         nav = NavHistory()
         republishAccess()
     }
+
+    // ── The inbox ───────────────────────────────────────────────────────────
+
+    /// One inbox model per sign-in (Android's ConversationsViewModel, scoped to the dashboard).
+    private func startInbox() {
+        inboxScreen?.close()
+        let vm = InboxViewModel(host: inboxHost, media: AppleMediaAccess())
+        inboxScreen = InboxScreenModel(vm: vm, customerHost: inboxHost)
+    }
+
+    private func stopInbox() {
+        inboxScreen?.close()
+        inboxScreen = nil
+        inboxHost.inboxSummary.update(nil)
+        inboxHost.openConvKey.update(nil)
+        inboxHost.composerPrefill.update(nil)
+        inboxHost.callChannels.update(nil)
+        inboxHost.orders.update([])
+    }
+
+    /// GET /admin/calls/channels: which apps can call now (the customer panel's Messenger Call button follows it).
+    func refetchCallChannels() {
+        let agent = signedInAgent
+        Task { [weak self] in
+            guard let self = self else { return }
+            if let ch = try? await self.container.api.calls.channels(), self.signedInAgent == agent { self.inboxHost.callChannels.update(ch) }
+        }
+    }
+
+    /// Words another view wants in a thread's composer (never sent by themselves).
+    func prefillComposer(convId: String, text: String) {
+        inboxHost.composerPrefill.update(ComposerPrefill(convId: convId, text: text))
+        openConversationFor(convId)
+    }
+
+    /// A notification landed: the inbox refetches.
+    func refreshInbox() { inboxHost.inboxRefresh.emit() }
+
+    /// The freshest record of who this agent is: the team-list row, else /admin/me.
+    var currentAgent: Agent? { agents.first { $0.id == session?.agentId } ?? me }
+
+    /// The open thread's controls follow the web's role rules (ConversationsView.tsx).
+    var inboxPerms: InboxPerms { InboxPerms.of(agent: currentAgent, sessionAgentId: session?.agentId) }
 
     // ── Me, the team, access ────────────────────────────────────────────────
 
@@ -193,6 +258,7 @@ final class AppModel: ObservableObject {
 
     private func republishAccess() {
         access = ShellRules.access(agents: agents, me: me, session: session)
+        inboxHost.canManageSettings = access.can(Perms.MANAGE_SETTINGS)
     }
 
     /// page.tsx `can(perm)`: the one permission test every feature uses.

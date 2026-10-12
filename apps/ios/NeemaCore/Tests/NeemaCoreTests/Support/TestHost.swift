@@ -59,7 +59,7 @@ func json(_ text: String) -> [String: JSONValue] { JSONValue.parse(text)?.object
 /// A signed-in shell for the inbox (Android's `dashboard(...)` + `testContainer`):
 /// the fake API, a session for Moses, the app "in the foreground", a fake
 /// socket, every delay on one virtual clock, and the toasts recorded.
-final class TestHost: InboxHost, @unchecked Sendable {
+final class TestHost: InboxHost, CustomerHost, @unchecked Sendable {
     let fake: FakeNeema
     let clock: VirtualClock
     let sessionStore: SessionStore
@@ -80,6 +80,15 @@ final class TestHost: InboxHost, @unchecked Sendable {
     private var _calls: [(waId: String, name: String?, convId: String?)] = []
     var callOutcome: CallOutcome = .placed
     private var subs: [Subscription] = []
+    // CustomerHost
+    let orders = Watched<[Order]>([])
+    let callChannels = Watched<CallChannels?>(nil)
+    var canManageSettings = true
+    var messengerOutcome: CallOutcome = .placed
+    private var _messengerCalls: [(psid: String, name: String?, convId: String?)] = []
+    var placedMessengerCalls: [(psid: String, name: String?, convId: String?)] { lock.sync { _messengerCalls } }
+    /// Replaces the permission request (the call manager's) when a test must shape its answer.
+    var permissionRequest: ((String, String?, String) async throws -> PermissionRequestResponse)?
 
     var session: Watched<Session?> { sessionStore.session }
     var socketConnected: Watched<Bool> { socket.connected }
@@ -116,6 +125,16 @@ final class TestHost: InboxHost, @unchecked Sendable {
     func placeCall(waId: String, name: String?, convId: String?) async -> CallOutcome {
         lock.sync { _calls.append((waId, name, convId)) }
         return callOutcome
+    }
+
+    func placeMessengerCall(psid: String, name: String?, convId: String?) async -> CallOutcome {
+        lock.sync { _messengerCalls.append((psid, name, convId)) }
+        return messengerOutcome
+    }
+
+    func requestCallPermission(to: String, name: String?, channel: String) async throws -> PermissionRequestResponse {
+        if let p = permissionRequest { return try await p(to, name, channel) }
+        return channel == CallWords.MESSENGER ? try await api.calls.requestMessengerPermission(psid: to) : try await api.calls.requestPermission(to: to, name: name)
     }
 
     /// `DashboardViewModel.openConversationFor`.
