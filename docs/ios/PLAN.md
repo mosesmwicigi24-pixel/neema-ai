@@ -738,8 +738,11 @@ every `Task` for cancellation on sign-out.
 
 - `swift test` in `apps/ios/NeemaCore` on Linux: **1362 tests, 0
   failures**, 1 skipped: cycle 5's 1322 and the 40 stress tests above.
-- macOS CI (`Neema app (iOS Simulator)`): the WebRTC package resolved and the
-  app built and tested against it — the run recorded in the PR once green.
+- macOS CI (`Neema app (iOS Simulator)`): green on 23420fe (run
+  38306420400: XcodeGen, the WebRTC package resolved, the simulator build
+  against it, the app's test bundle with the screenshot gallery — no
+  compile defect); every other check green on the same head (NeemaCore on
+  Linux, API tests, migrations, web, lint, import smoke).
 
 **Remaining parity gaps** (scope of this cycle)
 
