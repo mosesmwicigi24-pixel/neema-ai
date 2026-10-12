@@ -226,11 +226,14 @@ final class AppModel: ObservableObject {
         pollTask = nil
     }
 
+    /// The app came to the front (or left it). Coming back: the live policy
+    /// reconnects a closed socket itself; `nudge` is for one already wanted and
+    /// mid-backoff, so it is only sent when the foreground state did not change.
     func setForeground(_ front: Bool) {
         let was = container.foreground.value
         container.foreground.update(front)
         if front {
-            container.socket.nudge()
+            if was { container.socket.nudge() }
             if !was && session != nil { refetchAgents() }
         }
     }
