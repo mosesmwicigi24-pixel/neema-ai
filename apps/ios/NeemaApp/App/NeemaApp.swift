@@ -3,7 +3,8 @@ import NeemaCore
 
 @main
 struct NeemaApp: App {
-    @StateObject private var app = AppModel(container: AppContainer())
+    // `-neema-canned` (the UI tests): the app on the recorded backend instead of the server.
+    @StateObject private var app = AppModel(container: CannedBackend.container() ?? AppContainer())
     @Environment(\.scenePhase) private var scenePhase
 
     var body: some Scene {

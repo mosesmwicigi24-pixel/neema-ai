@@ -782,7 +782,8 @@ struct AvatarView: View {
     /// components/ui/Avatar.tsx: one neutral stone-green disc with dark-green initials,
     /// and a person glyph for an unnamed contact whose "name" is only a phone number.
     private var disc: some View {
-        let phoneLike = isPhoneLike(name)
+        // Common.kt: a blank name or one that is really a number / id gets the glyph (`isPhoneLike` is the core's).
+        let phoneLike = (name ?? "").trimmingCharacters(in: .whitespaces).isEmpty || isPhoneLike(name)
         return Circle()
             .fill(c.isDark ? Color(hex: 0x0F1424) : Color(hex: 0xF5F6F3))
             .overlay(Circle().stroke(c.isDark ? Color(hex: 0x1F367A) : Color(hex: 0xDDE8D5)))
@@ -797,17 +798,6 @@ struct AvatarView: View {
             )
             .frame(width: size, height: size)
     }
-}
-
-/// True when a "name" is really a phone number, a Meta id or a website-chat
-/// visitor: its initials would read "+7", "MI" or "WV", so the avatar shows a person glyph.
-func isPhoneLike(_ name: String?) -> Bool {
-    let n = (name ?? "").trimmingCharacters(in: .whitespaces)
-    if n.isEmpty { return true }
-    if n.lowercased().hasPrefix("messenger id") { return true }
-    if n.lowercased() == "website visitor" || n.hasPrefix("web_") { return true }
-    let digits = n.filter { !" +-().".contains($0) }
-    return !digits.isEmpty && digits.allSatisfy { $0.isNumber }
 }
 
 /// "Reconnecting…": the socket is down while the device is online (amber-100

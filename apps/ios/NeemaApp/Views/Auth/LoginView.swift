@@ -96,6 +96,7 @@ struct LoginView: View {
             label("EMAIL ADDRESS").padding(.top, 28)
             field {
                 TextField("admin@bethanyhouse.com", text: $email)
+                    .accessibilityIdentifier("login.email")
                     .textContentType(.username)
                     .keyboardType(.emailAddress)
                     .textInputAutocapitalization(.never)
@@ -115,6 +116,7 @@ struct LoginView: View {
                             SecureField("••••••••", text: $password)
                         }
                     }
+                    .accessibilityIdentifier("login.password")
                     .textContentType(.password)
                     .submitLabel(.go)
                     .focused($focus, equals: .password)
@@ -153,6 +155,7 @@ struct LoginView: View {
                 .shadow(color: Self.moss.opacity(0.45), radius: 14, y: 6)
             }
             .disabled(busy)
+            .accessibilityIdentifier("login.submit")
             .padding(.top, 22)
 
             Rectangle().fill(Self.lines).frame(height: 1).padding(.top, 28)

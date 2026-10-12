@@ -174,29 +174,9 @@ struct ChannelGlyph: View {
     }
 }
 
-/// The web's `avatarColor`: `[...s].reduce((a, c) => a + c.charCodeAt(0))` —
-/// one term per code point, taking its FIRST UTF-16 unit (so an emoji adds
-/// its high surrogate once, not both halves).
-func avatarIndex(_ s: String) -> Int {
-    let src = s.isEmpty ? "?" : s
-    var sum = 0
-    for scalar in src.unicodeScalars {
-        let utf16 = Array(String(scalar).utf16)
-        sum += Int(utf16.first ?? 0)
-    }
-    return sum % CallInk.avatars.count
-}
-
+/// `avatarIndex` and `initialsOf` live in the core (`CallVisualsRules.swift`,
+/// tested on Linux); the palette has `AVATAR_COLOURS` entries.
 func avatarColor(_ s: String) -> Color { CallInk.avatars[avatarIndex(s)] }
-
-/// The row's initials: who minus its first "+", first letter of the first two
-/// words, upper-cased. A word starting with an emoji keeps the whole emoji.
-func initialsOf(_ who: String) -> String {
-    var s = who
-    if let r = s.range(of: "+") { s.removeSubrange(r) }
-    let words = s.split(whereSeparator: { $0.isWhitespace }).map(String.init).filter { !$0.isEmpty }
-    return words.prefix(2).map { Fmt.firstGrapheme($0) }.joined().uppercased()
-}
 
 /// The outcome word's colour on the dark log (the word is always there too).
 func callToneColor(_ t: CallTone) -> Color {
@@ -243,18 +223,4 @@ func spokenLength(_ s: Int) -> String {
     return m > 0 ? "\(m) minute\(m == 1 ? "" : "s") \(sec) second\(sec == 1 ? "" : "s")" : "\(sec) second\(sec == 1 ? "" : "s")"
 }
 
-/// The Calls view's details pane on a tablet: the newest call shown opens in it
-/// when none is open or the open one was filtered away; the agent's own pick
-/// stays. Shrinking to a phone-sized window drops only a call the app picked,
-/// so a ⅓ split shows the log rather than a call nobody asked for.
-struct DetailsPick: Equatable {
-    let select: String?
-    let autoPicked: String?
-}
-
-func detailsPick(wide: Bool, shownIds: [String], selected: String?, autoPicked: String?) -> DetailsPick {
-    if !wide { return DetailsPick(select: selected != nil && selected == autoPicked ? nil : selected, autoPicked: nil) }
-    guard let first = shownIds.first else { return DetailsPick(select: selected, autoPicked: autoPicked) }
-    if selected == nil || !shownIds.contains(selected!) { return DetailsPick(select: first, autoPicked: first) }
-    return DetailsPick(select: selected, autoPicked: selected == autoPicked ? autoPicked : nil)
-}
+// `DetailsPick` / `detailsPick(wide:shownIds:selected:autoPicked:)` live in the core (`CallVisualsRules.swift`).
