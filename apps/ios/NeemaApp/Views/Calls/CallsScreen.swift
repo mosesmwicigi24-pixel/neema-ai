@@ -148,7 +148,7 @@ struct CallReadiness: Equatable {
             _ = try? await center.requestAuthorization(options: [.alert, .sound, .badge])
             return
         }
-        if let url = URL(string: UIApplication.openSettingsURLString) { UIApplication.shared.open(url) }
+        if let url = URL(string: UIApplication.openSettingsURLString) { UIApplication.shared.open(url, options: [:], completionHandler: nil) }
     }
 }
 

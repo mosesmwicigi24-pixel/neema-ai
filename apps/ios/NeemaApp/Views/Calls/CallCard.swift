@@ -49,7 +49,7 @@ struct CallActions {
             minimise: { calls.minimise() }, expand: { calls.expand() }, redial: { calls.redial() }, dismiss: { calls.dismiss() },
             sendCallRequest: { calls.sendCallRequest() },
             openSettings: {
-                if let url = URL(string: UIApplication.openSettingsURLString) { UIApplication.shared.open(url) }
+                if let url = URL(string: UIApplication.openSettingsURLString) { UIApplication.shared.open(url, options: [:], completionHandler: nil) }
                 calls.dismiss()
             },
             callNow: { calls.callNow() },
