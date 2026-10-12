@@ -505,8 +505,11 @@ price/ordering invariants the Android tests pin.
   `CallingSettingsModelTests` 5 — plus the 403 re-read, the Business/AI
   waits, the crash list's contract and 403, the restore-once rule, and the
   calling rules on their own), and the 3 route-coverage tests.
-- macOS CI (`Neema app (iOS Simulator)`): this PR's run — the result goes in
-  this record once known (any compile defect it finds is listed above).
+- macOS CI (`Neema app (iOS Simulator)`): green on ccf2ed7 (run
+  38287130688: XcodeGen, the simulator build, the app's test bundle with the
+  screenshot gallery — no compile defect); every other check green on the
+  same head (NeemaCore on Linux, API tests, migrations, web, lint, import
+  smoke).
 
 **Remaining parity gaps** (scope of this cycle)
 
