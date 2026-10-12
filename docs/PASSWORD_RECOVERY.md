@@ -26,7 +26,11 @@ password meant an admin typing a new one in Settings → Team.
    `POST /api/auth/reset-password {token, password}`. The token is consumed on
    first use; the hash is replaced; the person signs in with the new password.
 
-The mobile prefix `/api/agent-auth` carries the same routes.
+The mobile prefix `/api/agent-auth` carries the same routes — and on the public
+host it is the one the pages call: there `/api/auth/*` belongs to NextAuth (the
+dashboard's sign-in handler), which answers a POST with "This action with HTTP
+POST is not supported by NextAuth.js". NextAuth itself reaches the API's
+`/api/auth/login` over the internal network (`API_INTERNAL_URL`).
 
 ## What the box needs (`.env`, then both compose files as usual)
 
