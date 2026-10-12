@@ -105,36 +105,11 @@ public final class OrdersFeed: @unchecked Sendable {
 
     private func startPolling() {
         stopPolling()
-        let every = Self.POLL_MS, sleep = self.sleep, fg = foreground
-        let t = Task { [weak self] in
-            while !Task.isCancelled {
-                guard let self = self else { return }
-                await quietly { try await self.refreshOrders() }
-                // Wait out the interval — unless the app leaves and comes back
-                // meanwhile, which refetches at once.
-                let returned = await Self.leftAndCameBack(fg, within: every, sleep: sleep)
-                if Task.isCancelled { return }
-                if !returned && !fg.value { await await_(fg, equals: true) }
-            }
+        let t = Polling.loop(every: Self.POLL_MS, foreground: foreground, sleep: sleep) { [weak self] in
+            guard let self = self else { return }
+            await quietly { try await self.refreshOrders() }
         }
         lock.sync { pollTask = t }
-    }
-
-    /// `withTimeoutOrNull(ms) { fg.first { !it }; fg.first { it } }`: true when the
-    /// app left and came back before `ms` passed.
-    static func leftAndCameBack(_ fg: Watched<Bool>, within ms: Int64, sleep: @escaping Sleeper) async -> Bool {
-        await withTaskGroup(of: Bool.self) { group in
-            group.addTask { _ = try? await sleep(ms); return false }
-            group.addTask {
-                await await_(fg, equals: false)
-                if Task.isCancelled { return false }
-                await await_(fg, equals: true)
-                return !Task.isCancelled
-            }
-            let first = await group.next() ?? false
-            group.cancelAll()
-            return first
-        }
     }
 
     private func stopPolling() {

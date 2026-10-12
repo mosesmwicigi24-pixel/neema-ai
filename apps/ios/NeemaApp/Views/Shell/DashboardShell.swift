@@ -34,7 +34,7 @@ struct CurrentView: View {
         case .deals: ViewPlaceholder(view: .deals, cycle: 2, note: "What Neema owns right now and her planned actions.")
         case .leads: ViewPlaceholder(view: .leads, cycle: 2, note: "The leads pipeline.")
         case .overview: ViewPlaceholder(view: .overview, cycle: 2, note: "Real-time metrics and platform performance.")
-        case .catalog: ViewPlaceholder(view: .catalog, cycle: 2, note: "Live from the Bethany House hub.")
+        case .catalog: CatalogScreen()
         case .agents: ViewPlaceholder(view: .agents, cycle: 2, note: "Agents and roles.")
         case .settings: ViewPlaceholder(view: .settings, cycle: 4, note: "Platform configuration and integrations.")
         case .profile: ViewPlaceholder(view: .profile, cycle: 2, note: "Your account and preferences.")

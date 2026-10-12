@@ -136,3 +136,29 @@ public struct PriceAudit: Equatable, Sendable, Decodable {
         self.init(currencyGaps: c.list(.currency_gaps), perPiece: c.list(.per_piece), checked: c.int(.checked, default: 0), rate: c.double(.rate, default: 0))
     }
 }
+
+// ── Snapshots: the catalogue written back as the wire has it ─────────────────
+
+extension CatalogVariant: Encodable {
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: K.self)
+        try c.encodeIfPresent(variantId, forKey: .variant_id); try c.encodeIfPresent(sku, forKey: .sku); try c.encodeIfPresent(name, forKey: .name)
+        try c.encodeIfPresent(label, forKey: .label); try c.encode(attributes, forKey: .attributes)
+        try c.encodeIfPresent(priceKes, forKey: .price_kes); try c.encodeIfPresent(priceUsd, forKey: .price_usd)
+    }
+}
+
+extension CatalogItem: Encodable {
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: K.self)
+        try c.encodeIfPresent(rawId, forKey: .id); try c.encodeIfPresent(hubProductId, forKey: .hub_product_id)
+        try c.encodeIfPresent(availableQty, forKey: .available_qty); try c.encode(sku, forKey: .sku); try c.encode(name, forKey: .name)
+        try c.encode(aliases, forKey: .aliases); try c.encode(price, forKey: .price); try c.encodeIfPresent(unit, forKey: .unit)
+        try c.encodeIfPresent(rawCategory, forKey: .category); try c.encodeIfPresent(description, forKey: .description)
+        try c.encode(inStock, forKey: .in_stock); try c.encodeIfPresent(updatedAt, forKey: .updated_at)
+        try c.encodeIfPresent(imageUrl, forKey: .image_url); try c.encodeIfPresent(thumbnailUrl, forKey: .thumbnail_url)
+        try c.encodeIfPresent(priceKes, forKey: .price_kes); try c.encodeIfPresent(priceUsd, forKey: .price_usd)
+        try c.encodeIfPresent(productType, forKey: .product_type); try c.encode(variants, forKey: .variants)
+        try c.encodeIfPresent(priceMinKes, forKey: .price_min_kes); try c.encodeIfPresent(priceMaxKes, forKey: .price_max_kes)
+    }
+}

@@ -59,7 +59,7 @@ func json(_ text: String) -> [String: JSONValue] { JSONValue.parse(text)?.object
 /// A signed-in shell for the inbox (Android's `dashboard(...)` + `testContainer`):
 /// the fake API, a session for Moses, the app "in the foreground", a fake
 /// socket, every delay on one virtual clock, and the toasts recorded.
-final class TestHost: InboxHost, CustomerHost, OrdersHost, @unchecked Sendable {
+final class TestHost: InboxHost, CustomerHost, OrdersHost, CatalogHost, @unchecked Sendable {
     /// A burst of 403s costs one re-read of who this agent is (the shell's `FORBIDDEN_WINDOW_MS`).
     static let FORBIDDEN_WINDOW_MS: Int64 = 1_000
 
@@ -87,6 +87,9 @@ final class TestHost: InboxHost, CustomerHost, OrdersHost, @unchecked Sendable {
     let orders = Watched<[Order]>([])
     /// The dashboard's orders feed (Android's DashboardViewModel orders poll), when the test asks for one.
     let feed: OrdersFeed?
+    // CatalogHost
+    let catalog = Watched<[CatalogItem]>([])
+    let catalogFeed: CatalogFeed?
     private var forbiddenRefresh: Coalescer?
     private var _accessRereads = 0
     /// How often a 403 made this host re-read /admin/me and the team list.
@@ -107,7 +110,7 @@ final class TestHost: InboxHost, CustomerHost, OrdersHost, @unchecked Sendable {
     var placedCalls: [(waId: String, name: String?, convId: String?)] { lock.sync { _calls } }
 
     init(fake: FakeNeema, role: String = "admin", superuser: Bool = true, clock: VirtualClock = VirtualClock(),
-         snapshots: SnapshotCache? = nil, signedIn: Bool = true, ordersFeed: Bool = false) {
+         snapshots: SnapshotCache? = nil, signedIn: Bool = true, ordersFeed: Bool = false, catalogFeed: Bool = false) {
         self.fake = fake
         self.clock = clock
         fake.sleep = clock.sleeper
@@ -121,6 +124,7 @@ final class TestHost: InboxHost, CustomerHost, OrdersHost, @unchecked Sendable {
         self.snapshots = snapshots ?? SnapshotCache.temporary()
         feed = ordersFeed ? OrdersFeed(api: api, foreground: foreground, socketEvents: socket.events, reconnected: socket.reconnected,
                                        snapshots: self.snapshots, orders: orders, sleep: clock.sleeper, clock: { clock.now }) : nil
+        self.catalogFeed = catalogFeed ? CatalogFeed(api: api, foreground: foreground, snapshots: self.snapshots, catalog: catalog, sleep: clock.sleeper) : nil
         if signedIn {
             sessionStore.save(Session(accessToken: fakeJwt(), refreshToken: "refresh", agentId: Fixtures.ME_ID, email: "moses@bethanyhouse.co.ke",
                                       name: "Moses Mwicigi", role: role, isSuperuser: superuser, mode: "direct"))
@@ -138,6 +142,12 @@ final class TestHost: InboxHost, CustomerHost, OrdersHost, @unchecked Sendable {
         }
         subs.append(http.forbidden.observe { [weak self] _ in self?.forbiddenRefresh?.kick() })
         if signedIn, let f = feed { f.start(agentId: Fixtures.ME_ID) }
+        if signedIn, let f = self.catalogFeed { f.start(agentId: Fixtures.ME_ID) }
+    }
+
+    // CatalogHost
+    func refreshCatalog() async throws {
+        if let f = catalogFeed { try await f.refreshCatalog() } else { catalog.value = try await api.catalog.list() }
     }
 
     // OrdersHost
@@ -169,6 +179,7 @@ final class TestHost: InboxHost, CustomerHost, OrdersHost, @unchecked Sendable {
     func onReauthenticated() { sessionExpired.value = false }
     func logout() {
         feed?.stop()
+        catalogFeed?.stop()
         sessionStore.clear()
         sessionExpired.value = false
         inboxSummary.value = nil

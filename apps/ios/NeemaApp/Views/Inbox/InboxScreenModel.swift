@@ -7,7 +7,7 @@ import NeemaCore
 /// The shell as the inbox's logic sees it (Android's `DashboardViewModel`
 /// for `ConversationsViewModel`): the session, the socket, the badges and
 /// the cross-view requests, as watched values the app model keeps in step.
-final class ShellInboxHost: InboxHost, CustomerHost, OrdersHost, @unchecked Sendable {
+final class ShellInboxHost: InboxHost, CustomerHost, OrdersHost, CatalogHost, @unchecked Sendable {
     let session: Watched<Session?>
     let foreground: Watched<Bool>
     let sessionExpired = Watched<Bool>(false)
@@ -24,21 +24,25 @@ final class ShellInboxHost: InboxHost, CustomerHost, OrdersHost, @unchecked Send
     // CustomerHost / OrdersHost: every order the dashboard knows, the calling channels and the settings permission.
     let ordersFeed: OrdersFeed
     var orders: Watched<[Order]> { ordersFeed.orders }
+    let catalogFeed: CatalogFeed
+    var catalog: Watched<[CatalogItem]> { catalogFeed.catalog }
     let callChannels = Watched<CallChannels?>(nil)
     var canManageSettings = false
 
-    init(container: AppContainer, ordersFeed: OrdersFeed, snapshots: SnapshotCache) {
+    init(container: AppContainer, ordersFeed: OrdersFeed, catalogFeed: CatalogFeed, snapshots: SnapshotCache) {
         session = container.sessionStore.session
         foreground = container.foreground
         socketConnected = container.socket.connected
         socketEvents = container.socket.events
         api = container.api
         self.ordersFeed = ordersFeed
+        self.catalogFeed = catalogFeed
         self.snapshots = snapshots
     }
 
     func refreshOrders() async throws { try await ordersFeed.refreshOrders() }
     func refetchOrders() { ordersFeed.refetchOrders() }
+    func refreshCatalog() async throws { try await catalogFeed.refreshCatalog() }
 
     func toast(_ message: String, _ type: ToastType) {
         guard let cb = onToast else { return }

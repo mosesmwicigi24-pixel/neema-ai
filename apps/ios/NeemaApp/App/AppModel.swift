@@ -14,10 +14,13 @@ final class AppModel: ObservableObject {
     let container: AppContainer
     /// The dashboard's orders list: polled, pushed, snapshotted per agent (the orders part of Android's DashboardViewModel).
     let ordersFeed: OrdersFeed
+    /// The hub's catalogue: read at sign-in and every five minutes while in front, snapshotted per agent.
+    let catalogFeed: CatalogFeed
     /// The screens' view of the shell; their logic lives in NeemaCore and is created per sign-in.
     let inboxHost: ShellInboxHost
     @Published private(set) var inboxScreen: InboxScreenModel?
     @Published private(set) var ordersScreen: OrdersScreenModel?
+    @Published private(set) var catalogScreen: CatalogScreenModel?
 
     @Published private(set) var session: Session?
     @Published private(set) var me: Agent?
@@ -61,7 +64,8 @@ final class AppModel: ObservableObject {
         let snapshots = SnapshotCache.standard()
         ordersFeed = OrdersFeed(api: container.api, foreground: container.foreground, socketEvents: container.socket.events,
                                 reconnected: container.socket.reconnected, snapshots: snapshots)
-        inboxHost = ShellInboxHost(container: container, ordersFeed: ordersFeed, snapshots: snapshots)
+        catalogFeed = CatalogFeed(api: container.api, foreground: container.foreground, snapshots: snapshots)
+        inboxHost = ShellInboxHost(container: container, ordersFeed: ordersFeed, catalogFeed: catalogFeed, snapshots: snapshots)
         inboxHost.onToast = { [weak self] message, type in self?.toast(message, type) }
         forbiddenRefresh = Coalescer(windowMs: Self.FORBIDDEN_WINDOW_MS) { [weak self] in
             await MainActor.run {
@@ -131,6 +135,7 @@ final class AppModel: ObservableObject {
         republishAccess()
         startPolls()
         ordersFeed.start(agentId: s.agentId)
+        catalogFeed.start(agentId: s.agentId)
         startScreens()
         refetchCallChannels()
         refetchMe()
@@ -155,6 +160,7 @@ final class AppModel: ObservableObject {
         refetchMe()
         refetchAgents()
         ordersFeed.refetchOrders()
+        catalogFeed.refetchCatalog()
         refreshInbox()
     }
 
@@ -198,6 +204,8 @@ final class AppModel: ObservableObject {
         inboxScreen = InboxScreenModel(vm: vm, customerHost: inboxHost)
         ordersScreen?.close()
         ordersScreen = OrdersScreenModel(vm: OrdersViewModel(host: inboxHost))
+        catalogScreen?.close()
+        catalogScreen = CatalogScreenModel(vm: CatalogViewModel(host: inboxHost))
     }
 
     private func stopScreens() {
@@ -205,7 +213,10 @@ final class AppModel: ObservableObject {
         inboxScreen = nil
         ordersScreen?.close()
         ordersScreen = nil
+        catalogScreen?.close()
+        catalogScreen = nil
         ordersFeed.stop()
+        catalogFeed.stop()
         inboxHost.inboxSummary.update(nil)
         inboxHost.openConvKey.update(nil)
         inboxHost.composerPrefill.update(nil)

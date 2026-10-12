@@ -182,9 +182,10 @@ public final class OrdersViewModel {
 
     public func refresh() {
         if ui.refreshing { return }
+        // Raised at once (not inside the task): a second pull before the task starts is ignored too.
+        mut { $0.refreshing = true }
         launch { [weak self] in
             guard let self = self else { return }
-            self.mut { $0.refreshing = true }
             _ = await self.awaitRefetch()
             self.mut { $0.refreshing = false }
         }
@@ -193,9 +194,9 @@ public final class OrdersViewModel {
     /// The error state's Retry: the first load again, with its spinner.
     public func retry() {
         if ui.initialLoading || ui.refreshing { return }
+        mut { $0.initialLoading = true }
         launch { [weak self] in
             guard let self = self else { return }
-            self.mut { $0.initialLoading = true }
             _ = await self.awaitRefetch()
             self.mut { $0.initialLoading = false }
         }

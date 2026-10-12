@@ -209,3 +209,36 @@ struct StatusBadge: View {
 extension String {
     var unbroken: String { replacingOccurrences(of: " ", with: "\u{00A0}") }
 }
+
+/// A load that failed, said in place: an amber notice with the reason and a
+/// Retry. Used where a card or a screen would otherwise sit on "Loading…"
+/// forever, or show figures that are not the server's (Android `LoadProblem`).
+struct LoadProblem: View {
+    let message: String
+    var title: String? = nil
+    var retrying: Bool = false
+    var onRetry: (() -> Void)? = nil
+    @Environment(\.neema) private var c
+
+    var body: some View {
+        HStack(alignment: .center, spacing: 10) {
+            Image(systemName: "icloud.slash").font(.system(size: 14, weight: .medium)).foregroundColor(c.amber)
+            VStack(alignment: .leading, spacing: 2) {
+                if let t = title { Text(t).font(NeemaFont.manrope(12, .semibold)).foregroundColor(c.text) }
+                Text(message).font(NeemaFont.manrope(12)).foregroundColor(c.text.opacity(0.72))
+            }
+            Spacer(minLength: 4)
+            if let r = onRetry {
+                Button(action: r) {
+                    Text(retrying ? "Retrying…" : "Retry").font(NeemaFont.manrope(12, .semibold)).foregroundColor(c.gold2)
+                        .padding(.horizontal, 10).frame(minHeight: 36)
+                }
+                .disabled(retrying)
+                .accessibilityLabel("Retry loading")
+            }
+        }
+        .padding(.leading, 12).padding(.trailing, 4).padding(.vertical, 10)
+        .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(c.isDark ? Palette.amber950.opacity(0.45) : Palette.amber50))
+        .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).stroke(c.amber.opacity(0.35)))
+    }
+}
