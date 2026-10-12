@@ -324,6 +324,11 @@ Last updated: 2026-07-09. Branch of record: work is fused to **`origin/main`**
   shape of something that happened: came, arrived, too small, didn't — all
   silent) is a misread: `_settle_reading` makes it high/other — a person to
   answer, never to apologise to. Tests: `tests/test_campaign_posts.py`.
+- **Password recovery** (owner, 2026-10-12): Login → "Forgot your password?" mails a
+  single-use reset link to the business recovery inbox (`PASSWORD_RESET_INBOX`,
+  default info@bethanyhouse.co.ke), never to the person; the office hands it over.
+  Needs SMTP on the box (`SMTP_HOST/PORT/USER/PASSWORD`, `MEDIA_PUBLIC_URL` for the
+  link); off → 503 naming Settings → Team. `docs/PASSWORD_RECOVERY.md`.
 - **Anchored to the product** (owner, 2026-10-07: under the stole post "Looking
   for a gift the pastor in your life will actually treasure? … Single sided:
   $25, Double sided: $40", "We need it on the Plateau. How can we get supply?!"

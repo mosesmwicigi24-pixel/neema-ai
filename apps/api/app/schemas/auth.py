@@ -11,3 +11,12 @@ class TokenResponse(BaseModel):
     agent_id: str
     role: str
     is_superuser: bool
+
+
+class ForgotPasswordRequest(BaseModel):
+    email: str
+
+
+class ResetPasswordRequest(BaseModel):
+    token: str
+    password: str
