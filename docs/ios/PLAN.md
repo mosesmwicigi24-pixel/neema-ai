@@ -945,3 +945,90 @@ re-read against the app as it stands, every **unverified** row either driven
 by a UI test or a gallery state or named as needing a device, the consistency
 pass (copy, spacing, icons, dark mode) across screens, and the loose ends the
 cycles left (forms' saved state, the gallery's named states).
+
+### Cycle 9 — Final refinement & cross-platform consistency
+
+**Features implemented / verified**
+
+- **A gallery that shows what the app shows.** `ImageRenderer` had left
+  every scrolling region blank, so no list had ever appeared in a
+  screenshot (the cycle 3–8 galleries proved layout, not content). Each
+  shot is now the view hosted in a window of the shot's size, without the
+  simulator's status-bar and home-indicator insets, drawn as it is on
+  screen. The gallery then renders the states Android's screenshot suites
+  pin: the drawer and the account menu, the bell, the three toasts,
+  offline, the session-expired card, a ringing call and its wrap-up (the
+  app accepts a silent ringer so CallKit's UI never opens over the test
+  host), and the open thread.
+- **The screens walked against Android's goldens** — the run's
+  `ios-screenshots` artifact beside `apps/android/app/src/test/snapshots/images`
+  (902 PNGs), screen by screen on the phone: `docs/ios/CONSISTENCY_LOG.md`
+  holds the verdict for each of the 17 screens and states compared, with
+  the two recurring non-differences named (the 390 pt vs 412 dp phone and
+  the fixtures' clocks).
+- **Every word compared**: the 135 Android literals (of 1 202) with no
+  verbatim iOS twin read in context — each is Android-only by design
+  (foreground service, channels, share targets, tombstones), a fragment
+  of a template that matches once joined, or code; one was missing and is
+  now there ("Drop to attach to your reply").
+- **The hardware-keyboard and drop rules** of Android's `Shortcuts.kt` /
+  `DropFiles.kt` in the core (`Shell/Shortcuts.swift`, the 14 Android
+  tests ported: `KeyboardRulesTests` 11, `EscapeKeyTests` 3) and wired on
+  iPad: Cmd+1…9 open the views, Cmd+B collapses the sidebar, Cmd+F / Cmd+K
+  focus the inbox search, Cmd+] / Cmd+[ walk the conversations, Return
+  sends with a hardware keyboard (Shift+Return a new line; iOS 17), Esc
+  closes what is open and never leaves the view, a drag from another app
+  attaches what Neema can send. The matrix's last platform-restricted row
+  ("Hardware keyboard + mouse + drag-and-drop — Cycle 9") is done.
+- **Matrix rows re-verified**: the saved-state rows against every screen's
+  `@SceneStorage`, the keyboard row, the chrome rows the walk touched.
+
+**Defects corrected** (found by the walk; none by a test)
+
+1. Sign-in: the phone layout stacked and centred the brand where Android
+   puts the logo beside "Neema / ADMIN" and centres the form; the subtitle,
+   labels and footer were grey where Android uses willow; the email
+   placeholder rendered in the system's link blue. All three aligned.
+2. The phone header truncated "Reconnecting…" to "Rec…" (then the
+   wordmark to "Ne…"); Android keeps both and truncates the view's name.
+3. The Team tabs stretched to half the row each (the underline's greedy
+   width); Android keeps them at their labels' width.
+4. The Profile email broke mid-word; now one line with the tail cut.
+5. The orders' channel pill used a letter for its mark; Android draws the
+   app's glyph.
+6. The session-expired password field had no "••••••••" placeholder.
+7. The gallery itself (above): the renderer that hid every list.
+
+**Tests executed**
+
+- `swift test` in `apps/ios/NeemaCore` on Linux: **1584 tests, 0
+  failures**, 1 skipped (cycle 8's 1570 + the 14 keyboard and drop tests).
+- macOS CI (`Neema app (iOS Simulator)`): see the line below once the run
+  is in. The first run of this cycle hung in the gallery at the open-thread
+  state and its UI tests then found no shell after sign-in; the state is
+  rendered last and logged, and the UI tests print the hierarchy they saw.
+- The Migrations job failed once on a backend latency bound
+  (`p95 < 0.2`, measured 218 ms) in code this PR does not touch; its one
+  re-run passed.
+
+**Remaining parity gaps** (scope of this cycle)
+
+- The walk compared the phone, light, in the fixtures' state: the dark
+  shots were read for legibility only, the iPad shots render but the Tab S9
+  Ultra's widths, font scales and split-screen thirds are pinned by tests,
+  not compared by eye; the call card's phases and wrap-up outcomes beyond
+  "ringing" / "missed" are words and rules under test, not renders.
+- Android's 412 dp phone shows one more word per line than the 390 pt
+  iPhone the gallery renders; where a row wraps or truncates differently
+  for that reason it is not changed.
+- The keyboard and drop wiring, the saved-state restore and the toast per
+  notification are compiled on CI and not driven by a UI test (no hardware
+  keyboard, process death or socket on the simulator job).
+
+**Blockers** (carried) — no Xcode or device here; backend push (PushKit /
+APNs); no Apple credentials.
+
+**Next cycle** — Cycle 10: final verification & production readiness — the
+release configuration, versioning, the signing / TestFlight instructions
+(blocked without credentials), `docs/ios/FINAL_REPORT.md` with the honest
+status of every item, the blockers and the hand-over. Then stop.
