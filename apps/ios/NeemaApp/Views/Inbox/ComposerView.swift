@@ -61,7 +61,7 @@ struct ComposerView: View {
 
     var body: some View {
         let state = model.composer
-        let blue = tint(Blue50, Blue700, Blue200, dark: c.isDark)
+        let blue = tintOf(Blue50, Blue700, Blue200, dark: c.isDark)
         let closed = window?.mode == "closed"
         let canSend = !state.replyText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !closed
         VStack(spacing: 0) {
@@ -138,7 +138,7 @@ struct ComposerView: View {
                     // ── Translate-to-their-language toggle ──
                     if threadLang != nil || txOn {
                         HStack(spacing: 8) {
-                            let tx = txOn ? tint(Palette.willow100, Palette.moss700, Palette.moss700.opacity(0.3), dark: c.isDark) : tint(Palette.stone100, Palette.stone500, Palette.stone200, dark: c.isDark)
+                            let tx = txOn ? tintOf(Palette.willow100, Palette.moss700, Palette.moss700.opacity(0.3), dark: c.isDark) : tintOf(Palette.stone100, Palette.stone500, Palette.stone200, dark: c.isDark)
                             Button { vm.toggleTx() } label: {
                                 Text("🌐 " + (txOn ? "Sending in \(state.txPreview?.lang ?? threadLang ?? "their language")" : "Translate: off"))
                                     .font(NeemaFont.manrope(11, .semibold)).foregroundColor(tx.fg)
@@ -214,7 +214,7 @@ private struct DraftPanel: View {
     var body: some View {
         let state = model.composer
         let vm = model.vm
-        let blue = tint(Blue50, Blue700, Blue200, dark: c.isDark)
+        let blue = tintOf(Blue50, Blue700, Blue200, dark: c.isDark)
         let soft = ink(Palette.blue500, dark: c.isDark)
         VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 6) {
@@ -290,7 +290,7 @@ struct WindowStrip: View {
                 default: return (Palette.stoneGreen, Palette.hairline, Palette.sage500, "•")
                 }
             }()
-            let t = tint(bg0, fg0, bd0, dark: c.isDark)
+            let t = tintOf(bg0, fg0, bd0, dark: c.isDark)
             let text: String = {
                 switch win.mode {
                 case "open": return "Reply window open — \(left(win.expiresAt, now: now)) left"
@@ -399,7 +399,7 @@ private struct LostMediaNote: View {
     @Environment(\.neema) private var c
 
     var body: some View {
-        let t = tint(Palette.amber50, Palette.amber800, Palette.amber200, dark: c.isDark)
+        let t = tintOf(Palette.amber50, Palette.amber800, Palette.amber200, dark: c.isDark)
         let list = names.prefix(3).joined(separator: ", ") + (names.count > 3 ? " and \(names.count - 3) more" : "")
         HStack(spacing: 8) {
             Text("📎").font(.system(size: 11))

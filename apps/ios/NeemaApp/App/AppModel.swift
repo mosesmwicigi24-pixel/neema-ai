@@ -12,9 +12,12 @@ final class AppModel: ObservableObject {
     static let FORBIDDEN_COOLDOWN_MS: Int64 = 15_000
 
     let container: AppContainer
-    /// The inbox's view of the shell; its logic lives in NeemaCore and is created per sign-in.
+    /// The dashboard's orders list: polled, pushed, snapshotted per agent (the orders part of Android's DashboardViewModel).
+    let ordersFeed: OrdersFeed
+    /// The screens' view of the shell; their logic lives in NeemaCore and is created per sign-in.
     let inboxHost: ShellInboxHost
     @Published private(set) var inboxScreen: InboxScreenModel?
+    @Published private(set) var ordersScreen: OrdersScreenModel?
 
     @Published private(set) var session: Session?
     @Published private(set) var me: Agent?
@@ -55,7 +58,10 @@ final class AppModel: ObservableObject {
         dark = container.prefs.dark.value
         online = container.online.value
         toasts = ToastPresenter(foreground: container.foreground)
-        inboxHost = ShellInboxHost(container: container)
+        let snapshots = SnapshotCache.standard()
+        ordersFeed = OrdersFeed(api: container.api, foreground: container.foreground, socketEvents: container.socket.events,
+                                reconnected: container.socket.reconnected, snapshots: snapshots)
+        inboxHost = ShellInboxHost(container: container, ordersFeed: ordersFeed, snapshots: snapshots)
         inboxHost.onToast = { [weak self] message, type in self?.toast(message, type) }
         forbiddenRefresh = Coalescer(windowMs: Self.FORBIDDEN_WINDOW_MS) { [weak self] in
             await MainActor.run {
@@ -98,6 +104,13 @@ final class AppModel: ObservableObject {
                 if self.openConvKey != k { self.openConvKey = k }
             }
         })
+        // The orders feed keeps the nav's pending badge fresh.
+        subs.append(ordersFeed.orders.observe { [weak self] _ in
+            Task { @MainActor in
+                guard let self = self else { return }
+                self.pendingOrders = self.ordersFeed.pendingOrders
+            }
+        })
     }
 
     // ── Session ─────────────────────────────────────────────────────────────
@@ -117,7 +130,8 @@ final class AppModel: ObservableObject {
         nav = NavHistory()
         republishAccess()
         startPolls()
-        startInbox()
+        ordersFeed.start(agentId: s.agentId)
+        startScreens()
         refetchCallChannels()
         refetchMe()
         if let link = pendingLink {
@@ -140,6 +154,8 @@ final class AppModel: ObservableObject {
         sessionExpired = false
         refetchMe()
         refetchAgents()
+        ordersFeed.refetchOrders()
+        refreshInbox()
     }
 
     /// Sidebar.tsx's sign-out: the token, the bell and every per-agent state go.
@@ -156,7 +172,7 @@ final class AppModel: ObservableObject {
 
     private func clearAgentState() {
         stopPolls()
-        stopInbox()
+        stopScreens()
         toasts.cancel()
         me = nil
         agents = []
@@ -173,23 +189,27 @@ final class AppModel: ObservableObject {
         republishAccess()
     }
 
-    // ── The inbox ───────────────────────────────────────────────────────────
+    // ── The screens ─────────────────────────────────────────────────────────
 
-    /// One inbox model per sign-in (Android's ConversationsViewModel, scoped to the dashboard).
-    private func startInbox() {
+    /// One model per screen per sign-in (Android's per-agent ViewModelStore).
+    private func startScreens() {
         inboxScreen?.close()
         let vm = InboxViewModel(host: inboxHost, media: AppleMediaAccess())
         inboxScreen = InboxScreenModel(vm: vm, customerHost: inboxHost)
+        ordersScreen?.close()
+        ordersScreen = OrdersScreenModel(vm: OrdersViewModel(host: inboxHost))
     }
 
-    private func stopInbox() {
+    private func stopScreens() {
         inboxScreen?.close()
         inboxScreen = nil
+        ordersScreen?.close()
+        ordersScreen = nil
+        ordersFeed.stop()
         inboxHost.inboxSummary.update(nil)
         inboxHost.openConvKey.update(nil)
         inboxHost.composerPrefill.update(nil)
         inboxHost.callChannels.update(nil)
-        inboxHost.orders.update([])
     }
 
     /// GET /admin/calls/channels: which apps can call now (the customer panel's Messenger Call button follows it).

@@ -112,7 +112,7 @@ struct ConversationListView: View {
                         }
                     } else {
                         if humanCount > 0 {
-                            let lt = tint(Palette.livePill, Palette.livePillInk, dark: c.isDark)
+                            let lt = tintOf(Palette.livePill, Palette.livePillInk, dark: c.isDark)
                             Text("\(humanCount) live").font(NeemaFont.manrope(10, .semibold)).foregroundColor(lt.fg).lineLimit(1).fixedSize()
                                 .padding(.horizontal, 8).padding(.vertical, 2)
                                 .background(Capsule().fill(lt.bg))
@@ -351,7 +351,7 @@ private struct FilterPill: View {
     let action: () -> Void
     @Environment(\.neema) private var c
     var body: some View {
-        let t = tint(Palette.willow100, Palette.willow600, dark: c.isDark)
+        let t = tintOf(Palette.willow100, Palette.willow600, dark: c.isDark)
         Button(action: action) {
             Text(label).font(NeemaFont.manrope(12, .medium)).foregroundColor(active ? .white : t.fg)
                 .padding(.horizontal, 10).padding(.vertical, 4)
@@ -450,13 +450,13 @@ struct ConversationRowView: View {
                             }
                             if let st = stage, st != "new" {
                                 let (sbg, sfg, sbd) = STAGE_CHIP[st] ?? STAGE_CHIP["contacted"]!
-                                let t = tint(sbg, sfg, sbd, dark: c.isDark)
+                                let t = tintOf(sbg, sfg, sbd, dark: c.isDark)
                                 Text(st.prefix(1).uppercased() + st.dropFirst()).font(NeemaFont.manrope(10, .semibold)).foregroundColor(t.fg).lineLimit(1)
                                     .padding(.horizontal, 6).padding(.vertical, 1)
                                     .background(RoundedRectangle(cornerRadius: 4).fill(t.bg)).roundedBorder(t.border, radius: 4)
                             }
                             if let iso = conv.countryIso, !iso.trimmingCharacters(in: .whitespaces).isEmpty {
-                                let ct = tint(Palette.orange100, Palette.orange700, Palette.orange300, dark: c.isDark)
+                                let ct = tintOf(Palette.orange100, Palette.orange700, Palette.orange300, dark: c.isDark)
                                 Text(Fmt.countryName(iso)).font(NeemaFont.manrope(10, .semibold)).foregroundColor(ct.fg).lineLimit(1)
                                     .frame(maxWidth: 110)
                                     .padding(.horizontal, 6).padding(.vertical, 1)

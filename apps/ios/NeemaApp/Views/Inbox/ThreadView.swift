@@ -56,11 +56,8 @@ struct ThreadPaneView: View {
 
     private var vm: InboxViewModel { model.vm }
 
-    var body: some View {
-        let thread = model.thread
-        let composer = model.composer
-        let can = threadControls(conv, perms)
-        let inline = wide && roomyHeader
+    /// The header's buttons for what this agent may do with the thread (a plain function: a view builder can't hold statements).
+    private func headerActions(_ can: ThreadControls, inline: Bool) -> [HeaderAction] {
         var actions: [HeaderAction] = []
         if can.intercept { actions.append(HeaderAction("intercept", "Intercept", "⚡", busyKey: "intercept", primary: true) { vm.intercept(conv.id) }) }
         if can.pickUp { actions.append(HeaderAction("pickup", "Pick up", "🙋", busyKey: "intercept", primary: true) { vm.intercept(conv.id) }) }
@@ -70,6 +67,26 @@ struct ThreadPaneView: View {
         if can.transfer { actions.append(HeaderAction("transfer", inline ? "" : "Transfer", "⇄") { vm.showTransfer(true) }) }
         if can.note { actions.append(HeaderAction("note", inline ? "" : "Add note", "📝") { vm.showNote(true) }) }
         if can.clearHistory { actions.append(HeaderAction("clear", inline ? "" : "Clear history", "🗑️", danger: true) { vm.showClear(true) }) }
+        return actions
+    }
+
+    /// Shortcuts to the customer panel's Ask Neema / Answer-via-Neema boxes and
+    /// Invite button (CustomerSidebar.tsx), which the web shows to everyone.
+    private func menuItems(invite: Bool) -> [(String, () -> Void)] {
+        var menu: [(String, () -> Void)] = []
+        menu.append(("🔎 Ask Neema", onAsk))
+        menu.append(("💬 Neema delivers a team answer", onAnswer))
+        if invite { menu.append(("🟢 Invite to WhatsApp", onInvite)) }
+        if let a = onActivity { menu.append(("🕘 Activity log", a)) }
+        return menu
+    }
+
+    var body: some View {
+        let thread = model.thread
+        let composer = model.composer
+        let can = threadControls(conv, perms)
+        let inline = wide && roomyHeader
+        let actions = headerActions(can, inline: inline)
         let siblings: [Conversation] = conv.personId == nil ? [conv] :
             model.inbox.cache.values.filter { $0.personId == conv.personId }
                 .sorted { a, b in (Inbox.CHAN_ORDER.firstIndex(of: a.channel) ?? 99) < (Inbox.CHAN_ORDER.firstIndex(of: b.channel) ?? 99) }
@@ -79,13 +96,7 @@ struct ThreadPaneView: View {
         // CustomerSidebar's rule: the invite exists only for a person with a real
         // 7–15-digit phone on their profile and no WhatsApp thread yet.
         let invitePhone = Inbox.inviteTarget(thread.reach, conv.id)
-        var menu: [(String, () -> Void)] = []
-        // Shortcuts to the customer panel's Ask Neema / Answer-via-Neema boxes and
-        // Invite button (CustomerSidebar.tsx), which the web shows to everyone.
-        menu.append(("🔎 Ask Neema", onAsk))
-        menu.append(("💬 Neema delivers a team answer", onAnswer))
-        if invitePhone != nil { menu.append(("🟢 Invite to WhatsApp", onInvite)) }
-        if let a = onActivity { menu.append(("🕘 Activity log", a)) }
+        let menu = menuItems(invite: invitePhone != nil)
         let callbacks = ThreadCallbacks(
             onView: onView,
             onRecover: { id, done in vm.recoverMedia(id, onDone: done) },
@@ -375,7 +386,7 @@ private struct ThreadRowView: View {
             }
             .padding(.top, 8)
         case .escalated(let msg, let reason):
-            let t = tint(Palette.amber50, Palette.amber700, Palette.amber200, dark: c.isDark)
+            let t = tintOf(Palette.amber50, Palette.amber700, Palette.amber200, dark: c.isDark)
             let rule = c.isDark ? t.border : Palette.amber200
             VStack(spacing: 4) {
                 HStack(spacing: 0) {
@@ -407,7 +418,7 @@ private struct ThreadRowView: View {
             }()
             DividerPill(text: msg.body + (msg.createdAt.map { " · \(Fmt.timeAgo($0))" } ?? ""), line: Palette.stone200, bg: bg, fg: fg, border: bd)
         case .note(let msg):
-            let t = tint(Palette.amber50, Palette.amber800, Palette.amber200, dark: c.isDark)
+            let t = tintOf(Palette.amber50, Palette.amber800, Palette.amber200, dark: c.isDark)
             VStack(alignment: .leading, spacing: 4) {
                 HStack(spacing: 6) {
                     Text("📝").font(.system(size: 12))
@@ -442,7 +453,7 @@ private struct DividerPill: View {
     @Environment(\.neema) private var c
 
     var body: some View {
-        let t = tint(bg, fg, border ?? bg, dark: c.isDark)
+        let t = tintOf(bg, fg, border ?? bg, dark: c.isDark)
         let rule = c.isDark ? c.border : line
         HStack(spacing: 0) {
             Rectangle().fill(rule).frame(height: 1)

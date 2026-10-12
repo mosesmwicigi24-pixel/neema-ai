@@ -188,3 +188,37 @@ public struct Attribution: Equatable, Sendable, Decodable {
         self.init(sources: c.list(.sources), unattributed: c.object(.unattributed) ?? Unattributed(), totals: c.object(.totals) ?? AttributionTotals())
     }
 }
+
+// ── Snapshots: orders written back as the wire has them ─────────────────────
+
+extension OrderItem: Codable {
+    enum K: String, CodingKey { case name, qty, unit, total, sku }
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.lenient(K.self)
+        self.init(name: c.string(.name, default: ""), qty: c.double(.qty, default: 0), unit: c.double(.unit, default: 0),
+                  total: c.double(.total, default: 0), sku: c.string(.sku))
+    }
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: K.self)
+        try c.encode(name, forKey: .name); try c.encode(qty, forKey: .qty); try c.encode(unit, forKey: .unit); try c.encode(total, forKey: .total)
+        try c.encodeIfPresent(sku, forKey: .sku)
+    }
+}
+
+extension Order: Encodable {
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: K.self)
+        try c.encode(id, forKey: .id); try c.encode(waId, forKey: .wa_id)
+        try c.encodeIfPresent(sessionId, forKey: .session_id); try c.encodeIfPresent(eventType, forKey: .event_type)
+        try c.encode(items, forKey: .items); try c.encode(subtotal, forKey: .subtotal); try c.encode(currency, forKey: .currency)
+        try c.encode(rawStatus, forKey: .status)
+        try c.encodeIfPresent(paymentStatus, forKey: .payment_status); try c.encodeIfPresent(fulfillmentStatus, forKey: .fulfillment_status)
+        try c.encodeIfPresent(replyText, forKey: .reply_text); try c.encode(channel, forKey: .channel); try c.encodeIfPresent(state, forKey: .state)
+        try c.encode(createdAt, forKey: .created_at); try c.encodeIfPresent(updatedAt, forKey: .updated_at)
+        try c.encodeIfPresent(contactName, forKey: .contact_name); try c.encodeIfPresent(contactPhone, forKey: .contact_phone)
+        try c.encodeIfPresent(hubOrderId, forKey: .hub_order_id); try c.encodeIfPresent(hubOrderNumber, forKey: .hub_order_number)
+        try c.encodeIfPresent(hubPushStatus, forKey: .hub_push_status); try c.encodeIfPresent(hubLastError, forKey: .hub_last_error)
+        try c.encodeIfPresent(hubPublicToken, forKey: .hub_public_token); try c.encodeIfPresent(hubPublicUrl, forKey: .hub_public_url)
+        try c.encodeIfPresent(hubStatus, forKey: .hub_status); try c.encodeIfPresent(hubPaymentStatus, forKey: .hub_payment_status)
+    }
+}

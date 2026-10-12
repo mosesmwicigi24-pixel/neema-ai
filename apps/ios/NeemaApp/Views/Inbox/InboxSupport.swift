@@ -147,7 +147,7 @@ func darkInk(_ fg: Color) -> Color { fg.lifted(0.45) }
 /// The dark-mode form of a tint whose light-mode ink is `fg`.
 func darkTint(_ fg: Color) -> Tint { Tint(bg: fg.opacity(0.16), fg: darkInk(fg), border: darkInk(fg).opacity(0.45)) }
 
-func tint(_ bg: Color, _ fg: Color, _ border: Color? = nil, dark: Bool) -> Tint {
+func tintOf(_ bg: Color, _ fg: Color, _ border: Color? = nil, dark: Bool) -> Tint {
     dark ? darkTint(fg) : Tint(bg: bg, fg: fg, border: border ?? bg)
 }
 

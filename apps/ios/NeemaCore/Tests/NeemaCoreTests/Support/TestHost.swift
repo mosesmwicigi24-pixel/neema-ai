@@ -59,7 +59,10 @@ func json(_ text: String) -> [String: JSONValue] { JSONValue.parse(text)?.object
 /// A signed-in shell for the inbox (Android's `dashboard(...)` + `testContainer`):
 /// the fake API, a session for Moses, the app "in the foreground", a fake
 /// socket, every delay on one virtual clock, and the toasts recorded.
-final class TestHost: InboxHost, CustomerHost, @unchecked Sendable {
+final class TestHost: InboxHost, CustomerHost, OrdersHost, @unchecked Sendable {
+    /// A burst of 403s costs one re-read of who this agent is (the shell's `FORBIDDEN_WINDOW_MS`).
+    static let FORBIDDEN_WINDOW_MS: Int64 = 1_000
+
     let fake: FakeNeema
     let clock: VirtualClock
     let sessionStore: SessionStore
@@ -80,8 +83,14 @@ final class TestHost: InboxHost, CustomerHost, @unchecked Sendable {
     private var _calls: [(waId: String, name: String?, convId: String?)] = []
     var callOutcome: CallOutcome = .placed
     private var subs: [Subscription] = []
-    // CustomerHost
+    // CustomerHost / OrdersHost
     let orders = Watched<[Order]>([])
+    /// The dashboard's orders feed (Android's DashboardViewModel orders poll), when the test asks for one.
+    let feed: OrdersFeed?
+    private var forbiddenRefresh: Coalescer?
+    private var _accessRereads = 0
+    /// How often a 403 made this host re-read /admin/me and the team list.
+    var accessRereads: Int { lock.sync { _accessRereads } }
     let callChannels = Watched<CallChannels?>(nil)
     var canManageSettings = true
     var messengerOutcome: CallOutcome = .placed
@@ -98,7 +107,7 @@ final class TestHost: InboxHost, CustomerHost, @unchecked Sendable {
     var placedCalls: [(waId: String, name: String?, convId: String?)] { lock.sync { _calls } }
 
     init(fake: FakeNeema, role: String = "admin", superuser: Bool = true, clock: VirtualClock = VirtualClock(),
-         snapshots: SnapshotCache? = nil, signedIn: Bool = true) {
+         snapshots: SnapshotCache? = nil, signedIn: Bool = true, ordersFeed: Bool = false) {
         self.fake = fake
         self.clock = clock
         fake.sleep = clock.sleeper
@@ -110,6 +119,8 @@ final class TestHost: InboxHost, CustomerHost, @unchecked Sendable {
         let store = sessionStore
         socket = LiveSocket(factory: sockets, baseUrl: "https://neema.test", token: { store.current?.accessToken }, sleep: clock.sleeper)
         self.snapshots = snapshots ?? SnapshotCache.temporary()
+        feed = ordersFeed ? OrdersFeed(api: api, foreground: foreground, socketEvents: socket.events, reconnected: socket.reconnected,
+                                       snapshots: self.snapshots, orders: orders, sleep: clock.sleeper, clock: { clock.now }) : nil
         if signedIn {
             sessionStore.save(Session(accessToken: fakeJwt(), refreshToken: "refresh", agentId: Fixtures.ME_ID, email: "moses@bethanyhouse.co.ke",
                                       name: "Moses Mwicigi", role: role, isSuperuser: superuser, mode: "direct"))
@@ -118,7 +129,22 @@ final class TestHost: InboxHost, CustomerHost, @unchecked Sendable {
             guard let self = self else { return }
             if self.session.value != nil { self.sessionExpired.value = true }
         })
+        // A refusal re-reads who this agent is (the shell's onForbidden), coalesced over a short window.
+        let api = self.api
+        forbiddenRefresh = Coalescer(windowMs: Self.FORBIDDEN_WINDOW_MS, sleep: clock.sleeper) { [weak self] in
+            self?.lock.sync { self?._accessRereads += 1 }
+            _ = try? await api.profile.me()
+            _ = try? await api.agents.list()
+        }
+        subs.append(http.forbidden.observe { [weak self] _ in self?.forbiddenRefresh?.kick() })
+        if signedIn, let f = feed { f.start(agentId: Fixtures.ME_ID) }
     }
+
+    // OrdersHost
+    func refreshOrders() async throws {
+        if let f = feed { try await f.refreshOrders() } else { orders.value = try await api.orders.list() }
+    }
+    func refetchOrders() { Task { [weak self] in _ = try? await self?.refreshOrders() } }
 
     func toast(_ message: String, _ type: ToastType) { lock.sync { _toasts.append(Toast(message: message, type: type)) } }
 
@@ -142,6 +168,7 @@ final class TestHost: InboxHost, CustomerHost, @unchecked Sendable {
     /// The SessionExpired dialog's sign-in succeeded.
     func onReauthenticated() { sessionExpired.value = false }
     func logout() {
+        feed?.stop()
         sessionStore.clear()
         sessionExpired.value = false
         inboxSummary.value = nil
