@@ -1,6 +1,7 @@
 import Foundation
 import SwiftUI
 import AVFoundation
+import UserNotifications
 import NeemaCore
 
 /// The dashboard page's shared state (Android's `DashboardViewModel`): the
@@ -26,6 +27,9 @@ final class AppModel: ObservableObject {
     let messageAlerts: MessageAlerts
     private let callRinger: CallKitRinger
     private let alertSink: SystemAlertSink
+    /// Delivers the vault's crash reports once someone is signed in (Android `CrashReporter`).
+    let crashReporter: CrashReporter
+    private let signedInFlag: Watched<Bool>
     @Published private(set) var callsScreen: CallsScreenModel?
     @Published private(set) var callCard: CallCardModel?
     @Published private(set) var bell: BellModel?
@@ -107,6 +111,9 @@ final class AppModel: ObservableObject {
         notifications = AgentNotifications(events: container.socket.events, appPrefs: container.prefs, store: container.prefs.raw, sink: sink)
         messageAlerts = MessageAlerts(events: container.socket.events, notifications: notifications, prefs: container.prefs, sink: sink, player: SystemAlertPlayer())
         inboxHost = ShellInboxHost(container: container, ordersFeed: ordersFeed, catalogFeed: catalogFeed, snapshots: snapshots, calls: calls)
+        let flag = Watched<Bool>(container.sessionStore.current != nil)
+        signedInFlag = flag
+        crashReporter = CrashReporter(http: container.http, signedIn: flag, vault: container.crashVault)
         inboxHost.onToast = { [weak self] message, type in self?.toast(message, type) }
         inboxHost.onRefreshAgents = { [weak self] in try await self?.refreshAgents() }
         inboxHost.onRefetchAgents = { [weak self] in self?.refetchAgents() }
@@ -123,6 +130,11 @@ final class AppModel: ObservableObject {
         // The system call UI's Answer / Decline (CallKit) come back as the softphone's own actions.
         ringer.onAction = { [weak self] action, id in Task { @MainActor in self?.calls.handleAction(action, id: id) } }
         calls.start()
+        // An error caught at the edge (a WebRTC callback, a background task) is written down and sent on.
+        let vault = container.crashVault
+        let reporter = crashReporter
+        CrashHooks.install(vault) { reporter.flushSoon() }
+        crashReporter.start()
         subscribe()
         if let s = session { signedIn(s) }
     }
@@ -190,6 +202,8 @@ final class AppModel: ObservableObject {
 
     private func signedIn(_ s: Session) {
         signedInAgent = s.agentId
+        signedInFlag.update(true)
+        askForNotificationsOnce()
         nav = NavHistory()
         republishAccess()
         startPolls()
@@ -255,6 +269,7 @@ final class AppModel: ObservableObject {
     }
 
     private func clearAgentState() {
+        signedInFlag.update(false)
         stopPolls()
         stopScreens()
         toasts.cancel()
@@ -345,6 +360,21 @@ final class AppModel: ObservableObject {
         inboxHost.callChannels.update(nil)
         inboxHost.callsFocusKey.update(nil)
     }
+
+    /// Once per install, right after the first sign-in (Android `MainActivity.maybeAskForNotifications`):
+    /// the system's own prompt, so a customer's message or a call can alert from the background.
+    private func askForNotificationsOnce() {
+        let prefs = container.prefs.raw
+        if prefs.bool(Self.ASKED_NOTIFICATIONS, default: false) { return }
+        prefs.set(true, for: Self.ASKED_NOTIFICATIONS)
+        let sink = alertSink
+        UNUserNotificationCenter.current().getNotificationSettings { s in
+            guard s.authorizationStatus == .notDetermined else { return }
+            UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound, .badge]) { _, _ in sink.refreshPermission() }
+        }
+    }
+
+    static let ASKED_NOTIFICATIONS = "asked_post_notifications"
 
     /// A row in the bell: read, and where it names a customer (or an order) the
     /// app also takes the agent there — the same target as tapping its phone notification.

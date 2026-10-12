@@ -84,8 +84,8 @@ final class SoftphoneStressTests: XCTestCase {
         private(set) var lists = 0
         init(_ inner: FakeCallApi) { self.inner = inner }
         func list() async throws -> [Call] {
-            lock.lock(); lists += 1; _inFlight += 1; maxInFlight = max(maxInFlight, _inFlight); lock.unlock()
-            defer { lock.lock(); _inFlight -= 1; lock.unlock() }
+            lock.sync { lists += 1; _inFlight += 1; maxInFlight = max(maxInFlight, _inFlight) }
+            defer { lock.sync { _inFlight -= 1 } }
             try await gate.value()
             return []
         }
