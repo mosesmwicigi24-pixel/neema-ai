@@ -9,8 +9,10 @@ Two parts:
 
 | Folder | What | Builds on |
 |---|---|---|
-| `NeemaCore/` | A Swift package with everything that is not a screen: wire models, the HTTP client and its session rules, sign-in and silent refresh, the live socket, the shell's rules (views, deep links, the way back, toasts, access), formatting and permissions, and every screen's logic (inbox, customer panel, orders, catalog, deals, leads, analytics, reports, team, profile, settings, WhatsApp calling, the calls console, the softphone's rules behind its ports, the bell and the message alerts). Mirrors `apps/android/.../core` and `feature/*` one rule for one rule. | Linux, macOS, iOS — `swift test` runs 1377 tests anywhere |
+| `NeemaCore/` | A Swift package with everything that is not a screen: wire models, the HTTP client and its session rules, sign-in and silent refresh, the live socket, the shell's rules (views, deep links, the way back, toasts, access), formatting and permissions, and every screen's logic (inbox, customer panel, orders, catalog, deals, leads, analytics, reports, team, profile, settings, WhatsApp calling, the calls console, the softphone's rules behind its ports, the bell and the message alerts). Mirrors `apps/android/.../core` and `feature/*` one rule for one rule. | Linux, macOS, iOS — `swift test` runs 1570 tests anywhere |
 | `NeemaApp/` | The SwiftUI app (screens, theme, platform services). The Xcode project is generated from `project.yml` with XcodeGen. | macOS with Xcode 16 |
+| `NeemaAppTests/` | The app's test bundle: the shell's four tests and the screenshot gallery below. | macOS, the simulator |
+| `NeemaAppUITests/` | XCUITest driving the built app on the simulator against the recorded backend (`-neema-canned`): sign-in right and wrong, the bottom tabs, the drawer to Settings, the orders list, sign-out. | macOS, the simulator |
 
 ## Build and test
 
@@ -47,6 +49,21 @@ at the SwiftUI layer the programme gets without a device. The pieces:
   NEEMA_GALLERY_OUT=/tmp/gallery swift test --package-path apps/ios/NeemaCore --filter GalleryFixtureExport
   cp /tmp/gallery/fixtures.json apps/ios/NeemaAppTests/Gallery/fixtures.json
   ```
+
+## The UI tests and the recorded backend
+
+Launched with `-neema-canned`, the app runs on `CannedBackend`
+(`NeemaApp/App/CannedBackend.swift`): the gallery's `fixtures.json`, bundled
+with the app too, answers every GET, sign-in is answered as FastAPI's auth
+router would for the fixtures' agent (any email, password `neema`), and the
+live socket is dead on arrival. `NeemaAppUITests/NeemaUITests.swift` drives
+that app as a person would, finding controls by the accessibility labels the
+screens carry for VoiceOver and the sign-in form by its identifiers
+(`login.email`, `login.password`, `login.submit`). The scheme runs them with
+the unit tests, so the CI job above runs them on every pull request.
+
+`docs/ios/TESTS.md` maps every Android test file to where the same behaviour
+is proven on iOS.
 
 ## The routes the server serves
 

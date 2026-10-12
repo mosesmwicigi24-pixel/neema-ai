@@ -12,6 +12,10 @@ import NeemaCore
 struct DashboardShell: View {
     @EnvironmentObject private var app: AppModel
     @Environment(\.neema) private var c
+    // Android's SavedStateHandle: the view, its history and whose they are, and the toast on
+    // screen, survive the system killing the app in the background (not a sign-out).
+    @SceneStorage("shell.nav") private var savedNav = ""
+    @SceneStorage("shell.toast") private var savedToast = ""
 
     var body: some View {
         GeometryReader { g in
@@ -26,6 +30,13 @@ struct DashboardShell: View {
             .frame(width: g.size.width, height: g.size.height)
         }
         .background(c.surface.ignoresSafeArea())
+        .onAppear {
+            app.restoreNav(savedNav)
+            app.restoreToast(savedToast)
+            savedNav = app.savedNav
+        }
+        .onChange(of: app.nav) { _ in savedNav = app.savedNav }
+        .onChange(of: app.toast) { _ in savedToast = app.savedToast }
     }
 }
 

@@ -86,12 +86,7 @@ final class CallCardModel: ObservableObject {
     var barShown: Bool { (state.minimised && state.phase != .idle) || grant != nil }
 }
 
-/// The docked call panel's width beside the view (tablets).
-let CALL_PANEL_WIDTH: CGFloat = 420
-
-func callDocks(phase: CallPhase, minimised: Bool, contentWidth: CGFloat) -> Bool {
-    phase != .idle && !minimised && contentWidth >= 1000
-}
+// `CALL_PANEL_WIDTH` and `callDocks(phase:minimised:contentWidth:)` are the core's (`Shell/DockRules.swift`).
 
 /// The call over the content area. Renders nothing when idle, and only the
 /// `CallBar` (composed by the shell above the content) while minimised.
