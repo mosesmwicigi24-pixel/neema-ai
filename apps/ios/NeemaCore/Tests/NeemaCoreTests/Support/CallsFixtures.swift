@@ -33,15 +33,12 @@ enum CallsFixtures {
     /// routers/admin.py calls_transcribe: the 409 when the call has no recording.
     static let NO_RECORDING = #"{"detail":"No recording was captured for this call."}"#
 
-    /// The encoded path the app requests for `callId` (what FakeNeema's calls log records).
-    static func path(_ callId: String, _ suffix: String) -> String { "/admin/calls/\(enc(callId))/\(suffix)" }
-    /// The id as `encodeURIComponent` / the client's path encoder spell it (`=` → `%3D`).
-    static func enc(_ callId: String) -> String {
-        var allowed = CharacterSet.alphanumerics
-        allowed.insert(charactersIn: "-_.~")
-        return callId.addingPercentEncoding(withAllowedCharacters: allowed) ?? callId
-    }
-    /// A FakeNeema route pattern for `path` (the id's `.` and `%` are regex-escaped).
+    /// The path the app requests for `callId`, as FakeNeema records and matches it: the
+    /// client percent-encodes the id's `==` on the wire (`enc`), the fake sees it decoded.
+    static func path(_ callId: String, _ suffix: String) -> String { "/admin/calls/\(callId)/\(suffix)" }
+    /// The id as the client's path encoder spells it on the wire (`=` → `%3D`).
+    static func encoded(_ callId: String) -> String { enc(callId) }
+    /// A FakeNeema route pattern for `path` (the id's `.` is regex-escaped).
     static func route(_ callId: String, _ suffix: String) -> String { NSRegularExpression.escapedPattern(for: path(callId, suffix)) }
 
     /// `datetime.isoformat()` of an aware UTC timestamp, `minutes` ago.

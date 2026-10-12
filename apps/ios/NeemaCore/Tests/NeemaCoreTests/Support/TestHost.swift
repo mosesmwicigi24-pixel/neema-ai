@@ -62,7 +62,7 @@ func json(_ text: String) -> [String: JSONValue] { JSONValue.parse(text)?.object
 /// A signed-in shell for the inbox (Android's `dashboard(...)` + `testContainer`):
 /// the fake API, a session for Moses, the app "in the foreground", a fake
 /// socket, every delay on one virtual clock, and the toasts recorded.
-final class TestHost: InboxHost, CustomerHost, OrdersHost, CatalogHost, DealsHost, LeadsHost, OverviewHost, ReportsHost, TeamHost, ProfileHost, SettingsHost, @unchecked Sendable {
+final class TestHost: InboxHost, CustomerHost, OrdersHost, CatalogHost, DealsHost, LeadsHost, OverviewHost, ReportsHost, TeamHost, ProfileHost, SettingsHost, CallsHost, @unchecked Sendable {
     /// A burst of 403s costs one re-read of who this agent is (the shell's `FORBIDDEN_WINDOW_MS`).
     static let FORBIDDEN_WINDOW_MS: Int64 = 1_000
 
@@ -110,6 +110,24 @@ final class TestHost: InboxHost, CustomerHost, OrdersHost, CatalogHost, DealsHos
     var placedMessengerCalls: [(psid: String, name: String?, convId: String?)] { lock.sync { _messengerCalls } }
     /// Replaces the permission request (the call manager's) when a test must shape its answer.
     var permissionRequest: ((String, String?, String) async throws -> PermissionRequestResponse)?
+
+    // CallsHost: the softphone over this host's API, socket and clock, with the fake device.
+    let callMedia = FakeMedia()
+    let callRinger = FakeRinger()
+    let callAudio = FakeAudio()
+    let callsFocusKey = Watched<String?>(nil)
+    private var _softphone: CallManager?
+    var calls: CallManager {
+        if let c = _softphone { return c }
+        let store = sessionStore
+        let c = MainActor.assumeIsolated {
+            CallManager(api: NeemaCallApi(api), events: socket.events, connected: socket.connected, foreground: foreground,
+                        signedIn: { store.current != nil }, media: callMedia, ringer: callRinger, audio: callAudio, micGranted: { true },
+                        sleep: clock.sleeper)
+        }
+        _softphone = c
+        return c
+    }
 
     var session: Watched<Session?> { sessionStore.session }
     var socketConnected: Watched<Bool> { socket.connected }

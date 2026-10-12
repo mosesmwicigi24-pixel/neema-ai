@@ -6,7 +6,7 @@ import XCTest
 /// one virtual clock, frames pushed straight into the events signal.
 @MainActor
 final class CallRig {
-    static let BASE: Int64 = 1_790_330_400_000   // 2026-09-25T10:00:00Z
+    nonisolated static let BASE: Int64 = 1_790_330_400_000   // 2026-09-25T10:00:00Z
     let api: FakeCallApi
     let media = FakeMedia()
     let ringer = FakeRinger()
