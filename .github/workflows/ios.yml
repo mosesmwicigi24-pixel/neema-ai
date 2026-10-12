@@ -1,0 +1,80 @@
+name: iOS
+
+# Builds and tests the iOS app (apps/ios). Two jobs:
+#  - core: the platform-independent Swift package (apps/ios/NeemaCore) on
+#    Linux — wire models, the HTTP client and its session rules, sign-in and
+#    refresh, the live socket, formatting, permissions. Fast, and the same
+#    command a contributor runs anywhere (`swift test`).
+#  - app: the SwiftUI app on a macOS runner — XcodeGen writes the Xcode
+#    project from apps/ios/project.yml, then xcodebuild builds it for the
+#    iPhone simulator and runs the app tests. Unsigned (no Apple team in CI).
+on:
+  pull_request:
+    paths: ["apps/ios/**", ".github/workflows/ios.yml"]
+  push:
+    branches: [main]
+    paths: ["apps/ios/**", ".github/workflows/ios.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ios-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  core:
+    name: NeemaCore (Linux)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    container: swift:6.2
+    defaults:
+      run:
+        working-directory: apps/ios/NeemaCore
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build
+        run: swift build --build-tests
+      - name: Test
+        run: swift test
+
+  app:
+    name: Neema app (iOS Simulator)
+    runs-on: macos-15
+    timeout-minutes: 45
+    defaults:
+      run:
+        working-directory: apps/ios
+    steps:
+      - uses: actions/checkout@v4
+      - name: Toolchain
+        run: |
+          xcodebuild -version
+          swift --version
+      - name: XcodeGen
+        run: brew install xcodegen && xcodegen generate
+      - name: Pick a simulator
+        id: sim
+        run: |
+          DEVICE=$(xcrun simctl list devices available --json | python3 -c '
+          import json, sys
+          d = json.load(sys.stdin)["devices"]
+          names = [x["name"] for k, v in d.items() if "iOS" in k for x in v if x["name"].startswith("iPhone")]
+          pick = [n for n in names if n.startswith("iPhone 1") and "Pro" not in n and "Plus" not in n] or names
+          print(sorted(pick)[-1] if pick else "iPhone 16")')
+          echo "device=$DEVICE" >> "$GITHUB_OUTPUT"
+          echo "Using simulator: $DEVICE"
+      - name: Build and test
+        run: |
+          xcodebuild -project Neema.xcodeproj -scheme Neema \
+            -destination "platform=iOS Simulator,name=${{ steps.sim.outputs.device }}" \
+            -skipPackagePluginValidation CODE_SIGNING_ALLOWED=NO \
+            build test 2>&1 | tee xcodebuild.log | grep -E "error:|warning: unreachable|\*\* |Test Suite|Test Case.*(passed|failed)|Executed" || true
+          grep -q "\*\* TEST SUCCEEDED \*\*" xcodebuild.log
+      - name: Upload the build log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-xcodebuild-log
+          path: apps/ios/xcodebuild.log

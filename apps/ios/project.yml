@@ -1,0 +1,98 @@
+# XcodeGen spec for the Neema iOS app. `xcodegen generate` writes
+# Neema.xcodeproj (not committed). The platform-independent core is the local
+# Swift package in NeemaCore/.
+name: Neema
+options:
+  bundleIdPrefix: ke.co.bethanyhouse
+  deploymentTarget:
+    iOS: "16.0"
+  createIntermediateGroups: true
+  xcodeVersion: "16.0"
+settings:
+  base:
+    SWIFT_VERSION: "5.0"
+    MARKETING_VERSION: "1.0.0"
+    CURRENT_PROJECT_VERSION: "1"
+    CODE_SIGN_STYLE: Automatic
+    ENABLE_USER_SCRIPT_SANDBOXING: YES
+packages:
+  NeemaCore:
+    path: NeemaCore
+targets:
+  Neema:
+    type: application
+    platform: iOS
+    sources:
+      - path: NeemaApp
+    dependencies:
+      - package: NeemaCore
+        product: NeemaCore
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: ke.co.bethanyhouse.neema
+        PRODUCT_NAME: Neema
+        TARGETED_DEVICE_FAMILY: "1,2"
+        SUPPORTS_MACCATALYST: NO
+        GENERATE_INFOPLIST_FILE: NO
+    info:
+      path: NeemaApp/Info.plist
+      properties:
+        CFBundleDisplayName: Neema
+        CFBundleName: Neema
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        UILaunchScreen: {}
+        UIApplicationSceneManifest:
+          UIApplicationSupportsMultipleScenes: false
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+        UISupportedInterfaceOrientations~ipad:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationPortraitUpsideDown
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+        UIRequiresFullScreen: false
+        ITSAppUsesNonExemptEncryption: false
+        NSMicrophoneUsageDescription: "Neema uses the microphone to take and place WhatsApp and Messenger calls with customers."
+        NSCameraUsageDescription: "Neema uses the camera to photograph an item and send it to a customer."
+        NSPhotoLibraryUsageDescription: "Neema sends photos and videos you pick to customers."
+        UIBackgroundModes:
+          - audio
+          - voip
+          - remote-notification
+        CFBundleURLTypes:
+          - CFBundleURLName: ke.co.bethanyhouse.neema
+            CFBundleURLSchemes: [neema]
+        UIAppFonts:
+          - manrope_regular.ttf
+          - manrope_medium.ttf
+          - manrope_semibold.ttf
+          - manrope_bold.ttf
+          - manrope_extrabold.ttf
+          - dm_mono_regular.ttf
+          - dm_mono_medium.ttf
+  NeemaAppTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources:
+      - path: NeemaAppTests
+    dependencies:
+      - target: Neema
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: ke.co.bethanyhouse.neema.tests
+        GENERATE_INFOPLIST_FILE: YES
+schemes:
+  Neema:
+    build:
+      targets:
+        Neema: all
+        NeemaAppTests: [test]
+    run:
+      config: Debug
+    test:
+      config: Debug
+      targets:
+        - NeemaAppTests
