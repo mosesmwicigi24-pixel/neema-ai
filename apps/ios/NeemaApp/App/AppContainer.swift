@@ -15,7 +15,7 @@ final class AppContainer {
     let foreground = Watched<Bool>(false)
     /// The device has a network (the shell's offline banner).
     let online = Watched<Bool>(true)
-    let prefs = AppPrefs()
+    let prefs = AppPrefs(store: UserDefaults.standard)
 
     private let monitor = NWPathMonitor()
     private var subs: [Subscription] = []
@@ -52,27 +52,5 @@ final class AppContainer {
             return
         }
         if foreground.value { socket.connect(s.agentId) } else { socket.disconnect() }
-    }
-}
-
-/// Small device-level preferences (not secrets) — Android's `AppPrefs`.
-final class AppPrefs {
-    private let defaults: UserDefaults
-    let dark: Watched<Bool>
-
-    init(defaults: UserDefaults = .standard) {
-        self.defaults = defaults
-        dark = Watched(defaults.string(forKey: "theme") == "dark")
-    }
-
-    func setDark(_ v: Bool) {
-        dark.update(v)
-        defaults.set(v ? "dark" : "light", forKey: "theme")
-    }
-
-    /// The notification prompt is asked once, after the first sign-in.
-    var askedNotifications: Bool {
-        get { defaults.bool(forKey: "asked_post_notifications") }
-        set { defaults.set(newValue, forKey: "asked_post_notifications") }
     }
 }

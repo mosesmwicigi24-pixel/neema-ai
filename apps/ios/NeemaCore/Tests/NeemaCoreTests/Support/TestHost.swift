@@ -1,0 +1,138 @@
+import Foundation
+import XCTest
+@testable import NeemaCore
+
+/// Runs `body` on the main actor from wherever the caller is — a fake route
+/// handler on the cooperative pool included — and waits for it (Android's
+/// Unconfined dispatcher made such calls synchronous).
+func onMainSync(_ body: @escaping @MainActor () -> Void) {
+    if Thread.isMainThread { MainActor.assumeIsolated { body() } } else { DispatchQueue.main.sync { MainActor.assumeIsolated { body() } } }
+}
+
+/// A mutable box a route handler can share with its test.
+final class Ref<T>: @unchecked Sendable {
+    private let lock = NSLock()
+    private var v: T
+    init(_ v: T) { self.v = v }
+    var value: T {
+        get { lock.sync { v } }
+        set { lock.sync { v = newValue } }
+    }
+}
+
+/// Lets every queued hop run (the inbox's work is asynchronous tasks on the
+/// main actor; the fake answers in-process, so a handful of turns settles it).
+func drain() async {
+    for _ in 0..<3 {
+        for _ in 0..<25 { await Task.yield() }
+        try? await Task.sleep(nanoseconds: 12_000_000)
+    }
+}
+
+extension HTTPRequest {
+    /// One decoded query parameter (`cursor`, `tab`, `before`…).
+    func param(_ name: String) -> String? {
+        for pair in (url.query ?? "").split(separator: "&") {
+            let kv = pair.split(separator: "=", maxSplits: 1, omittingEmptySubsequences: false)
+            guard String(kv[0]) == name else { continue }
+            let raw = kv.count > 1 ? String(kv[1]) : ""
+            return raw.replacingOccurrences(of: "+", with: " ").removingPercentEncoding ?? raw
+        }
+        return nil
+    }
+}
+
+extension FakeNeema.Call {
+    /// One decoded query parameter of a recorded call.
+    func param(_ name: String) -> String? { params[name] }
+}
+
+/// `base` (a JSON array as text) with `extra` rows appended.
+func withRows(_ base: String, _ extra: [String]) -> String {
+    var t = base.trimmingCharacters(in: .whitespacesAndNewlines)
+    if t.hasSuffix("]") { t.removeLast() }
+    return t + extra.map { "," + $0 }.joined() + "]"
+}
+
+func json(_ text: String) -> [String: JSONValue] { JSONValue.parse(text)?.objectValue ?? [:] }
+
+/// A signed-in shell for the inbox (Android's `dashboard(...)` + `testContainer`):
+/// the fake API, a session for Moses, the app "in the foreground", a fake
+/// socket, every delay on one virtual clock, and the toasts recorded.
+final class TestHost: InboxHost, @unchecked Sendable {
+    let fake: FakeNeema
+    let clock: VirtualClock
+    let sessionStore: SessionStore
+    let auth: AuthRepository
+    let http: NeemaHTTP
+    let api: NeemaApi
+    let sockets = FakeSocketFactory()
+    let socket: LiveSocket
+    let foreground = Watched<Bool>(true)
+    let sessionExpired = Watched<Bool>(false)
+    let inboxRefresh = Signal<Void>(buffer: 4)
+    let inboxSummary = Watched<InboxSummary?>(nil)
+    let openConvKey = Watched<String?>(nil)
+    let composerPrefill = Watched<ComposerPrefill?>(nil)
+    let snapshots: SnapshotCache
+    private let lock = NSLock()
+    private var _toasts: [Toast] = []
+    private var _calls: [(waId: String, name: String?, convId: String?)] = []
+    var callOutcome: CallOutcome = .placed
+    private var subs: [Subscription] = []
+
+    var session: Watched<Session?> { sessionStore.session }
+    var socketConnected: Watched<Bool> { socket.connected }
+    var socketEvents: Signal<JSONValue> { socket.events }
+    var toasts: [Toast] { lock.sync { _toasts } }
+    var errors: [Toast] { toasts.filter { $0.type == .error } }
+    var placedCalls: [(waId: String, name: String?, convId: String?)] { lock.sync { _calls } }
+
+    init(fake: FakeNeema, role: String = "admin", superuser: Bool = true, clock: VirtualClock = VirtualClock(),
+         snapshots: SnapshotCache? = nil, signedIn: Bool = true) {
+        self.fake = fake
+        self.clock = clock
+        fake.sleep = clock.sleeper
+        sessionStore = SessionStore(store: MemoryStore())
+        auth = AuthRepository(store: sessionStore, base: "https://neema.test", transport: fake, backoffMs: 0, sleep: clock.sleeper)
+        http = NeemaHTTP(baseUrl: "https://neema.test", tokens: auth, transport: fake)
+        http.gate = fake
+        api = NeemaApi(http: http)
+        let store = sessionStore
+        socket = LiveSocket(factory: sockets, baseUrl: "https://neema.test", token: { store.current?.accessToken }, sleep: clock.sleeper)
+        self.snapshots = snapshots ?? SnapshotCache.temporary()
+        if signedIn {
+            sessionStore.save(Session(accessToken: fakeJwt(), refreshToken: "refresh", agentId: Fixtures.ME_ID, email: "moses@bethanyhouse.co.ke",
+                                      name: "Moses Mwicigi", role: role, isSuperuser: superuser, mode: "direct"))
+        }
+        subs.append(http.sessionExpired.observe { [weak self] _ in
+            guard let self = self else { return }
+            if self.session.value != nil { self.sessionExpired.value = true }
+        })
+    }
+
+    func toast(_ message: String, _ type: ToastType) { lock.sync { _toasts.append(Toast(message: message, type: type)) } }
+
+    func placeCall(waId: String, name: String?, convId: String?) async -> CallOutcome {
+        lock.sync { _calls.append((waId, name, convId)) }
+        return callOutcome
+    }
+
+    /// `DashboardViewModel.openConversationFor`.
+    func openConversationFor(_ key: String) { openConvKey.value = key }
+    /// The SessionExpired dialog's sign-in succeeded.
+    func onReauthenticated() { sessionExpired.value = false }
+    func logout() {
+        sessionStore.clear()
+        sessionExpired.value = false
+        inboxSummary.value = nil
+        openConvKey.value = nil
+        socket.signOut()
+    }
+    func refreshInbox() { inboxRefresh.emit() }
+    /// The live socket, open.
+    func connectLive() {
+        socket.connect(Fixtures.ME_ID)
+        sockets.last.open()
+    }
+}

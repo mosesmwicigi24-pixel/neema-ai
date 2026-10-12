@@ -22,6 +22,11 @@ public enum NeemaJSON {
     public static func encode<T: Encodable>(_ value: T) throws -> String {
         String(decoding: try encoder.encode(value), as: UTF8.self)
     }
+
+    /// Decodes a model out of a JSON tree already in memory (a raw field read leniently).
+    public static func decode<T: Decodable>(_ type: T.Type, from value: JSONValue) throws -> T {
+        try decoder.decode(type, from: try encoder.encode(value))
+    }
 }
 
 /// Lenient reads on a keyed container — what kotlinx's `isLenient` +
