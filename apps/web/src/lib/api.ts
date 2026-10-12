@@ -127,11 +127,15 @@ const post = <T>(path: string, body: unknown) => req<T>("POST", path, body);
 // ── Account recovery (no session needed) ──────────────────────────────────────
 // The reset link is mailed to the business recovery inbox (owner, 2026-10-12),
 // never shown here; the page tells the person where to collect it.
+// On the public host `/api/auth/*` is NextAuth's own handler (the sign-in
+// flow), so the API's auth router is reached through its other mount,
+// `/api/agent-auth/*` — the live probe of /api/auth/forgot-password answered
+// "This action with HTTP POST is not supported by NextAuth.js" (2026-10-12).
 export const authApi = {
     forgotPassword: (email: string) =>
-        post<{ ok: boolean; message: string; inbox: string }>("/auth/forgot-password", { email }),
+        post<{ ok: boolean; message: string; inbox: string }>("/agent-auth/forgot-password", { email }),
     resetPassword: (token: string, password: string) =>
-        post<{ ok: boolean; email: string }>("/auth/reset-password", { token, password }),
+        post<{ ok: boolean; email: string }>("/agent-auth/reset-password", { token, password }),
 };
 const patch = <T>(path: string, body: unknown) => req<T>("PATCH", path, body);
 const put = <T>(path: string, body: unknown) => req<T>("PUT", path, body);
