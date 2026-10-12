@@ -18,6 +18,9 @@ final class Ref<T>: @unchecked Sendable {
         get { lock.sync { v } }
         set { lock.sync { v = newValue } }
     }
+    /// Change the value under the lock: handlers of concurrent requests never lose each other's update.
+    @discardableResult
+    func mutate<R>(_ f: (inout T) -> R) -> R { lock.sync { f(&v) } }
 }
 
 /// Lets every queued hop run (the inbox's work is asynchronous tasks on the
@@ -59,7 +62,7 @@ func json(_ text: String) -> [String: JSONValue] { JSONValue.parse(text)?.object
 /// A signed-in shell for the inbox (Android's `dashboard(...)` + `testContainer`):
 /// the fake API, a session for Moses, the app "in the foreground", a fake
 /// socket, every delay on one virtual clock, and the toasts recorded.
-final class TestHost: InboxHost, CustomerHost, OrdersHost, CatalogHost, DealsHost, @unchecked Sendable {
+final class TestHost: InboxHost, CustomerHost, OrdersHost, CatalogHost, DealsHost, LeadsHost, OverviewHost, @unchecked Sendable {
     /// A burst of 403s costs one re-read of who this agent is (the shell's `FORBIDDEN_WINDOW_MS`).
     static let FORBIDDEN_WINDOW_MS: Int64 = 1_000
 
@@ -89,6 +92,8 @@ final class TestHost: InboxHost, CustomerHost, OrdersHost, CatalogHost, DealsHos
     let feed: OrdersFeed?
     // CatalogHost
     let catalog = Watched<[CatalogItem]>([])
+    /// The team list as the dashboard holds it (OverviewHost); read on demand by `refreshAgents`.
+    let agents = Watched<[Agent]>([])
     let catalogFeed: CatalogFeed?
     private var forbiddenRefresh: Coalescer?
     private var _accessRereads = 0
@@ -149,6 +154,9 @@ final class TestHost: InboxHost, CustomerHost, OrdersHost, CatalogHost, DealsHos
     func refreshCatalog() async throws {
         if let f = catalogFeed { try await f.refreshCatalog() } else { catalog.value = try await api.catalog.list() }
     }
+
+    // OverviewHost
+    func refreshAgents() async throws { agents.value = try await api.agents.list() }
 
     // OrdersHost
     func refreshOrders() async throws {

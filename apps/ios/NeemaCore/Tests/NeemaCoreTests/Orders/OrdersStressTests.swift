@@ -121,7 +121,7 @@ final class SingleFlightSalesTests: XCTestCase {
     func testAFailedReadFailsItsCallersButNotTheNextRead() async {
         let n = Ref(0)
         let flight = SingleFlight<Int> {
-            n.value += 1
+            n.mutate { $0 += 1 }
             if n.value == 1 { throw PlainError("offline") }
             return n.value
         }

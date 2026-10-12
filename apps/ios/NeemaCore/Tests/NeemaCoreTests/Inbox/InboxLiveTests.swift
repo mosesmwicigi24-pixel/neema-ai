@@ -346,7 +346,7 @@ final class InboxLiveTests: XCTestCase {
         defer { try? FileManager.default.removeItem(at: file) }
         let n = Ref(0)
         fake.on("POST", "/admin/conversations/c1/upload-media") { _, _ in
-            defer { n.value += 1 }
+            defer { n.mutate { $0 += 1 } }
             return n.value == 0 ? (401, #"{"detail":"Token expired"}"#) : (200, InboxFixtures.Contract.uploaded("document", "https://x/m.pdf", "Sizes"))
         }
         // A new pair, not the same token string back.

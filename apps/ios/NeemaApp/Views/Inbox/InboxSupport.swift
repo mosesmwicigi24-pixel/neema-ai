@@ -194,6 +194,8 @@ struct WebBtn: View {
     var enabled: Bool = true
     var busy: Bool = false
     var size: BtnSize = .sm
+    /// Stretch to the width given (the web's `w-full`, Android's `weight(1f)`).
+    var fill: Bool = false
     var action: () -> Void
     @Environment(\.neema) private var c
 
@@ -220,7 +222,7 @@ struct WebBtn: View {
                 if let t = label { Text(t).font(NeemaFont.manrope(size.font, .medium)).foregroundColor(col.fg).lineLimit(1) }
             }
             .padding(.horizontal, size.padX).padding(.vertical, 4)
-            .frame(minHeight: size.height)
+            .frame(maxWidth: fill ? .infinity : nil, minHeight: size.height)
             .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(col.bg))
             .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).stroke(col.bd))
             .opacity(enabled ? 1 : 0.4)

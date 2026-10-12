@@ -310,7 +310,7 @@ final class CustomerLiveTests: CustomerTestCase {
         let held = Held()
         let next = await shown(CustomerFixtures.conversation("c2"), fetch: held.fetch)
         let seen = Ref<[String?]>([next.profile?.name])
-        let sub = next.state.observe { s in seen.value.append(s.profile?.name) }
+        let sub = next.state.observe { s in seen.mutate { $0.append(s.profile?.name) } }
         defer { sub.cancel() }
         XCTAssertTrue(next.ui.loading)
         XCTAssertNil(next.profile)

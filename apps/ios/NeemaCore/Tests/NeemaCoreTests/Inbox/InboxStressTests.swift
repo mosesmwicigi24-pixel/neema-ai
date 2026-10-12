@@ -215,7 +215,7 @@ final class InboxStressTests: XCTestCase {
         fake.on("GET", "/admin/conversations", body: Contract.page([Contract.peterWa]))
         fake.on("GET", "/admin/conversations/resolve", body: Contract.resolved)
         let seen = Ref(0)
-        fake.on("GET", "/admin/conversations/k2") { _, _ in seen.value += 1; return (200, Contract.maryMsgr) }
+        fake.on("GET", "/admin/conversations/k2") { _, _ in seen.mutate { $0 += 1 }; return (200, Contract.maryMsgr) }
         let (host, vm) = await vm()
         host.openConvKey.value = "+250788123456|BH-1042"
         await drain()

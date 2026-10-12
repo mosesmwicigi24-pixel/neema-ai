@@ -366,7 +366,7 @@ final class DealsNetworkTests: DealsTestCase {
         let fake = self.fake!
         fake.on("GET", "/admin/deals") { r, _ in
             if r.param("status") == "won" { return (200, SalesFixtures.wonDeals) }
-            n.value += 1
+            n.mutate { $0 += 1 }
             // The second load's reply is stale: while it is on the wire a newer load starts and lands.
             if n.value == 2 {
                 fake.on("GET", "/admin/deals") { rr, _ in (200, rr.param("status") == "won" ? SalesFixtures.wonDeals : #"{"deals":[]}"#) }

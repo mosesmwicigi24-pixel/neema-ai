@@ -428,7 +428,7 @@ final class InboxContractTests: XCTestCase {
     func testSendMediaPartialFailure() async {
         let n = Ref(0)
         fake.on("POST", "/admin/conversations/k1/upload-media") { _, _ in
-            defer { n.value += 1 }
+            defer { n.mutate { $0 += 1 } }
             return n.value == 0 ? (200, Contract.uploaded("document", "https://api.bethanyhouse.co.ke/api/admin/media/m.pdf", "Measurements")) : (413, Contract.tooLarge)
         }
         let (host, vm) = await vm()

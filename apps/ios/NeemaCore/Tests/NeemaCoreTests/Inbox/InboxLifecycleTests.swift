@@ -216,7 +216,7 @@ final class InboxLifecycleTests: XCTestCase {
         let n = Ref(0)
         let server = self.server!
         fake.on("POST", "/admin/conversations/c1/note") { _, _ in
-            defer { n.value += 1 }
+            defer { n.mutate { $0 += 1 } }
             if n.value == 0 { return (401, #"{"detail":"Token expired"}"#) }
             let row = InboxNetFixtures.row("srv-n", "Internal: VIP", note: true)
             server.add(row)
@@ -240,7 +240,7 @@ final class InboxLifecycleTests: XCTestCase {
         let n = Ref(0)
         let server = self.server!
         fake.on("POST", "/admin/conversations/c1/upload-media") { _, _ in
-            defer { n.value += 1 }
+            defer { n.mutate { $0 += 1 } }
             if n.value == 0 { return (401, #"{"detail":"Token expired"}"#) }
             let row = InboxNetFixtures.row("srv-v", "Fitting video", mediaType: "video")
             server.add(row)

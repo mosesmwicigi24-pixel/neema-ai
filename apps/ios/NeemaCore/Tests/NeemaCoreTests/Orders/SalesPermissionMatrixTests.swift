@@ -2,8 +2,8 @@ import Foundation
 import XCTest
 @testable import NeemaCore
 
-/// The permission matrix for Orders (Android `SalesPermissionMatrixTest`;
-/// its Deals, Leads and Calls rows arrive with those screens).
+/// The permission matrix for Orders, Deals and Leads (Android
+/// `SalesPermissionMatrixTest`; its Calls rows arrive with that screen).
 ///
 /// What the web gates (app/dashboard/page.tsx): only the NAV — Deals and
 /// Leads appear with `can(view_leads)`; Calls and Orders for everyone.
@@ -80,6 +80,59 @@ final class SalesPermissionMatrixTests: OrdersTestCase {
         }
     }
 
+    func testEveryPersonaCanSendVetoAndSteerDeals() async {
+        for p in SalesPersona.allCases {
+            SalesFixtures.install(fake)
+            let h = await signIn(p)
+            let vm = DealsViewModel(host: h, sleep: h.clock.sleeper)
+            await drain()
+            let approves = fake.callsTo("POST", "/admin/actions/x1/approve").count
+            let vetoes = fake.callsTo("POST", "/admin/actions/x2/veto").count
+            let patches = fake.callsTo("PATCH", "/admin/deals/d1").count
+            vm.act("x1", "approve"); await drain()
+            XCTAssertEqual(h.toasts.last?.message, "Sent ✓", "\(p)")
+            vm.act("x2", "veto"); await drain()
+            XCTAssertEqual(h.toasts.last?.message, "Vetoed", "\(p)")
+            vm.markWon("d1"); await drain()
+            XCTAssertEqual(h.toasts.last?.message, "Marked won 🎉", "\(p)")
+            let d2 = vm.ui.deals?.first { $0.id == "d2" }
+            XCTAssertNotNil(d2, "\(p)")
+            if let d = d2 {
+                vm.startGuidance(d)
+                vm.setGuidanceDraft("No discount")
+                vm.saveGuidance("d2"); await drain()
+                XCTAssertEqual(h.toasts.last?.message, "Guidance saved — Neema obeys it now", "\(p)")
+            }
+            XCTAssertEqual(fake.callsTo("POST", "/admin/actions/x1/approve").count, approves + 1, "\(p)")
+            XCTAssertEqual(fake.callsTo("POST", "/admin/actions/x2/veto").count, vetoes + 1, "\(p)")
+            XCTAssertEqual(fake.callsTo("PATCH", "/admin/deals/d1").count, patches + 1, "\(p)")
+            vm.close()
+        }
+    }
+
+    private func leadPatches() -> Int { fake.calls.filter { $0.method == "PATCH" && $0.path.hasPrefix("/admin/leads/") }.count }
+
+    func testEveryPersonaCanMoveAndEditLeads() async {
+        for p in SalesPersona.allCases {
+            SalesFixtures.install(fake)
+            let h = await signIn(p)
+            let vm = LeadsViewModel(host: h, sleep: h.clock.sleeper)
+            await drain()
+            _ = await eventually(timeout: 10) { !vm.ui.loading }
+            guard let lead = vm.ui.leads.first(where: { $0.id == "u1" }) else { XCTFail("\(p): u1 not loaded"); vm.close(); continue }
+            let target = vm.ui.stages.first { !$0.matches(lead.leadStage) }!.id
+            let before = leadPatches()
+            vm.moveTo(lead, target); await drain()
+            XCTAssertEqual(h.toasts.last?.message, "Lead updated", "\(p)")
+            vm.select(lead.id)
+            vm.save(lead, LeadEdit(tags: ["church"], notesBase: lead.notes ?? "")); await drain()
+            XCTAssertNil(vm.ui.sheetError, "\(p)")
+            XCTAssertNil(vm.ui.selectedId, "\(p): the sheet closes on save")
+            XCTAssertEqual(leadPatches(), before + 2, "\(p)")
+            vm.close()
+        }
+    }
+
     // ── A 403: the web's words, the reason, and a re-read of who we are ────
 
     private func rechecks() -> (Int, Int) { (fake.callsTo("GET", "/admin/me").count, fake.callsTo("GET", "/admin/agents").count) }
@@ -109,8 +162,40 @@ final class SalesPermissionMatrixTests: OrdersTestCase {
         vm.updateStatus(id: "o2", status: "confirmed")
         await drain()
         XCTAssertEqual(h.toasts.last?.message, "Failed to update order — your role doesn't allow that")
+        let deals = DealsViewModel(host: h, sleep: h.clock.sleeper)
+        await drain()
+        deals.act("x2", "veto"); await drain()
+        XCTAssertEqual(h.toasts.last?.message, "Couldn't veto — your role doesn't allow that")
+        deals.markLost("d1"); await drain()
+        XCTAssertEqual(h.toasts.last?.message, "Update failed — your role doesn't allow that")
+        deals.close()
         // Never a bare "failed — " with nothing after the dash.
         XCTAssertFalse(h.toasts.contains { $0.message.trimmingCharacters(in: .whitespaces).hasSuffix("—") })
+    }
+
+    func testForbiddenDealAndLeadWritesSayWhy() async {
+        let h = await signIn(.override)
+        SalesPersonaFixtures.refuseWrites(fake)
+        let deals = DealsViewModel(host: h, sleep: h.clock.sleeper)
+        await drain()
+        deals.act("x1", "approve"); await drain()
+        XCTAssertEqual(h.toasts.last?.message, "Couldn't send — not allowed for your role")
+        XCTAssertEqual(deals.ui.actions?.map { $0.id }, ["x1", "x2"]) // nothing left the queue
+
+        let leads = LeadsViewModel(host: h, sleep: h.clock.sleeper)
+        await drain()
+        _ = await eventually(timeout: 10) { !leads.ui.loading }
+        let lead = leads.ui.leads.first { $0.id == "u1" }!
+        let stageBefore = lead.leadStage
+        leads.moveTo(lead, leads.ui.stages.first { !$0.matches(stageBefore) }!.id); await drain()
+        XCTAssertEqual(h.toasts.last?.message, "Failed to update lead — not allowed for your role")
+        XCTAssertEqual(leads.ui.leads.first { $0.id == "u1" }?.leadStage, stageBefore) // rolled back
+
+        leads.select(lead.id)
+        leads.save(lead, LeadEdit(notes: "x", notesBase: lead.notes ?? "")); await drain()
+        XCTAssertEqual(leads.ui.sheetError, "Couldn't save — not allowed for your role")
+        XCTAssertEqual(leads.ui.selectedId, lead.id)
+        deals.close(); leads.close()
     }
 
     /// A burst of refusals (several screens' parallel loads) costs one re-read.

@@ -101,7 +101,7 @@ final class CustomerViewModelTests: CustomerTestCase {
     func testRenamingTellsTheInboxOnlyAfterTheServerAccepts() async {
         let vm = await vm()
         let renamed = Ref<[(String, String)]>([])
-        vm.saveName("Fr. Peter M. Kamau") { id, n in renamed.value.append((id, n)) }
+        vm.saveName("Fr. Peter M. Kamau") { id, n in renamed.mutate { $0.append((id, n)) } }
         await drain()
         XCTAssertEqual(renamed.value.count, 1)
         XCTAssertEqual(renamed.value.first?.0, PETER)
@@ -109,7 +109,7 @@ final class CustomerViewModelTests: CustomerTestCase {
         XCTAssertEqual(calls("PATCH", "/admin/customers/\(PETER)").last?.body, #"{"name":"Fr. Peter M. Kamau"}"#)
 
         fake.on("PATCH", "/admin/customers/.*", code: 500, body: "{}")
-        vm.saveName("Oops") { id, n in renamed.value.append((id, n)) }
+        vm.saveName("Oops") { id, n in renamed.mutate { $0.append((id, n)) } }
         await drain()
         XCTAssertEqual(renamed.value.count, 1)
         XCTAssertEqual(vm.profile?.name, "Fr. Peter M. Kamau")

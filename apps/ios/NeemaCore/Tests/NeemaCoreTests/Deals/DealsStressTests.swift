@@ -25,7 +25,7 @@ final class DealsStressTests: DealsTestCase {
             return (200, SalesStressFixtures.actionsJson((0..<200).filter { !done.contains(SalesStressFixtures.actionId($0)) }.map(SalesStressFixtures.actionRow)))
         }
         fake.on("POST", "/admin/actions/[^/]+/(approve|veto)") { r, _ in
-            resolved.value.insert(actionIdOf(r))
+            resolved.mutate { $0.insert(actionIdOf(r)) }
             return (200, #"{"ok":true,"sent":"Hello 🙏"}"#)
         }
     }
@@ -59,7 +59,7 @@ final class DealsStressTests: DealsTestCase {
         serveTheQueue()
         let vm = await vm()
         let seen = Ref<[[String]]>([])
-        let sub = vm.state.observe { s in seen.value.append((s.actions ?? []).map { $0.id }) }
+        let sub = vm.state.observe { s in seen.mutate { $0.append((s.actions ?? []).map { $0.id }) } }
         defer { sub.cancel() }
         let target = SalesStressFixtures.actionId(3)
         let before = fake.callsTo("GET", "/admin/actions").count

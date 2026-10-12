@@ -103,7 +103,7 @@ final class ConversationsViewModelTests: XCTestCase {
         let n = Ref(0)
         let vmRef = Ref<InboxViewModel?>(nil)
         fake.on("GET", "/admin/conversations") { _, _ in
-            n.value += 1
+            n.mutate { $0 += 1 }
             let k = n.value
             // While the first (older) request is in flight, a newer refresh starts and finishes.
             if k == 2 { onMainSync { vmRef.value?.refresh() } }
@@ -159,7 +159,7 @@ final class ConversationsViewModelTests: XCTestCase {
                 }
                 return (200, InboxFixtures.page(["c6", "c7"], cursor: "cursor-3"))
             }
-            pageOnes.value += 1
+            pageOnes.mutate { $0 += 1 }
             return (200, pageOnes.value == 1 ? InboxFixtures.page(["c1", "c2"], cursor: "cursor-2") : InboxFixtures.page(["c2", "c1"], cursor: "cursor-2b"))
         }
         let (_, vm) = await vm()

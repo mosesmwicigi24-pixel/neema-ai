@@ -87,7 +87,7 @@ final class CustomerNetworkStressTests: CustomerTestCase {
     func testATokenThatExpiredMidLoadRefreshesSilently() async {
         let n = Ref(0)
         fake.on("GET", peterPath) { _, _ in
-            n.value += 1
+            n.mutate { $0 += 1 }
             return n.value == 1 ? (401, #"{"detail":"Token expired"}"#) : (200, CustomerFixtures.peter)
         }
         let vm = await vm()
@@ -191,7 +191,7 @@ final class CustomerNetworkStressTests: CustomerTestCase {
         let vm = await vm()
         let n = Ref(0)
         fake.on("PATCH", peterPath) { _, _ in
-            n.value += 1
+            n.mutate { $0 += 1 }
             return n.value == 1 ? (401, #"{"detail":"Token expired"}"#) : (200, #"{"ok":true}"#)
         }
         vm.saveContactField("location", "Othaya"); await drain()
@@ -608,7 +608,7 @@ final class CustomerNetworkStressTests: CustomerTestCase {
     func testAskSaysWhatWentWrongAndNeverAsksTwice() async {
         let vmRef = Ref<CustomerViewModel?>(nil)
         let n = Ref(0)
-        fake.on("POST", "/admin/conversations/c1/ask") { _, _ in n.value += 1; onMainSync { vmRef.value?.ask("sizes?") }; return try InboxNetFixtures.offline() }
+        fake.on("POST", "/admin/conversations/c1/ask") { _, _ in n.mutate { $0 += 1 }; onMainSync { vmRef.value?.ask("sizes?") }; return try InboxNetFixtures.offline() }
         let vm = await vm()
         vmRef.value = vm
         vm.setAskDraft("sizes?")
@@ -638,7 +638,7 @@ final class CustomerNetworkStressTests: CustomerTestCase {
     func testAnOfflineAnswerKeepsTheFactsAndASentOneClearsThem() async {
         let vmRef = Ref<CustomerViewModel?>(nil)
         let n = Ref(0)
-        fake.on("POST", "/admin/conversations/c1/answer") { _, _ in n.value += 1; onMainSync { vmRef.value?.answerViaNeema() }; return try InboxNetFixtures.offline() }
+        fake.on("POST", "/admin/conversations/c1/answer") { _, _ in n.mutate { $0 += 1 }; onMainSync { vmRef.value?.answerViaNeema() }; return try InboxNetFixtures.offline() }
         let vm = await vm()
         vmRef.value = vm
         vm.setAnswerDraft("yes, we make it")

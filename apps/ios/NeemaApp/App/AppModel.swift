@@ -22,10 +22,14 @@ final class AppModel: ObservableObject {
     @Published private(set) var ordersScreen: OrdersScreenModel?
     @Published private(set) var catalogScreen: CatalogScreenModel?
     @Published private(set) var dealsScreen: DealsScreenModel?
+    @Published private(set) var leadsScreen: LeadsScreenModel?
+    @Published private(set) var overviewScreen: OverviewScreenModel?
 
     @Published private(set) var session: Session?
     @Published private(set) var me: Agent?
-    @Published private(set) var agents: [Agent] = []
+    @Published private(set) var agents: [Agent] = [] {
+        didSet { inboxHost.agents.update(agents) }
+    }
     @Published private(set) var access = Access()
     @Published private(set) var inboxHuman = 0
     @Published private(set) var pendingOrders = 0
@@ -68,6 +72,7 @@ final class AppModel: ObservableObject {
         catalogFeed = CatalogFeed(api: container.api, foreground: container.foreground, snapshots: snapshots)
         inboxHost = ShellInboxHost(container: container, ordersFeed: ordersFeed, catalogFeed: catalogFeed, snapshots: snapshots)
         inboxHost.onToast = { [weak self] message, type in self?.toast(message, type) }
+        inboxHost.onRefreshAgents = { [weak self] in try await self?.refreshAgents() }
         forbiddenRefresh = Coalescer(windowMs: Self.FORBIDDEN_WINDOW_MS) { [weak self] in
             await MainActor.run {
                 guard let self = self else { return }
@@ -209,6 +214,10 @@ final class AppModel: ObservableObject {
         catalogScreen = CatalogScreenModel(vm: CatalogViewModel(host: inboxHost))
         dealsScreen?.close()
         dealsScreen = DealsScreenModel(vm: DealsViewModel(host: inboxHost))
+        leadsScreen?.close()
+        leadsScreen = LeadsScreenModel(vm: LeadsViewModel(host: inboxHost))
+        overviewScreen?.close()
+        overviewScreen = OverviewScreenModel(vm: OverviewViewModel(host: inboxHost))
     }
 
     private func stopScreens() {
@@ -220,6 +229,10 @@ final class AppModel: ObservableObject {
         catalogScreen = nil
         dealsScreen?.close()
         dealsScreen = nil
+        leadsScreen?.close()
+        leadsScreen = nil
+        overviewScreen?.close()
+        overviewScreen = nil
         ordersFeed.stop()
         catalogFeed.stop()
         inboxHost.inboxSummary.update(nil)
@@ -278,18 +291,19 @@ final class AppModel: ObservableObject {
     }
 
     func refetchAgents() {
-        let agent = signedInAgent
         Task { [weak self] in
-            guard let self = self else { return }
-            do {
-                let list = try await self.container.api.agents.list()
-                guard self.signedInAgent == agent else { return }
-                self.agents = list
-                self.republishAccess()
-            } catch {
-                // keep what is on screen; the poll tries again
-            }
+            // keep what is on screen on a failure; the poll tries again
+            _ = try? await self?.refreshAgents()
         }
+    }
+
+    /// Re-read the team list and return when it has landed (a pull-to-refresh waits for it); throws on failure.
+    func refreshAgents() async throws {
+        let agent = signedInAgent
+        let list = try await container.api.agents.list()
+        guard signedInAgent == agent else { return }
+        agents = list
+        republishAccess()
     }
 
     private func republishAccess() {

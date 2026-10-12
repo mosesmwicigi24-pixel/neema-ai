@@ -211,7 +211,7 @@ final class InboxNetworkStressTests: XCTestCase {
         replyRoute { (409, #"{"detail":"Conversation is handled by Grace Wanjiru."}"#) }
         let got = Ref(0)
         let c1 = InboxFixtures.conversations.first { $0.contains("\"id\":\"c1\"") }!
-        fake.on("GET", "/admin/conversations/c1") { _, _ in got.value += 1; return (200, c1) }
+        fake.on("GET", "/admin/conversations/c1") { _, _ in got.mutate { $0 += 1 }; return (200, c1) }
         let (host, vm) = await vm()
         vm.select("c1"); await drain()
         vm.setReplyText("Mine now?"); vm.sendReply(); await drain()
@@ -253,7 +253,7 @@ final class InboxNetworkStressTests: XCTestCase {
         let n = Ref(0)
         let server = self.server!
         replyRoute {
-            defer { n.value += 1 }
+            defer { n.mutate { $0 += 1 } }
             if n.value == 0 { return (401, #"{"detail":"Token expired"}"#) }
             server.add(InboxNetFixtures.row("srv-a", "After refresh")); return (200, #"{"ok":true}"#)
         }
@@ -595,7 +595,7 @@ final class InboxNetworkStressTests: XCTestCase {
         XCTAssertEqual(host.errors.last?.message, "Failed to pause. Only the agent handling it or an admin can pause it.")
         let truth = Ref(0)
         let row = convRow("c2", "human", Fixtures.AGENT2_ID)
-        fake.on("GET", "/admin/conversations/c2") { _, _ in truth.value += 1; return (200, row) }
+        fake.on("GET", "/admin/conversations/c2") { _, _ in truth.mutate { $0 += 1 }; return (200, row) }
         fake.on("POST", "/admin/conversations/c2/intercept", code: 409, body: InboxFixtures.Contract.interceptConflict)
         vm.intercept("c2"); await drain()
         XCTAssertEqual(host.errors.last?.message, "Already claimed by another agent")
@@ -628,7 +628,7 @@ final class InboxNetworkStressTests: XCTestCase {
     func testClearHistoryTimesOutButTheThreadIsEmptyIsClearedAndDoubleTapClearsOnce() async {
         let n = Ref(0)
         let fake = self.fake!
-        fake.on("DELETE", "/admin/conversations/c1/messages") { _, _ in n.value += 1; fake.on("GET", "/admin/conversations/c1/messages", body: "[]"); return try InboxNetFixtures.timeout() }
+        fake.on("DELETE", "/admin/conversations/c1/messages") { _, _ in n.mutate { $0 += 1 }; fake.on("GET", "/admin/conversations/c1/messages", body: "[]"); return try InboxNetFixtures.timeout() }
         let (host, vm) = await vm()
         vm.select("c1"); await drain(); vm.showClear(true)
         vm.clearHistory(); vm.clearHistory(); await drain()
