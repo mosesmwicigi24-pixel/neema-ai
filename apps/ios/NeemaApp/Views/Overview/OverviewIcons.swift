@@ -22,9 +22,9 @@ enum OverviewIcons {
     static func filled(_ ch: String) -> String? {
         switch ch {
         case "whatsapp": return whatsApp
-        case "messenger": return expandArcFlags(SVGPath.messenger)
-        case "facebook": return expandArcFlags(SVGPath.facebook)
-        case "instagram": return expandArcFlags(SVGPath.instagram)
+        case "messenger": return expandArcFlags(ChannelIcons.messenger)
+        case "facebook": return expandArcFlags(ChannelIcons.facebook)
+        case "instagram": return expandArcFlags(ChannelIcons.instagram)
         case "tiktok": return tikTok
         default: return nil
         }

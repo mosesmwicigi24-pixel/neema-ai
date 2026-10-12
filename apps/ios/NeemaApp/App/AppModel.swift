@@ -24,6 +24,7 @@ final class AppModel: ObservableObject {
     @Published private(set) var dealsScreen: DealsScreenModel?
     @Published private(set) var leadsScreen: LeadsScreenModel?
     @Published private(set) var overviewScreen: OverviewScreenModel?
+    @Published private(set) var reportsScreen: ReportsScreenModel?
 
     @Published private(set) var session: Session?
     @Published private(set) var me: Agent?
@@ -218,6 +219,8 @@ final class AppModel: ObservableObject {
         leadsScreen = LeadsScreenModel(vm: LeadsViewModel(host: inboxHost))
         overviewScreen?.close()
         overviewScreen = OverviewScreenModel(vm: OverviewViewModel(host: inboxHost))
+        reportsScreen?.close()
+        reportsScreen = ReportsScreenModel(vm: ReportsViewModel(host: inboxHost))
     }
 
     private func stopScreens() {
@@ -233,6 +236,8 @@ final class AppModel: ObservableObject {
         leadsScreen = nil
         overviewScreen?.close()
         overviewScreen = nil
+        reportsScreen?.close()
+        reportsScreen = nil
         ordersFeed.stop()
         catalogFeed.stop()
         inboxHost.inboxSummary.update(nil)

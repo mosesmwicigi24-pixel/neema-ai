@@ -70,7 +70,7 @@ struct LeadChannelIcon: View {
     var body: some View {
         ZStack {
             if let f = fill { Circle().fill(f) } else { Circle().fill(Self.igGradient) }
-            if let d = SVGPath.of(key) {
+            if let d = ChannelIcons.of(key) {
                 SVGIcon(d: d, size: size * 0.6).foregroundColor(.white)
             } else {
                 Text(glyph).font(NeemaFont.fixed(size * 0.55, .bold)).foregroundColor(.white)

@@ -30,7 +30,7 @@ struct CurrentView: View {
         case .conversations: InboxScreen()
         case .calls: ViewPlaceholder(view: .calls, cycle: 5, note: "The call log, details, transcripts and the softphone.")
         case .orders: OrdersScreen()
-        case .reports: ViewPlaceholder(view: .reports, cycle: 2, note: "Reports over every conversation, with CSV export.")
+        case .reports: ReportsScreen()
         case .deals: DealsScreen()
         case .leads: LeadsScreen()
         case .overview: OverviewScreen()
