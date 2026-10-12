@@ -391,6 +391,8 @@ after cycle 2 merged).
 3. The connectivity banner drew its icon in the tone's accent colour over
    the tint (under 3:1 by day); it is now the solid 24 pt badge Android
    draws.
+4. A cycle 2 test waited a fixed drain for a refresh that reads two things
+   (CI run 18 caught it once); it waits for the spinner to end now.
 
 **Tests executed**
 
@@ -405,6 +407,12 @@ after cycle 2 merged).
   one defect they would have caught — the canned transport's private
   `NSLock.sync` twin of NeemaCore's public one — was fixed from reading
   the code (`88f6c8d`), not from a compile error.
+- Run 18 (`4f938b7`, the record itself): macOS green again; the Linux core
+  job failed once on a cycle 2 test, `CatalogViewModelTests.
+  testAnEmptyCatalogueAfterAFailedReadSaysWhyAndRetryLoadsIt`, whose last
+  assertion followed one fixed drain while the retry's refresh (catalogue
+  AND audit) was still landing on the slow runner. Defect 4 below; the test
+  now waits for the flag (`1fdf695`).
 
 **Remaining parity gaps** (scope of this cycle)
 
