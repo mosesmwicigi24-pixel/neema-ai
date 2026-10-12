@@ -31,7 +31,7 @@ struct CurrentView: View {
         case .calls: ViewPlaceholder(view: .calls, cycle: 5, note: "The call log, details, transcripts and the softphone.")
         case .orders: OrdersScreen()
         case .reports: ViewPlaceholder(view: .reports, cycle: 2, note: "Reports over every conversation, with CSV export.")
-        case .deals: ViewPlaceholder(view: .deals, cycle: 2, note: "What Neema owns right now and her planned actions.")
+        case .deals: DealsScreen()
         case .leads: ViewPlaceholder(view: .leads, cycle: 2, note: "The leads pipeline.")
         case .overview: ViewPlaceholder(view: .overview, cycle: 2, note: "Real-time metrics and platform performance.")
         case .catalog: CatalogScreen()

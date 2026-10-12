@@ -21,6 +21,7 @@ final class AppModel: ObservableObject {
     @Published private(set) var inboxScreen: InboxScreenModel?
     @Published private(set) var ordersScreen: OrdersScreenModel?
     @Published private(set) var catalogScreen: CatalogScreenModel?
+    @Published private(set) var dealsScreen: DealsScreenModel?
 
     @Published private(set) var session: Session?
     @Published private(set) var me: Agent?
@@ -206,6 +207,8 @@ final class AppModel: ObservableObject {
         ordersScreen = OrdersScreenModel(vm: OrdersViewModel(host: inboxHost))
         catalogScreen?.close()
         catalogScreen = CatalogScreenModel(vm: CatalogViewModel(host: inboxHost))
+        dealsScreen?.close()
+        dealsScreen = DealsScreenModel(vm: DealsViewModel(host: inboxHost))
     }
 
     private func stopScreens() {
@@ -215,6 +218,8 @@ final class AppModel: ObservableObject {
         ordersScreen = nil
         catalogScreen?.close()
         catalogScreen = nil
+        dealsScreen?.close()
+        dealsScreen = nil
         ordersFeed.stop()
         catalogFeed.stop()
         inboxHost.inboxSummary.update(nil)

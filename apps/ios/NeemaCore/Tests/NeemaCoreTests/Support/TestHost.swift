@@ -59,7 +59,7 @@ func json(_ text: String) -> [String: JSONValue] { JSONValue.parse(text)?.object
 /// A signed-in shell for the inbox (Android's `dashboard(...)` + `testContainer`):
 /// the fake API, a session for Moses, the app "in the foreground", a fake
 /// socket, every delay on one virtual clock, and the toasts recorded.
-final class TestHost: InboxHost, CustomerHost, OrdersHost, CatalogHost, @unchecked Sendable {
+final class TestHost: InboxHost, CustomerHost, OrdersHost, CatalogHost, DealsHost, @unchecked Sendable {
     /// A burst of 403s costs one re-read of who this agent is (the shell's `FORBIDDEN_WINDOW_MS`).
     static let FORBIDDEN_WINDOW_MS: Int64 = 1_000
 
