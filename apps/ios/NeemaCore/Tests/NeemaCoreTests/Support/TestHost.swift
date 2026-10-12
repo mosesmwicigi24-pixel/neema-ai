@@ -84,7 +84,7 @@ final class TestHost: InboxHost, CustomerHost, OrdersHost, CatalogHost, DealsHos
     private let lock = NSLock()
     private var _toasts: [Toast] = []
     private var _calls: [(waId: String, name: String?, convId: String?)] = []
-    var callOutcome: CallOutcome = .placed
+    var callOutcome: PlaceCallOutcome = .placed
     private var subs: [Subscription] = []
     // CustomerHost / OrdersHost
     let orders = Watched<[Order]>([])
@@ -105,7 +105,7 @@ final class TestHost: InboxHost, CustomerHost, OrdersHost, CatalogHost, DealsHos
     var accessRereads: Int { lock.sync { _accessRereads } }
     let callChannels = Watched<CallChannels?>(nil)
     var canManageSettings = true
-    var messengerOutcome: CallOutcome = .placed
+    var messengerOutcome: PlaceCallOutcome = .placed
     private var _messengerCalls: [(psid: String, name: String?, convId: String?)] = []
     var placedMessengerCalls: [(psid: String, name: String?, convId: String?)] { lock.sync { _messengerCalls } }
     /// Replaces the permission request (the call manager's) when a test must shape its answer.
@@ -172,12 +172,12 @@ final class TestHost: InboxHost, CustomerHost, OrdersHost, CatalogHost, DealsHos
 
     func toast(_ message: String, _ type: ToastType) { lock.sync { _toasts.append(Toast(message: message, type: type)) } }
 
-    func placeCall(waId: String, name: String?, convId: String?) async -> CallOutcome {
+    func placeCall(waId: String, name: String?, convId: String?) async -> PlaceCallOutcome {
         lock.sync { _calls.append((waId, name, convId)) }
         return callOutcome
     }
 
-    func placeMessengerCall(psid: String, name: String?, convId: String?) async -> CallOutcome {
+    func placeMessengerCall(psid: String, name: String?, convId: String?) async -> PlaceCallOutcome {
         lock.sync { _messengerCalls.append((psid, name, convId)) }
         return messengerOutcome
     }

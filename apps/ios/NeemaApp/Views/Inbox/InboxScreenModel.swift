@@ -68,11 +68,11 @@ final class ShellInboxHost: InboxHost, CustomerHost, OrdersHost, CatalogHost, De
     }
 
     /// The softphone lands with the calls screen (cycle 5); until then the thread says so.
-    func placeCall(waId: String, name: String?, convId: String?) async -> CallOutcome {
+    func placeCall(waId: String, name: String?, convId: String?) async -> PlaceCallOutcome {
         .failed("Calling from the app arrives with the calls screen — call from WhatsApp for now.")
     }
 
-    func placeMessengerCall(psid: String, name: String?, convId: String?) async -> CallOutcome {
+    func placeMessengerCall(psid: String, name: String?, convId: String?) async -> PlaceCallOutcome {
         .failed("Calling from the app arrives with the calls screen — call from Messenger for now.")
     }
 

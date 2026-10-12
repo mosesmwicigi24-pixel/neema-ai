@@ -17,9 +17,9 @@ public protocol CustomerHost: AnyObject {
     var canManageSettings: Bool { get }
     func toast(_ message: String, _ type: ToastType)
     /// A WhatsApp voice call to `waId` (the call screen carries what happens next).
-    func placeCall(waId: String, name: String?, convId: String?) async -> CallOutcome
+    func placeCall(waId: String, name: String?, convId: String?) async -> PlaceCallOutcome
     /// A Messenger voice call to a PSID.
-    func placeMessengerCall(psid: String, name: String?, convId: String?) async -> CallOutcome
+    func placeMessengerCall(psid: String, name: String?, convId: String?) async -> PlaceCallOutcome
     /// POST /admin/calls/request-permission (or Messenger's): only on the agent's tap.
     func requestCallPermission(to: String, name: String?, channel: String) async throws -> PermissionRequestResponse
 }

@@ -8,7 +8,7 @@ public struct ComposerPrefill: Equatable, Sendable {
 }
 
 /// How placing a call from the thread went.
-public enum CallOutcome: Sendable, Equatable {
+public enum PlaceCallOutcome: Sendable, Equatable {
     case placed
     /// The call screen already showed the outcome: nothing to say here.
     case shown
@@ -34,7 +34,7 @@ public protocol InboxHost: AnyObject {
     var api: NeemaApi { get }
     var snapshots: SnapshotCache { get }
     func toast(_ message: String, _ type: ToastType)
-    func placeCall(waId: String, name: String?, convId: String?) async -> CallOutcome
+    func placeCall(waId: String, name: String?, convId: String?) async -> PlaceCallOutcome
 }
 
 /// What the inbox needs from the file system and the image codec for picked
