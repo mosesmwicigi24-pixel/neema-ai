@@ -7,7 +7,7 @@ import NeemaCore
 /// The shell as the inbox's logic sees it (Android's `DashboardViewModel`
 /// for `ConversationsViewModel`): the session, the socket, the badges and
 /// the cross-view requests, as watched values the app model keeps in step.
-final class ShellInboxHost: InboxHost, CustomerHost, OrdersHost, CatalogHost, DealsHost, LeadsHost, OverviewHost, ReportsHost, TeamHost, ProfileHost, SettingsHost, @unchecked Sendable {
+final class ShellInboxHost: InboxHost, CustomerHost, OrdersHost, CatalogHost, DealsHost, LeadsHost, OverviewHost, ReportsHost, TeamHost, ProfileHost, SettingsHost, CallsHost, @unchecked Sendable {
     let session: Watched<Session?>
     let foreground: Watched<Bool>
     let sessionExpired = Watched<Bool>(false)
@@ -28,6 +28,9 @@ final class ShellInboxHost: InboxHost, CustomerHost, OrdersHost, CatalogHost, De
     var catalog: Watched<[CatalogItem]> { catalogFeed.catalog }
     let callChannels = Watched<CallChannels?>(nil)
     var canManageSettings = false
+    // CallsHost: the softphone and the caller the calls screen should focus (a deep link, a missed-call alert).
+    let calls: CallManager
+    let callsFocusKey = Watched<String?>(nil)
     // OverviewHost / TeamHost / ProfileHost: the team list and the signed-in agent's row as the app model
     // holds them, the refreshes that re-read them, and the device's small preferences.
     let agents = Watched<[Agent]>([])
@@ -37,7 +40,8 @@ final class ShellInboxHost: InboxHost, CustomerHost, OrdersHost, CatalogHost, De
     var onRefetchAgents: (@MainActor () -> Void)?
     var onRefetchMe: (@MainActor () -> Void)?
 
-    init(container: AppContainer, ordersFeed: OrdersFeed, catalogFeed: CatalogFeed, snapshots: SnapshotCache) {
+    init(container: AppContainer, ordersFeed: OrdersFeed, catalogFeed: CatalogFeed, snapshots: SnapshotCache, calls: CallManager) {
+        self.calls = calls
         session = container.sessionStore.session
         foreground = container.foreground
         socketConnected = container.socket.connected
@@ -67,13 +71,25 @@ final class ShellInboxHost: InboxHost, CustomerHost, OrdersHost, CatalogHost, De
         Task { @MainActor in cb(message, type) }
     }
 
-    /// The softphone lands with the calls screen (cycle 5); until then the thread says so.
+    /// The web's callCtx.initiateCall: the call card carries what happens next;
+    /// only a refusal the card doesn't show comes back as words for a toast.
     func placeCall(waId: String, name: String?, convId: String?) async -> PlaceCallOutcome {
-        .failed("Calling from the app arrives with the calls screen — call from WhatsApp for now.")
+        Self.outcome(await calls.initiateCall(to: waId, name: name, conversationId: convId))
     }
 
     func placeMessengerCall(psid: String, name: String?, convId: String?) async -> PlaceCallOutcome {
-        .failed("Calling from the app arrives with the calls screen — call from Messenger for now.")
+        Self.outcome(await calls.initiateCall(to: psid, name: name, conversationId: convId, channel: CallWords.MESSENGER))
+    }
+
+    private static func outcome(_ r: Result<Void, Error>) -> PlaceCallOutcome {
+        switch r {
+        case .success: return .placed
+        case .failure(let e):
+            if let ce = e as? CallError { return ce.shown ? .shown : .failed(ce.message) }
+            if e is CancellationError { return .shown }
+            let m = ErrorText.of(e).trimmingCharacters(in: .whitespaces)
+            return .failed(m.isEmpty ? "Couldn't place the call" : m)
+        }
     }
 
     /// POST /admin/calls/request-permission (or Messenger's): only on the agent's tap.

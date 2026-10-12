@@ -533,3 +533,135 @@ groundwork (CallKit / PushKit, blocked server-side for pushes), the bell
 the iOS lifecycle (background suspension, reconnect on return), the docked
 call panel, and the inbox's media round trips on a real device where one
 exists.
+
+### Cycle 5 — Messaging, communication & real-time
+
+**Features implemented / verified**
+
+- The softphone's rules, in NeemaCore (`Calls/`), one rule for one rule with
+  Android's `feature/calls/CallManager.kt`: `CallManager` behind the same
+  five ports (`CallApi`, `CallPeer`, `CallMedia`, `CallRinger`, `CallAudio`)
+  — the phases and their side effects, inbound WhatsApp (ring by frame or
+  poll, answer through ice-config + offer + mic + non-trickle ICE + `POST
+  answer`, the failure table: 409 answered elsewhere, 410/404 missed, mic
+  blocked, status 0 back to ringing, the 8 s unconfirmed answer), inbound
+  Messenger (reversed SDP, `media_update` highest version only, held until
+  ready), outbound WhatsApp (the 1.5 s permission read, PermissionNeeded /
+  Requested without a connect, the placed-row lookup, `call_status` →
+  RingingOut, `outbound_answer`, the refusal table), outbound Messenger,
+  resilience (10 s reconnecting, the connect guard, terminate / callback
+  retries, resync on reconnect and foreground, audio-trouble inline errors),
+  the second caller, permission requests and the `call_permission` grant
+  banner, the caution at two unanswered calls, `endForSignOut`, the
+  recording outbox (10 files, 3 days, transient vs permanent errors) and
+  every string of the card (`CallState.swift`: status line, outcome words,
+  notes, wrap-up actions).
+- The console's rules: `CallsViewModel` (one read on the wire at a time, the
+  60 s tick while shown and in front, 500 ms after call frames, `call_update`
+  merged in place, the transcript panel with its 5 s polling and error
+  table, call back through the softphone, follow-up done with the row
+  re-read, the deep-link focus with its re-read and "No calls with this
+  customer yet" toast, `saveUi` / `restoreUi`).
+- The bell and the alerts: `AgentNotifications` (Android's
+  `NotificationCenter`: the last 60 persisted, the 3 s exact-repeat drop,
+  the per-type table — channel, priority, tap target, the Profile switches —
+  the tray through an `AlertSink`, the group summary, read / dismiss / clear
+  withdrawing their rows) and `MessageAlerts` (the beep + buzz behind the
+  2 s gate and the mute, one tray row per customer in the background,
+  cleared on return).
+- The SwiftUI layer, screen for screen with Android: `CallsScreen` (the
+  night card with its glow, "Calls · WhatsApp [and Messenger] voice calls ·
+  N total", All / Follow-ups (N) and the app chips, the restriction,
+  readiness and stale-log banners, four skeleton rows, the empty and error
+  states, rows under TODAY / YESTERDAY / date with the avatar disc, the
+  channel badge, the direction glyph and outcome word in its tone, the
+  length, the agent, "Follow up", the Voicemail badge, the time, the
+  transcript and call-back round buttons; the transcript panel with the
+  summary, the speaker-separated transcript, Transcribe & summarise, Retry
+  and the recording player on `AVPlayer`; the details pane — timeline,
+  recording line, INSIGHTS, Call back / Open chat / Mark follow-up done,
+  the history line and the customer's full panel; a phone replaces the log
+  with the details, a window from 840 pt shows both with the newest call
+  auto-opened as Android's `detailsPick`), `CallCard` (WhatsApp's dark
+  surface, the 120 / 88 pt avatar with the pulse rings — off under Reduce
+  Motion — and Messenger's ring, the landscape split, every phase's
+  controls, the audio-route menu, the wrap-up pills, the caution and the
+  notes), the minimised bar, the waiting banner, the grant banner, the
+  docked 420 pt panel from 1000 pt of content with the chat opened beside a
+  connected call, the microphone prompt, the bell's panel (the unread badge,
+  Mark all read, the mute menu, rows with their emoji tile and time, the
+  footer) as the wide shell's 316 pt popup and the phone's sheet, and the
+  header / sidebar bells with their counts.
+- The platform ports on iOS: `SessionCallAudio` (`AVAudioSession` in
+  voice-chat mode, the earpiece / speaker / wired / Bluetooth routes from
+  the session's ports, the override on selection), `CallKitRinger` (the
+  system's call UI for a ring that leaves the screen, Answer / Decline back
+  into the softphone's `handleAction`; in front the alert tone every two
+  seconds), `SystemAlertSink` (`UNUserNotificationCenter`: one row per
+  alert keyed by the core's id, interruption levels for the priorities, the
+  summary row, nothing posted without permission) and `SystemAlertPlayer`.
+  The inbox's Call buttons now place calls through the softphone
+  (`ShellInboxHost.placeCall` / `placeMessengerCall`); sign-out ends a live
+  call first (`endForSignOut`, bounded).
+- The gallery renders the Calls view against five canned calls and the
+  channels answer (31 canned responses).
+
+**Defects corrected**
+
+1. `CallOutcome` (the softphone's) collided with the inbox's enum of the
+   same name: the inbox's is now `PlaceCallOutcome` (placed / shown /
+   failed), which is what it was always describing.
+2. The contract tests addressed `/admin/calls/<id>/…` with the encoded id
+   while the fake matched decoded paths (404s on every call id with a dot):
+   the fixtures now carry the raw id and assert the wire form separately.
+3. The simulation suite ran 100 random call histories a run (285 s): 30 by
+   default, `NEEMA_SIM_RUNS` scales it up for a soak.
+
+**Tests executed**
+
+- `swift test` in `apps/ios/NeemaCore` on Linux: **1322 tests, 0
+  failures**, 1 skipped (the gallery exporter): cycle 4's 1004 and 318 new —
+  the softphone's 239 (Android's suites ported: `CallManagerTests` 59,
+  `CallLifecycleTests` 47, `CallResilienceTests` 31, `CallUxTests` 13,
+  `CallAcceptanceTests` 48, `CallRingsEverywhereTests` 10,
+  `CallNetworkStressTests` 15, `CallApiContractTests` 14,
+  `CallSimulationTests` 2), the console's 41 (`CallsViewModelTests`,
+  `CallLogLiveTests`) and the 38 notification tests (`NotificationTests`).
+- macOS CI (`Neema app (iOS Simulator)`): the build and the gallery on the
+  cycle's head — recorded in the PR once green.
+
+**Remaining parity gaps** (scope of this cycle)
+
+- **WebRTC media is not linked**: `DeviceCallMedia` throws
+  `DeviceCallError`, so a call that reaches the media step ends on the card
+  with "Calling isn't available on this device" (the softphone's own path,
+  tested) — no audio flows yet. The WebRTC binary (stasel/WebRTC) is the
+  first task of cycle 6, as an SPM dependency with a `CallPeer` over
+  `RTCPeerConnection`; the rules above do not change.
+- Calls to a closed app stay **blocked** on PushKit VoIP pushes from the
+  backend (§25): the app rings only while it runs. The readiness banner says
+  "Calls can't ring in the background" when notifications are off, and the
+  empty state says "a call rings this phone while the app is open".
+- Local two-sided recording is **platform-restricted** (no public audio
+  sample hook in the iOS WebRTC SDK): `startRecording` returns nil, the
+  outbox and upload rules are ported and tested; Meta's own transcription
+  (`meta_transcription`) stands in.
+- The ringtone and vibration Profile switches cannot be honoured exactly
+  (CallKit rings the device's own ringtone); the in-front tone is the
+  system alert sound.
+- Android's readiness banners for "Stay connected in background", battery
+  optimisation and full-screen intents have no iOS equivalent; the
+  notifications and microphone ones remain.
+- Not ported: Android's `CallRecorderTests` and `CallAlertTests` (device
+  code), and the recorder sweep tests (no recorder).
+- The SwiftUI layer is compile- and gallery-verified only; no call has been
+  placed from a device.
+
+**Blockers** (carried) — no Xcode or device here; backend push (PushKit /
+APNs); no Apple credentials.
+
+**Next cycle** — Cycle 6: performance — the WebRTC dependency and the real
+`CallPeer`, the inbox list and thread under a thousand rows, image
+decoding off the main thread, the catalogue's search, the socket's
+reconnect budget, memory under the gallery's three sizes, and a sweep of
+every `Task` for cancellation on sign-out.

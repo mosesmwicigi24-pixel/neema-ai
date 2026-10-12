@@ -1,5 +1,6 @@
 import Foundation
 import SwiftUI
+import AVFoundation
 import NeemaCore
 
 /// The dashboard page's shared state (Android's `DashboardViewModel`): the
@@ -18,6 +19,18 @@ final class AppModel: ObservableObject {
     let catalogFeed: CatalogFeed
     /// The screens' view of the shell; their logic lives in NeemaCore and is created per sign-in.
     let inboxHost: ShellInboxHost
+    /// The softphone (Android `container.calls`): one for the process, started once; signed-out it ignores every frame.
+    let calls: CallManager
+    /// The bell's list (Android `container.notifications`) and the message alerts, started per sign-in.
+    let notifications: AgentNotifications
+    let messageAlerts: MessageAlerts
+    private let callRinger: CallKitRinger
+    private let alertSink: SystemAlertSink
+    @Published private(set) var callsScreen: CallsScreenModel?
+    @Published private(set) var callCard: CallCardModel?
+    @Published private(set) var bell: BellModel?
+    @Published private(set) var unreadBell = 0
+    @Published var bellOpen = false
     @Published private(set) var inboxScreen: InboxScreenModel?
     @Published private(set) var ordersScreen: OrdersScreenModel?
     @Published private(set) var catalogScreen: CatalogScreenModel?
@@ -56,7 +69,9 @@ final class AppModel: ObservableObject {
     @Published var openConvKey: String? {
         didSet { if inboxHost.openConvKey.value != openConvKey { inboxHost.openConvKey.update(openConvKey) } }
     }
-    @Published var callsFocusKey: String?
+    @Published var callsFocusKey: String? {
+        didSet { if inboxHost.callsFocusKey.value != callsFocusKey { inboxHost.callsFocusKey.update(callsFocusKey) } }
+    }
 
     private let toasts: ToastPresenter
     private var subs: [Subscription] = []
@@ -76,7 +91,22 @@ final class AppModel: ObservableObject {
         ordersFeed = OrdersFeed(api: container.api, foreground: container.foreground, socketEvents: container.socket.events,
                                 reconnected: container.socket.reconnected, snapshots: snapshots)
         catalogFeed = CatalogFeed(api: container.api, foreground: container.foreground, snapshots: snapshots)
-        inboxHost = ShellInboxHost(container: container, ordersFeed: ordersFeed, catalogFeed: catalogFeed, snapshots: snapshots)
+        let sessions = container.sessionStore
+        let ringer = CallKitRinger()
+        callRinger = ringer
+        calls = CallManager(
+            api: NeemaCallApi(container.api), events: container.socket.events, connected: container.socket.connected, foreground: container.foreground,
+            signedIn: { sessions.current != nil }, media: DeviceCallMedia(), ringer: ringer, audio: SessionCallAudio(),
+            micGranted: { AVAudioSession.sharedInstance().recordPermission == .granted },
+            outboxDir: FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first.map { $0.appendingPathComponent("call-recordings") }
+                ?? FileManager.default.temporaryDirectory.appendingPathComponent("call-recordings"),
+            myAgentId: { sessions.current?.agentId }, myAgentName: { sessions.current?.name }
+        )
+        let sink = SystemAlertSink()
+        alertSink = sink
+        notifications = AgentNotifications(events: container.socket.events, appPrefs: container.prefs, store: container.prefs.raw, sink: sink)
+        messageAlerts = MessageAlerts(events: container.socket.events, notifications: notifications, prefs: container.prefs, sink: sink, player: SystemAlertPlayer())
+        inboxHost = ShellInboxHost(container: container, ordersFeed: ordersFeed, catalogFeed: catalogFeed, snapshots: snapshots, calls: calls)
         inboxHost.onToast = { [weak self] message, type in self?.toast(message, type) }
         inboxHost.onRefreshAgents = { [weak self] in try await self?.refreshAgents() }
         inboxHost.onRefetchAgents = { [weak self] in self?.refetchAgents() }
@@ -89,6 +119,10 @@ final class AppModel: ObservableObject {
                 self.refetchAgents()
             }
         }
+        calls.canManageSettings = { [weak self] in self?.access.can(Perms.MANAGE_SETTINGS) ?? false }
+        // The system call UI's Answer / Decline (CallKit) come back as the softphone's own actions.
+        ringer.onAction = { [weak self] action, id in Task { @MainActor in self?.calls.handleAction(action, id: id) } }
+        calls.start()
         subscribe()
         if let s = session { signedIn(s) }
     }
@@ -122,6 +156,17 @@ final class AppModel: ObservableObject {
                 if self.openConvKey != k { self.openConvKey = k }
             }
         })
+        // The calls screen consumes the focus request; the deep link sets it.
+        subs.append(inboxHost.callsFocusKey.observe { [weak self] k in
+            Task { @MainActor in
+                guard let self = self else { return }
+                if self.callsFocusKey != k { self.callsFocusKey = k }
+            }
+        })
+        // The bell's count.
+        subs.append(notifications.items.observe { [weak self] list in
+            Task { @MainActor in self?.unreadBell = list.filter { !$0.read }.count }
+        })
         // The orders feed keeps the nav's pending badge fresh.
         subs.append(ordersFeed.orders.observe { [weak self] _ in
             Task { @MainActor in
@@ -151,6 +196,10 @@ final class AppModel: ObservableObject {
         ordersFeed.start(agentId: s.agentId)
         catalogFeed.start(agentId: s.agentId)
         startScreens()
+        notifications.start(foreground: container.foreground)
+        messageAlerts.start(foreground: container.foreground)
+        alertSink.refreshPermission()
+        unreadBell = notifications.unread
         refetchCallChannels()
         refetchMe()
         if let link = pendingLink {
@@ -179,12 +228,27 @@ final class AppModel: ObservableObject {
     }
 
     /// Sidebar.tsx's sign-out: the token, the bell and every per-agent state go.
+    /// A live call is ended first and the server told, bounded (CallManager.endForSignOut: 3 s;
+    /// a merely ringing call is left ringing for colleagues).
     func logout() {
         if signingOut { return }
         signingOut = true
         stopPolls()
+        if calls.state.value.live && calls.state.value.phase != .ringing {
+            Task { @MainActor [weak self] in
+                guard let self = self else { return }
+                await self.calls.endForSignOut()
+                self.finishLogout()
+            }
+        } else {
+            finishLogout()
+        }
+    }
+
+    private func finishLogout() {
         container.auth.logout()
         session = nil
+        notifications.clear()
         clearAgentState()
         pendingLink = nil
         signingOut = false
@@ -200,6 +264,8 @@ final class AppModel: ObservableObject {
         pendingOrders = 0
         openConvKey = nil
         callsFocusKey = nil
+        bellOpen = false
+        unreadBell = 0
         sessionExpired = false
         immersive = false
         drawerOpen = false
@@ -234,6 +300,12 @@ final class AppModel: ObservableObject {
         profileScreen = ProfileScreenModel(vm: ProfileViewModel(host: inboxHost), prefs: container.prefs)
         settingsScreen?.close()
         settingsScreen = SettingsScreenModel(vm: SettingsViewModel(host: inboxHost), catalog: inboxHost.catalog)
+        callsScreen?.close()
+        callsScreen = CallsScreenModel(vm: CallsViewModel(host: inboxHost), calls: calls)
+        callCard?.close()
+        callCard = CallCardModel(calls: calls)
+        bell?.close()
+        bell = BellModel(center: notifications, prefs: container.prefs)
     }
 
     private func stopScreens() {
@@ -257,12 +329,33 @@ final class AppModel: ObservableObject {
         profileScreen = nil
         settingsScreen?.close()
         settingsScreen = nil
+        callsScreen?.close()
+        callsScreen = nil
+        callCard?.close()
+        callCard = nil
+        bell?.close()
+        bell = nil
+        notifications.stop()
+        messageAlerts.stop()
         ordersFeed.stop()
         catalogFeed.stop()
         inboxHost.inboxSummary.update(nil)
         inboxHost.openConvKey.update(nil)
         inboxHost.composerPrefill.update(nil)
         inboxHost.callChannels.update(nil)
+        inboxHost.callsFocusKey.update(nil)
+    }
+
+    /// A row in the bell: read, and where it names a customer (or an order) the
+    /// app also takes the agent there — the same target as tapping its phone notification.
+    func openNotification(_ n: AppNotification) {
+        notifications.markRead(n.id)
+        let view = AgentNotifications.viewFor(n).flatMap { ViewId.fromWeb($0) }
+        if n.convKey != nil || view != nil {
+            bellOpen = false
+            drawerOpen = false
+            if let k = n.convKey { openConversationFor(k) } else if let v = view { navigate(v) }
+        }
     }
 
     /// GET /admin/calls/channels: which apps can call now (the customer panel's Messenger Call button follows it).

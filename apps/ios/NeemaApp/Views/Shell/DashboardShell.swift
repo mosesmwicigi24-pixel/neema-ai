@@ -20,7 +20,7 @@ struct DashboardShell: View {
                 if mode == .drawer {
                     MobileShell()
                 } else {
-                    WideShell(mode: mode)
+                    WideShell(mode: mode, width: g.size.width)
                 }
             }
             .frame(width: g.size.width, height: g.size.height)
@@ -36,7 +36,7 @@ struct CurrentView: View {
     var body: some View {
         switch app.view {
         case .conversations: InboxScreen()
-        case .calls: ViewPlaceholder(view: .calls, cycle: 5, note: "The call log, details, transcripts and the softphone.")
+        case .calls: CallsScreen()
         case .orders: OrdersScreen()
         case .reports: ReportsScreen()
         case .deals: DealsScreen()
@@ -61,8 +61,16 @@ struct MobileShell: View {
             VStack(spacing: 0) {
                 if !app.immersive { MobileHeader() }
                 ConnectivityBanner()
-                CurrentView()
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                // A minimised call / "allowed calls" sits here, above the view: nothing of the view is covered.
+                CallBar()
+                ZStack {
+                    CurrentView()
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    // Phones: an incoming / active call takes over the content area.
+                    CallStage()
+                    // The microphone prompt: always here, wherever the card is.
+                    CallMicHost()
+                }
                 if !app.immersive { MobileBottomNav() }
             }
             // Clear of the bottom nav (or, in an immersive thread, of the composer).
@@ -78,6 +86,8 @@ struct MobileShell: View {
         .overlay {
             DrawerHost(open: $app.drawerOpen, width: 272) { SidebarView(docked: false) }
         }
+        // The bell's list as a bottom sheet.
+        .background(BellHost(wide: false))
     }
 }
 
@@ -173,7 +183,7 @@ struct MobileHeader: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .accessibilityAddTraits(.isHeader)
                 if !app.connected && app.online { OfflineDot().padding(.trailing, 4) }
-                HeaderBell(count: 0) {}
+                HeaderBell(count: app.unreadBell) { app.bellOpen = true }
                 Button { app.setDark(!app.dark) } label: {
                     WebIcon(glyph: app.dark ? WebIcons.sun : WebIcons.moon, size: 18).foregroundColor(chrome.icon)
                         .frame(width: 48, height: 48).contentShape(Rectangle())
@@ -293,6 +303,7 @@ struct BottomTab: View {
 
 struct WideShell: View {
     let mode: NavMode
+    let width: CGFloat
     @EnvironmentObject private var app: AppModel
     @Environment(\.neema) private var c
     @State private var collapsed = false
@@ -311,13 +322,33 @@ struct WideShell: View {
                 }
                 VStack(spacing: 0) {
                     ConnectivityBanner()
-                    CurrentView()
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    // A minimised call / "allowed calls" sits here, above the view: nothing of the view is covered.
+                    CallBar()
+                    // The view's own width (window minus the navigation beside it). A tablet
+                    // with room (≥ 1000 pt of content): a ringing or live call docks as a
+                    // panel at the end edge and the view stays usable beside it.
+                    let navW: CGFloat = app.immersive ? 0 : (collapsed ? 60 : dockedWidth)
+                    CallDockHost(contentWidth: width - navW) { docked in
+                        HStack(spacing: 0) {
+                            ZStack {
+                                CurrentView()
+                                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                                if !docked { CallStage() }
+                                CallMicHost()
+                            }
+                            if docked {
+                                Rectangle().fill(Color.black.opacity(0.25)).frame(width: 1)
+                                CallStage().frame(width: CALL_PANEL_WIDTH)
+                            }
+                        }
+                    }
                 }
                 .background(c.surface)
             }
             // Navy runs under the status bar across the whole width, framing the view like the web's full-height sidebar does.
             .background(Brand.navy.ignoresSafeArea(edges: .top))
+            // The web's bell popup beside the sidebar; a tap outside closes it.
+            BellHost(wide: true, collapsed: collapsed)
             if let t = app.toast {
                 ToastView(toast: t)
                     .frame(minWidth: 288, maxWidth: 384)
@@ -340,6 +371,39 @@ struct WideShell: View {
             collapsed = mode == .rail
             collapsedFor = mode
         }
+    }
+}
+
+/// Lays the content out with or without the docked call panel, following the softphone's state.
+struct CallDockHost<Content: View>: View {
+    let contentWidth: CGFloat
+    @ViewBuilder let content: (Bool) -> Content
+    @EnvironmentObject private var app: AppModel
+    var body: some View {
+        if let m = app.callCard { CallDockBody(model: m, contentWidth: contentWidth, content: content) }
+        else { content(false) }
+    }
+}
+
+private struct CallDockBody<Content: View>: View {
+    @ObservedObject var model: CallCardModel
+    let contentWidth: CGFloat
+    @ViewBuilder let content: (Bool) -> Content
+    @EnvironmentObject private var app: AppModel
+    @State private var chatOpenedFor: String?
+    var body: some View {
+        let docked = model.docks(contentWidth: contentWidth)
+        content(docked)
+            // Anticipatory, docked only: once a call connects while the agent is in
+            // the inbox or the call log, that customer's chat opens beside it (once per call).
+            .onChange(of: model.state.phase) { _ in openChatBesideCall(docked) }
+            .onChange(of: docked) { d in openChatBesideCall(d) }
+    }
+    private func openChatBesideCall(_ docked: Bool) {
+        let s = model.state
+        guard docked, s.phase == .inCall, let id = s.callId, chatOpenedFor != id else { return }
+        chatOpenedFor = id
+        if app.view == .conversations || app.view == .calls, let k = s.chatKey { app.openConversationFor(k) }
     }
 }
 
@@ -386,7 +450,7 @@ struct SidebarView: View {
         if isCollapsed {
             VStack(spacing: 6) {
                 NeemaLogo()
-                BellButton(count: 0, compact: true) {}
+                BellButton(count: app.unreadBell, compact: true) { app.bellOpen.toggle() }
             }
             .frame(maxWidth: .infinity)
             .padding(.top, 12).padding(.bottom, 8)
@@ -400,7 +464,7 @@ struct SidebarView: View {
                 }
                 .padding(.leading, 6)
                 .frame(maxWidth: .infinity, alignment: .leading)
-                BellButton(count: 0) {}
+                BellButton(count: app.unreadBell) { app.bellOpen.toggle() }
                 if docked, let collapsed = collapsed {
                     NavyIconButton(glyph: WebIcons.collapse, label: "Collapse sidebar") { collapsed.wrappedValue = true }
                 }
