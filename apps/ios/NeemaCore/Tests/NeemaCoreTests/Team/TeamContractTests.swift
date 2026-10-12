@@ -28,9 +28,9 @@ final class TeamContractTests: TeamTestCase {
         let brian = agent(Fixtures.AGENT3_ID)
         XCTAssertNil(brian.customRoleId)
         XCTAssertTrue(brian.permissions.isEmpty)
-        // Python isoformat: microseconds and "+00:00".
+        // Python isoformat: "+00:00", with microseconds only when they are not zero.
         let created = grace.createdAt ?? ""
-        XCTAssertNotNil(created.range(of: #"^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{6}\+00:00$"#, options: .regularExpression), created)
+        XCTAssertNotNil(created.range(of: #"^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(\.\d{6})?\+00:00$"#, options: .regularExpression), created)
         XCTAssertNotNil(Fmt.millis(grace.createdAt))
         XCTAssertTrue(Fmt.timeAgo(grace.lastSeenAt).hasSuffix("ago"))
     }
