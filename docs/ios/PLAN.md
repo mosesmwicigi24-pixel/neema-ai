@@ -908,8 +908,14 @@ failed against the core)
 
 - `swift test` in `apps/ios/NeemaCore` on Linux: **1570 tests, 0
   failures**, 1 skipped, twice in a row (cycle 7's 1377 + the 193 above).
-- macOS CI (`Neema app (iOS Simulator)`): see the line below once the run
-  is in.
+- macOS CI (`Neema app (iOS Simulator)`): green on b225c2c (run
+  38315070475): XcodeGen with the new UI-test target, the simulator build,
+  the app's 5 tests with the gallery (35 screenshots), then the **6 UI tests
+  on the simulator, all passing** (sign-in 13 s, the tabs 47 s, the drawer
+  21 s, orders 15 s, sign-out 22 s, the wrong password 12 s); every other
+  check green on the same head. The first push's Linux job refused one new
+  assertion (a Python-style timestamp whose zero microseconds are left out
+  on CI's machine but not here) — the assertion, not the code, was wrong.
 
 **Remaining parity gaps** (scope of this cycle)
 
