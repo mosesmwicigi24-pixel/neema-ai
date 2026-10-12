@@ -214,7 +214,8 @@ struct MobileHeader: View {
                     .lineLimit(1)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .accessibilityAddTraits(.isHeader)
-                if !app.connected && app.online { OfflineDot().padding(.trailing, 4) }
+                // The pill keeps its words; the view's name gives way (MobileHeader.kt: "Orde…" beside "Reconnecting…").
+                if !app.connected && app.online { OfflineDot().fixedSize().layoutPriority(1).padding(.trailing, 4) }
                 HeaderBell(count: app.unreadBell) { app.bellOpen = true }
                 Button { app.setDark(!app.dark) } label: {
                     WebIcon(glyph: app.dark ? WebIcons.sun : WebIcons.moon, size: 18).foregroundColor(chrome.icon)

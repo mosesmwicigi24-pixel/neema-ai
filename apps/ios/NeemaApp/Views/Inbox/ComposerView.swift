@@ -213,8 +213,13 @@ struct ComposerView: View {
         .onDrop(of: [UTType.item], isTargeted: $dropHover) { providers in DroppedFiles.take(providers) { vm.addMedia($0) } }
         .overlay {
             if dropHover {
-                RoundedRectangle(cornerRadius: 16, style: .continuous).stroke(Amber, lineWidth: 2).padding(4)
-                    .allowsHitTesting(false)
+                ZStack {
+                    RoundedRectangle(cornerRadius: 16, style: .continuous).fill(Amber.opacity(0.08))
+                    RoundedRectangle(cornerRadius: 16, style: .continuous).stroke(Amber, lineWidth: 2)
+                    Text("Drop to attach to your reply").font(NeemaFont.manrope(13, .semibold)).foregroundColor(Palette.amber800)
+                }
+                .padding(4)
+                .allowsHitTesting(false)
             }
         }
     }

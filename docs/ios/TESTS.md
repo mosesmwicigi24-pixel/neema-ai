@@ -3,8 +3,8 @@
 The Android app's JVM test suite (`apps/android/app/src/test/java/ke/co/bethanyhouse/neema/`,
 177 files) is the reference for what the iOS app must prove. This file maps
 every one of them to where the same behaviour is proven on iOS, and says
-honestly where it is not. It is written at the end of cycle 8 and kept
-current by later cycles (`docs/ios/PLAN.md` holds the cycle log).
+honestly where it is not. It was written at the end of cycle 8 and is kept
+current by later cycles (cycle 9: the keyboard and drop rules) (`docs/ios/PLAN.md` holds the cycle log).
 
 Where the iOS proof lives:
 
@@ -247,8 +247,8 @@ twin), **missing** (no iOS proof yet).
 | Android test file | tests | iOS counterpart | tests | status | note |
 |---|---|---|---|---|---|
 | `TabS9UltraScreenshotTest.kt` | 10 | `apps/ios/NeemaAppTests/Gallery/ScreenGalleryTests.swift` | 1 | **gallery** | iPad 1180 × 820 stands in for the Tab S9 Ultra |
-| `TabletInputTest.kt` | 12 | `Shell/TabletInputTests.swift` | 1 | **partial** | 1 of 12: `stepping`; Android's hardware-keyboard rules (Enter sends, Ctrl-digits, conversation walking, drops) have no iOS twin — the composer's only shortcut is ⌘-Return |
-| `TabletLayoutTest.kt` | 23 | `Shell/TabletLayoutTests.swift` + `AdaptiveTests.swift` | 34 | **partial** | 20 of 23 (cycle 8): the 13 Tab S9 Ultra widths, call docking (`DockRules.swift`, moved to the core), the 6 details-pick rules; the three Esc-key rules have no iOS twin |
+| `TabletInputTest.kt` | 12 | `Shell/TabletInputTests.swift` | 15 | **verified** | cycle 9: the keyboard and drop rules moved into the core (`Shell/Shortcuts.swift`) — `KeyboardRulesTests` 11 + `stepping` 1 |
+| `TabletLayoutTest.kt` | 23 | `Shell/TabletLayoutTests.swift` + `AdaptiveTests.swift` + `Shell/TabletInputTests.swift` | 49 | **verified** | the 13 Tab S9 Ultra widths, call docking (`DockRules.swift`), the 6 details-pick rules, the 3 Esc-key rules (`EscapeKeyTests`, cycle 9) |
 
 ## Team (`team/`)
 
@@ -303,14 +303,14 @@ twin), **missing** (no iOS proof yet).
 
 | status | Android files | Android tests |
 |---|---|---|
-| verified | 64 | 971 |
-| partial | 46 | 790 |
+| verified | 66 | 1006 |
+| partial | 44 | 755 |
 | gallery | 28 | 501 |
 | platform-restricted | 6 | 14 |
 | support | 33 | 1 |
 | **all** | **177** | **2277** |
 
-iOS test functions: **1570** in `NeemaCore` (Linux), **5** in the app's test bundle (macOS CI, one of them the gallery's render of every screen), **6** UI tests (macOS CI).
+iOS test functions: **1584** in `NeemaCore` (Linux), **5** in the app's test bundle (macOS CI, one of them the gallery's render of every screen), **6** UI tests (macOS CI).
 
 ## How the ports were made (cycle 8)
 

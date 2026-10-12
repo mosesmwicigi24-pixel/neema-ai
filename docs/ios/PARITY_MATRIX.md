@@ -64,7 +64,7 @@ signing exists (no Apple Developer credentials in the repo or on the box).
 | `ScreenLife` (shown × foreground × connected → catch-up, poll) | `ScreenLife.kt` | — | missing (Cycle 2, with the first screens) | 2 |
 | `AppPrefs` (theme, background_live, alert settings, mute) | `core/util/AppPrefs.kt` | — | missing (UserDefaults-backed; `background_live` is platform-restricted, see §24) | 2 |
 | `SnapshotCache` (per-agent JSON files for me/agents/orders/catalog, inbox page one, inbox memory) | `core/util/SnapshotCache.kt` | — | missing (Cycle 2; will store the raw response text so no model needs to be Encodable) | 2 |
-| `UiRestore` / saved state across process death | `core/util/UiRestore.kt`, `rememberSaveable` | `@SceneStorage` in `DashboardShell` / `RootView` (the view, its history and whose they are, the pending deep link, the toast on screen) + the screens' own `@SceneStorage` (inbox, calls) | partial — the shell's keys and the owner rule (cycle 8, compile only); the per-screen forms (team dialogs, lead sheet, deals guidance) keep their drafts in the view models only while the process lives | 8 |
+| `UiRestore` / saved state across process death | `core/util/UiRestore.kt`, `rememberSaveable` | `@SceneStorage` in `DashboardShell` / `RootView` (the view, its history and whose they are, the pending deep link, the toast on screen) + every screen's own `@SceneStorage` (§21) | verified (rules) · the restore unverified (compile only; no process-death run without a device) | 9 |
 | `ContactNames` (LRU of 2,000 names for notifications) | `core/notify/MessageAlerts.kt` | `NeemaApi.onConversationsSeen` hook only | partial | 5 |
 
 ## 2. App bootstrap, shell and navigation (`app/`)
@@ -350,7 +350,7 @@ signing exists (no Apple Developer credentials in the repo or on the box).
 | `neema_crash` | `Application Support/crash` (`CrashVault`) | verified (file rules) | 7 |
 | Snapshots `cacheDir/snapshots/<hash>_<key>.json` (me, agents, orders, catalog, inbox_v2, inbox_memory_v1) | `Caches/snapshots/` (raw response text) | verified (`SnapshotCache`) | 2 |
 | Crash files, report CSVs, camera captures (FileProvider) | `Application Support/crash`, `Caches` + the share sheet, the picker's own files | verified (crash, CSV); captures unverified | 2/7 |
-| SavedState / `rememberSaveable` keys | `@SceneStorage` + Codable UI state (`shell.nav`, `shell.toast`, `shell.pendingLink`, `calls.ui`, the inbox's) | partial — the shell and two screens (cycle 8); the forms are not restored | 8 |
+| SavedState / `rememberSaveable` keys | `@SceneStorage` + Codable UI state: the shell (`shell.nav`, `shell.toast`, `shell.pendingLink`), every screen's `<screen>.ui` (orders, catalog + the open product, deals, leads, reports, team + its tab and open dialog, profile + its edit and password modes, settings + the open integration, the offer's pickers, calls + the auto-pick, the inbox's panels) | verified (the keys compile and the screens' models round-trip their state in the Linux suites: `*LifecycleTests`); the restore itself unverified (compile only, no process-death run) | 9 |
 
 ## 22. Design tokens, typography, icons (`core/ui/theme/*`)
 
@@ -411,4 +411,4 @@ Every path, query name and body below exists in `Api/NeemaApi.swift` unless the 
 | Device-level vibrate / silent-mode detection for message alerts | not exposed | haptics; the switches still gate sounds | n/a |
 | Local call recording from WebRTC's audio device module | no public sample hook in the iOS WebRTC SDK | `startRecording` returns nil; the outbox is ported; Meta transcription (`meta_transcription`) stands in — the card says "Recorded by WhatsApp" | decided (cycle 5): platform-restricted |
 | `recording_url` playback without an auth header | same on Android | `AVPlayer`; verify `/api/admin/media/*` rules | backend check |
-| Hardware keyboard + mouse + drag-and-drop | iPad only | iPad: `.keyboardShortcut`, `.dropDestination`, context menus | Cycle 9 |
+| Hardware keyboard + mouse + drag-and-drop | iPad only | iPad (cycle 9): the rules of `Shortcuts.kt` / `DropFiles.kt` in the core (`Shell/Shortcuts.swift`, 14 tests) — Cmd+1…9 views, Cmd+B sidebar, Cmd+F / Cmd+K search, Cmd+] / Cmd+[ walk, Return sends on a hardware keyboard, Esc closes what is open, drops attach; a mouse's right button is the system's context menu | done (compile only; needs an iPad with a keyboard to see) |
