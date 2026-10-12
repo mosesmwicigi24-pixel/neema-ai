@@ -306,23 +306,6 @@ private struct AttributionCard: View {
     }
 }
 
-/// A bar with only its top corners rounded.
-private struct TopRoundedBar: Shape {
-    let radius: CGFloat
-    func path(in rect: CGRect) -> Path {
-        let r = min(radius, rect.height / 2, rect.width / 2)
-        var p = Path()
-        p.move(to: CGPoint(x: rect.minX, y: rect.maxY))
-        p.addLine(to: CGPoint(x: rect.minX, y: rect.minY + r))
-        p.addArc(center: CGPoint(x: rect.minX + r, y: rect.minY + r), radius: r, startAngle: .degrees(180), endAngle: .degrees(270), clockwise: false)
-        p.addLine(to: CGPoint(x: rect.maxX - r, y: rect.minY))
-        p.addArc(center: CGPoint(x: rect.maxX - r, y: rect.minY + r), radius: r, startAngle: .degrees(270), endAngle: .degrees(0), clockwise: false)
-        p.addLine(to: CGPoint(x: rect.maxX, y: rect.maxY))
-        p.closeSubpath()
-        return p
-    }
-}
-
 /// 7-day revenue bars; today's bar in the dark green. Tap a bar for its amount.
 struct RevenueChart: View {
     let bars: [DayBar]

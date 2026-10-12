@@ -25,9 +25,13 @@ final class AppModel: ObservableObject {
     @Published private(set) var leadsScreen: LeadsScreenModel?
     @Published private(set) var overviewScreen: OverviewScreenModel?
     @Published private(set) var reportsScreen: ReportsScreenModel?
+    @Published private(set) var teamScreen: TeamScreenModel?
+    @Published private(set) var profileScreen: ProfileScreenModel?
 
     @Published private(set) var session: Session?
-    @Published private(set) var me: Agent?
+    @Published private(set) var me: Agent? {
+        didSet { inboxHost.me.update(me) }
+    }
     @Published private(set) var agents: [Agent] = [] {
         didSet { inboxHost.agents.update(agents) }
     }
@@ -74,6 +78,8 @@ final class AppModel: ObservableObject {
         inboxHost = ShellInboxHost(container: container, ordersFeed: ordersFeed, catalogFeed: catalogFeed, snapshots: snapshots)
         inboxHost.onToast = { [weak self] message, type in self?.toast(message, type) }
         inboxHost.onRefreshAgents = { [weak self] in try await self?.refreshAgents() }
+        inboxHost.onRefetchAgents = { [weak self] in self?.refetchAgents() }
+        inboxHost.onRefetchMe = { [weak self] in self?.refetchMe() }
         forbiddenRefresh = Coalescer(windowMs: Self.FORBIDDEN_WINDOW_MS) { [weak self] in
             await MainActor.run {
                 guard let self = self else { return }
@@ -221,6 +227,10 @@ final class AppModel: ObservableObject {
         overviewScreen = OverviewScreenModel(vm: OverviewViewModel(host: inboxHost))
         reportsScreen?.close()
         reportsScreen = ReportsScreenModel(vm: ReportsViewModel(host: inboxHost))
+        teamScreen?.close()
+        teamScreen = TeamScreenModel(vm: TeamViewModel(host: inboxHost))
+        profileScreen?.close()
+        profileScreen = ProfileScreenModel(vm: ProfileViewModel(host: inboxHost), prefs: container.prefs)
     }
 
     private func stopScreens() {
@@ -238,6 +248,10 @@ final class AppModel: ObservableObject {
         overviewScreen = nil
         reportsScreen?.close()
         reportsScreen = nil
+        teamScreen?.close()
+        teamScreen = nil
+        profileScreen?.close()
+        profileScreen = nil
         ordersFeed.stop()
         catalogFeed.stop()
         inboxHost.inboxSummary.update(nil)

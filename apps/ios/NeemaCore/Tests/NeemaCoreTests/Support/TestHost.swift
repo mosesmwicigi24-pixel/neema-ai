@@ -62,7 +62,7 @@ func json(_ text: String) -> [String: JSONValue] { JSONValue.parse(text)?.object
 /// A signed-in shell for the inbox (Android's `dashboard(...)` + `testContainer`):
 /// the fake API, a session for Moses, the app "in the foreground", a fake
 /// socket, every delay on one virtual clock, and the toasts recorded.
-final class TestHost: InboxHost, CustomerHost, OrdersHost, CatalogHost, DealsHost, LeadsHost, OverviewHost, ReportsHost, TeamHost, @unchecked Sendable {
+final class TestHost: InboxHost, CustomerHost, OrdersHost, CatalogHost, DealsHost, LeadsHost, OverviewHost, ReportsHost, TeamHost, ProfileHost, @unchecked Sendable {
     /// A burst of 403s costs one re-read of who this agent is (the shell's `FORBIDDEN_WINDOW_MS`).
     static let FORBIDDEN_WINDOW_MS: Int64 = 1_000
 
@@ -96,6 +96,8 @@ final class TestHost: InboxHost, CustomerHost, OrdersHost, CatalogHost, DealsHos
     let agents = Watched<[Agent]>([])
     /// The signed-in agent's own row (TeamHost), read on demand by `refetchMe`.
     let me = Watched<Agent?>(nil)
+    /// The device's small preferences (ProfileHost): the notification switches live here.
+    let prefs: KeyValueStore = MemoryPrefs()
     let catalogFeed: CatalogFeed?
     private var forbiddenRefresh: Coalescer?
     private var _accessRereads = 0

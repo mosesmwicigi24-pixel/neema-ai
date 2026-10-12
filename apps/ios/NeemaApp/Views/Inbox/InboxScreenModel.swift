@@ -7,7 +7,7 @@ import NeemaCore
 /// The shell as the inbox's logic sees it (Android's `DashboardViewModel`
 /// for `ConversationsViewModel`): the session, the socket, the badges and
 /// the cross-view requests, as watched values the app model keeps in step.
-final class ShellInboxHost: InboxHost, CustomerHost, OrdersHost, CatalogHost, DealsHost, LeadsHost, OverviewHost, ReportsHost, @unchecked Sendable {
+final class ShellInboxHost: InboxHost, CustomerHost, OrdersHost, CatalogHost, DealsHost, LeadsHost, OverviewHost, ReportsHost, TeamHost, ProfileHost, @unchecked Sendable {
     let session: Watched<Session?>
     let foreground: Watched<Bool>
     let sessionExpired = Watched<Bool>(false)
@@ -28,9 +28,14 @@ final class ShellInboxHost: InboxHost, CustomerHost, OrdersHost, CatalogHost, De
     var catalog: Watched<[CatalogItem]> { catalogFeed.catalog }
     let callChannels = Watched<CallChannels?>(nil)
     var canManageSettings = false
-    // OverviewHost: the team list as the app model holds it, and its refresh.
+    // OverviewHost / TeamHost / ProfileHost: the team list and the signed-in agent's row as the app model
+    // holds them, the refreshes that re-read them, and the device's small preferences.
     let agents = Watched<[Agent]>([])
+    let me = Watched<Agent?>(nil)
+    let prefs: KeyValueStore
     var onRefreshAgents: (() async throws -> Void)?
+    var onRefetchAgents: (@MainActor () -> Void)?
+    var onRefetchMe: (@MainActor () -> Void)?
 
     init(container: AppContainer, ordersFeed: OrdersFeed, catalogFeed: CatalogFeed, snapshots: SnapshotCache) {
         session = container.sessionStore.session
@@ -41,12 +46,21 @@ final class ShellInboxHost: InboxHost, CustomerHost, OrdersHost, CatalogHost, De
         self.ordersFeed = ordersFeed
         self.catalogFeed = catalogFeed
         self.snapshots = snapshots
+        prefs = container.prefs.raw
     }
 
     func refreshOrders() async throws { try await ordersFeed.refreshOrders() }
     func refetchOrders() { ordersFeed.refetchOrders() }
     func refreshCatalog() async throws { try await catalogFeed.refreshCatalog() }
     func refreshAgents() async throws { try await onRefreshAgents?() }
+    func refetchAgents() {
+        guard let cb = onRefetchAgents else { return }
+        Task { @MainActor in cb() }
+    }
+    func refetchMe() {
+        guard let cb = onRefetchMe else { return }
+        Task { @MainActor in cb() }
+    }
 
     func toast(_ message: String, _ type: ToastType) {
         guard let cb = onToast else { return }

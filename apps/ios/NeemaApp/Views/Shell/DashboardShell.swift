@@ -35,9 +35,9 @@ struct CurrentView: View {
         case .leads: LeadsScreen()
         case .overview: OverviewScreen()
         case .catalog: CatalogScreen()
-        case .agents: ViewPlaceholder(view: .agents, cycle: 2, note: "Agents and roles.")
+        case .agents: TeamScreen()
         case .settings: ViewPlaceholder(view: .settings, cycle: 4, note: "Platform configuration and integrations.")
-        case .profile: ViewPlaceholder(view: .profile, cycle: 2, note: "Your account and preferences.")
+        case .profile: ProfileScreen()
         }
     }
 }
