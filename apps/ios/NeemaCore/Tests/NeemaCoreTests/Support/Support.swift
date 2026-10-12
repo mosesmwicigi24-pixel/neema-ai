@@ -61,6 +61,7 @@ final class VirtualClock: @unchecked Sendable {
 
     func sleep(_ ms: Int64) async throws {
         if Task.isCancelled { throw CancellationError() }
+        if ms <= 0 { await Task.yield(); return }
         let id: Int = lock.sync { seq += 1; waits.append(ms); return seq }
         try await withTaskCancellationHandler {
             try await withCheckedThrowingContinuation { (c: CheckedContinuation<Void, Error>) in

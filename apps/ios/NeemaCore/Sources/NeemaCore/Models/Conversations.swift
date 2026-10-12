@@ -79,7 +79,10 @@ public struct Conversation: Identifiable, Equatable, Hashable, Sendable, Decodab
 public struct ConversationPage: Equatable, Sendable, Decodable {
     public var items: [Conversation]
     public var nextCursor: String?
+    /// The page as it came off the wire (kept for the stale-while-revalidate snapshot); not part of equality.
+    public var raw: JSONValue? = nil
     public init(items: [Conversation] = [], nextCursor: String? = nil) { self.items = items; self.nextCursor = nextCursor }
+    public static func == (a: ConversationPage, b: ConversationPage) -> Bool { a.items == b.items && a.nextCursor == b.nextCursor }
     enum K: String, CodingKey { case items, next_cursor }
     public init(from decoder: Decoder) throws {
         let c = try decoder.lenient(K.self)

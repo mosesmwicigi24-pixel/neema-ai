@@ -77,11 +77,11 @@ signing exists (no Apple Developer credentials in the repo or on the box).
 | `ViewId` (11 views, labels, web names), start on Inbox | `app/DashboardViewModel.kt` | `NeemaCore/Shell/ViewId.swift` | verified | 1 |
 | `navigate` history (each view once, cap 10), `back` → previous, Inbox, leave | same | `NeemaCore/Shell/NavHistory.swift` | verified | 1 |
 | Deep links `?open=<key>[&ref=]`, `?view=calls&caller=`, `?view=<name>`, `https://neema.bethanyhouse.co.ke/dashboard*`, `neema://`; stashed while signed out and replayed once; newest wins; dropped on sign-out | `applyDeepLink`, manifest filters | `NeemaCore/Shell/DeepLink.swift` (+ `onOpenURL`, Universal Links need an AASA file on the host) | verified (parsing); routing **unverified**; AASA **blocked** (host file + entitlement) | 1 |
-| Cross-view requests: `openConvKey`, `callsFocusKey`, `composerPrefill`, `inboxRefresh`, `immersive` | `DashboardViewModel` | `DashboardModel` | missing | 2 |
+| Cross-view requests: `openConvKey`, `callsFocusKey`, `composerPrefill`, `inboxRefresh`, `immersive` | `DashboardViewModel` | `DashboardModel` | unverified (`AppModel` + `ShellInboxHost`; `callsFocusKey` is consumed by the calls screen in cycle 5) | 2 |
 | Toasts: one at a time, 3.5 s while in front, ≥1.5 s after a return, survives process death; ✓ / ! / ✕ pill | `DashboardViewModel`, `ToastView` | `NeemaCore/Shell/Toast.swift` + `ToastView` | partial (rules verified; view unverified) | 1 |
-| Snapshots painted on sign-in; `refetchMe` (3 tries, no retry on 401); polls agents 180 s / catalog 300 s / orders 90 s only in front, refetch on return | `DashboardViewModel` | `DashboardModel` | missing | 2 |
+| Snapshots painted on sign-in; `refetchMe` (3 tries, no retry on 401); polls agents 180 s / catalog 300 s / orders 90 s only in front, refetch on return | `DashboardViewModel` | `DashboardModel` | verified (the feeds and `refetchMe` rules) · shell unverified | 2 |
 | Notification frames → toast "{title}: {body}", inbox refetch (types), orders refetch on `order_update` (800 ms) | same | — | missing | 5 |
-| `socket.reconnected` → orders refetch unless < 5 s ago; `sessionExpired` → dialog; `forbidden` → re-read me + agents (1 s coalesce, 15 s cooldown) | same | — | missing | 2 |
+| `socket.reconnected` → orders refetch unless < 5 s ago; `sessionExpired` → dialog; `forbidden` → re-read me + agents (1 s coalesce, 15 s cooldown) | same | — | verified (the feed and the host) · shell unverified | 2 |
 | Access: team row by id then email; `permissions()` empty until it lands; `isAdmin` rule; nav gates | `access`, `Sidebar.buildNavItems` | `NeemaCore/Shell/Access.swift` | verified | 1 |
 | Logout: ignore repeats, stop polls, end a live call (3 s / 4 s caps) before the token goes, clear store (keep `last_email`), clear notifications, clear agent state, drop pending link; late answers dropped | `logout()`, `forCurrentAgent` | — | missing (call part: Cycle 5) | 2 |
 | Session expired dialog: not dismissable, "Signed in as", password, "Continue"/"Signing in…", "Sign out", errors | `LoginScreen.kt` `SessionExpiredDialog` | `Views/Auth/SessionExpiredView.swift` | unverified | 1 |
@@ -102,75 +102,75 @@ signing exists (no Apple Developer credentials in the repo or on the box).
 
 | Feature | Status | Cycle |
 |---|---|---|
-| Pane rules: one pane < 801 dp (thread full-screen, chrome hidden); two panes ≥ 801 (list 30%, 320–400 dp); customer panel docks when the thread keeps ≥ 480 dp + 32 dp rail; activity pane 16% (196–292 dp); `roomyThread` ≥ 540 dp; auto-open first row; placeholder "💬 Select a conversation" | missing | 2 |
-| Header "Chats" / "{n} selected", "{human} live" pill, select mode (checklist icon), filter icon | missing | 2 |
-| Tabs All · Unread · Read · Human · Yours with server-summary counts ("999+"), local fallback before the summary | missing | 2 |
-| Search: placeholder, 300 ms debounce, server `q`, ✕ | missing | 2 |
-| Channel chips All · WA · FB · MSG · IG with `unread_messages` badges | missing | 2 |
-| Filter panel: tags from the summary, mode pills All / "Ai" / Human / Paused | missing | 2 |
-| Rows grouped by `person_id` (newest representative, sibling chips), sorted by `lastMessageAt ?: createdAt`; edge colour, avatar + flag + unread dot, name rules ("Website visitor"), repeat-buyer badge, time ago, chips (channels, stage, country, Human/Paused, Yours/🔒, unread pill), preview, hover, long-press select | missing | 2 |
-| Bulk release bar and parallel `POST …/release` with 404 handling and toasts | missing | 2 |
-| States: Loading… / Couldn't load + Retry / No conversations found; stale strip; paging footer; pull-to-refresh only with rows; snapshot `inbox_v2` paint | missing | 2 |
-| Paging `limit=50`, cursor, "all" keys omitted, legacy bare array, newest request wins, join an in-flight refresh, page-one replace vs prepend, revealed rows stay, open-thread row kept fresh | partial (`NeemaApi.conversations.page` verified) | 2 |
-| Summary fetched on every refresh (newest wins, failure keeps badges) → nav badge | missing | 2 |
-| List poll 60 s in front; frames coalesce 1.5 s; quiet refresh 2 s after a local patch | missing | 2 |
-| Open-conversation key resolution (cache → `resolve` → `get`), toasts, offline retry on reconnect | missing | 2 |
+| Pane rules: one pane < 801 dp (thread full-screen, chrome hidden); two panes ≥ 801 (list 30%, 320–400 dp); customer panel docks when the thread keeps ≥ 480 dp + 32 dp rail; activity pane 16% (196–292 dp); `roomyThread` ≥ 540 dp; auto-open first row; placeholder "💬 Select a conversation" | unverified (phone / two-pane / docked customer panel; the rail widths are re-checked in cycle 3) | 2 |
+| Header "Chats" / "{n} selected", "{human} live" pill, select mode (checklist icon), filter icon | logic verified · UI unverified | 2 |
+| Tabs All · Unread · Read · Human · Yours with server-summary counts ("999+"), local fallback before the summary | logic verified · UI unverified | 2 |
+| Search: placeholder, 300 ms debounce, server `q`, ✕ | logic verified · UI unverified | 2 |
+| Channel chips All · WA · FB · MSG · IG with `unread_messages` badges | logic verified · UI unverified | 2 |
+| Filter panel: tags from the summary, mode pills All / "Ai" / Human / Paused | logic verified · UI unverified | 2 |
+| Rows grouped by `person_id` (newest representative, sibling chips), sorted by `lastMessageAt ?: createdAt`; edge colour, avatar + flag + unread dot, name rules ("Website visitor"), repeat-buyer badge, time ago, chips (channels, stage, country, Human/Paused, Yours/🔒, unread pill), preview, hover, long-press select | logic verified · UI unverified | 2 |
+| Bulk release bar and parallel `POST …/release` with 404 handling and toasts | logic verified · UI unverified | 2 |
+| States: Loading… / Couldn't load + Retry / No conversations found; stale strip; paging footer; pull-to-refresh only with rows; snapshot `inbox_v2` paint | logic verified · UI unverified | 2 |
+| Paging `limit=50`, cursor, "all" keys omitted, legacy bare array, newest request wins, join an in-flight refresh, page-one replace vs prepend, revealed rows stay, open-thread row kept fresh | verified (logic) · UI unverified | 2 |
+| Summary fetched on every refresh (newest wins, failure keeps badges) → nav badge | logic verified · UI unverified | 2 |
+| List poll 60 s in front; frames coalesce 1.5 s; quiet refresh 2 s after a local patch | logic verified · UI unverified | 2 |
+| Open-conversation key resolution (cache → `resolve` → `get`), toasts, offline retry on reconnect | logic verified · UI unverified | 2 |
 | Keyboard stepping Alt+↓/↑ | missing | 9 |
 
 ## 4. Thread (`ThreadView.kt`, `ConversationsScreen.ThreadPane`, `MediaViews.kt`, `ThreadCall.kt`)
 
 | Feature | Status | Cycle |
 |---|---|---|
-| Header: back (phone), avatar, name, handle line (mono phone / "Web chat" / hidden), 📞 "Call on WhatsApp" (7–15 digits), 👤 profile, ⋮ menu (actions, Ask Neema, Neema delivers, Invite, Activity log) | missing | 2 |
-| Second row: Intercept badge AI/Human/Paused, "→ {agent}" (wide), 🔒 lock, sibling chips, inline actions on roomy tablets, pinned primary on phones | missing | 2 |
-| `threadControls()` truth table (admin / agent-type / readonly × c1/c2/c3/c6/h) and the busy-lock rule | missing (port with its tests) | 2 |
-| Footer: Composer when allowed; "🔒 Handled by …" banner; nothing for AI/paused | missing | 2 |
-| Row builder: "N new messages" divider, post head card, hidden handoff events, first-escalation pill with default reasons, flag pill, live pills by kind, call pill + summary card ("Use as reply"), internal note card, albums (2+ images) | missing | 2 |
-| Bubbles: inbound/AI/human colours, widths (75% / 65%, 520 / 360 dp), labels, quote strip (CUSTOMER / NEEMA / YOU + thumbnail), WhatsApp formatting (*bold* _italic_ ~strike~ `code` ```mono```), links, translation line, footer (time / Sending… / Not sent / ↩ Reply), swipe-to-reply ≥ 55 dp, failed line with Retry · Edit | missing | 2 |
-| Body variants: public comment reply "↳", `[comment]` prefix stripped, media fallback card ("Recover from Meta"), unsupported type text, image (viewer, "Show image analysis"), sticker 120 dp, video poster + player, audio player (seek, mm:ss, transcript toggle, AI caption box), document tile, comment-post card (post-video fetch, "View on Facebook ↗") | missing | 2 |
-| Dedupe/merge rules for live bubbles (same id, media echo 15 s, optimistic match, id-less 10 s / 120 s, inbound only by id, server page replaces `optimistic-`/`ws-` within 10 min, `live-evt-` yields) | missing (port with tests) | 2 |
-| States: spinner, load error + Try again, "No messages yet", top progress bar, older-page spinner / retry / hint, deleted conversation toast | missing | 2 |
-| Open-thread requests: messages (50), window, activity, latest-draft (human), translate preview, customer reach; per-person composer keys; 8 cached threads | missing | 2 |
-| Actions + wording table: intercept / pick up / release / resume / pause / transfer / note / clear history / recover media / call / Ask / Answer / Invite / other-channel identity; 409 and unknown-result settling | missing | 2 |
-| Live: silent reload 20 s, call frames reload 700 ms, window re-check 1 s, activity 60 s | missing | 2 |
-| Scroll position per thread; auto-scroll within 2 rows / own bubble; `sortThread` 1 ms rule | missing | 2 |
+| Header: back (phone), avatar, name, handle line (mono phone / "Web chat" / hidden), 📞 "Call on WhatsApp" (7–15 digits), 👤 profile, ⋮ menu (actions, Ask Neema, Neema delivers, Invite, Activity log) | logic verified · UI unverified | 2 |
+| Second row: Intercept badge AI/Human/Paused, "→ {agent}" (wide), 🔒 lock, sibling chips, inline actions on roomy tablets, pinned primary on phones | logic verified · UI unverified | 2 |
+| `threadControls()` truth table (admin / agent-type / readonly × c1/c2/c3/c6/h) and the busy-lock rule | verified (logic; the truth table ported with its tests) · UI unverified | 2 |
+| Footer: Composer when allowed; "🔒 Handled by …" banner; nothing for AI/paused | logic verified · UI unverified | 2 |
+| Row builder: "N new messages" divider, post head card, hidden handoff events, first-escalation pill with default reasons, flag pill, live pills by kind, call pill + summary card ("Use as reply"), internal note card, albums (2+ images) | logic verified · UI unverified | 2 |
+| Bubbles: inbound/AI/human colours, widths (75% / 65%, 520 / 360 dp), labels, quote strip (CUSTOMER / NEEMA / YOU + thumbnail), WhatsApp formatting (*bold* _italic_ ~strike~ `code` ```mono```), links, translation line, footer (time / Sending… / Not sent / ↩ Reply), swipe-to-reply ≥ 55 dp, failed line with Retry · Edit | logic verified · UI unverified | 2 |
+| Body variants: public comment reply "↳", `[comment]` prefix stripped, media fallback card ("Recover from Meta"), unsupported type text, image (viewer, "Show image analysis"), sticker 120 dp, video poster + player, audio player (seek, mm:ss, transcript toggle, AI caption box), document tile, comment-post card (post-video fetch, "View on Facebook ↗") | logic verified · UI unverified | 2 |
+| Dedupe/merge rules for live bubbles (same id, media echo 15 s, optimistic match, id-less 10 s / 120 s, inbound only by id, server page replaces `optimistic-`/`ws-` within 10 min, `live-evt-` yields) | verified (logic) · UI unverified | 2 |
+| States: spinner, load error + Try again, "No messages yet", top progress bar, older-page spinner / retry / hint, deleted conversation toast | logic verified · UI unverified | 2 |
+| Open-thread requests: messages (50), window, activity, latest-draft (human), translate preview, customer reach; per-person composer keys; 8 cached threads | logic verified · UI unverified | 2 |
+| Actions + wording table: intercept / pick up / release / resume / pause / transfer / note / clear history / recover media / call / Ask / Answer / Invite / other-channel identity; 409 and unknown-result settling | logic verified · UI unverified | 2 |
+| Live: silent reload 20 s, call frames reload 700 ms, window re-check 1 s, activity 60 s | logic verified · UI unverified | 2 |
+| Scroll position per thread; auto-scroll within 2 rows / own bubble; `sortThread` 1 ms rule | logic verified · UI unverified | 2 |
 
 ## 5. Composer (`Composer.kt`)
 
 | Feature | Status | Cycle |
 |---|---|---|
-| AI draft pill and panel (Edit/Preview, ✓ Send, Edit & send manually, Dismiss), "Generate AI draft" | missing | 2 |
-| Quote strip (incl. cross-channel "REPLYING TO {CHANNEL}") | missing | 2 |
-| Window strip: open / 24h closed (human agent for {left}) / closed reason, ticking per minute | missing | 2 |
-| Translate pill + preview ("THEY WILL RECEIVE — {LANG}") with 700 ms debounce | missing | 2 |
-| Lost-files note after process death | missing | 2 |
-| Box row: attach menu (Camera / Photos & videos / Document), 44–132 dp box, placeholders, send button rules, hardware-keyboard rules | missing | 2 |
-| Media tray: thumbnails, captions, per-file errors, add-more, Send N / Retry N / Cancel, "Images up to 5 MB each" | missing | 2 |
-| Outbox: optimistic bubble, translate step, reply body keys, `{ok:false,error}` = not delivered, refused vs no-answer (2 / 8 / 20 s reconcile), 401 hold + auto-resend after re-auth, Retry checks, Edit, restore after death | missing (port with tests) | 2 |
-| AI drafts: latest-draft, generate (toasts incl. held toast), approve (null = server's draft), `ai_draft_ready` frame | missing | 2 |
-| Attachments: sources (camera, picker, documents, drop), allowed MIME list, size limits, JPEG re-encode ladder (2048 px, q 85→40), sequential upload with per-file toasts, unknown-result check, 401 keeps the file | missing | 2 |
+| AI draft pill and panel (Edit/Preview, ✓ Send, Edit & send manually, Dismiss), "Generate AI draft" | logic verified · UI unverified | 2 |
+| Quote strip (incl. cross-channel "REPLYING TO {CHANNEL}") | logic verified · UI unverified | 2 |
+| Window strip: open / 24h closed (human agent for {left}) / closed reason, ticking per minute | logic verified · UI unverified | 2 |
+| Translate pill + preview ("THEY WILL RECEIVE — {LANG}") with 700 ms debounce | logic verified · UI unverified | 2 |
+| Lost-files note after process death | partial — the restore is `InboxMemory`'s; the note itself lands in cycle 3 | 3 |
+| Box row: attach menu (Camera / Photos & videos / Document), 44–132 dp box, placeholders, send button rules, hardware-keyboard rules | logic verified · UI unverified | 2 |
+| Media tray: thumbnails, captions, per-file errors, add-more, Send N / Retry N / Cancel, "Images up to 5 MB each" | logic verified · UI unverified | 2 |
+| Outbox: optimistic bubble, translate step, reply body keys, `{ok:false,error}` = not delivered, refused vs no-answer (2 / 8 / 20 s reconcile), 401 hold + auto-resend after re-auth, Retry checks, Edit, restore after death | verified (logic) · UI unverified | 2 |
+| AI drafts: latest-draft, generate (toasts incl. held toast), approve (null = server's draft), `ai_draft_ready` frame | logic verified · UI unverified | 2 |
+| Attachments: sources (camera, picker, documents, drop), allowed MIME list, size limits, JPEG re-encode ladder (2048 px, q 85→40), sequential upload with per-file toasts, unknown-result check, 401 keeps the file | logic verified · UI unverified | 2 |
 | No template picker, no voice-note recorder, no reactions/edit/delete/mark-unread (parity = also absent) | n/a | — |
 
 ## 6. Dialogs, sheets, viewers
 
 | Feature | Status | Cycle |
 |---|---|---|
-| Transfer (available agents minus assignee, "{n} active conversations"), Add Note, Clear Chat History, Ask Neema, Neema delivers, Invite to WhatsApp (phone prefill, 7–15 digits) — all with the exact strings; Ask/Answer/Invite remember their thread | missing | 2 |
-| Viewer: image pinch 1–5×, double-tap 2.5×, video player, album pager "{i} / {n}" | missing | 2 |
-| Activity log pane/sheet with kind-coloured dots and the empty line; collapsed rails ACTIVITY (20+) / CUSTOMER | missing | 2 |
-| Phone bottom sheets "Customer Profile" / "ACTIVITY LOG"; tablet `SideSheet` (28% scrim, 220/180 ms) and `AdaptiveSheet` (< 600 dp sheet, else 440 dp end panel) | missing | 2/3 |
+| Transfer (available agents minus assignee, "{n} active conversations"), Add Note, Clear Chat History, Ask Neema, Neema delivers, Invite to WhatsApp (phone prefill, 7–15 digits) — all with the exact strings; Ask/Answer/Invite remember their thread | logic verified · UI unverified | 2 |
+| Viewer: image pinch 1–5×, double-tap 2.5×, video player, album pager "{i} / {n}" | unverified | 2 |
+| Activity log pane/sheet with kind-coloured dots and the empty line; collapsed rails ACTIVITY (20+) / CUSTOMER | unverified | 2 |
+| Phone bottom sheets "Customer Profile" / "ACTIVITY LOG"; tablet `SideSheet` (28% scrim, 220/180 ms) and `AdaptiveSheet` (< 600 dp sheet, else 440 dp end panel) | partial — the phone sheets and the tablet `SideSheet` are in; `AdaptiveSheet` (the 440 dp end panel) is cycle 3 | 3 |
 
 ## 7. Customer panel (`feature/conversations/customer/*`)
 
 | Feature | Status | Cycle |
 |---|---|---|
-| Placement (docked / slide-over / sheet; reused in Calls as `call:{id}`), one model per conversation, load `GET /admin/customers/{key}?channel=` + production enquiry + pipeline stages, quiet 400 ms reloads on the listed triggers, hidden = silent, failure banners (three wordings) + Retry, pull-to-refresh | missing | 2 |
-| Hero: avatar, name (+ ✓), flag + phone, stage pill, country chip, lead score bar, tier badge + tooltips, cadence / Overdue, channel chips, Invite chip, "+N merged", Call button (WhatsApp green / Messenger #0066D6), "Send template" | missing | 2 |
-| Quick stats; tabs PROFILE · INSIGHTS · ACTIVITY with every section and string (contact fields, ad ref, parish, pipeline stepper + admin custom stages, tags, notes with 3-way merge note, cross-channel identity + merge form + suggestions, purchase summary, buying rhythm, top products, score breakdown, recent orders incl. hub-linked line, channel history) | missing | 2 |
-| Pinned footer: made-to-order request (push / dismiss / not pushable) and quick actions (Mark Won / Lost / Advance Stage) | missing | 2 |
-| CALLS section: 3 recent calls (wa_id + psid), permission lines, Send call request flow (138009 / template_required / errors), live frames | missing | 5 |
+| Placement (docked / slide-over / sheet; reused in Calls as `call:{id}`), one model per conversation, load `GET /admin/customers/{key}?channel=` + production enquiry + pipeline stages, quiet 400 ms reloads on the listed triggers, hidden = silent, failure banners (three wordings) + Retry, pull-to-refresh | logic verified · UI unverified | 2 |
+| Hero: avatar, name (+ ✓), flag + phone, stage pill, country chip, lead score bar, tier badge + tooltips, cadence / Overdue, channel chips, Invite chip, "+N merged", Call button (WhatsApp green / Messenger #0066D6), "Send template" | logic verified · UI unverified | 2 |
+| Quick stats; tabs PROFILE · INSIGHTS · ACTIVITY with every section and string (contact fields, ad ref, parish, pipeline stepper + admin custom stages, tags, notes with 3-way merge note, cross-channel identity + merge form + suggestions, purchase summary, buying rhythm, top products, score breakdown, recent orders incl. hub-linked line, channel history) | logic verified · UI unverified | 2 |
+| Pinned footer: made-to-order request (push / dismiss / not pushable) and quick actions (Mark Won / Lost / Advance Stage) | logic verified · UI unverified | 2 |
+| CALLS section: 3 recent calls (wa_id + psid), permission lines, Send call request flow (138009 / template_required / errors), live frames | partial — the section renders (`CustomerCallsView`: recent calls, permission lines); the call-request flow and the live frames land with the softphone | 5 |
 | Call button decision + "call on WhatsApp instead" sheet (Messenger off / Instagram), composer prefill question | missing | 5 |
-| PATCH bodies per field, age rule, stage, tags, notes + `notes_base`, custom stages PUT, merge / unmerge, push / decline enquiry, invite, template, Ask / Answer (panel wording), save-failure wording and rollback rules | missing | 2 |
+| PATCH bodies per field, age rule, stage, tags, notes + `notes_base`, custom stages PUT, merge / unmerge, push / decline enquiry, invite, template, Ask / Answer (panel wording), save-failure wording and rollback rules | verified (logic) · UI unverified | 2 |
 
 ## 8. Calls — softphone (`feature/calls/CallManager.kt`, `WebRtcMedia.kt`, `CallStage.kt`, `CallAlert.kt`)
 
@@ -226,84 +226,84 @@ signing exists (no Apple Developer credentials in the repo or on the box).
 
 | Feature | Status | Cycle |
 |---|---|---|
-| Shared `dash.orders` (snapshot + 90 s poll), ScreenLife catch-up, SingleFlight reads, `initialLoading`, no gate, server order kept | missing | 2 |
-| Layout by width (< 600 sheet / 600–840 side sheet 440 / ≥ 840 pane 440; compact rows < 480 dp) | missing | 2 |
-| Header "Orders", "{n} total · {pending} pending" / Loading… / Not loaded, revenue card (always KES) | missing | 2 |
-| Status cards Pending / Confirmed / Delivered / Cancelled (tones, counts, revenue, columns rule, toggle filter) | missing | 2 |
-| Search "Search by name or phone…" (name, raw wa_id, id), filter chip "{Label} ✕" | missing | 2 |
-| List body precedence (stale banner, spinner, error, "📦 No orders found", rows), client-side pagination 15/page with "Showing a–b of n" and the windowed pager | missing | 2 |
-| Row: avatar, name ("Unknown"), channel pill (colours, glyphs), status badge (hub state first, mapping table), hub chip / "not in hub", "Open in hub ↗", "push failed" badge + toast, phone line, items summary "·  name ×qty +N more", time ago, amount + currency, spinner; compact 4-row layout | missing | 2 |
-| Detail: title bar, customer box, meta grid (ORDER ID last 8 / DATE / CHANNEL / CURRENCY), HUB section (payment, push, PUSH FAILED box, links, Copy link), ITEMS (unit × qty, "× qty" when unpriced, "No items recorded", Total), NOTE box, Open conversation, status moves with primary/danger buttons | missing | 2 |
-| Line maths (`effectiveQty/Unit`, `lineTotal`, amount = subtotal) | missing (port with tests) | 2 |
-| `updateStatus`: one at a time, PATCH `{status}`, refetch, close, toast "Order marked as {status}"; failure table (404, may-have-happened reconcile, session expired silent, else) | missing | 2 |
-| Pull / Retry / Back rules; selected row vanishing; restore after death (filter, search, page, selected, scroll) | missing | 2/3 |
+| Shared `dash.orders` (snapshot + 90 s poll), ScreenLife catch-up, SingleFlight reads, `initialLoading`, no gate, server order kept | logic verified · UI unverified | 2 |
+| Layout by width (< 600 sheet / 600–840 side sheet 440 / ≥ 840 pane 440; compact rows < 480 dp) | logic verified · UI unverified | 2 |
+| Header "Orders", "{n} total · {pending} pending" / Loading… / Not loaded, revenue card (always KES) | logic verified · UI unverified | 2 |
+| Status cards Pending / Confirmed / Delivered / Cancelled (tones, counts, revenue, columns rule, toggle filter) | logic verified · UI unverified | 2 |
+| Search "Search by name or phone…" (name, raw wa_id, id), filter chip "{Label} ✕" | logic verified · UI unverified | 2 |
+| List body precedence (stale banner, spinner, error, "📦 No orders found", rows), client-side pagination 15/page with "Showing a–b of n" and the windowed pager | logic verified · UI unverified | 2 |
+| Row: avatar, name ("Unknown"), channel pill (colours, glyphs), status badge (hub state first, mapping table), hub chip / "not in hub", "Open in hub ↗", "push failed" badge + toast, phone line, items summary "·  name ×qty +N more", time ago, amount + currency, spinner; compact 4-row layout | logic verified · UI unverified | 2 |
+| Detail: title bar, customer box, meta grid (ORDER ID last 8 / DATE / CHANNEL / CURRENCY), HUB section (payment, push, PUSH FAILED box, links, Copy link), ITEMS (unit × qty, "× qty" when unpriced, "No items recorded", Total), NOTE box, Open conversation, status moves with primary/danger buttons | logic verified · UI unverified | 2 |
+| Line maths (`effectiveQty/Unit`, `lineTotal`, amount = subtotal) | verified | 2 |
+| `updateStatus`: one at a time, PATCH `{status}`, refetch, close, toast "Order marked as {status}"; failure table (404, may-have-happened reconcile, session expired silent, else) | verified (logic) · UI unverified | 2 |
+| Pull / Retry / Back rules; selected row vanishing; restore after death (filter, search, page, selected, scroll) | logic verified · UI unverified (SceneStorage "orders.ui") | 2 |
 
 ## 12. Catalog (`feature/catalog/*`)
 
 | Feature | Status | Cycle |
 |---|---|---|
-| Read-only; `view_catalog` nav gate; snapshot + 5-min poll; audit on init; catch-up on re-show; pull loads both; local filtering | missing | 2 |
-| Price audit banner (heading rules, subtitle, table, per-piece paragraph with "KES ?") | missing | 2 |
-| Header counts ("{total} items · {inStock} in stock · {out} out of stock"), source banner copy | missing | 2 |
-| Search (name / SKU / aliases), category dropdown with emojis (list + aliases + 📦 default), wide side-by-side | missing | 2 |
-| Grid columns (2/3/4/6 by width, ≥ 118 dp × fontScale), equal-height rows, cards (image → emoji gradient fallback, stock badge "{qty} left" / IN / OUT, description, price or range, "{n} variants", alias chips, SKU, "#id") | missing | 2 |
-| Detail sheet (96 dp thumb, "{emoji} {category}", price + "per unit" + "KES x · $y", variants table, USD format, aliases, type, Updated, hub lock line), live row tracking | missing | 2 |
-| States: LoadProblem "Couldn't load the catalogue", "📦 No items found"; persistence of filter/search/audit/open product/scroll | missing | 2 |
+| Read-only; `view_catalog` nav gate; snapshot + 5-min poll; audit on init; catch-up on re-show; pull loads both; local filtering | logic verified · UI unverified | 2 |
+| Price audit banner (heading rules, subtitle, table, per-piece paragraph with "KES ?") | logic verified · UI unverified | 2 |
+| Header counts ("{total} items · {inStock} in stock · {out} out of stock"), source banner copy | logic verified · UI unverified | 2 |
+| Search (name / SKU / aliases), category dropdown with emojis (list + aliases + 📦 default), wide side-by-side | logic verified · UI unverified | 2 |
+| Grid columns (2/3/4/6 by width, ≥ 118 dp × fontScale), equal-height rows, cards (image → emoji gradient fallback, stock badge "{qty} left" / IN / OUT, description, price or range, "{n} variants", alias chips, SKU, "#id") | logic verified · UI unverified | 2 |
+| Detail sheet (96 dp thumb, "{emoji} {category}", price + "per unit" + "KES x · $y", variants table, USD format, aliases, type, Updated, hub lock line), live row tracking | logic verified · UI unverified | 2 |
+| States: LoadProblem "Couldn't load the catalogue", "📦 No items found"; persistence of filter/search/audit/open product/scroll | logic verified · UI unverified (SceneStorage "catalog.ui" / "catalog.product") | 2 |
 
 ## 13. Deals (`feature/deals/*`)
 
 | Feature | Status | Cycle |
 |---|---|---|
-| Layout (#F6F7F2, max 1100 dp, 3 columns ≥ 840 dp), loading (3 parallel reads, partial failures keep data, 60 s poll, catch-ups, `planned_action` / `hub_event` 800 ms, pull, Retry), header counts | missing | 2 |
-| Planned actions queue (header, empty states, row lines with `fmtDue`, buttons Send / Edit & send / Veto / Open chat, busy states) | missing | 2 |
-| Board columns New / Qualified / Proposal (others under New), deal card (name link, liveAgo, title, ⛔ blocking, "→ Neema/You · due", 📌 guidance, Guidance / Won / Lost), guidance editor (400 chars) | missing | 2 |
-| Draft dialog (title, reason, placeholder, button labels by state) | missing | 2 |
-| Send / Veto / Won / Lost / Guidance endpoints and the full failure wording incl. the 4 × 10 s settle loop | missing (port with tests) | 2 |
-| UI persistence (editing, guidance, draftFor…) | missing | 3 |
+| Layout (#F6F7F2, max 1100 dp, 3 columns ≥ 840 dp), loading (3 parallel reads, partial failures keep data, 60 s poll, catch-ups, `planned_action` / `hub_event` 800 ms, pull, Retry), header counts | logic verified · UI unverified | 2 |
+| Planned actions queue (header, empty states, row lines with `fmtDue`, buttons Send / Edit & send / Veto / Open chat, busy states) | logic verified · UI unverified | 2 |
+| Board columns New / Qualified / Proposal (others under New), deal card (name link, liveAgo, title, ⛔ blocking, "→ Neema/You · due", 📌 guidance, Guidance / Won / Lost), guidance editor (400 chars) | logic verified · UI unverified | 2 |
+| Draft dialog (title, reason, placeholder, button labels by state) | logic verified · UI unverified | 2 |
+| Send / Veto / Won / Lost / Guidance endpoints and the full failure wording incl. the 4 × 10 s settle loop | verified (logic, incl. the settle loop) · UI unverified | 2 |
+| UI persistence (editing, guidance, draftFor…) | unverified (SceneStorage "deals.ui") | 2 |
 
 ## 14. Leads (`feature/leads/*`)
 
 | Feature | Status | Cycle |
 |---|---|---|
-| `Lead` model (LenientTagsSerializer comma-split, `leadScore` clamp, `handle`), `BuyingRhythm`, `LeadEdit`, `diffLead` | missing (model + tests) | 2 |
-| Loading (stages + leads, quiet re-reads, pull, Retry, one read at a time, `overlayLocal`) | missing | 2 |
-| Stages: canonical 7 + custom (yellow) with the colour table; case-insensitive matching | missing | 2 |
-| Header "Leads Pipeline", "{n} leads · Pipeline KES … · Won KES …", search box | missing | 2 |
-| Stage pills with counts; board columns (~260 dp + 0.35 peek), column totals, "No leads" | missing | 2 |
-| Lead card (avatar, name/Unknown, mono phone, score + bar colours, channel icons, spent, tags, liveAgo, ← / → move buttons) | missing | 2 |
-| Detail sheet (480 dp, stage chips, tags field, notes, stats box + facts line, Save/Cancel, dismiss keeps draft) | missing | 2 |
-| Card move (optimistic, failure table incl. may-have-happened read), sheet save (changed fields only, `notes_base`, `editLanded` after an uncertain outcome) | missing (port with tests) | 2 |
+| `Lead` model (LenientTagsSerializer comma-split, `leadScore` clamp, `handle`), `BuyingRhythm`, `LeadEdit`, `diffLead` | verified | 2 |
+| Loading (stages + leads, quiet re-reads, pull, Retry, one read at a time, `overlayLocal`) | logic verified · UI unverified | 2 |
+| Stages: canonical 7 + custom (yellow) with the colour table; case-insensitive matching | logic verified · UI unverified | 2 |
+| Header "Leads Pipeline", "{n} leads · Pipeline KES … · Won KES …", search box | logic verified · UI unverified | 2 |
+| Stage pills with counts; board columns (~260 dp + 0.35 peek), column totals, "No leads" | logic verified · UI unverified | 2 |
+| Lead card (avatar, name/Unknown, mono phone, score + bar colours, channel icons, spent, tags, liveAgo, ← / → move buttons) | logic verified · UI unverified | 2 |
+| Detail sheet (480 dp, stage chips, tags field, notes, stats box + facts line, Save/Cancel, dismiss keeps draft) | logic verified · UI unverified | 2 |
+| Card move (optimistic, failure table incl. may-have-happened read), sheet save (changed fields only, `notes_base`, `editLanded` after an uncertain outcome) | verified (logic) · UI unverified | 2 |
 
 ## 15. Analytics / Overview (`feature/overview/*`)
 
 | Feature | Status | Cycle |
 |---|---|---|
-| Requests (stats, attribution, human feed 10, fallback 50), 30 s poll, catch-ups, coalesced reloads on the listed notification types and `intercept_changed`, pull also re-reads orders/agents/catalog | missing | 2 |
-| Header, "Refreshing…", stats-failed LoadProblem ("Live figures unavailable — showing an estimate") | missing | 2 |
-| Stat cards (3/2/1 columns, accent strip, icon tile, auto-shrink figure, pulsing placeholder): six cards with their sub-lines | missing | 2 |
-| "WHERE SALES COME FROM" (table on wide, cards on phone), "7-DAY REVENUE (KES)" bars (tap tooltip), "ORDER STATUS", "BY CHANNEL", "RECENT ACTIVITY" (8), "TOP PRODUCTS BY REVENUE" (5), wide layout ratios | missing | 2 |
-| Overview maths (port `OverviewMathTest`) | missing | 2 |
+| Requests (stats, attribution, human feed 10, fallback 50), 30 s poll, catch-ups, coalesced reloads on the listed notification types and `intercept_changed`, pull also re-reads orders/agents/catalog | logic verified · UI unverified | 2 |
+| Header, "Refreshing…", stats-failed LoadProblem ("Live figures unavailable — showing an estimate") | logic verified · UI unverified | 2 |
+| Stat cards (3/2/1 columns, accent strip, icon tile, auto-shrink figure, pulsing placeholder): six cards with their sub-lines | logic verified · UI unverified | 2 |
+| "WHERE SALES COME FROM" (table on wide, cards on phone), "7-DAY REVENUE (KES)" bars (tap tooltip), "ORDER STATUS", "BY CHANNEL", "RECENT ACTIVITY" (8), "TOP PRODUCTS BY REVENUE" (5), wide layout ratios | logic verified · UI unverified | 2 |
+| Overview maths (port `OverviewMathTest`) | verified | 2 |
 
 ## 16. Reports (`feature/reports/*`)
 
 | Feature | Status | Cycle |
 |---|---|---|
-| Full unpaged `GET /admin/conversations` on the 10-min client (bare array or `{items}`), once per visit, built off-main, midnight rollover | missing | 2 |
-| States and reasons (timed out / cut off / incomplete / permission), refresh-failure toast | missing | 2 |
-| Header, range dropdown (7 / 30 / 90 / custom with two date buttons), Export CSV, tabs Overview / Conversations / Orders / Agents | missing | 2 |
-| Overview stat boxes, mini bars (14), order-status breakdown; tables on wide / cards on phone with the column sets and row caps | missing | 2 |
-| CSV export (RFC 4180, `.part` file, share sheet "Export report", toasts, failure wording) | `UIActivityViewController` | missing (FileProvider → share sheet is platform-equivalent) | 2 |
-| Report maths and rollover (port `ReportMathTest`, `ReportsRolloverTest`) | missing | 2 |
+| Full unpaged `GET /admin/conversations` on the 10-min client (bare array or `{items}`), once per visit, built off-main, midnight rollover | logic verified · UI unverified | 2 |
+| States and reasons (timed out / cut off / incomplete / permission), refresh-failure toast | logic verified · UI unverified | 2 |
+| Header, range dropdown (7 / 30 / 90 / custom with two date buttons), Export CSV, tabs Overview / Conversations / Orders / Agents | logic verified · UI unverified | 2 |
+| Overview stat boxes, mini bars (14), order-status breakdown; tables on wide / cards on phone with the column sets and row caps | logic verified · UI unverified | 2 |
+| CSV export (RFC 4180, `.part` file, share sheet "Export report", toasts, failure wording) | `UIActivityViewController` | logic verified · UI unverified (the share sheet; Android's share-target-missing failure has no iOS twin) | 2 |
+| Report maths and rollover (port `ReportMathTest`, `ReportsRolloverTest`) | verified | 2 |
 
 ## 17. Team (`feature/agents/*`)
 
 | Feature | Status | Cycle |
 |---|---|---|
-| Data (agents + roles, load on open, re-read on re-show, pull waits for both, failure wording), header "{N} agents · {N} online", Add Agent / New Role | missing | 2 |
-| Tabs "Agents (N)" / "Roles (N)", agent grid (1–3 columns by 332 dp), agent card (presence, badges, pills, footer switch + Role / Edit / Reset password / Remove), roles list + role card | missing | 2 |
-| Seven dialogs with their exact copy, requests and toasts (Add, Edit, Reset Password, Remove, Assign Role + PermissionPicker, New/Edit Role with 12 swatches, Delete Role) | missing | 2 |
-| Validation and conflict toasts, write handling (one at a time, verifying re-read, 404 = removed by someone else), fixed `role_<ms>` id | missing (port with tests) | 2 |
-| Saved state (no passwords) | missing | 3 |
+| Data (agents + roles, load on open, re-read on re-show, pull waits for both, failure wording), header "{N} agents · {N} online", Add Agent / New Role | logic verified · UI unverified | 2 |
+| Tabs "Agents (N)" / "Roles (N)", agent grid (1–3 columns by 332 dp), agent card (presence, badges, pills, footer switch + Role / Edit / Reset password / Remove), roles list + role card | logic verified · UI unverified | 2 |
+| Seven dialogs with their exact copy, requests and toasts (Add, Edit, Reset Password, Remove, Assign Role + PermissionPicker, New/Edit Role with 12 swatches, Delete Role) | logic verified · UI unverified | 2 |
+| Validation and conflict toasts, write handling (one at a time, verifying re-read, 404 = removed by someone else), fixed `role_<ms>` id | verified (logic) · UI unverified | 2 |
+| Saved state (no passwords) | verified (logic) · UI unverified (SceneStorage "team.ui" / "team.tab" / "team.dialog") | 2 |
 
 ## 18. Settings (`feature/settings/*`)
 
@@ -322,11 +322,11 @@ signing exists (no Apple Developer credentials in the repo or on the box).
 
 | Feature | Status | Cycle |
 |---|---|---|
-| Data (me + team row), states, pull | missing | 2 |
-| Profile card (avatar, role badges, email, Joined · Last active, Edit form FULL NAME / EMAIL / DEPARTMENT, PATCH me, toasts) | missing | 2 |
-| Stat tiles (Active chats / Status with "Seen {ago}" / Permissions n/20), Availability toggle (optimistic PATCH, toasts) | missing | 2 |
-| Password change (min 8, confirm, masking, no-answer wording) | missing | 2 |
-| Appearance (Dark Mode), Notifications switches, Sounds & vibration, Your Permissions grid (20), Account (Settings link, "App version", Sign out confirm) | partial plan: "Stay connected in background" / battery link / "System notification settings" are platform-restricted (the last becomes a link to iOS Settings) | 2/5 |
+| Data (me + team row), states, pull | logic verified · UI unverified | 2 |
+| Profile card (avatar, role badges, email, Joined · Last active, Edit form FULL NAME / EMAIL / DEPARTMENT, PATCH me, toasts) | logic verified · UI unverified | 2 |
+| Stat tiles (Active chats / Status with "Seen {ago}" / Permissions n/20), Availability toggle (optimistic PATCH, toasts) | logic verified · UI unverified | 2 |
+| Password change (min 8, confirm, masking, no-answer wording) | logic verified · UI unverified | 2 |
+| Appearance (Dark Mode), Notifications switches, Sounds & vibration, Your Permissions grid (20), Account (Settings link, "App version", Sign out confirm) | logic verified · UI unverified — "Stay connected in background" and the battery link are platform-restricted (dropped: no foreground service; background delivery is the cycle 5 / blocked push path); "System notification settings" opens the app's page in iOS Settings | 2 |
 
 ## 20. Crash reporting (`core/crash/*`)
 
@@ -342,10 +342,10 @@ signing exists (no Apple Developer credentials in the repo or on the box).
 | Android | iOS | Status | Cycle |
 |---|---|---|---|
 | Encrypted `neema_session` | Keychain (`KeychainStore`) | unverified | 1 |
-| `neema_prefs` (theme, background_live, alert_*, notif_*, asked_post_notifications) | `UserDefaults` (`background_live` dropped) | missing | 2 |
+| `neema_prefs` (theme, background_live, alert_*, notif_*, asked_post_notifications) | `UserDefaults` (`background_live` dropped) | verified (`AppPrefs`; `notif_*` through the profile model) | 2 |
 | `neema_notifications` (last 60) | `UserDefaults` / file | missing | 5 |
 | `neema_crash` | file | missing | 7 |
-| Snapshots `cacheDir/snapshots/<hash>_<key>.json` (me, agents, orders, catalog, inbox_v2, inbox_memory_v1) | `Caches/snapshots/` (raw response text) | missing | 2 |
+| Snapshots `cacheDir/snapshots/<hash>_<key>.json` (me, agents, orders, catalog, inbox_v2, inbox_memory_v1) | `Caches/snapshots/` (raw response text) | verified (`SnapshotCache`) | 2 |
 | Crash files, report CSVs, camera captures (FileProvider) | `Application Support` / `Caches` / share sheet | missing | 2/7 |
 | SavedState / `rememberSaveable` keys | `@SceneStorage` + Codable UI state | missing | 3 |
 
@@ -367,16 +367,16 @@ Every path, query name and body below exists in `Api/NeemaApi.swift` unless the 
 
 | # | Endpoint | NeemaCore | Screen use | Cycle |
 |---|---|---|---|---|
-| 1–25 | Inbox / conversations (list page, unpaged list, summary, resolve, get, messages, clear, activity, intercept, release, pause, transfer, reply, translate-reply, approve-draft, latest-draft, generate-draft, note, window, upload-media, recover-media, post-video, ask, answer, whatsapp-invite) | all present (`InboxApi`'s `+` query encoding to mirror in the inbox wrapper) | missing | 2 |
-| 26–33 | Customers / CRM (get, patch, merge_suggestions, merge, unmerge, production enquiry, push, decline) | **missing** (`CrmApi` to port) | missing | 2 |
-| 34–35 | Orders list, patch | present | missing | 2 |
-| 36–37 | Catalog list, audit | present | missing | 2 |
-| 38–42 | Deals list/patch, actions list/approve/veto | present | missing | 2 |
-| 43–44 | Leads list, patch | **missing** (`LeadsApi` to port) | missing | 2 |
+| 1–25 | Inbox / conversations (list page, unpaged list, summary, resolve, get, messages, clear, activity, intercept, release, pause, transfer, reply, translate-reply, approve-draft, latest-draft, generate-draft, note, window, upload-media, recover-media, post-video, ask, answer, whatsapp-invite) | all present (`InboxApi`'s `+` query encoding to mirror in the inbox wrapper) | verified via `InboxViewModel` | 2 |
+| 26–33 | Customers / CRM (get, patch, merge_suggestions, merge, unmerge, production enquiry, push, decline) | present (`CrmApi`) | verified via `CustomerViewModel` | 2 |
+| 34–35 | Orders list, patch | present | verified via `OrdersFeed` / `OrdersViewModel` | 2 |
+| 36–37 | Catalog list, audit | present | verified via `CatalogFeed` / `CatalogViewModel` | 2 |
+| 38–42 | Deals list/patch, actions list/approve/veto | present | verified via `DealsViewModel` | 2 |
+| 43–44 | Leads list, patch | present (`LeadsApi`) | verified via `LeadsViewModel` | 2 |
 | 45–49 | Settings directives / pipeline-stages / translation / offer | present | missing | 4 |
 | 50–51 | Client crashes list, post | **missing** | missing | 4/7 |
-| 52–62 | Me, agents, roles | present | missing | 2 |
-| 63–64 | Stats, attribution | present | missing | 2 |
+| 52–62 | Me, agents, roles | present | verified via `TeamViewModel` / `ProfileViewModel` (+ `TeamApi`) | 2 |
+| 63–64 | Stats, attribution | present | verified via `OverviewViewModel` | 2 |
 | 65–81 | Calls (list, get, permission, request-permission, follow-up-done, ice-config, channels, offer, answer, connect ×2, terminate, callback, transcript, transcribe, recording, settings, permission-template) | present | missing | 5 |
 | — | Auth: agent-auth/login, auth/login, csrf, callback/credentials, session, agent-auth/refresh, auth/refresh | present | verified | 1 |
 | — | `GET /api/health` (not used by Android) | — | — | — |
@@ -385,11 +385,11 @@ Every path, query name and body below exists in `Api/NeemaApi.swift` unless the 
 
 | Frame | Consumers on Android | iOS status | Cycle |
 |---|---|---|---|
-| `new_message`, `message` (legacy) | inbox row patch + thread bubble + alerts | missing | 2 (inbox) / 5 (alerts) |
-| `intercept_changed` | inbox row + live pills; Overview | missing | 2 |
-| `ai_draft_ready`, `translations`, `history_cleared` | thread | missing | 2 |
-| `notification` (13 types + legacy) | bell, toast, refetches, tray | missing | 5 |
-| `incoming_call`, `outbound_answer`, `call_answered`, `call_status`, `media_update`, `call_ended`, `call_update`, `call_permission`, `calling_restricted` | CallManager, console, panel, thread | missing | 5 |
+| `new_message`, `message` (legacy) | inbox row patch + thread bubble + alerts | verified (inbox rows and bubbles) · alerts missing | 5 (alerts) |
+| `intercept_changed` | inbox row + live pills; Overview | verified (inbox, Overview) | 2 |
+| `ai_draft_ready`, `translations`, `history_cleared` | thread | verified | 2 |
+| `notification` (13 types + legacy) | bell, toast, refetches, tray | partial — consumed by the orders feed (`order_update`), Deals (`planned_action`, `hub_event`) and the Overview's reload list; the bell, toasts and tray are cycle 5 | 5 |
+| `incoming_call`, `outbound_answer`, `call_answered`, `call_status`, `media_update`, `call_ended`, `call_update`, `call_permission`, `calling_restricted` | CallManager, console, panel, thread | partial — `incoming_call` / `call_ended` refresh the thread's call pill and the customer panel's calls; the softphone consumers are cycle 5 | 5 |
 | `call_settings` | Settings calling card | missing | 4 |
 | `pong` | dropped | verified | 1 |
 

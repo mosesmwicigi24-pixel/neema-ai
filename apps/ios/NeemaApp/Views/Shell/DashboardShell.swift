@@ -27,17 +27,17 @@ struct CurrentView: View {
 
     var body: some View {
         switch app.view {
-        case .conversations: ViewPlaceholder(view: .conversations, cycle: 2, note: "The inbox, threads, the composer and the customer panel.")
+        case .conversations: InboxScreen()
         case .calls: ViewPlaceholder(view: .calls, cycle: 5, note: "The call log, details, transcripts and the softphone.")
-        case .orders: ViewPlaceholder(view: .orders, cycle: 2, note: "Orders with their hub state and status moves.")
-        case .reports: ViewPlaceholder(view: .reports, cycle: 2, note: "Reports over every conversation, with CSV export.")
-        case .deals: ViewPlaceholder(view: .deals, cycle: 2, note: "What Neema owns right now and her planned actions.")
-        case .leads: ViewPlaceholder(view: .leads, cycle: 2, note: "The leads pipeline.")
-        case .overview: ViewPlaceholder(view: .overview, cycle: 2, note: "Real-time metrics and platform performance.")
-        case .catalog: ViewPlaceholder(view: .catalog, cycle: 2, note: "Live from the Bethany House hub.")
-        case .agents: ViewPlaceholder(view: .agents, cycle: 2, note: "Agents and roles.")
+        case .orders: OrdersScreen()
+        case .reports: ReportsScreen()
+        case .deals: DealsScreen()
+        case .leads: LeadsScreen()
+        case .overview: OverviewScreen()
+        case .catalog: CatalogScreen()
+        case .agents: TeamScreen()
         case .settings: ViewPlaceholder(view: .settings, cycle: 4, note: "Platform configuration and integrations.")
-        case .profile: ViewPlaceholder(view: .profile, cycle: 2, note: "Your account and preferences.")
+        case .profile: ProfileScreen()
         }
     }
 }
@@ -378,12 +378,31 @@ struct AmberBadge: View {
 /// Initials on a stone-green disc (Android `Avatar`).
 struct AvatarView: View {
     var name: String
+    var url: String? = nil
     var size: CGFloat
     @Environment(\.neema) private var c
 
     var body: some View {
-        let phoneLike = name.filter { $0.isNumber }.count >= 7 || name.hasPrefix("web_") || name.isEmpty
-        Circle()
+        ZStack {
+            disc
+            // The photo when there is one, falling back to the disc while it loads or if it fails.
+            if let u = url, !u.isEmpty, let link = URL(string: u) {
+                AsyncImage(url: link) { phase in
+                    if case .success(let img) = phase { img.resizable().scaledToFill() } else { Color.clear }
+                }
+                .frame(width: size, height: size)
+                .clipShape(Circle())
+            }
+        }
+        .frame(width: size, height: size)
+        .accessibilityHidden(true)
+    }
+
+    /// components/ui/Avatar.tsx: one neutral stone-green disc with dark-green initials,
+    /// and a person glyph for an unnamed contact whose "name" is only a phone number.
+    private var disc: some View {
+        let phoneLike = isPhoneLike(name)
+        return Circle()
             .fill(c.isDark ? Color(hex: 0x0F1424) : Color(hex: 0xF5F6F3))
             .overlay(Circle().stroke(c.isDark ? Color(hex: 0x1F367A) : Color(hex: 0xDDE8D5)))
             .overlay(
@@ -397,6 +416,17 @@ struct AvatarView: View {
             )
             .frame(width: size, height: size)
     }
+}
+
+/// True when a "name" is really a phone number, a Meta id or a website-chat
+/// visitor: its initials would read "+7", "MI" or "WV", so the avatar shows a person glyph.
+func isPhoneLike(_ name: String?) -> Bool {
+    let n = (name ?? "").trimmingCharacters(in: .whitespaces)
+    if n.isEmpty { return true }
+    if n.lowercased().hasPrefix("messenger id") { return true }
+    if n.lowercased() == "website visitor" || n.hasPrefix("web_") { return true }
+    let digits = n.filter { !" +-().".contains($0) }
+    return !digits.isEmpty && digits.allSatisfy { $0.isNumber }
 }
 
 /// SF Symbols standing in for the web's heroicons until the custom paths land (Cycle 3).
