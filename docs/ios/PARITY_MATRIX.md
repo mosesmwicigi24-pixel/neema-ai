@@ -307,16 +307,19 @@ signing exists (no Apple Developer credentials in the repo or on the box).
 
 ## 18. Settings (`feature/settings/*`)
 
+`SettingsViewModel` + `CallingSettingsModel` (NeemaCore `Settings/`), `SettingsScreen` + `OfferCard` + `CallingSettingsCard` (SwiftUI). The logic is pinned by the 83 ported settings tests on Linux (Android's 76, plus the server-route check, the crash list's contract, the Business/AI waits and the rules on their own); the screen compiles on the macOS job and is in the gallery.
+
 | Feature | Status | Cycle |
 |---|---|---|
-| Layout (two columns ≥ 720 dp), per-card independent loads with LoadProblem + Retry, pull-to-refresh, re-read on return skipping dirty cards | missing | 4 |
-| Standing Orders (directives, counter, save toasts incl. `UNCERTAIN_SAVE`) | missing | 4 |
-| Translation (status, spend line, optimistic switch, toasts, off note) | missing | 4 |
-| Offer (status, notes, fields, categories chips from the catalogue, SKU picker, date pickers, validation list, save toasts, End confirmation) | missing | 4 |
-| Pipeline stages (preview, chips, add with 18-char counter, limit 4, toasts) | missing | 4 |
-| Business / AI Configuration / Integrations / Danger Zone (local-only cards with their copy and fake saves) | missing (parity = local-only too) | 4 |
-| WhatsApp calling card (see §9) and App crash reports card (`GET /admin/client-crashes?limit=20`, expand, Copy report) | missing | 4 |
-| Saved state (`saveUi`, secrets never saved) | missing | 4 |
+| Layout (two columns ≥ 720 pt), per-card independent loads with LoadProblem + Retry, pull-to-refresh, re-read on return skipping dirty cards | verified (loads, retries, refresh, the dirty-card rule: `SettingsViewModelTests`, `SettingsNetworkTests`); layout unverified (compiles; gallery) | 4 |
+| Standing Orders (directives, counter, save toasts incl. `UNCERTAIN_SAVE`, the box locked until the real text arrives) | verified via `SettingsViewModel` | 4 |
+| Translation (status, spend line, optimistic switch, toasts, off note) | verified via `SettingsViewModel` | 4 |
+| Offer (status, notes, fields, categories chips from the catalogue, SKU picker, date pickers, validation list, save toasts, End confirmation) | verified (rules, bodies, toasts, verify-after-no-answer); the pickers and date sheets unverified (compile only) | 4 |
+| Pipeline stages (preview, chips, add with 18-char counter, limit 4, toasts) | verified via `SettingsViewModel` | 4 |
+| Business / AI Configuration / Integrations / Danger Zone (local-only cards with their copy and fake saves) | verified (local-only here too: `testLocalCardsNeverCallTheApi`, the 600 ms waits) | 4 |
+| WhatsApp calling card (see §9): only-the-diff save, field checks before sending, Meta's words on a refusal, `call_settings` reload unless dirty, the template | verified via `CallingSettingsModel` (7 tests); the hours editor unverified (compile only) | 4 |
+| App crash reports card (`GET /admin/client-crashes?limit=20`, expand, Copy report) | verified (the list's contract and 403); the card unverified. Wording: "When the app closes…" rather than Android's "the Android app" — the server lists every phone's reports once iOS reports too (cycle 7) | 4 |
+| Saved state (`saveUi`, secrets never saved; a restore once per model) | verified via `SettingsLifecycleTests` (7) | 4 |
 
 ## 19. Profile (`feature/profile/*`)
 
@@ -373,13 +376,15 @@ Every path, query name and body below exists in `Api/NeemaApi.swift` unless the 
 | 36–37 | Catalog list, audit | present | verified via `CatalogFeed` / `CatalogViewModel` | 2 |
 | 38–42 | Deals list/patch, actions list/approve/veto | present | verified via `DealsViewModel` | 2 |
 | 43–44 | Leads list, patch | present (`LeadsApi`) | verified via `LeadsViewModel` | 2 |
-| 45–49 | Settings directives / pipeline-stages / translation / offer | present | missing | 4 |
-| 50–51 | Client crashes list, post | **missing** | missing | 4/7 |
+| 45–49 | Settings directives / pipeline-stages / translation / offer | present | verified via `SettingsViewModel` (+ `CustomerViewModel`, `LeadsViewModel` for the stages) | 4 |
+| 50–51 | Client crashes list, post | present (`api.crashes.list/report`) | list verified (contract, 403); the card reads it; the reporter posts in cycle 7 | 4/7 |
 | 52–62 | Me, agents, roles | present | verified via `TeamViewModel` / `ProfileViewModel` (+ `TeamApi`) | 2 |
 | 63–64 | Stats, attribution | present | verified via `OverviewViewModel` | 2 |
 | 65–81 | Calls (list, get, permission, request-permission, follow-up-done, ice-config, channels, offer, answer, connect ×2, terminate, callback, transcript, transcribe, recording, settings, permission-template) | present | missing | 5 |
 | — | Auth: agent-auth/login, auth/login, csrf, callback/credentials, session, agent-auth/refresh, auth/refresh | present | verified | 1 |
 | — | `GET /api/health` (not used by Android) | — | — | — |
+
+**Route coverage (cycle 4).** `RouteCoverageTests` reads every `http.get/post/put/patch/delete`, `http.raw` and `http.multipart` call in NeemaCore's sources and matches it, method and path, against the server's route table (`ServerRoutes.swift`, generated from `apps/api/app` by `apps/ios/scripts/server_routes.py`): 89 distinct client calls (102 call sites), all served; the 14 admin routes neither app calls are the web's own (ai-cost, analytics/message-rollup, customers identities, demand, identities/health, media, parishes, recovery/preview, settings/proposals, conversations close, media/download, meta/backfill-profiles, posts product).
 
 ## 24. WebSocket frame coverage
 

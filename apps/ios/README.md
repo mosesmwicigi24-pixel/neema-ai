@@ -9,7 +9,7 @@ Two parts:
 
 | Folder | What | Builds on |
 |---|---|---|
-| `NeemaCore/` | A Swift package with everything that is not a screen: wire models, the HTTP client and its session rules, sign-in and silent refresh, the live socket, the shell's rules (views, deep links, the way back, toasts, access), formatting and permissions, and every screen's logic (inbox, customer panel, orders, catalog, deals, leads, analytics, reports, team, profile). Mirrors `apps/android/.../core` and `feature/*` one rule for one rule. | Linux, macOS, iOS — `swift test` runs 918 tests anywhere |
+| `NeemaCore/` | A Swift package with everything that is not a screen: wire models, the HTTP client and its session rules, sign-in and silent refresh, the live socket, the shell's rules (views, deep links, the way back, toasts, access), formatting and permissions, and every screen's logic (inbox, customer panel, orders, catalog, deals, leads, analytics, reports, team, profile, settings and WhatsApp calling). Mirrors `apps/android/.../core` and `feature/*` one rule for one rule. | Linux, macOS, iOS — `swift test` runs 1004 tests anywhere |
 | `NeemaApp/` | The SwiftUI app (screens, theme, platform services). The Xcode project is generated from `project.yml` with XcodeGen. | macOS with Xcode 16 |
 
 ## Build and test
@@ -47,6 +47,15 @@ at the SwiftUI layer the programme gets without a device. The pieces:
   NEEMA_GALLERY_OUT=/tmp/gallery swift test --package-path apps/ios/NeemaCore --filter GalleryFixtureExport
   cp /tmp/gallery/fixtures.json apps/ios/NeemaAppTests/Gallery/fixtures.json
   ```
+
+## The routes the server serves
+
+`NeemaCore/Tests/NeemaCoreTests/RouteCoverageTests.swift` reads every
+`http.get/post/put/patch/delete`, `http.raw` and `http.multipart` call in the
+core's sources and checks, method and path, that `apps/api/app` serves it —
+so a renamed handler or a typo fails on Linux before the macOS job. The
+server's table is `Support/ServerRoutes.swift`; regenerate it after a backend
+route changes: `python3 apps/ios/scripts/server_routes.py`.
 
 ## The app icon and launch image
 

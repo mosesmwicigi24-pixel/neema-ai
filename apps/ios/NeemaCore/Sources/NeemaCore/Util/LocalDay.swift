@@ -60,6 +60,13 @@ public struct LocalDay: Equatable, Hashable, Sendable, Comparable, CustomStringC
 
     public func minusDays(_ n: Int) -> LocalDay { plusDays(-n) }
 
+    /// java's `plusMonths`: the same day `n` months on, clamped to that month's last day (31 Jan + 1 = 28 Feb).
+    public func plusMonths(_ n: Int) -> LocalDay {
+        let d = Self.utc.date(byAdding: .month, value: n, to: utcDate) ?? utcDate
+        let c = Self.utc.dateComponents([.year, .month, .day], from: d)
+        return LocalDay(c.year ?? year, c.month ?? month, c.day ?? day)
+    }
+
     /// Whole days from `other` to this day (negative when this day is earlier).
     public func daysSince(_ other: LocalDay) -> Int {
         Self.utc.dateComponents([.day], from: other.utcDate, to: utcDate).day ?? 0

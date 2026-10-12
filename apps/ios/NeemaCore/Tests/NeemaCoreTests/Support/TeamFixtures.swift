@@ -203,4 +203,176 @@ enum TeamFixtures {
             }
         }
     }
+
+    // ── Settings (crm.py) ────────────────────────────────────────────────────
+
+    /// app_settings.DIRECTIVES_MAX_CHARS
+    static let DIRECTIVES_MAX = 600
+    /// promotions.MAX_PERCENT
+    static let OFFER_MAX_PERCENT = 70
+    static let OFFER_422 = "a campaign needs a name, 1-70%, a scope with its categories or SKUs, and an end date (YYYY-MM-DD)"
+
+    /// A running Easter offer, as promotions.parse stores it and describe() words it.
+    static let easterCampaign = #"{"name":"Easter Sale","percent":10,"scope":"category","categories":["Vestments"],"skus":[],"starts_on":null,"ends_on":"2099-04-30"}"#
+    static let EASTER_SAYS = "Easter Sale — 10% off our Vestments, until 30 April 2099"
+
+    /// The calling settings as WhatsApp has them for the test number (routers/admin.py calls_get_settings).
+    static let callingSettings = """
+    {"status":"ENABLED","call_icon_visibility":"DEFAULT","callback_permission_status":"DISABLED","call_hours":null,
+     "voicemail":{"status":"DISABLED","triggers":["TIMEOUT"],"timeout_seconds":15},"restrictions":[],
+     "last_settings_event":null,"last_restriction_event":null}
+    """
+    /// The call-request template, approved (calls_permission_template).
+    static let permissionTemplate = #"{"configured":true,"name":"neema_call_permission","language":"en","source":"app","waba_configured":true,"exists":true,"status":"approved","category":"UTILITY"}"#
+
+    /// Two reports as client_crash_list answers them (newest first; `received_at` is the row's created_at isoformat).
+    static var clientCrashes: String {
+        """
+        [{"id":"crash-7f3a","kind":"crash","at":"\(Fixtures.ago(42))","received_at":"\(pyTs(41))","agent_name":"Grace Wanjiru",
+          "summary":"java.lang.IllegalStateException: Composer dropped its draft","trace":"java.lang.IllegalStateException: Composer dropped its draft\\n\\tat ke.co.bethanyhouse.neema.feature.inbox.Composer.send(Composer.kt:214)\\n\\tat android.os.Handler.handleCallback(Handler.java:958)",
+          "thread":"main","app_version":"1.4.2","build":"142","device":"samsung SM-S918B","sdk":34},
+         {"id":"anr-20c1","kind":"anr","at":"\(Fixtures.ago(60 * 26))","received_at":"\(pyTs(60 * 26 - 1))","agent_name":"Brian Otieno",
+          "summary":"Input dispatching timed out (Waiting to send non-key event because the touched window has not finished processing certain input events)",
+          "trace":"main (state=Blocked)\\n\\tat ke.co.bethanyhouse.neema.feature.orders.OrdersScreen(OrdersScreen.kt:88)",
+          "thread":"main","app_version":"1.4.1","build":"141","device":"Tecno KI5k","sdk":31}]
+        """
+    }
+
+    /// Every settings route as crm.py answers it. `admin` false makes the four
+    /// PUTs refuse with 403 "Admin only", as they do for a non-admin caller.
+    static func settings(_ f: FakeNeema, admin: Bool = true) {
+        let directives = Ref("Always offer free delivery within Nairobi on orders above KES 10,000.")
+        // crm.py get_operator_directives: {"directives", "max_chars"}.
+        f.on("GET", "/admin/settings/directives") { _, _ in (200, "{\"directives\":\(q(directives.value)),\"max_chars\":\(DIRECTIVES_MAX)}") }
+        // put_operator_directives → set_directives: str(body.directives or "").strip()[:600]; never 413/422.
+        f.on("PUT", "/admin/settings/directives") { _, b in
+            if !admin { return (403, detail("Admin only")) }
+            let v = String((body(b)["directives"]?.stringValue ?? "").trimmingCharacters(in: .whitespacesAndNewlines).prefix(DIRECTIVES_MAX))
+            directives.value = v
+            return (200, "{\"ok\":true,\"directives\":\(q(v))}")
+        }
+
+        let stages = Ref(["measuring"])
+        // get_pipeline_stages: {"stages": [...]}
+        f.on("GET", "/admin/settings/pipeline-stages") { _, _ in (200, "{\"stages\":\(arr(stages.value))}") }
+        // put_pipeline_stages: 403; 422 "stages must be a list"; clean (trim, [:18], drop blanks,
+        // built-ins and case-insensitive repeats); 422 "At most 4 custom stages"; {"ok", "stages"}.
+        f.on("PUT", "/admin/settings/pipeline-stages") { _, b in
+            if !admin { return (403, detail("Admin only")) }
+            guard let raw = body(b)["stages"]?.arrayValue else { return (422, detail("stages must be a list")) }
+            let canonical: Set<String> = ["new", "contacted", "qualified", "proposal", "negotiation", "won", "lost"]
+            var cleaned: [String] = []
+            for s in raw {
+                let label = String((s.content ?? "").trimmingCharacters(in: .whitespacesAndNewlines).prefix(18))
+                if !label.isEmpty && !canonical.contains(label.lowercased()) && !cleaned.contains(where: { $0.lowercased() == label.lowercased() }) { cleaned.append(label) }
+            }
+            if cleaned.count > 4 { return (422, detail("At most 4 custom stages")) }
+            stages.value = cleaned
+            return (200, "{\"ok\":true,\"stages\":\(arr(cleaned))}")
+        }
+
+        let enabled = Ref(true)
+        // get_translation_setting: spend is round(float, 4) — a JSON number, never a Decimal string.
+        f.on("GET", "/admin/settings/translation") { _, _ in (200, "{\"enabled\":\(enabled.value),\"default\":false,\"spend_30d_usd\":3.4187,\"calls_30d\":812}") }
+        // put_translation_setting: 403; 422 unless enabled is a JSON bool; {"ok", "enabled"}.
+        f.on("PUT", "/admin/settings/translation") { _, b in
+            if !admin { return (403, detail("Admin only")) }
+            guard case .bool(let e)? = body(b)["enabled"] else { return (422, detail("enabled must be true or false")) }
+            enabled.value = e
+            return (200, "{\"ok\":true,\"enabled\":\(e)}")
+        }
+
+        let campaign = Ref<String?>(easterCampaign)
+        // get_offer: {"campaign": parse(stored) or null, "running", "says": describe(live), "max_percent": 70}.
+        f.on("GET", "/admin/settings/offer") { _, _ in (200, offerBody(campaign.value)) }
+        // put_offer: 403; set_campaign → parse or 422 (ValueError text); {"ok", "campaign", "running", "says"}.
+        f.on("PUT", "/admin/settings/offer") { _, b in
+            if !admin { return (403, detail("Admin only")) }
+            let c = body(b)["campaign"]
+            if c == nil || c?.isNull == true {
+                campaign.value = nil
+                return (200, #"{"ok":true,"campaign":null,"running":false,"says":""}"#)
+            }
+            guard let parsed = parseCampaign(c!) else { return (422, detail(OFFER_422)) }
+            campaign.value = parsed
+            let running = isRunning(parsed)
+            return (200, "{\"ok\":true,\"campaign\":\(parsed),\"running\":\(running),\"says\":\(q(running ? describe(parsed) : ""))}")
+        }
+        // routers/admin.py calls_get_settings / calls_permission_template (manage_settings): WhatsApp's
+        // calling settings as the number has them, and the call-request template waiting for review.
+        f.on("GET", "/admin/calls/settings", body: callingSettings)
+        f.on("GET", "/admin/calls/permission-template", body: permissionTemplate)
+        // admin.py client_crash_list (manage_settings): the phones' crash reports, newest first.
+        f.on("GET", "/admin/client-crashes", body: clientCrashes)
+    }
+
+    private static func offerBody(_ c: String?) -> String {
+        let running = c.map(isRunning) ?? false
+        return "{\"campaign\":\(c ?? "null"),\"running\":\(running),\"says\":\(q(running ? describe(c!) : "")),\"max_percent\":\(OFFER_MAX_PERCENT)}"
+    }
+
+    /// promotions.parse, for the fake: the normalised campaign JSON, or nil when it would 422.
+    private static func parseCampaign(_ el: JSONValue) -> String? {
+        guard let c = el.objectValue else { return nil }
+        let name = String((c["name"]?.stringValue ?? "").trimmingCharacters(in: .whitespacesAndNewlines).prefix(60))
+        guard let pct = c["percent"]?.lenientDouble else { return nil }
+        let percent = Int(pct)   // int(percent)
+        if name.isEmpty || !(1...OFFER_MAX_PERCENT).contains(percent) { return nil }
+        let scope = (c["scope"]?.stringValue ?? "all").trimmingCharacters(in: .whitespaces).lowercased()
+        if !["all", "category", "products"].contains(scope) { return nil }
+        func clean(_ k: String) -> [String] {
+            var out: [String] = []
+            for v in c[k]?.arrayValue ?? [] {
+                let s = (v.stringValue ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+                if !s.isEmpty && !out.contains(where: { $0.lowercased() == s.lowercased() }) { out.append(s) }
+            }
+            return Array(out.prefix(60))
+        }
+        let cats = clean("categories"), skus = clean("skus")
+        if (scope == "category" && cats.isEmpty) || (scope == "products" && skus.isEmpty) { return nil }
+        guard let ends = parseIsoDate(c["ends_on"]?.stringValue) else { return nil }
+        let starts = parseIsoDate(c["starts_on"]?.stringValue)
+        return "{\"name\":\(q(name)),\"percent\":\(percent),\"scope\":\"\(scope)\",\"categories\":\(arr(cats)),\"skus\":\(arr(skus)),"
+            + "\"starts_on\":\(starts.map { "\"\($0)\"" } ?? "null"),\"ends_on\":\"\(ends)\"}"
+    }
+
+    private static func obj(_ c: String) -> [String: JSONValue] { JSONValue.parse(c)?.objectValue ?? [:] }
+
+    /// promotions.is_running by the SERVER's calendar — the real date in UTC, not the app's pinned clock.
+    private static func isRunning(_ c: String) -> Bool {
+        let o = obj(c)
+        let today = LocalDay.of(millis: Int64(Date().timeIntervalSince1970 * 1000), zone: TimeZone(identifier: "UTC")!)
+        if let s = o["starts_on"]?.stringValue, let starts = LocalDay.parse(s), today < starts { return false }
+        guard let ends = LocalDay.parse(o["ends_on"]?.stringValue ?? "") else { return false }
+        return !(ends < today)
+    }
+
+    private static let MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"]
+
+    /// promotions.describe
+    private static func describe(_ c: String) -> String {
+        let o = obj(c)
+        let what: String
+        switch o["scope"]?.stringValue {
+        case "all": what = "everything in the catalogue"
+        case "category": what = "our " + (o["categories"]?.arrayValue ?? []).compactMap { $0.stringValue }.joined(separator: ", ")
+        default: what = "selected items"
+        }
+        let end = LocalDay.parse(o["ends_on"]?.stringValue ?? "") ?? LocalDay(2099, 1, 1)
+        let pct = Int(o["percent"]?.lenientDouble ?? 0)
+        return "\(o["name"]?.stringValue ?? "") — \(pct)% off \(what), until \(end.day) \(MONTHS[end.month - 1]) \(end.year)"
+    }
+
+    /// No offer declared yet (get_offer before anyone starts one).
+    static func noOffer(_ f: FakeNeema) {
+        f.on("GET", "/admin/settings/offer", body: "{\"campaign\":null,\"running\":false,\"says\":\"\",\"max_percent\":\(OFFER_MAX_PERCENT)}")
+    }
+
+    /// A stored offer whose end date has passed — parse() keeps it, it is not running, describe() is "".
+    static func expiredOffer(_ f: FakeNeema) {
+        f.on("GET", "/admin/settings/offer", body: """
+        {"campaign":{"name":"Lent Offer","percent":15,"scope":"products","categories":[],"skus":["CS-BLK-16","STL-GRN","ZZ-UNKNOWN"],
+          "starts_on":null,"ends_on":"2026-03-01"},"running":false,"says":"","max_percent":\(OFFER_MAX_PERCENT)}
+        """)
+    }
 }

@@ -7,7 +7,7 @@ import NeemaCore
 /// The shell as the inbox's logic sees it (Android's `DashboardViewModel`
 /// for `ConversationsViewModel`): the session, the socket, the badges and
 /// the cross-view requests, as watched values the app model keeps in step.
-final class ShellInboxHost: InboxHost, CustomerHost, OrdersHost, CatalogHost, DealsHost, LeadsHost, OverviewHost, ReportsHost, TeamHost, ProfileHost, @unchecked Sendable {
+final class ShellInboxHost: InboxHost, CustomerHost, OrdersHost, CatalogHost, DealsHost, LeadsHost, OverviewHost, ReportsHost, TeamHost, ProfileHost, SettingsHost, @unchecked Sendable {
     let session: Watched<Session?>
     let foreground: Watched<Bool>
     let sessionExpired = Watched<Bool>(false)
