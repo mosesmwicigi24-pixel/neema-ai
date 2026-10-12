@@ -389,6 +389,8 @@ final class ConversationsViewModelTests: XCTestCase {
         XCTAssertTrue(vm.txOn())          // ON by default: the thread reads foreign
         vm.setReplyText("Yes, Friday")
         await host.clock.advance(by: 701)
+        // The debounce fired; the preview lands a round trip later (a loaded runner takes more than the clock's settle).
+        _ = await eventually { vm.composer.value.txPreview != nil }
         XCTAssertEqual(lastBody("POST", "/admin/conversations/c1/translate-reply")["text"]?.content, "Yes, Friday")
         XCTAssertEqual(vm.composer.value.txPreview?.text, "Ndiyo, tutafikisha Ijumaa.")
         let before = calls("POST", "/admin/conversations/c1/translate-reply").count
