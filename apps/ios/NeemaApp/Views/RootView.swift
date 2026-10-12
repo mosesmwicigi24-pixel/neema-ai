@@ -22,5 +22,7 @@ struct RootView: View {
             }
         }
         .animation(.easeInOut(duration: 0.2), value: app.session == nil)
+        // After the app closed on someone: the notice with Share and Copy, once per crash.
+        .background(CrashNoticeView(vault: app.container.crashVault))
     }
 }

@@ -16,6 +16,8 @@ final class AppContainer {
     /// The device has a network (the shell's offline banner).
     let online = Watched<Bool>(true)
     let prefs = AppPrefs(store: UserDefaults.standard)
+    /// Crash reports that survive the crash (Application Support/crash); the handlers are installed first thing.
+    let crashVault: CrashVault
 
     private let monitor = NWPathMonitor()
     private var subs: [Subscription] = []
@@ -23,6 +25,8 @@ final class AppContainer {
     init(baseUrl: String = NeemaConfig.baseUrl, store: SecureStore = KeychainStore(), transport: HTTPTransport = URLSessionTransport(),
          socketFactory: WebSocketFactory = URLSessionWebSocketFactory(), watchNetwork: Bool = true) {
         self.baseUrl = baseUrl
+        crashVault = CrashVault(dir: CrashHandlers.vaultDirectory())
+        CrashHandlers.install(crashVault)
         // Images (AsyncImage through URLSession.shared) keep a 64 MB memory / 256 MB disk cache,
         // Coil's defaults on Android; the system's default is a tenth of that.
         if URLCache.shared.memoryCapacity < 64 << 20 {

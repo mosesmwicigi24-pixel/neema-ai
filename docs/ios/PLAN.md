@@ -770,3 +770,69 @@ privacy manifest, the usage strings, the mic / camera / photos /
 notifications flows with native rationale, crash reporting from the iOS app
 without PII beyond Android's, the RBAC gates audited screen by screen, and
 a written permission / privacy checklist.
+
+### Cycle 7 — Security & permissions
+
+**Features implemented / verified**
+
+- **Crash reporting from the iOS app**, Android's `core/crash` one rule for
+  one rule: `NeemaCore/Crash/CrashVault.swift` (a report per file in
+  `Application Support/crash`, the newest 10, `last.txt`, `last-fatal.txt`,
+  500 characters of summary and 48k of trace, `asText` capped at 60k, the
+  non-fatal that never raises the notice), `CrashReporter.swift` (sent
+  oldest first once signed in — at start, on sign-in, after a non-fatal —
+  stopping at the first failure), `App/CrashHandlers.swift` (the uncaught
+  `NSException` handler and the fatal signals, written first, then the
+  process ends as it would have), `CrashHooks` wired to the vault
+  (`rtcGuard` and every edge that records a non-fatal), the next-launch
+  "Neema closed unexpectedly" notice with Share / Copy / Close
+  (`CrashNoticeView`), and Settings → App crash reports showing "On this
+  phone" with Copy.
+- **Permissions**: notifications asked once, right after the first sign-in
+  (`asked_post_notifications`, as Android's MainActivity); the microphone
+  mid-answer (cycle 5); the camera when opened; the photo library never
+  (`PhotosPicker`). The usage strings are the rationale iOS shows.
+- **The privacy manifest** (`NeemaApp/PrivacyInfo.xcprivacy`): no tracking;
+  email, name and crash data declared as collected for app functionality;
+  `UserDefaults` (CA92.1) the one required-reason API.
+- **Audits written down** in `docs/ios/SECURITY_CHECKLIST.md`: the Keychain
+  class and what it holds, sign-out, no tokens in snapshots, logs or crash
+  reports (no `print` / `os_log` anywhere in the core or the app), App
+  Transport Security at the system default (no exceptions in the plist),
+  every permission's prompt and refusal path, and the RBAC gates screen by
+  screen against the web's `can(PERMS.*)` (the six nav gates, the calling
+  card, the inbox's role rules, the sales permission matrix, the team's
+  last-admin rule, the 403 re-read) — every one already pinned by a test.
+
+**Defects corrected**
+
+1. `rtcGuard` labelled a WebRTC callback's non-fatal `rtc:<name>`; Android's
+   vault reads `webrtc-<name>`. Aligned.
+
+**Tests executed**
+
+- `swift test` in `apps/ios/NeemaCore` on Linux: **{TESTS} tests, 0
+  failures**, 1 skipped: cycle 6's 1362 and the 15 crash tests
+  (`CrashTests`: Android's `CrashHardeningTest` — the call log's update for
+  an old call, keys that look like their own suffix, lead stages, the
+  reporter's two — and the vault's file rules).
+- macOS CI (`Neema app (iOS Simulator)`): {MACOS}
+
+**Remaining parity gaps** (scope of this cycle)
+
+- The crash handlers, the notice and the permission prompts are device code,
+  compiled only. MetricKit diagnostics (hangs, the system's own crash
+  records — Android's `ApplicationExitInfo`) are not read: platform-restricted
+  until a device run shows what MetricKit delivers.
+- No certificate pinning (Android pins nothing either).
+- Signing, TestFlight and the App Store listing's privacy answers stay
+  blocked without Apple credentials; the manifest is written for them.
+
+**Blockers** (carried) — no Xcode or device here; backend push (PushKit /
+APNs); no Apple credentials.
+
+**Next cycle** — Cycle 8: comprehensive functional & stress testing — the
+Android test inventory mapped file by file in `docs/ios/TESTS.md`, everything
+portable ported, UI tests on the simulator for the flows CI can drive
+(sign-in, navigation, inbox, orders, settings), the fake backend with the
+full fixture set.

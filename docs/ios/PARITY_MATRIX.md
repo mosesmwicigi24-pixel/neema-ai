@@ -335,21 +335,21 @@ signing exists (no Apple Developer credentials in the repo or on the box).
 
 | Feature | Android | iOS | Status | Cycle |
 |---|---|---|---|---|
-| Uncaught handler → `files/crash/<ms>-<kind>.json` (max 10), `last.txt`, `last-fatal.txt`, non-fatals, 48k trace cap | `CrashVault` | `NSSetUncaughtExceptionHandler` + signal handlers; MetricKit for hangs | missing | 7 |
-| `POST /admin/client-crashes` body `{id, at, kind, thread, summary, trace, app_version, build, device, sdk}`; sent at start, sign-in, after a non-fatal; oldest first; stop at first failure | `CrashReporter` | same body (`sdk` = iOS version) | missing | 7 |
-| Next-launch "Neema closed unexpectedly" dialog (Share / Copy / Close) | `CrashNotice` | same | missing | 7 |
-| Native tombstones / ANR decoding | `TombstoneText`, `ApplicationExitInfo` | MetricKit diagnostics | platform-restricted | 7 |
+| Uncaught handler → `files/crash/<ms>-<kind>.json` (max 10), `last.txt`, `last-fatal.txt`, non-fatals, 48k trace cap | `CrashVault` | `NeemaCore/Crash/CrashVault.swift` (the file rules) + `App/CrashHandlers.swift` (`NSSetUncaughtExceptionHandler` and the fatal signals); MetricKit not read | verified (file rules, `CrashTests`); handlers unverified | 7 |
+| `POST /admin/client-crashes` body `{id, at, kind, thread, summary, trace, app_version, build, device, sdk}`; sent at start, sign-in, after a non-fatal; oldest first; stop at first failure | `CrashReporter` | `NeemaCore/Crash/CrashReporter.swift`, the same body (`sdk` = the iOS major version) | verified (`CrashTests`) | 7 |
+| Next-launch "Neema closed unexpectedly" dialog (Share / Copy / Close) | `CrashNotice` | `CrashNoticeView` (a sheet with ShareLink, Copy, Close) over `RootView` | unverified | 7 |
+| Native tombstones / ANR decoding | `TombstoneText`, `ApplicationExitInfo` | MetricKit diagnostics (not read yet) | platform-restricted | 7 |
 
 ## 21. Local persistence
 
 | Android | iOS | Status | Cycle |
 |---|---|---|---|
-| Encrypted `neema_session` | Keychain (`KeychainStore`) | unverified | 1 |
+| Encrypted `neema_session` | Keychain (`KeychainStore`, `AfterFirstUnlockThisDeviceOnly`; SECURITY_CHECKLIST §1) | unverified (device code; the store rules verified) | 1/7 |
 | `neema_prefs` (theme, background_live, alert_*, notif_*, asked_post_notifications) | `UserDefaults` (`background_live` dropped) | verified (`AppPrefs`; `notif_*` through the profile model) | 2 |
-| `neema_notifications` (last 60) | `UserDefaults` / file | missing | 5 |
-| `neema_crash` | file | missing | 7 |
+| `neema_notifications` (last 60) | `UserDefaults` (`AgentNotifications`, key `neema_notifications.items`) | verified | 5 |
+| `neema_crash` | `Application Support/crash` (`CrashVault`) | verified (file rules) | 7 |
 | Snapshots `cacheDir/snapshots/<hash>_<key>.json` (me, agents, orders, catalog, inbox_v2, inbox_memory_v1) | `Caches/snapshots/` (raw response text) | verified (`SnapshotCache`) | 2 |
-| Crash files, report CSVs, camera captures (FileProvider) | `Application Support` / `Caches` / share sheet | missing | 2/7 |
+| Crash files, report CSVs, camera captures (FileProvider) | `Application Support/crash`, `Caches` + the share sheet, the picker's own files | verified (crash, CSV); captures unverified | 2/7 |
 | SavedState / `rememberSaveable` keys | `@SceneStorage` + Codable UI state | missing | 3 |
 
 ## 22. Design tokens, typography, icons (`core/ui/theme/*`)

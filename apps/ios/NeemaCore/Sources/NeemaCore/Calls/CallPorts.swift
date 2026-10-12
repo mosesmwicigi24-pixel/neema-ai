@@ -173,7 +173,7 @@ public protocol CallAudio: AnyObject {
 /// observer must never bring the app down (Android's `rtcGuard`). The error
 /// is handed to the crash hook with the callback's name.
 public func rtcGuard(_ name: String, _ body: () throws -> Void) {
-    do { try body() } catch { CrashHooks.recordNonFatal?(error, "rtc:\(name)") }
+    do { try body() } catch { CrashHooks.recordNonFatal?(error, "webrtc-\(name)") }
 }
 
 /// The device's call audio failing under WebRTC (the microphone taken by

@@ -351,6 +351,24 @@ struct CrashReportsCard: View {
             if let list = reports {
                 ForEach(list) { r in row(r) }
             }
+            // The newest report on this phone, delivered or not (Android's "On this phone").
+            if let mine = app.container.crashVault.latest() {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("ON THIS PHONE").font(NeemaFont.manrope(10, .semibold)).tracking(1).foregroundColor(c.muted)
+                    Text(mine.summary.trimmingCharacters(in: .whitespaces).isEmpty ? mine.kind : mine.summary)
+                        .font(NeemaFont.manrope(13, .medium)).foregroundColor(c.text).lineLimit(3)
+                    Text([mine.at, mine.kind, mine.device, mine.sdk > 0 ? "iOS \(mine.sdk)" : nil, "build \(mine.build)"].compactMap { $0 }.joined(separator: " · "))
+                        .font(NeemaFont.manrope(11)).foregroundColor(c.muted)
+                    TextLink(label: "Copy report", size: 13) {
+                        UIPasteboard.general.string = CrashVault.asText(mine)
+                        app.toast("Crash report copied")
+                    }
+                }
+                .padding(12)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(c.bg))
+                .padding(.top, 8)
+            }
         }
     }
 
