@@ -816,8 +816,10 @@ a written permission / privacy checklist.
   (`CrashTests`: Android's `CrashHardeningTest` — the call log's update for
   an old call, keys that look like their own suffix, lead stages, the
   reporter's two — and the vault's file rules).
-- macOS CI (`Neema app (iOS Simulator)`): the build with the crash handlers, the
-  notice and the manifest — the run recorded in the PR once green.
+- macOS CI (`Neema app (iOS Simulator)`): green on b67ff6b (run
+  38309732605: XcodeGen, the simulator build with the crash handlers, the
+  notice and the privacy manifest, the app's test bundle with the screenshot
+  gallery — no compile defect); every other check green on the same head.
 
 **Remaining parity gaps** (scope of this cycle)
 
