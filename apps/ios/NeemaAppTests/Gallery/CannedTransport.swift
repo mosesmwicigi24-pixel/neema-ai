@@ -68,11 +68,3 @@ final class CannedTransport: HTTPTransport, @unchecked Sendable {
         return HTTPResponse(status: hit.status, headers: ["content-type": "application/json"], body: Data(hit.body.utf8))
     }
 }
-
-private extension NSLock {
-    func sync<T>(_ body: () -> T) -> T {
-        lock()
-        defer { unlock() }
-        return body()
-    }
-}
