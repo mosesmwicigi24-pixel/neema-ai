@@ -154,3 +154,165 @@ in matrix §25.
 screens top to bottom (Inbox → Thread → Composer → Customer panel → Orders →
 Catalog → Deals → Leads → Analytics → Reports → Team → Profile) with their
 logic in `NeemaCore` and the Android unit tests ported alongside.
+
+### Cycle 2 — Screen & feature parity, part 1 (data screens)
+
+Pull request #270, built up in nine pushes (`694586f` … `68e5aed`), each one
+compiled by the macOS job.
+
+**Features implemented / verified**
+
+- Core foundations for every screen (`NeemaCore`): `ScreenLife` (shown ×
+  foreground × connected → polls, catch-ups on return and reconnect),
+  `SnapshotCache` (per-agent painted-at-sign-in snapshots), `AppPrefs` +
+  `AlertSettings` (moved into the core), `InboxMemory`, `NetErrors` /
+  `SalesFailures` / `FriendlyErrors` (the fate of a failed request and the
+  plain words for it), `Polling`, `LocalDay`, `MuteWords` — verified.
+- Inbox (`Inbox/`): `InboxViewModel`, the port of Android's
+  `ConversationsViewModel` — the paged list, tabs, search, channel chips,
+  filter panel, grouped rows, bulk release, the thread (pages, poll, window,
+  activity, drafts), live frames (`new_message` / `message`,
+  `intercept_changed`, `ai_draft_ready`, `translations`, `history_cleared`,
+  the call frames), the ownership controls and their truth table, the outbox
+  with its 2 / 8 / 20 s reconciliation and 401 hold, attachments, Ask /
+  Answer / Invite, deep links, per-customer composers — verified (180 tests
+  in `Tests/Inbox` + the inbox logic and wrapper suites). SwiftUI:
+  `InboxScreen` (phone / two-pane / docked panel), `ConversationListView`,
+  `ThreadView` (rows, bubbles, WhatsApp formatting in `WaTextView`, media in
+  `MediaViews` with the pinch viewer and album pager, `ThreadCallView`),
+  `ComposerView` (AI draft panel, quote strip, window strip, translate
+  preview, attach menu, media tray), the dialogs (Transfer, Add Note, Clear
+  history, Ask Neema, Neema delivers, Invite), the activity log — unverified
+  (compiled on the macOS job).
+- Customer panel (`Crm/`): `CrmApi` and `CustomerViewModel` (load, quiet
+  reloads, hero, tabs, pipeline, tags, notes with the 3-way merge, identity
+  merge / unmerge, enquiry push / decline, invite, template, Ask / Answer,
+  every PATCH body and rollback rule) — verified (136 tests). SwiftUI:
+  `CustomerPanelView`, `CustomerTabsView`, `CustomerWidgets`,
+  `CustomerCallsView` (the calls section renders; the call-request flow is
+  cycle 5) — unverified.
+- Orders (`Orders/`): `OrdersFeed` (one read on the wire, 90 s poll,
+  `order_update` coalesced, reconnect catch-up, snapshot, pending badge),
+  `OrderUi` rules, `OrdersViewModel` — verified (75 tests incl. the
+  permission-matrix personas). SwiftUI: list, status cards, search, pages,
+  row, detail (sheet / side sheet / docked pane), status moves — unverified.
+- Catalog (`Catalog/`): `CatalogFeed` (5-minute poll, snapshot),
+  `CatalogRules`, `CatalogViewModel` (filter, search, audit) — verified (33
+  tests). SwiftUI: grid, source banner, price-audit banner, product sheet —
+  unverified.
+- Deals (`Deals/`): `DealsRules`, `DealsViewModel` (three reads, 60 s poll,
+  `planned_action` / `hub_event` coalesced, guidance / won / lost, approve
+  and veto with the lock-until-known settle loop) — verified (58 tests).
+  SwiftUI: queue card, three columns, deal card, guidance editor, the
+  edit-and-send sheet — unverified.
+- Leads (`Leads/`): `LeadsApi`, `LeadsRules` (stages, filter, the sheet's
+  diff, `editLanded`, the board in one pass), `LeadsViewModel` (optimistic
+  moves, rollback, 404 = gone, lost answers settled by re-reading) —
+  verified (54 tests). SwiftUI: kanban columns sized like Android's, cards,
+  stage pills, the lead sheet (phone sheet / side sheet) — unverified.
+- Analytics (`Overview/`): `OverviewRules` on `LocalDay`, `OverviewViewModel`
+  (stats + attribution + the human tab, 30 s poll, coalesced reloads on the
+  listed notification types and `intercept_changed`) — verified (30 tests).
+  SwiftUI: stat grid, attribution, 7-day revenue, order status, by channel,
+  recent activity, top products — unverified.
+- Reports (`Reports/`): `ReportsRules` (the report in one pass, tables,
+  RFC-4180 CSV to a `.part` file, the unpaged download and its failure
+  words), `ReportsViewModel` (one download per visit, off-main rebuilds,
+  midnight rollover, the export held until shared) — verified (49 tests
+  incl. a 10,000-conversation stress). SwiftUI: range menu, date pickers,
+  Export CSV through `UIActivityViewController`, tabs, tiles, tables / cards
+  — unverified.
+- Team (`Team/`): `PermissionCatalog`, `ROLE_COLORS`, `TeamColors`,
+  `TeamForms`, `TeamApi`, `TeamViewModel` (every write under one saving
+  flag, verify-after-no-answer, 404 = removed by someone else, masked
+  secrets, optimistic availability, per-agent overrides, role CRUD with a
+  fixed draft id) — verified (63 tests). SwiftUI: header, tabs, agent grid
+  and card, role list, the seven dialogs as sheets with the permission
+  picker and the twelve swatches — unverified.
+- Profile (`Profile/`): `ProfileViewModel` (forms filled once per agent and
+  kept across a reclaim, save profile with the duplicate-email check,
+  password change that never echoes the password, availability, the four
+  notification switches on the device), the mute words — verified (34
+  tests). SwiftUI: profile card and edit form, stat tiles, Availability,
+  Password, Appearance, Notifications, Sounds & vibration, Your Permissions,
+  Account — unverified.
+- Shell: `ShellInboxHost` serves every screen's host protocol; `AppModel`
+  owns one model per screen per sign-in and mirrors `me` / `agents` into
+  the host; `DashboardShell` routes every view but Calls (cycle 5) and
+  Settings (cycle 4). Shared SwiftUI pieces: `StateViews`, `PanelCard`,
+  `InboxSupport` (buttons, tints, `FlowLayout`), `TeamDialogs` (form
+  pieces); scene state restored per screen (`orders.ui`, `catalog.ui`,
+  `deals.ui`, `leads.ui`, `reports.ui`, `team.*`, `profile.*`).
+
+**Defects corrected** (found by the ported tests and the macOS job)
+
+1. Orders: statements inside view-builder bodies and a `tint` helper
+   colliding with SwiftUI's modifier (run 7 on `845c7af`) — the thread
+   header's actions are built in plain functions; the helper is `tintOf`.
+2. Media views: the player's status publisher needs Combine (same run).
+3. Deals stress flake (151 vs 150 resolved actions): a lost update between
+   two concurrent fake handlers — the test `Ref` gained an atomic `mutate`
+   and every counter the handlers bump uses it.
+4. Leads stress: the first move raced the board's first read — the test's
+   model waits for the read to land.
+5. Reports: a test host without orders made the export one line — the
+   reports test case reads orders and agents at sign-in, as the dashboard
+   does; the `settle` helper shadowed the global one (renamed `landed`).
+6. XCTest on Linux aborts test discovery for a synchronous `throws` test in
+   a `@MainActor` class — such tests are `async throws`.
+7. Team: a raw string holding `"#0891b2"` needs `##"…"##`; main-actor
+   isolation inside `quietly { }` closures — a `@MainActor` method instead.
+8. macOS job, run 10 on `6218f43`: the brand icon paths were referenced on
+   `SVGPath` (the parser) instead of `ChannelIcons`.
+9. macOS job, run 11 on `d5df914`: the overview screen redeclared the
+   reports' `TopRoundedBar`; a `PanelHeader` name collided with the
+   customer panel's private one (renamed `PanelHeadline`).
+
+**Tests executed**
+
+- `swift test` in `apps/ios/NeemaCore` on Linux (Swift 6.2): **917 tests, 0
+  failures** (154 s) — Inbox 180, Crm 136, Orders 75, Team 63, Deals 58,
+  Leads 54, Reports 49, Profile 34, Catalog 33, Overview 30, Calls 8, and
+  the 197 foundation tests (cycle 1's 147 plus the FriendlyErrors, inbox
+  logic, wrapper and adaptive suites). 770 tests were added this cycle.
+- macOS CI (`Neema app (iOS Simulator)`, XcodeGen → xcodebuild on the
+  iPhone 17 simulator): run 8 on `e1f9464` and run 9 on `d9c9abb` green;
+  runs 7, 10 and 11 failed on the compile errors listed above, each fixed
+  in the next push; run 12 on `68e5aed` (the
+  final code push: Team + Profile) — **build and app tests green**; the
+  Linux core job was green on every run.
+
+**Remaining parity gaps** (scope of this cycle)
+
+- Every SwiftUI screen is "unverified": compiled on the macOS job, never
+  seen on a device or driven in a simulator session.
+- Composer: the lost-files note after process death (the restore itself is
+  in `InboxMemory`) — cycle 3.
+- Sheets: `AdaptiveSheet` (the 440 dp end panel on tablets) — cycle 3; the
+  inbox's rail widths are re-checked against Android's in cycle 3.
+- Customer panel: the call-request flow, the call-button decision sheet and
+  the live call frames — cycle 5, with the softphone; the Calls and
+  Settings views are still placeholders (cycles 5 and 4).
+- Reports: Android's "share target missing" export failure has no iOS twin
+  (the share sheet always exists) — platform-equivalent, not a gap.
+- Profile: "Stay connected in background" and the battery-saver link are
+  platform-restricted (no foreground service on iOS); background delivery
+  is the push path, blocked on the backend (matrix §25).
+- Notifications: the `notification` frames are consumed by the feeds that
+  need them; the bell, toasts and tray are cycle 5.
+
+**Blockers** (carried)
+
+- No Xcode here: the SwiftUI layer is compiled only by the macOS job; no
+  device, simulator session or TestFlight build has been touched.
+- Backend push (APNs + PushKit VoIP + token endpoints) does not exist.
+- No Apple Developer credentials: nothing is signed.
+- `aRefusalCorrectsTheNav` (the shell's 403 re-read) lives in `AppModel`
+  and cannot be unit-tested on Linux; its host-side coalescing is.
+
+**Next cycle** — Cycle 3: UI/UX refinement — theme tokens and the three
+toggles, typography scale, the web's icon paths for the nav, shared
+components, adaptive layouts (phone / iPad panes, docked sidebar and rail,
+`AdaptiveSheet`), launch screen and app icon, back / sheet ordering, state
+restoration for the inbox, Dynamic Type caps, haptics; a screenshot of each
+screen from the simulator on CI.
