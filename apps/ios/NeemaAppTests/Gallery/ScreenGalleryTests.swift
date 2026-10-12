@@ -16,17 +16,6 @@ import NeemaCore
 /// lay out fails here.
 @MainActor
 final class ScreenGalleryTests: XCTestCase {
-    private final class NoSockets: WebSocketFactory {
-        final class Dead: WebSocketConnection {
-            let url: URL
-            init(_ u: URL) { url = u }
-            func send(text: String) {}
-            func close(code: Int, reason: String?) {}
-            func cancel() {}
-        }
-        func newWebSocket(url: URL, events: WebSocketEvents) -> WebSocketConnection { Dead(url) }
-    }
-
     private struct Shot {
         let tag: String
         let size: CGSize
@@ -64,7 +53,8 @@ final class ScreenGalleryTests: XCTestCase {
         // The fixtures' dates are relative to the core's pinned clock: "5m ago" reads the same here.
         if transport.pinnedMillis > 0 { AppClock.pin(to: Date(timeIntervalSince1970: Double(transport.pinnedMillis) / 1000)) }
         defer { AppClock.reset() }
-        let container = AppContainer(baseUrl: "https://neema.test", store: MemoryStore(), transport: transport, socketFactory: NoSockets(), watchNetwork: false)
+        // Its own wiped preferences and snapshots: what the gallery opens never reaches the app the UI tests launch.
+        let container = CannedBackend.container(transport: transport)
         let app = AppModel(container: container, ringer: QuietRinger())
 
         // Signed out first: the login screen, by night as it always is.
@@ -215,13 +205,14 @@ final class ScreenGalleryTests: XCTestCase {
         await pause(600)
         shot(phone, "call-ended"); shot(phoneDark, "call-ended")
         await pause(2_500)
-        // The first thread open: full-screen on the phone (immersive), beside the list on the iPad.
+        // The first thread open beside the list on the iPad. The phone's full-screen thread is not
+        // rendered here: hosting it in a window hangs the test host (twice, in the first two runs of
+        // this renderer); the UI tests open it in the real app instead (`testOpeningAThreadShowsIt`).
         NSLog("gallery: opening the thread")
         app.openConversationFor("c1")
         await quiet(transport)
         NSLog("gallery: the thread is open")
-        shot(ipad, "thread"); shot(phone, "thread"); shot(phoneDark, "thread")
-        app.navigate(.conversations)
+        shot(ipad, "thread")
         app.setDark(false)
     }
 }

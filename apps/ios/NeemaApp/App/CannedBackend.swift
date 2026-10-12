@@ -144,7 +144,22 @@ enum CannedBackend {
     @MainActor
     static func container() -> AppContainer? {
         guard requested, let transport = try? CannedTransport.bundledWithApp() else { return nil }
-        UserDefaults.standard.set(true, forKey: AppModel.ASKED_NOTIFICATIONS)
-        return AppContainer(baseUrl: "https://neema.test", store: MemoryStore(), transport: transport, socketFactory: DeadSockets(), watchNetwork: false)
+        return container(transport: transport)
+    }
+
+    /// The app on a recorded backend, in its own wiped preferences suite and
+    /// snapshot folder: nothing of the real app's (or of an earlier run's: the
+    /// gallery once left a thread open that the UI tests then restored)
+    /// reaches it, and it leaves nothing behind.
+    @MainActor
+    static func container(transport: HTTPTransport) -> AppContainer {
+        let suite = "ke.co.bethanyhouse.neema.canned"
+        let defaults = UserDefaults(suiteName: suite) ?? .standard
+        defaults.removePersistentDomain(forName: suite)
+        defaults.set(true, forKey: AppModel.ASKED_NOTIFICATIONS)
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("neema-canned-snapshots", isDirectory: true)
+        try? FileManager.default.removeItem(at: dir)
+        return AppContainer(baseUrl: "https://neema.test", store: MemoryStore(), transport: transport, socketFactory: DeadSockets(), watchNetwork: false,
+                            defaults: defaults, snapshots: SnapshotCache(directory: dir))
     }
 }

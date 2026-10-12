@@ -93,7 +93,7 @@ final class AppModel: ObservableObject {
         dark = container.prefs.dark.value
         online = container.online.value
         toasts = ToastPresenter(foreground: container.foreground)
-        let snapshots = SnapshotCache.standard()
+        let snapshots = container.snapshots
         ordersFeed = OrdersFeed(api: container.api, foreground: container.foreground, socketEvents: container.socket.events,
                                 reconnected: container.socket.reconnected, snapshots: snapshots)
         catalogFeed = CatalogFeed(api: container.api, foreground: container.foreground, snapshots: snapshots)

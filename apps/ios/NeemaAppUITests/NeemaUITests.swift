@@ -110,6 +110,20 @@ final class NeemaUITests: XCTestCase {
         XCTAssertTrue(text("BH-1042").waitForExistence(timeout: 15))
     }
 
+    // MARK: The thread
+
+    func testOpeningAThreadShowsIt() {
+        signIn()
+        signedIn()
+        let row = text("Fr. Peter Kamau")
+        XCTAssertTrue(row.waitForExistence(timeout: 15))
+        row.tap()
+        // The full-screen thread on a phone: the header's actions and the messages.
+        XCTAssertTrue(app.buttons["Call on WhatsApp"].waitForExistence(timeout: 15))
+        XCTAssertTrue(text("Can you deliver to Nyeri by Friday?").waitForExistence(timeout: 15))
+        XCTAssertTrue(app.buttons["Back"].exists)
+    }
+
     // MARK: Sign-out
 
     func testSignOutReturnsToTheForm() {
