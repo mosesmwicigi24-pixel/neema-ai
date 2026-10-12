@@ -397,9 +397,14 @@ after cycle 2 merged).
 - `swift test` in `apps/ios/NeemaCore` on Linux: **918 tests, 0 failures**
   (917 of cycle 2 plus the gallery exporter, which skips unless
   `NEEMA_GALLERY_OUT` is set).
-- macOS CI (`Neema app (iOS Simulator)`): the run on `88f6c8d` was in
-  progress when this record was first committed; its result (and any
-  compile defect it found) is added below once known.
+- macOS CI (`Neema app (iOS Simulator)`, XcodeGen → xcodebuild on the
+  iPhone 17 simulator): run 17 on `76b6049` **green** — the app and the
+  gallery compiled first time, the app tests passed and the
+  `ios-screenshots` artifact was uploaded. Runs 15 and 16 (`ce4e1c1`,
+  `88f6c8d`) were cancelled by the later pushes before finishing, so the
+  one defect they would have caught — the canned transport's private
+  `NSLock.sync` twin of NeemaCore's public one — was fixed from reading
+  the code (`88f6c8d`), not from a compile error.
 
 **Remaining parity gaps** (scope of this cycle)
 
