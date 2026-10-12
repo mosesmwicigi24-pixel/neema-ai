@@ -1,45 +1,54 @@
 import SwiftUI
 import NeemaCore
 
-/// A 12 pt pill with a round badge: ✓ success and info (emerald), ! warning (amber), ✕ error (red).
+/// The web's single toast (components/ui/Toast.tsx): a tinted pill with a
+/// round ✓ / ! / ✕ badge. Success and info share the emerald look, as on the
+/// web. Phones show it 96 pt up (above the bottom nav), full width less
+/// 16 pt gutters; wider windows pin it top-right (288–384 pt). The shell
+/// clears it after 3.5 s. VoiceOver reads it as it changes.
 struct ToastView: View {
     let toast: Toast
     @Environment(\.neema) private var c
 
     var body: some View {
-        HStack(spacing: 10) {
+        let look = tone
+        HStack(spacing: 8) {
             ZStack {
-                Circle().fill(badgeColor).frame(width: 20, height: 20)
-                Image(systemName: badgeIcon).font(.system(size: 11, weight: .bold)).foregroundColor(.white)
+                Circle().fill(look.accent).frame(width: 20, height: 20)
+                WebIcon(glyph: glyph, size: 12).foregroundColor(.white)
             }
-            Text(toast.message).font(NeemaFont.manrope(14, .medium)).foregroundColor(c.text).fixedSize(horizontal: false, vertical: true)
+            Text(toast.message).font(NeemaFont.manrope(14, .medium)).foregroundColor(look.text).fixedSize(horizontal: false, vertical: true)
             Spacer(minLength: 0)
         }
-        .padding(.horizontal, 14).padding(.vertical, 12)
-        .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(c.bg2))
-        .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).stroke(c.hairline))
-        .shadow(color: .black.opacity(0.12), radius: 12, y: 4)
+        .padding(.horizontal, 16).padding(.vertical, 12)
+        .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(look.bg))
+        .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).stroke(look.border))
+        .shadow(color: .black.opacity(0.15), radius: 8, y: 3)
+        .accessibilityElement(children: .combine)
         .accessibilityAddTraits(.updatesFrequently)
     }
 
-    private var badgeColor: Color {
+    private var tone: Tone {
         switch toast.type {
-        case .success, .info: return Palette.emerald500
-        case .warning: return Palette.amber500
-        case .error: return Palette.red500
+        case .error: return Tone.error(c.isDark)
+        case .warning: return Tone.warning(c.isDark)
+        default: return Tone.success(c.isDark)
         }
     }
 
-    private var badgeIcon: String {
+    private var glyph: WebGlyph {
         switch toast.type {
-        case .success, .info: return "checkmark"
-        case .warning: return "exclamationmark"
-        case .error: return "xmark"
+        case .error: return WebIcons.close
+        case .warning: return WebIcons.exclamation
+        default: return WebIcons.check
         }
     }
 }
 
-/// "You're offline" while the device has no network; "Back online" for 2.5 s after it returns.
+/// A slim bar across the top of the content while the device has no network
+/// (app-only: the web leans on the browser's own): whatever is on screen stays
+/// (it's what was last loaded), and the bar says so. When the network returns
+/// it turns moss, says "Back online" and folds away after 2.5 s.
 struct ConnectivityBanner: View {
     @EnvironmentObject private var app: AppModel
     @Environment(\.neema) private var c
@@ -49,9 +58,9 @@ struct ConnectivityBanner: View {
     var body: some View {
         VStack(spacing: 0) {
             if !app.online {
-                banner(tone: Tone.warning(c.isDark), icon: "wifi.slash", title: "You're offline", body: "Showing what was last loaded. Check your connection.")
+                bar(tone: Tone.warning(c.isDark), offline: true)
             } else if backOnline {
-                banner(tone: Tone.moss(c.isDark), icon: "checkmark", title: "Back online", body: nil)
+                bar(tone: Tone.moss(c.isDark), offline: false)
             }
         }
         .animation(.easeInOut(duration: 0.2), value: app.online)
@@ -68,17 +77,27 @@ struct ConnectivityBanner: View {
         }
     }
 
-    private func banner(tone: Tone, icon: String, title: String, body: String?) -> some View {
-        HStack(spacing: 10) {
-            Image(systemName: icon).foregroundColor(tone.accent)
-            VStack(alignment: .leading, spacing: 1) {
-                Text(title).font(NeemaFont.fixed(13, .semibold)).foregroundColor(tone.text)
-                if let b = body { Text(b).font(NeemaFont.fixed(12)).foregroundColor(tone.text.opacity(0.85)) }
+    /// The bar itself: amber while offline, moss once back, a solid badge for the icon.
+    private func bar(tone: Tone, offline: Bool) -> some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 10) {
+                ZStack {
+                    Circle().fill(tone.accent).frame(width: 24, height: 24)
+                    WebIcon(glyph: offline ? WebIcons.wifiOff : WebIcons.check, size: offline ? 14 : 12).foregroundColor(.white)
+                }
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(offline ? "You're offline" : "Back online").font(NeemaFont.manrope(13, .semibold)).foregroundColor(tone.text)
+                    if offline {
+                        Text("Showing what was last loaded. Check your connection.").font(NeemaFont.manrope(12)).foregroundColor(tone.text)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+                Spacer(minLength: 0)
             }
-            Spacer()
+            .padding(.horizontal, 16).padding(.vertical, 8)
+            Hairline(color: tone.border)
         }
-        .padding(.horizontal, 16).padding(.vertical, 8)
         .background(tone.bg)
-        .overlay(Rectangle().fill(tone.border).frame(height: 1), alignment: .bottom)
+        .accessibilityElement(children: .combine)
     }
 }

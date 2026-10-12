@@ -66,6 +66,9 @@ jobs:
           echo "device=$DEVICE" >> "$GITHUB_OUTPUT"
           echo "Using simulator: $DEVICE"
       - name: Build and test
+        # TEST_RUNNER_ variables reach the test process: the screenshot gallery writes its PNGs there.
+        env:
+          TEST_RUNNER_NEEMA_SCREENSHOTS: ${{ github.workspace }}/apps/ios/screenshots
         run: |
           xcodebuild -project Neema.xcodeproj -scheme Neema \
             -destination "platform=iOS Simulator,name=${{ steps.sim.outputs.device }}" \
@@ -78,3 +81,10 @@ jobs:
         with:
           name: ios-xcodebuild-log
           path: apps/ios/xcodebuild.log
+      - name: Upload the screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-screenshots
+          path: apps/ios/screenshots
+          if-no-files-found: warn
