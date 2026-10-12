@@ -83,7 +83,9 @@ final class CatalogViewModelTests: XCTestCase {
         XCTAssertEqual(vm.ui.catalogError, FriendlyErrors.DOWN_TEXT)
         ReportsFixtures.install(fake)
         vm.retry()
+        // The spinner lasts until the catalogue AND the audit have landed; a slow runner needs more than one drain.
         await drain()
+        _ = await eventually(timeout: 5) { !vm.ui.refreshing }
         XCTAssertNil(vm.ui.catalogError)
         XCTAssertEqual(vm.view.total, 6)
         XCTAssertFalse(vm.ui.refreshing)
