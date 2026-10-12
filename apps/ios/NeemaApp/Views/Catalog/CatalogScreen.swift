@@ -19,7 +19,6 @@ struct CatalogScreen: View {
     }
 }
 
-struct CatalogSheetItem: Identifiable, Equatable { let id: String }
 
 struct CatalogBody: View {
     @ObservedObject var model: CatalogScreenModel
@@ -89,26 +88,8 @@ struct CatalogBody: View {
         .refreshable { await pullToRefresh() }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(c.bg)
-        .overlay {
-            if wide {
-                SideSheet(open: sideOpen, width: min(440, width * 0.9), title: detail?.name ?? "Product") {
-                    if let item = detail { ProductDetailView(item: item) }
-                }
-            }
-        }
-        .sheet(item: phoneSheet) { which in
-            if let item = model.catalog.first(where: { $0.id == which.id }) ?? (opened?.id == which.id ? opened : nil) {
-                VStack(spacing: 0) {
-                    ModalTitleBar(title: item.name, onClose: { detailId = "" }).padding(.top, 16)
-                    ProductDetailView(item: item)
-                }
-                .background(c.bg2)
-                .environment(\.neema, c)
-                .environmentObject(app)
-                .presentationDetents([.large])
-                .presentationDragIndicator(.visible)
-            }
-        }
+        // A phone sheet, or a 440 pt panel beside the grid from 600 pt (Android `AdaptiveSheet`).
+        .adaptiveSheet(item: detailItem, width: width, title: { $0.name }) { item in ProductDetailView(item: item) }
         .onAppear {
             vm.restoreIfFresh(JSONValue.parse(savedUi)?.objectValue)
             vm.life.shown.update(true)
@@ -165,12 +146,9 @@ struct CatalogBody: View {
         }
     }
 
-    private var sideOpen: Binding<Bool> {
-        Binding(get: { wide && detail != nil }, set: { if !$0 { detailId = "" } })
-    }
-
-    private var phoneSheet: Binding<CatalogSheetItem?> {
-        Binding(get: { (!wide && detail != nil) ? CatalogSheetItem(id: detailId) : nil }, set: { if $0 == nil { detailId = "" } })
+    /// The open product (the row's live copy, or the copy kept when it left the catalogue); dismissing clears it.
+    private var detailItem: Binding<CatalogItem?> {
+        Binding(get: { detail }, set: { if $0 == nil { detailId = "" } })
     }
 
     private func pullToRefresh() async {

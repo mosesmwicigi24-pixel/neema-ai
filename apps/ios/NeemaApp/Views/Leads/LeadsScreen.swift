@@ -103,7 +103,6 @@ struct LeadsScreen: View {
     }
 }
 
-struct LeadSheetItem: Identifiable, Equatable { let id: String }
 
 struct LeadsBody: View {
     @ObservedObject var model: LeadsScreenModel
@@ -140,25 +139,8 @@ struct LeadsBody: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(c.bg)
-        .overlay {
-            if wide {
-                SideSheet(open: sideOpen, width: min(480, width * 0.8), title: sheetTitle(selected)) {
-                    if let l = selected { detail(l) }
-                }
-            }
-        }
-        .sheet(item: phoneSheet) { item in
-            if let l = leads.first(where: { $0.id == item.id }) {
-                VStack(spacing: 0) {
-                    WebDragHandle().padding(.top, 8)
-                    detail(l)
-                }
-                .background(c.bg2)
-                .environment(\.neema, c)
-                .environmentObject(app)
-                .presentationDetents([.large])
-            }
-        }
+        // A phone sheet, or a 480 pt panel beside the board from 600 pt (Android `AdaptiveSheet`); the detail brings its own header.
+        .adaptiveSheet(item: sheetItem, width: width, panelWidth: 480, maxFraction: 0.8, titleBar: false, title: { sheetTitle($0) }) { l in detail(l) }
         .onAppear {
             vm.restoreIfFresh(JSONValue.parse(savedUi)?.objectValue)
             vm.life.shown.update(true)
@@ -246,7 +228,7 @@ struct LeadsBody: View {
                             ForEach(ui.stages) { stage in
                                 LeadStageColumn(stage: stage, leads: board.columns[stage.id] ?? [], value: board.columnValue[stage.id] ?? 0,
                                                 stages: ui.stages, width: columnWidth(g.size.width), saving: ui.saving, now: now,
-                                                onSelect: { vm.select($0.id) }, onMove: { l, to in vm.moveTo(l, to) },
+                                                onSelect: { vm.select($0.id) }, onMove: { l, to in Haptics.tap(); vm.moveTo(l, to) },
                                                 onRefresh: { await pullToRefresh() })
                             }
                         }
@@ -306,14 +288,9 @@ struct LeadsBody: View {
             .onAppear { _ = vm.sheetFor(lead) }
     }
 
-    /// A swipe or a tap outside closes the sheet but keeps what was typed for this lead.
-    private var sideOpen: Binding<Bool> {
-        Binding(get: { wide && selectedLead != nil }, set: { if !$0 { vm.dismissSheet() } })
-    }
-
-    private var phoneSheet: Binding<LeadSheetItem?> {
-        Binding(get: { (!wide && selectedLead != nil) ? LeadSheetItem(id: selectedLead!.id) : nil },
-                set: { if $0 == nil { vm.dismissSheet() } })
+    /// The open lead; a swipe or a tap outside closes the sheet but keeps what was typed for this lead.
+    private var sheetItem: Binding<Lead?> {
+        Binding(get: { selectedLead }, set: { if $0 == nil { vm.dismissSheet() } })
     }
 }
 

@@ -417,7 +417,10 @@ final class AppModel: ObservableObject {
 
     // ── Toasts, theme, errors ───────────────────────────────────────────────
 
-    func toast(_ message: String, _ type: ToastType = .success) { toasts.show(message, type) }
+    func toast(_ message: String, _ type: ToastType = .success) {
+        if type == .error { Haptics.error() }
+        toasts.show(message, type)
+    }
 
     func setDark(_ v: Bool) {
         dark = v

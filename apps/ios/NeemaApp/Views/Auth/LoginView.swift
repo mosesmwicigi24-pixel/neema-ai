@@ -52,7 +52,7 @@ struct LoginView: View {
     private var logo: some View {
         RoundedRectangle(cornerRadius: 10, style: .continuous)
             .fill(Self.moss)
-            .overlay(Image(systemName: "bubble.left.fill").foregroundColor(.white).font(.system(size: 18, weight: .bold)))
+            .overlay(WebIcon(glyph: WebIcons.logo, size: 18).foregroundColor(.white))
     }
 
     private var phoneHeader: some View {
@@ -122,7 +122,7 @@ struct LoginView: View {
                     Button {
                         showPassword.toggle()
                     } label: {
-                        Image(systemName: showPassword ? "eye.slash" : "eye").foregroundColor(Brand.textMuted)
+                        WebIcon(glyph: showPassword ? WebIcons.eyeOff : WebIcons.eye, size: 18).foregroundColor(Brand.textMuted)
                     }
                     .accessibilityLabel(showPassword ? "Hide password" : "Show password")
                 }
@@ -130,7 +130,7 @@ struct LoginView: View {
 
             if let e = error {
                 HStack(alignment: .top, spacing: 8) {
-                    Image(systemName: "exclamationmark.circle").foregroundColor(Palette.red500)
+                    WebIcon(glyph: WebIcons.alertCircle, size: 16).foregroundColor(Palette.red500)
                     Text(e).font(NeemaFont.bodySmall).foregroundColor(Color(hex: 0xFCA5A5))
                 }
                 .padding(12)

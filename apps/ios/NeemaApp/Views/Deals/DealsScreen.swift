@@ -99,7 +99,7 @@ struct DealsBody: View {
             if let a = ui.draftFor, a.id == item.id {
                 DraftDialog(action: a, text: Binding(get: { ui.draftText }, set: { vm.setDraftText($0) }),
                             busy: ui.acting.contains(a.id), checking: ui.checking.contains(a.id), error: ui.draftError,
-                            onDismiss: { vm.openDraft(nil) }, onSend: { vm.act(a.id, "approve", draft: ui.draftText) })
+                            onDismiss: { vm.openDraft(nil) }, onSend: { Haptics.tap(); vm.act(a.id, "approve", draft: ui.draftText) })
                     .environment(\.neema, c)
                     .presentationDetents([.medium, .large])
                     .presentationDragIndicator(.visible)
@@ -139,7 +139,7 @@ struct DealsBody: View {
             }
             ForEach(rows) { a in
                 ActionRow(action: a, busy: ui.acting.contains(a.id), checking: ui.checking.contains(a.id), wide: wide, now: now,
-                          onSend: { vm.act(a.id, "approve") }, onEdit: { vm.openDraft(a) }, onVeto: { vm.act(a.id, "veto") },
+                          onSend: { Haptics.tap(); vm.act(a.id, "approve") }, onEdit: { vm.openDraft(a) }, onVeto: { Haptics.tap(); vm.act(a.id, "veto") },
                           onOpen: a.conversationId.map { id in { app.openConversationFor(id) } })
             }
         }

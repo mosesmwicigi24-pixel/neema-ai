@@ -103,7 +103,7 @@ struct OrdersBody: View {
                 }
                 // ── Order detail, beside the list on a wide tablet ─────────────
                 if twoPane, let o = selected {
-                    OrderDetailView(order: o, busy: ui.updating == o.id, onStatus: { vm.updateStatus(id: o.id, status: $0) }, onClose: { vm.select(nil) })
+                    OrderDetailView(order: o, busy: ui.updating == o.id, onStatus: { Haptics.tap(); vm.updateStatus(id: o.id, status: $0) }, onClose: { vm.select(nil) })
                         .frame(width: ORDER_PANE_WIDTH)
                         .background(RoundedRectangle(cornerRadius: 16, style: .continuous).fill(c.bg2))
                         .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).stroke(c.bg4))
@@ -117,14 +117,14 @@ struct OrdersBody: View {
             if sidePanel {
                 SideSheet(open: sideOpen, width: min(ORDER_PANE_WIDTH, width * 0.8), title: "Order") {
                     if let o = selected {
-                        OrderDetailView(order: o, busy: ui.updating == o.id, onStatus: { vm.updateStatus(id: o.id, status: $0) }, onClose: { vm.select(nil) }, titleBar: false)
+                        OrderDetailView(order: o, busy: ui.updating == o.id, onStatus: { Haptics.tap(); vm.updateStatus(id: o.id, status: $0) }, onClose: { vm.select(nil) }, titleBar: false)
                     }
                 }
             }
         }
         .sheet(item: phoneSheet) { item in
             if let o = orders.first(where: { $0.id == item.id }) {
-                OrderDetailView(order: o, busy: ui.updating == o.id, onStatus: { vm.updateStatus(id: o.id, status: $0) }, onClose: { vm.select(nil) })
+                OrderDetailView(order: o, busy: ui.updating == o.id, onStatus: { Haptics.tap(); vm.updateStatus(id: o.id, status: $0) }, onClose: { vm.select(nil) })
                     .background(c.bg2)
                     .environment(\.neema, c)
                     .environmentObject(app)

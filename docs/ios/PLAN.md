@@ -316,3 +316,123 @@ components, adaptive layouts (phone / iPad panes, docked sidebar and rail,
 `AdaptiveSheet`), launch screen and app icon, back / sheet ordering, state
 restoration for the inbox, Dynamic Type caps, haptics; a screenshot of each
 screen from the simulator on CI.
+
+### Cycle 3 — UI/UX refinement
+
+Pull request #271 on `claude/where-are-we-bx9v9w` (restarted from `main`
+after cycle 2 merged).
+
+**Features implemented / verified**
+
+- Theme tokens wired: the dim washes (`greenDim` … `indigoDim`), the chrome's
+  icon ink, the tones (success / warning / error / info / moss, light and
+  dark) now used by the toast and the connectivity banner;
+  `NeemaFont.capped(_:maxScale:)` — text that grows with the user's size
+  only up to a cap (Android `scaledAtMost`) for the wordmark, tab labels,
+  badges and the "Reconnecting…" pill. Three dark-mode toggles (header,
+  account card, Profile) drive one `theme` pref; the login is always night,
+  the account card always white — unverified (compiled on CI).
+- Icons: `WebIcons` — the dashboard's own heroicon paths (nav, bell, sun and
+  moon, collapse / expand, chevron, logout, more, menu, search, eye and
+  eye-off, wifi-off, check, close, exclamation, alert, warning), stroked
+  through `SVGShape` with `OverviewIcons.expandArcFlags`; `NeemaLogo` (the
+  amber mark with its glow). The SF Symbol stand-ins are gone from the chrome
+  and the login; they remain where the web has no icon of its own.
+- Shell chrome by navigation mode (`navMode(for:)` from the window width):
+  a drawer under 600 pt, the 60 pt icon rail under 1200 pt, the docked
+  208 pt sidebar (× text scale to 130%) beyond, the choice holding until the
+  mode changes; the phone drawer as a start-edge panel over a scrim (272 pt,
+  rounded end corners, swipe to close); the mobile header (the "Neema ·"
+  wordmark yields to the view's name past 150% text, the bell with its red
+  "9+" count, the theme switch); the bottom bar (web icons, labels capped,
+  the half-width amber indicator, the count 8 pt right of centre); the
+  sidebar (logo, wordmark, bell, collapse; the rail's expand button; amber
+  pill rows with navy ink; the account row with the online dot, the role
+  line, the rotating chevron, the signing-out ring; the account card inline
+  or as a popover on the rail, with the role pill, View Profile / Settings,
+  the theme row and its pill, Sign out); the three badge sizes with the full
+  number; the toast top-end and the "Reconnecting…" pill on wide windows —
+  unverified.
+- Launch screen and app icon: `Assets.xcassets` with the 1024 px icon and the
+  launch image, rendered by `scripts/make_icons.py` from Android's launcher
+  shapes (pure Python, so anyone can regenerate them), on the night
+  background Android's splash uses; `UILaunchScreen` and the app-icon
+  setting in `project.yml` — unverified.
+- Adaptive layouts: `AdaptiveSheet` (a phone sheet under 600 pt, an
+  end-edge panel beyond, Android `core/ui/AdaptiveSheet`), now what the
+  catalog and the leads screens present their detail with; the inbox's
+  `inboxPanes` rules and the shell's `navMode` were already the core's,
+  verified by `AdaptiveTests`.
+- State restoration: the inbox's open panes (customer pane / sheet, activity
+  sheet) persist in the scene state, as Android's `rememberSaveable` does;
+  every other screen already kept its saved UI (cycle 2).
+- Native polish: haptics (a light tap on sends, moves, status changes and
+  availability switches; the system's notice on an error toast); Dynamic
+  Type caps on dense chrome; safe areas handled by the shell (the navy top
+  edge under the status bar on wide windows, the drawer's background under
+  the bars); the status bar follows the theme and the night login through
+  `preferredColorScheme`.
+- The screenshot gallery — the cycle's "done when": `GalleryFixtureExportTests`
+  (NeemaCore, on demand) drives every screen's model against the full
+  fixture set and records the 24 answers the screens ask for;
+  `NeemaAppTests/Gallery` serves them from `fixtures.json` through
+  `CannedTransport` to a real `AppModel` and renders the sign-in screen and
+  every view (phone light and dark, iPad) through `ImageRenderer`, attaching
+  each PNG and writing it to `$NEEMA_SCREENSHOTS`, which the macOS job sets
+  and uploads as the `ios-screenshots` artifact.
+
+**Defects corrected**
+
+1. The nav badge on the phone bar and the rail showed "9+" where the web
+   prints the full number (only the bell's red count abbreviates) — fixed
+   with the badge rewrite.
+2. The wide shell's "Reconnecting…" indicator was a bare dot; Android and the
+   web show the pill with its words — fixed.
+3. The connectivity banner drew its icon in the tone's accent colour over
+   the tint (under 3:1 by day); it is now the solid 24 pt badge Android
+   draws.
+4. A cycle 2 test waited a fixed drain for a refresh that reads two things
+   (CI run 18 caught it once); it waits for the spinner to end now.
+
+**Tests executed**
+
+- `swift test` in `apps/ios/NeemaCore` on Linux: **918 tests, 0 failures**
+  (917 of cycle 2 plus the gallery exporter, which skips unless
+  `NEEMA_GALLERY_OUT` is set).
+- macOS CI (`Neema app (iOS Simulator)`, XcodeGen → xcodebuild on the
+  iPhone 17 simulator): run 17 on `76b6049` **green** — the app and the
+  gallery compiled first time, the app tests passed and the
+  `ios-screenshots` artifact was uploaded. Runs 15 and 16 (`ce4e1c1`,
+  `88f6c8d`) were cancelled by the later pushes before finishing, so the
+  one defect they would have caught — the canned transport's private
+  `NSLock.sync` twin of NeemaCore's public one — was fixed from reading
+  the code (`88f6c8d`), not from a compile error.
+- Run 18 (`4f938b7`, the record itself): macOS green again; the Linux core
+  job failed once on a cycle 2 test, `CatalogViewModelTests.
+  testAnEmptyCatalogueAfterAFailedReadSaysWhyAndRetryLoadsIt`, whose last
+  assertion followed one fixed drain while the retry's refresh (catalogue
+  AND audit) was still landing on the slow runner. Defect 4 below; the test
+  now waits for the flag (`1fdf695`).
+
+**Remaining parity gaps** (scope of this cycle)
+
+- The bell's list, its mute control and the wide shell's bell popup — cycle 5
+  (the bell button and its count are in place with a count of 0).
+- The docked call panel at ≥ 1000 pt of content and the call bar — cycle 5.
+- Keyboard shortcuts (Ctrl+1…9, Ctrl+B, Escape through the in-app history)
+  and drag-and-drop — cycle 9.
+- A pixel comparison of the gallery against Android's Paparazzi goldens —
+  cycle 9; the gallery renders through `ImageRenderer`, which does not draw
+  presented sheets or UIKit-backed views, so dialogs and the media viewer
+  are not in it.
+- Every SwiftUI change remains "unverified" on a device; the gallery is the
+  first rendered evidence.
+
+**Blockers** (carried) — no Xcode or device here; backend push; no Apple
+credentials.
+
+**Next cycle** — Cycle 4: business logic & backend integrity — the Settings
+screen (every card, incl. WhatsApp calling and crash reports), the server
+contracts re-checked endpoint by endpoint against the OpenAPI, every write's
+uncertain-result reconciliation, 403 → access re-read, permission gates, the
+price/ordering invariants the Android tests pin.

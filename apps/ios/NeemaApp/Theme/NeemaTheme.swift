@@ -15,6 +15,8 @@ extension Color {
 struct NeemaColors {
     let bg, bg2, bg3, bg4, border, border2, gold, gold2, goldDim, text, textDim, textMid: Color
     let green, red, blue, amber, indigo, surface, hairline, muted: Color
+    /// The web's `--*-dim` washes: a tenth of the hue over the surface (chips, badges, the sign-out button).
+    let greenDim, redDim, blueDim, amberDim, indigoDim: Color
     let isDark: Bool
 
     static let light = NeemaColors(
@@ -23,6 +25,8 @@ struct NeemaColors {
         goldDim: Color(hex: 0x589B31, alpha: 0.10), text: Color(hex: 0x16270C), textDim: Color(hex: 0x699A32), textMid: Color(hex: 0x4F7425),
         green: Color(hex: 0x589B31), red: Color(hex: 0xC0392B), blue: Color(hex: 0x2A48A2), amber: Color(hex: 0xBCC13E),
         indigo: Color(hex: 0x3D528F), surface: Color(hex: 0xF7F8F5), hairline: Color(hex: 0xE8EBE3), muted: Color(hex: 0x8A9E80),
+        greenDim: Color(hex: 0x589B31, alpha: 0.10), redDim: Color(hex: 0xC0392B, alpha: 0.10), blueDim: Color(hex: 0x2A48A2, alpha: 0.10),
+        amberDim: Color(hex: 0xBCC13E, alpha: 0.12), indigoDim: Color(hex: 0x3D528F, alpha: 0.10),
         isDark: false
     )
 
@@ -32,6 +36,8 @@ struct NeemaColors {
         goldDim: Color(hex: 0x84C13E, alpha: 0.12), text: Color(hex: 0xF3F9EC), textDim: Color(hex: 0x699A32), textMid: Color(hex: 0xB5DA8B),
         green: Color(hex: 0x84C13E), red: Color(hex: 0xE05555), blue: Color(hex: 0x5D7BD5), amber: Color(hex: 0xD7DA8B),
         indigo: Color(hex: 0x7085C2), surface: Color(hex: 0x070D1C), hairline: Color(hex: 0x152451), muted: Color(hex: 0x8A9E80),
+        greenDim: Color(hex: 0x84C13E, alpha: 0.12), redDim: Color(hex: 0xE05555, alpha: 0.12), blueDim: Color(hex: 0x5D7BD5, alpha: 0.12),
+        amberDim: Color(hex: 0xD7DA8B, alpha: 0.12), indigoDim: Color(hex: 0x7085C2, alpha: 0.10),
         isDark: true
     )
 }
@@ -51,11 +57,11 @@ enum Brand {
 
 /// The phone header and bottom bar.
 struct ChromeColors {
-    let bar, line, title, subtitle, active, separator: Color
+    let bar, line, title, subtitle, icon, active, separator: Color
     static let light = ChromeColors(bar: Color(hex: 0xFFFFFF), line: Color(hex: 0xF3F4F6), title: Color(hex: 0x111827),
-                                    subtitle: Color(hex: 0x6B7E64), active: Color(hex: 0xB45309), separator: Color(hex: 0xD1D5DB))
+                                    subtitle: Color(hex: 0x6B7E64), icon: Color(hex: 0x6B7E64), active: Color(hex: 0xB45309), separator: Color(hex: 0xD1D5DB))
     static let dark = ChromeColors(bar: Color(hex: 0x0A1229), line: Color(hex: 0x152451), title: .white,
-                                   subtitle: Color(hex: 0x9CA3AF), active: Color(hex: 0xF59E0B), separator: Color(hex: 0x4B5563))
+                                   subtitle: Color(hex: 0x9CA3AF), icon: Color(hex: 0x9CA3AF), active: Color(hex: 0xF59E0B), separator: Color(hex: 0x4B5563))
     static func of(_ c: NeemaColors) -> ChromeColors { c.isDark ? .dark : .light }
 }
 
@@ -146,6 +152,14 @@ enum NeemaFont {
     /// A fixed size (badges, emoji tiles, chrome capped at the design size).
     static func fixed(_ size: CGFloat, _ weight: Weight = .regular) -> Font {
         Font.custom(name(weight), fixedSize: size)
+    }
+
+    /// This size, grown with the user's text size only up to `maxScale` — for
+    /// dense chrome that must stay inside a fixed bar (tab labels, count
+    /// badges, the wordmark); body text should always scale freely.
+    static func capped(_ size: CGFloat, _ weight: Weight = .regular, maxScale: CGFloat) -> Font {
+        let scaled = UIFontMetrics.default.scaledValue(for: size)
+        return Font.custom(name(weight), fixedSize: min(scaled, size * maxScale))
     }
 
     static func mono(_ size: CGFloat, medium: Bool = false) -> Font {

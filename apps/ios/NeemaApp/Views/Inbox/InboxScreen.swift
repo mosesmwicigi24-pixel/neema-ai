@@ -41,9 +41,10 @@ struct InboxBody: View {
     @Environment(\.neema) private var c
     @State private var viewer: ViewerItem?
     @State private var brokenVideos: Set<String> = []
-    @State private var customerOpen = true      // wide side pane (open by default)
-    @State private var customerSheet = false    // phone / narrow wide
-    @State private var activitySheet = false
+    // The panes a phone or a tablet had open come back after iOS reclaims the app (Android rememberSaveable).
+    @SceneStorage("inbox.customerOpen") private var customerOpen = true      // wide side pane (open by default)
+    @SceneStorage("inbox.customerSheet") private var customerSheet = false    // phone / narrow wide
+    @SceneStorage("inbox.activitySheet") private var activitySheet = false
     // The reach-out dialogs remember WHICH conversation they were opened for: a
     // deep link or a notification tap that switches threads closes them, so a
     // team answer or an invite can never go to the next customer opened.

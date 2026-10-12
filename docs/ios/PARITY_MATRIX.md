@@ -71,7 +71,7 @@ signing exists (no Apple Developer credentials in the repo or on the box).
 
 | Feature | Android | iOS | Status | Cycle |
 |---|---|---|---|---|
-| Single entry, splash (night #070D1C, moss icon), then the app | `MainActivity`, `Theme.Neema.Starting` | `NeemaApp/App/NeemaApp.swift`, launch screen | missing (Cycle 1 skeleton has the entry; launch screen in Cycle 3) | 1/3 |
+| Single entry, splash (night #070D1C, moss icon), then the app | `MainActivity`, `Theme.Neema.Starting` | `NeemaApp/App/NeemaApp.swift`, launch screen | unverified — `UILaunchScreen` with the night background and the moss tile (`Assets.xcassets`, rendered from Android's launcher shapes by `scripts/make_icons.py`); the app icon likewise | 1/3 |
 | Hand-rolled DI: prefs, session store, auth, http, api, socket, foreground, online, snapshots, notifications, message alerts, calls, crash reporter | `app/AppContainer.kt` | `NeemaApp/App/AppContainer.swift` | unverified (skeleton: store, auth, http, api, socket, foreground, online) | 1 |
 | Foreground tracking + network callback that nudges the socket | `NeemaApplication` | `scenePhase` + `NWPathMonitor` | unverified | 1 |
 | `ViewId` (11 views, labels, web names), start on Inbox | `app/DashboardViewModel.kt` | `NeemaCore/Shell/ViewId.swift` | verified | 1 |
@@ -86,16 +86,16 @@ signing exists (no Apple Developer credentials in the repo or on the box).
 | Logout: ignore repeats, stop polls, end a live call (3 s / 4 s caps) before the token goes, clear store (keep `last_email`), clear notifications, clear agent state, drop pending link; late answers dropped | `logout()`, `forCurrentAgent` | — | missing (call part: Cycle 5) | 2 |
 | Session expired dialog: not dismissable, "Signed in as", password, "Continue"/"Signing in…", "Sign out", errors | `LoginScreen.kt` `SessionExpiredDialog` | `Views/Auth/SessionExpiredView.swift` | unverified | 1 |
 | Login screen: night palette, brand panel ≥1024 dp, exact copy, email prefilled from `last_email`, eye toggle, validation and error strings | `LoginScreen.kt` | `Views/Auth/LoginView.swift` | unverified | 1 |
-| Phone chrome: header (☰, amber logo, "Neema · {view}", reconnecting pill, bell with "9+" badge, theme toggle), bottom nav (first 4 + More, amber indicator), drawer 272 dp navy | `DashboardShell.kt`, `Sidebar.kt` | `Views/Shell/*` | unverified (skeleton) | 1/3 |
-| Wide chrome: navy docked sidebar 208 dp / rail 60 dp, collapse rule (<1200 dp), bell popup 316 dp, toast top-end, offline dot, docked call panel 420 dp at ≥1000 dp | same | `NavigationSplitView` / custom sidebar | missing | 3 |
-| Sidebar items, badges (Inbox = human, Orders = pending), account card (profile, settings, dark mode switch, sign out), signing-out spinner | `Sidebar.kt` | — | missing | 3 |
+| Phone chrome: header (☰, amber logo, "Neema · {view}", reconnecting pill, bell with "9+" badge, theme toggle), bottom nav (first 4 + More, amber indicator), drawer 272 dp navy | `DashboardShell.kt`, `Sidebar.kt` | `Views/Shell/*` | unverified — the web's icon paths, the wordmark that yields at 150% text, the bell with its red count, the theme switch, the bottom bar's half-width indicator and capped labels, the 272 pt start-edge drawer | 1/3 |
+| Wide chrome: navy docked sidebar 208 dp / rail 60 dp, collapse rule (<1200 dp), bell popup 316 dp, toast top-end, offline dot, docked call panel 420 dp at ≥1000 dp | same | `NavigationSplitView` / custom sidebar | unverified — `navMode(for:)`: rail under 1200 pt (the choice holds until the mode changes), docked 208 pt × text scale beyond; toast top-end; the "Reconnecting…" pill; the bell popup is cycle 5 and the docked call panel cycle 5 | 3 |
+| Sidebar items, badges (Inbox = human, Orders = pending), account card (profile, settings, dark mode switch, sign out), signing-out spinner | `Sidebar.kt` | — | unverified — amber pill rows with navy ink, the three badge sizes with the full number, the account row (online dot, role line, rotating chevron, signing-out ring), the account card inline or as a popover on the rail | 3 |
 | Bell panel: header, mute control (1 h / 8 h / until), mark all read, rows by kind with emoji tiles, dismiss, footer "Clear all", mute status strings | `ShellParts.kt` | — | missing | 5 |
-| Connectivity banner (offline / back online 2.5 s) | `ShellParts.kt` | — | missing | 3 |
-| Back-press order: bell popup → account menu → drawer → the view → history → Inbox → exit | `ShellBack.kt` | — | platform-restricted (iOS has no system back; the in-app rules apply to the navigation stack and sheets) | 3 |
+| Connectivity banner (offline / back online 2.5 s) | `ShellParts.kt` | — | unverified (the solid badge, the two wordings, 2.5 s fold) | 3 |
+| Back-press order: bell popup → account menu → drawer → the view → history → Inbox → exit | `ShellBack.kt` | — | platform-restricted — iOS has no system back; the shell's overlays (drawer, account card, sheets) dismiss by swipe, scrim tap or ✕, and the in-app history (`NavHistory`) stays for the keyboard's Escape in cycle 9 | 3 |
 | Keyboard shortcuts: Ctrl+1…9, Ctrl+B, Alt+↑/↓, Ctrl+[ ], Ctrl+F/K, Esc, Enter/Shift+Enter in the composer | `core/ui/Shortcuts.kt` | `.keyboardShortcut` | missing | 9 |
 | Drag-and-drop of files onto the thread | `DropFiles.kt` | `.dropDestination` (iPad) | missing | 9 |
-| System bar icon colours by theme / signed-out | `MainActivity` | `.preferredColorScheme`, status bar style | missing | 3 |
-| Dark mode: app-controlled (`theme` pref), three toggles, always-night login, always-light cards | `AppPrefs`, `NeemaTheme` | `NeemaTheme` | partial (tokens defined; toggle wiring in Cycle 3) | 3 |
+| System bar icon colours by theme / signed-out | `MainActivity` | `.preferredColorScheme`, status bar style | unverified — `.preferredColorScheme`: dark over the night login and the dark theme, light otherwise (the wide shell's navy top edge is drawn under the status bar) | 3 |
+| Dark mode: app-controlled (`theme` pref), three toggles, always-night login, always-light cards | `AppPrefs`, `NeemaTheme` | `NeemaTheme` | unverified — the `theme` pref drives the environment; three toggles (header, account card pill, Profile); the login is always night; the account card always white | 3 |
 | Notification permission asked once after first sign-in | `MainActivity.maybeAskForNotifications` | `UNUserNotificationCenter.requestAuthorization` | missing | 5/7 |
 
 ## 3. Inbox list (`feature/conversations/ConversationList.kt`, `ConversationsViewModel.kt`)
@@ -353,13 +353,13 @@ signing exists (no Apple Developer credentials in the repo or on the box).
 
 | Feature | Status | Cycle |
 |---|---|---|
-| `NeemaColors` light/dark (20 tokens), Brand (9), Tones (5 × light/dark), Chrome, ChannelColors (+ gradients), Palette ramps (Moss, Willow, Prussian, Sage, Stone, Gray, Slate, Pewter, Amber, Red, Emerald, Green, Blue, Violet, Purple, area literals, pipeline chips, avatar palette) | `NeemaApp/Theme/NeemaTheme.swift` — unverified | 1/3 |
-| Typography: Manrope 400–800, DM Mono 400/500, type scale (headlineSmall 22 EB … labelSmall 11 SB), `TabularNums`, `scaledAtMost` caps | fonts bundled; `Font.custom` scale | unverified | 1/3 |
-| Spacing (16 / 24 page, 14 / 16 / 20 card, 48 dp targets), corner radii table (4–18) | tokens | unverified | 3 |
-| Icons: `WebIcons` (heroicons paths), `OverviewIcons`, Material icons | SF Symbols equivalents (+ custom paths for brand glyphs) | missing | 3 |
-| Shared components: Avatar (initials / person glyph / image, 10-hue palette), ChannelChip, Pill, Loading, EmptyState, ErrorState, Panel, SectionTitle, StatTile, SearchField, FilterChips, ConfirmDialog, CountBadge, LoadProblem, StaleBanner, InlineError | `Views/Components/*` | missing | 2/3 |
-| Adaptive rules: `THREAD_MIN 480`, `TWO_PANE_MIN 801`, `DOCKED_NAV_MIN 1200`, `navModeFor` (<600 drawer / <1200 rail / docked), `inboxPanes`, `LocalContentWidthDp` | `NeemaCore/Shell/Adaptive.swift` | missing | 3 |
-| Screenshot goldens (Paparazzi, 173+ call PNGs, inbox 141…) as visual references | snapshot tests on macOS CI in a later cycle | missing | 8/9 |
+| `NeemaColors` light/dark (20 tokens), Brand (9), Tones (5 × light/dark), Chrome, ChannelColors (+ gradients), Palette ramps (Moss, Willow, Prussian, Sage, Stone, Gray, Slate, Pewter, Amber, Red, Emerald, Green, Blue, Violet, Purple, area literals, pipeline chips, avatar palette) | unverified — the dim tokens, chrome inks and tones added; `Palette` carries every literal the ported screens use | 1/3 |
+| Typography: Manrope 400–800, DM Mono 400/500, type scale (headlineSmall 22 EB … labelSmall 11 SB), `TabularNums`, `scaledAtMost` caps | fonts bundled; `Font.custom` scale | unverified — `NeemaFont.manrope` (scales), `.fixed`, `.capped(_:maxScale:)` (Android `scaledAtMost`), the ten-step type scale | 1/3 |
+| Spacing (16 / 24 page, 14 / 16 / 20 card, 48 dp targets), corner radii table (4–18) | tokens | unverified — the ported screens use the web's values in points | 3 |
+| Icons: `WebIcons` (heroicons paths), `OverviewIcons`, Material icons | SF Symbols equivalents (+ custom paths for brand glyphs) | unverified — `WebIcons` (the heroicon paths, stroked) across the chrome and the login; `OverviewIcons` and `ChannelIcons` for the panels and brand marks; SF Symbols remain where the web has no icon of its own | 3 |
+| Shared components: Avatar (initials / person glyph / image, 10-hue palette), ChannelChip, Pill, Loading, EmptyState, ErrorState, Panel, SectionTitle, StatTile, SearchField, FilterChips, ConfirmDialog, CountBadge, LoadProblem, StaleBanner, InlineError | `Views/Components/*` | unverified — `AvatarView`, `ChannelCodeChip`, `TeamPill`, `LoadingView`, `EmptyStateView`, `ErrorStateView`, `PanelCard`, `SectionLabel`, `StatTile`, `CompactSearchField`, `WebBtn` / `TeamBtn`, `FormSheet`, `AmberBadge`, `LoadProblem`, `StaleBanner`, `InlineError`, `AdaptiveSheet` | 2/3 |
+| Adaptive rules: `THREAD_MIN 480`, `TWO_PANE_MIN 801`, `DOCKED_NAV_MIN 1200`, `navModeFor` (<600 drawer / <1200 rail / docked), `inboxPanes`, `LocalContentWidthDp` | `NeemaCore/Shell/Adaptive.swift` | verified (`Adaptive.swift`, `AdaptiveTests`) · the shell uses `navMode(for:)`, the inbox `inboxPanes` | 3 |
+| Screenshot goldens (Paparazzi, 173+ call PNGs, inbox 141…) as visual references | snapshot tests on macOS CI in a later cycle | partial — a screenshot gallery renders the sign-in screen and every view (phone light/dark, iPad) on the macOS job into the `ios-screenshots` artifact; comparison against Android's goldens is cycle 9 | 3/9 |
 
 ## 23. Endpoint coverage (81 endpoints the Android app calls)
 

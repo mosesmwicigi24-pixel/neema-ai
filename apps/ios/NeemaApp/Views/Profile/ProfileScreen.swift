@@ -109,7 +109,7 @@ struct ProfileBody: View {
                     ToggleRow(label: "Available",
                               desc: available ? "You're online — the team sees you as available and chats can be transferred to you."
                                               : "You're away — shown as offline to the team.",
-                              on: available) { vm.setAvailable(agentId: agent.id, available: !available) }
+                              on: available) { Haptics.tap(); vm.setAvailable(agentId: agent.id, available: !available) }
                 }
                 passwordCard
                 ProfileSection(title: "Appearance") {

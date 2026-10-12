@@ -247,7 +247,7 @@ struct TeamBody: View {
                     ForEach(row) { agent in
                         AgentCard(agent: agent, available: ui.availability[agent.id] ?? agent.isAvailable,
                                   customRole: agent.customRoleId.flatMap { roleIndex[$0] }, now: now,
-                                  onToggle: { vm.toggleOnline(agent, current: ui.availability[agent.id] ?? agent.isAvailable) },
+                                  onToggle: { Haptics.tap(); vm.toggleOnline(agent, current: ui.availability[agent.id] ?? agent.isAvailable) },
                                   onRole: { vm.editForms { $0.openAssign(agent, roles: ui.roles) }; open(.assign(agent.id)) },
                                   onEdit: { vm.editForms { $0.openEdit(agent) }; open(.edit(agent.id)) },
                                   onPassword: { vm.editForms { $0.openPassword() }; open(.password(agent.id)) },
