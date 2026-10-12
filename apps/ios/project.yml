@@ -29,6 +29,10 @@ targets:
     platform: iOS
     sources:
       - path: NeemaApp
+      # The recorded backend's answers (the gallery's fixture set) ride in the app
+      # bundle too: `-neema-canned` launches (the UI tests) are served from them.
+      - path: NeemaAppTests/Gallery/fixtures.json
+        buildPhase: resources
     dependencies:
       - package: NeemaCore
         product: NeemaCore
@@ -94,15 +98,29 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: ke.co.bethanyhouse.neema.tests
         GENERATE_INFOPLIST_FILE: YES
+  NeemaAppUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources:
+      - path: NeemaAppUITests
+    dependencies:
+      - target: Neema
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: ke.co.bethanyhouse.neema.uitests
+        GENERATE_INFOPLIST_FILE: YES
+        TEST_TARGET_NAME: Neema
 schemes:
   Neema:
     build:
       targets:
         Neema: all
         NeemaAppTests: [test]
+        NeemaAppUITests: [test]
     run:
       config: Debug
     test:
       config: Debug
       targets:
         - NeemaAppTests
+        - NeemaAppUITests

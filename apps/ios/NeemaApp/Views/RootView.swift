@@ -5,6 +5,8 @@ import NeemaCore
 /// session-expired card over it when the server stopped accepting us.
 struct RootView: View {
     @EnvironmentObject private var app: AppModel
+    // A deep link that arrived signed out survives the login screen being killed in the background.
+    @SceneStorage("shell.pendingLink") private var savedPendingLink = ""
 
     var body: some View {
         ZStack {
@@ -22,6 +24,8 @@ struct RootView: View {
             }
         }
         .animation(.easeInOut(duration: 0.2), value: app.session == nil)
+        .onAppear { app.restorePendingLink(savedPendingLink) }
+        .onChange(of: app.pendingLink) { _ in savedPendingLink = app.savedPendingLink }
         // After the app closed on someone: the notice with Share and Copy, once per crash.
         .background(CrashNoticeView(vault: app.container.crashVault))
     }

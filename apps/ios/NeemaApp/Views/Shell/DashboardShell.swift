@@ -12,6 +12,10 @@ import NeemaCore
 struct DashboardShell: View {
     @EnvironmentObject private var app: AppModel
     @Environment(\.neema) private var c
+    // Android's SavedStateHandle: the view, its history and whose they are, and the toast on
+    // screen, survive the system killing the app in the background (not a sign-out).
+    @SceneStorage("shell.nav") private var savedNav = ""
+    @SceneStorage("shell.toast") private var savedToast = ""
 
     var body: some View {
         GeometryReader { g in
@@ -26,6 +30,13 @@ struct DashboardShell: View {
             .frame(width: g.size.width, height: g.size.height)
         }
         .background(c.surface.ignoresSafeArea())
+        .onAppear {
+            app.restoreNav(savedNav)
+            app.restoreToast(savedToast)
+            savedNav = app.savedNav
+        }
+        .onChange(of: app.nav) { _ in savedNav = app.savedNav }
+        .onChange(of: app.toast) { _ in savedToast = app.savedToast }
     }
 }
 
@@ -782,7 +793,8 @@ struct AvatarView: View {
     /// components/ui/Avatar.tsx: one neutral stone-green disc with dark-green initials,
     /// and a person glyph for an unnamed contact whose "name" is only a phone number.
     private var disc: some View {
-        let phoneLike = isPhoneLike(name)
+        // Common.kt: a blank name or one that is really a number / id gets the glyph (`isPhoneLike` is the core's).
+        let phoneLike = (name ?? "").trimmingCharacters(in: .whitespaces).isEmpty || isPhoneLike(name)
         return Circle()
             .fill(c.isDark ? Color(hex: 0x0F1424) : Color(hex: 0xF5F6F3))
             .overlay(Circle().stroke(c.isDark ? Color(hex: 0x1F367A) : Color(hex: 0xDDE8D5)))
@@ -797,17 +809,6 @@ struct AvatarView: View {
             )
             .frame(width: size, height: size)
     }
-}
-
-/// True when a "name" is really a phone number, a Meta id or a website-chat
-/// visitor: its initials would read "+7", "MI" or "WV", so the avatar shows a person glyph.
-func isPhoneLike(_ name: String?) -> Bool {
-    let n = (name ?? "").trimmingCharacters(in: .whitespaces)
-    if n.isEmpty { return true }
-    if n.lowercased().hasPrefix("messenger id") { return true }
-    if n.lowercased() == "website visitor" || n.hasPrefix("web_") { return true }
-    let digits = n.filter { !" +-().".contains($0) }
-    return !digits.isEmpty && digits.allSatisfy { $0.isNumber }
 }
 
 /// "Reconnecting…": the socket is down while the device is online (amber-100

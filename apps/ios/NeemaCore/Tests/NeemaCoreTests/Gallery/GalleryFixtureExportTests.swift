@@ -19,13 +19,16 @@ final class GalleryFixtureExportTests: XCTestCase {
         AppClock.pin(to: PINNED)
         defer { AppClock.reset() }
         let fake = Fixtures.withFixtures()
-        // Later registrations win: the reports' full set first, then the inbox page, the customers, the sales screens, the team.
+        // Later registrations win: the calls log first (its customer profile is the small one), then the reports' full set,
+        // the inbox page, the customers, the sales screens, the team.
+        CallsFixtures.install(fake)
         ReportsFixtures.install(fake)
         InboxFixtures.install(fake)
         CustomerFixtures.install(fake)
         SalesFixtures.install(fake)
         TeamFixtures.install(fake)
         TeamFixtures.settings(fake)
+        fake.on("GET", "/admin/calls/channels", body: #"{"whatsapp":{"inbound":true,"outbound":true,"video":false,"sdp":"answer"},"messenger":{"inbound":false,"outbound":false,"video":false},"instagram":{"inbound":false,"outbound":false,"video":false}}"#)
         let host = TestHost(fake: fake, ordersFeed: true, catalogFeed: true)
         _ = try? await host.refreshAgents()
         host.refetchMe()
@@ -44,6 +47,11 @@ final class GalleryFixtureExportTests: XCTestCase {
         let profile = ProfileViewModel(host: host)
         let settings = SettingsViewModel(host: host)
         settings.calling.start()
+        // The calls console (the log, the channels, the first row's transcript) and Settings' crash reports card.
+        host.calls.start()
+        let calls = CallsViewModel(host: host)
+        calls.load()
+        _ = try? await host.api.crashes.list(limit: 20)
         for life in [orders.life, catalog.life, deals.life, leads.life, overview.life, reports.life, team.life] { life?.shown.update(true) }
         await drain()
         await settle(ms: 300)
@@ -58,7 +66,10 @@ final class GalleryFixtureExportTests: XCTestCase {
             await settle(ms: 300)
             customer.close()
         }
-        _ = await eventually(timeout: 10) { reports.ui.report != nil && !overview.ui.statsLoading && !team.ui.rolesLoading && !settings.busy && !settings.calling.ui.loading }
+        _ = await eventually(timeout: 10) { reports.ui.report != nil && !overview.ui.statsLoading && !team.ui.rolesLoading && !settings.busy && !settings.calling.ui.loading && calls.calls.value != nil }
+        if let first = calls.calls.value?.first { calls.select(first); calls.toggleTranscript(first.callId) }
+        await drain()
+        await settle(ms: 300)
         await drain()
         await settle(ms: 300)
         _ = (profile, leads)
@@ -87,7 +98,7 @@ final class GalleryFixtureExportTests: XCTestCase {
         try Data(doc.text.utf8).write(to: file)
         print("gallery fixtures: \(responses.count) responses → \(file.path)")
         for v in [inbox as AnyObject, orders, catalog, deals, leads, overview, reports, team, profile] { _ = v }
-        inbox.close(); orders.close(); catalog.close(); deals.close(); leads.close(); overview.close(); reports.close(); team.close(); profile.close(); settings.close()
+        inbox.close(); orders.close(); catalog.close(); deals.close(); leads.close(); overview.close(); reports.close(); team.close(); profile.close(); settings.close(); calls.close()
         host.logout()
         XCTAssertGreaterThan(responses.count, 10)
     }

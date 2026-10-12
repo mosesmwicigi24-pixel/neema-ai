@@ -79,7 +79,8 @@ final class AppModel: ObservableObject {
 
     private let toasts: ToastPresenter
     private var subs: [Subscription] = []
-    private var pendingLink: DeepLink?
+    /// A deep link that arrived signed out: replayed right after sign-in (page.tsx's sessionStorage "neema:deeplink").
+    @Published private(set) var pendingLink: DeepLink?
     private var pollTask: Task<Void, Never>?
     private var forbiddenRefresh: Coalescer?
     private var lastForbiddenRefresh: Int64 = .min / 2
@@ -154,6 +155,11 @@ final class AppModel: ObservableObject {
         })
         subs.append(container.online.observe { [weak self] up in
             Task { @MainActor in self?.online = up }
+        })
+        // Every notification frame toasts "title: body" as it lands in the bell (page.tsx showToast; the
+        // inbox and the orders feed refetch themselves from the same frames).
+        subs.append(notifications.incoming.observe { [weak self] n in
+            Task { @MainActor in self?.toast("\(n.title): \(n.body)", .info) }
         })
         subs.append(toasts.current.observe { [weak self] t in
             Task { @MainActor in self?.toast = t }
@@ -251,11 +257,23 @@ final class AppModel: ObservableObject {
         if calls.state.value.live && calls.state.value.phase != .ringing {
             Task { @MainActor [weak self] in
                 guard let self = self else { return }
-                await self.calls.endForSignOut()
+                await self.endCallBounded()
                 self.finishLogout()
             }
         } else {
             finishLogout()
+        }
+    }
+
+    /// `endForSignOut` bounds itself at 3 s; this only guards against it ever
+    /// hanging (DashboardViewModel.SIGN_OUT_CALL_MS).
+    private func endCallBounded() async {
+        let calls = self.calls
+        await withTaskGroup(of: Void.self) { group in
+            group.addTask { @MainActor in await calls.endForSignOut() }
+            group.addTask { try? await Task.sleep(nanoseconds: UInt64(Self.SIGN_OUT_CALL_MS) * 1_000_000) }
+            _ = await group.next()
+            group.cancelAll()
         }
     }
 
@@ -375,6 +393,8 @@ final class AppModel: ObservableObject {
     }
 
     static let ASKED_NOTIFICATIONS = "asked_post_notifications"
+    /// The shell's own cap on waiting for the call to end before the token goes (the terminate request needs it).
+    static let SIGN_OUT_CALL_MS: Int64 = 4_000
 
     /// A row in the bell: read, and where it names a customer (or an order) the
     /// app also takes the agent there — the same target as tapping its phone notification.
@@ -541,6 +561,55 @@ final class AppModel: ObservableObject {
         case .navigate(let v): navigate(v)
         case nil: break
         }
+    }
+
+    // ── Saved state across a process death (Android's SavedStateHandle) ──────
+
+    /// The view, its history and whose they are, as the scene stores them
+    /// (`@SceneStorage` in `DashboardShell`): restored after the system killed
+    /// the app in the background, never after a sign-out.
+    var savedNav: String {
+        guard let id = signedInAgent else { return "" }
+        let names = ([nav.view] + nav.history).map { $0.rawValue }
+        return ([id] + names).joined(separator: ",")
+    }
+
+    /// A view restored after a process death belongs to whoever was signed in
+    /// then: someone else starts on the inbox. Unknown names are ignored.
+    func restoreNav(_ saved: String) {
+        let parts = saved.split(separator: ",").map(String.init)
+        guard parts.count >= 2, parts[0] == signedInAgent, let view = ViewId(rawValue: parts[1]) else { return }
+        let history = parts.dropFirst(2).compactMap { ViewId(rawValue: $0) }
+        nav = NavHistory(view: view, history: history)
+    }
+
+    /// The pending link as the scene stores it (`@SceneStorage` in `RootView`), so the
+    /// login screen being killed in the background does not lose it either.
+    var savedPendingLink: String {
+        guard let l = pendingLink else { return "" }
+        return [l.open, l.ref, l.view, l.caller].map { $0 ?? "" }.joined(separator: "\u{1F}")
+    }
+
+    func restorePendingLink(_ saved: String) {
+        guard session == nil, pendingLink == nil, !saved.isEmpty else { return }
+        let f = saved.split(separator: "\u{1F}", omittingEmptySubsequences: false).map { $0.isEmpty ? nil : String($0) }
+        guard f.count == 4 else { return }
+        let link = DeepLink(open: f[0], ref: f[1], view: f[2], caller: f[3])
+        if !link.isEmpty { pendingLink = link }
+    }
+
+    /// The toast on screen, as the scene stores it: a toast restored after a
+    /// process death gets its time on screen again; an expired one is gone.
+    var savedToast: String {
+        guard let t = toast else { return "" }
+        return "\(t.type.rawValue)\u{1F}\(t.message)"
+    }
+
+    func restoreToast(_ saved: String) {
+        guard toast == nil, !saved.isEmpty else { return }
+        let f = saved.split(separator: "\u{1F}", maxSplits: 1, omittingEmptySubsequences: false).map(String.init)
+        guard f.count == 2, let type = ToastType(rawValue: f[0]), !f[1].isEmpty else { return }
+        toasts.show(f[1], type)
     }
 
     // ── Toasts, theme, errors ───────────────────────────────────────────────
