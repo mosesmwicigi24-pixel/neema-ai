@@ -44,7 +44,7 @@ struct CurrentView: View {
         case .overview: OverviewScreen()
         case .catalog: CatalogScreen()
         case .agents: TeamScreen()
-        case .settings: ViewPlaceholder(view: .settings, cycle: 4, note: "Platform configuration and integrations.")
+        case .settings: SettingsScreen()
         case .profile: ProfileScreen()
         }
     }

@@ -25,6 +25,7 @@ final class GalleryFixtureExportTests: XCTestCase {
         CustomerFixtures.install(fake)
         SalesFixtures.install(fake)
         TeamFixtures.install(fake)
+        TeamFixtures.settings(fake)
         let host = TestHost(fake: fake, ordersFeed: true, catalogFeed: true)
         _ = try? await host.refreshAgents()
         host.refetchMe()
@@ -41,6 +42,8 @@ final class GalleryFixtureExportTests: XCTestCase {
         let reports = ReportsViewModel(host: host)
         let team = TeamViewModel(host: host)
         let profile = ProfileViewModel(host: host)
+        let settings = SettingsViewModel(host: host)
+        settings.calling.start()
         for life in [orders.life, catalog.life, deals.life, leads.life, overview.life, reports.life, team.life] { life?.shown.update(true) }
         await drain()
         await settle(ms: 300)
@@ -55,7 +58,7 @@ final class GalleryFixtureExportTests: XCTestCase {
             await settle(ms: 300)
             customer.close()
         }
-        _ = await eventually(timeout: 10) { reports.ui.report != nil && !overview.ui.statsLoading && !team.ui.rolesLoading }
+        _ = await eventually(timeout: 10) { reports.ui.report != nil && !overview.ui.statsLoading && !team.ui.rolesLoading && !settings.busy && !settings.calling.ui.loading }
         await drain()
         await settle(ms: 300)
         _ = (profile, leads)
@@ -84,7 +87,7 @@ final class GalleryFixtureExportTests: XCTestCase {
         try Data(doc.text.utf8).write(to: file)
         print("gallery fixtures: \(responses.count) responses → \(file.path)")
         for v in [inbox as AnyObject, orders, catalog, deals, leads, overview, reports, team, profile] { _ = v }
-        inbox.close(); orders.close(); catalog.close(); deals.close(); leads.close(); overview.close(); reports.close(); team.close(); profile.close()
+        inbox.close(); orders.close(); catalog.close(); deals.close(); leads.close(); overview.close(); reports.close(); team.close(); profile.close(); settings.close()
         host.logout()
         XCTAssertGreaterThan(responses.count, 10)
     }

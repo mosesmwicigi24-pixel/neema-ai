@@ -92,11 +92,21 @@ public struct DirectivesResponse: Equatable, Sendable, Decodable {
     public init(from decoder: Decoder) throws { let c = try decoder.lenient(K.self); self.init(directives: c.string(.directives, default: ""), maxChars: c.int(.max_chars, default: 0)) }
 }
 
+/// crm.py get_pipeline_stages / put_pipeline_stages: `{"stages": [...]}`.
+/// Strict about the list: a body whose `stages` is not a list is an error,
+/// never "no custom stages" (a save over that would replace the real list).
 public struct StagesResponse: Equatable, Sendable, Decodable {
     public var stages: [String]
     public init(stages: [String] = []) { self.stages = stages }
     enum K: String, CodingKey { case stages }
-    public init(from decoder: Decoder) throws { self.init(stages: (try decoder.lenient(K.self)).stringList(.stages)) }
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.lenient(K.self)
+        switch c.value(.stages) {
+        case nil, .null?: self.init(stages: [])
+        case .array?: self.init(stages: c.stringList(.stages))
+        default: throw DecodingError.typeMismatch([String].self, DecodingError.Context(codingPath: [K.stages], debugDescription: "stages must be a list"))
+        }
+    }
 }
 
 public struct OfferPutResponse: Equatable, Sendable, Decodable {
@@ -166,5 +176,34 @@ public struct TokenResponse: Equatable, Sendable, Decodable {
         guard let access = c.string(.access_token) else { throw DecodingError.keyNotFound(K.access_token, .init(codingPath: [], debugDescription: "no access_token")) }
         self.init(accessToken: access, refreshToken: c.string(.refresh_token), tokenType: c.string(.token_type, default: "bearer"), agentId: c.string(.agent_id, default: ""),
                   role: c.string(.role, default: "agent"), isSuperuser: c.bool(.is_superuser, default: false))
+    }
+}
+
+/// One row of GET /admin/client-crashes (routers/admin.py client_crash_list):
+/// what failed on someone's phone, on which device and build, and the trace.
+public struct ClientCrashReport: Identifiable, Equatable, Hashable, Sendable, Decodable {
+    public let id: String
+    public var kind: String
+    public var at: String?
+    public var receivedAt: String?
+    public var agentName: String?
+    public var summary: String
+    public var trace: String
+    public var thread: String?
+    public var appVersion: String?
+    public var build: String?
+    public var device: String?
+    public var sdk: Int?
+    public init(id: String = "", kind: String = "crash", at: String? = nil, receivedAt: String? = nil, agentName: String? = nil, summary: String = "",
+                trace: String = "", thread: String? = nil, appVersion: String? = nil, build: String? = nil, device: String? = nil, sdk: Int? = nil) {
+        self.id = id; self.kind = kind; self.at = at; self.receivedAt = receivedAt; self.agentName = agentName; self.summary = summary
+        self.trace = trace; self.thread = thread; self.appVersion = appVersion; self.build = build; self.device = device; self.sdk = sdk
+    }
+    enum K: String, CodingKey { case id, kind, at, received_at, agent_name, summary, trace, thread, app_version, build, device, sdk }
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.lenient(K.self)
+        self.init(id: c.string(.id, default: ""), kind: c.string(.kind, default: "crash"), at: c.string(.at), receivedAt: c.string(.received_at),
+                  agentName: c.string(.agent_name), summary: c.string(.summary, default: ""), trace: c.string(.trace, default: ""), thread: c.string(.thread),
+                  appVersion: c.string(.app_version), build: c.string(.build), device: c.string(.device), sdk: c.int(.sdk))
     }
 }

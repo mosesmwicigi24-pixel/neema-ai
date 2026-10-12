@@ -436,3 +436,100 @@ screen (every card, incl. WhatsApp calling and crash reports), the server
 contracts re-checked endpoint by endpoint against the OpenAPI, every write's
 uncertain-result reconciliation, 403 → access re-read, permission gates, the
 price/ordering invariants the Android tests pin.
+
+### Cycle 4 — Business logic & backend integrity
+
+**Features implemented / verified**
+
+- Settings, in NeemaCore (`Settings/`), one rule for one rule with Android's
+  `feature/settings`: `SettingsRules` (the local-only Business / AI /
+  Integrations models and their copy, crm.py's pipeline constants and
+  cleaning, strict ISO dates for the pickers, `offerProblem` — the 422 said
+  before the round trip and naming the field, the cards' toasts);
+  `SettingsViewModel` — the four live cards read independently with a
+  per-card reason and Retry (the standing-orders box stays locked until the
+  real text arrives: the web unlocks an empty box whose save would wipe the
+  real orders), the translation switch optimistic with the server's truth
+  re-read on no answer, the offer with verify-after-no-answer through
+  `sameOffer` and the three saved toasts (live / starts later / expired),
+  pipeline stages PUT as the whole list with the server's cleaning mirrored
+  for the no-answer check, the typed label cleared only once kept, the
+  local-only cards toasting and persisting nothing, `saveUi`/`restoreUi`
+  with secrets never saved and a pending restore until the card loads, the
+  `ScreenLife` re-read on return skipping dirty cards; `CallingSettingsModel`
+  — only-the-diff save, every field checked before anything is sent, Meta's
+  own words on a refusal, `call_settings` frames reloading unless edits are
+  unsaved, the call-request template.
+- `ClientCrashReport` and `api.crashes.list/report` (matrix rows 50–51).
+- The SwiftUI screen: `SettingsScreen` (one column, two from 720 pt with the
+  tall offer under the standing orders; every card; pull-to-refresh; the
+  typed state in the scene storage), `OfferCard` (category chips from the
+  catalogue, the product picker sheet, UTC date sheets, the End
+  confirmation), `CallingSettingsCard` (restrictions, the three call-button
+  chips, voicemail, the hours editor with holidays, the template status),
+  `CrashReportsCard` (load on tap, expand, Copy report to the clipboard).
+  `.settings` is routed; the gallery renders it against the canned settings
+  answers (the exporter now drives the model: 29 canned responses).
+- Backend integrity: `RouteCoverageTests` reads every `http.*` call in the
+  core's sources and matches method and path against the server's route
+  table (`ServerRoutes.swift`, 142 routes, generated from `apps/api/app` by
+  `apps/ios/scripts/server_routes.py`): 89 distinct client calls (102 call
+  sites), all served; the 14 admin routes neither app calls are the web's.
+  The no-answer paths of every write, audited: Team (6 writes: refetch and
+  compare), Profile (2: `/me` re-read), Customer (6 paths through
+  `mayHaveLanded`), Settings (4: the truth re-read), Orders / Deals / Leads
+  (status, approve/veto, stage: the list re-read through the feed —
+  `mayHaveHappened`), the inbox's sends (its own server check at 0 / 2 / 8 s,
+  `RESTORE_CHECK_MS`). The 403 re-read of who this agent is stays in one
+  place (`NeemaHTTP.forbidden` → the shell's coalesced refetch) and is pinned
+  for settings too (`testARefusedSaveRereadsWhoThisAgentIs`). Permission
+  gates: Settings has none (as the web), the calling and crash cards need
+  manage_settings (as Android), the rest unchanged from cycle 2's audit.
+
+**Defects corrected**
+
+1. `StagesResponse` read a body whose `stages` was not a list as "no custom
+   stages" — a save over that would have replaced the real list with one
+   stage. It is now a decoding error the card shows with Retry (Android's
+   serializer refuses it the same way).
+2. The route matcher escaped the server's `{param}` placeholders before
+   turning them into patterns, so every parameterised route read as unserved
+   — caught by its own first run, fixed before it shipped.
+
+**Tests executed**
+
+- `swift test` in `apps/ios/NeemaCore` on Linux: **1004 tests, 0 failures**,
+  1 skipped (the gallery exporter): cycle 3's 918, the 83 settings tests
+  (Android's 76 — `SettingsViewModelTests` 24, `SettingsNetworkTests` 22,
+  `SettingsContractTests` 19, `SettingsLifecycleTests` 6,
+  `CallingSettingsModelTests` 5 — plus the 403 re-read, the Business/AI
+  waits, the crash list's contract and 403, the restore-once rule, and the
+  calling rules on their own), and the 3 route-coverage tests.
+- macOS CI (`Neema app (iOS Simulator)`): green on ccf2ed7 (run
+  38287130688: XcodeGen, the simulator build, the app's test bundle with the
+  screenshot gallery — no compile defect); every other check green on the
+  same head (NeemaCore on Linux, API tests, migrations, web, lint, import
+  smoke).
+
+**Remaining parity gaps** (scope of this cycle)
+
+- The settings UI is compile- and gallery-verified only: the pickers, the
+  date sheets (a graphical `DatePicker` in UTC where Android opens the
+  Material dialog) and the hours editor have not been touched on a device.
+- The crash reporter itself (POST /client-crashes from a crashing iOS app)
+  is cycle 7's; the card reads what Android has sent.
+- The WhatsApp calling card lives in Settings as on Android; calls
+  themselves (the log, the softphone) are cycle 5's.
+- The crash card says "the app" where Android says "the Android app": the
+  server lists every phone's reports once iOS sends them too.
+
+**Blockers** (carried) — no Xcode or device here; backend push; no Apple
+credentials.
+
+**Next cycle** — Cycle 5: messaging, communication & real-time — the calls
+screen (log, details, transcripts, the call-request flow), the softphone
+groundwork (CallKit / PushKit, blocked server-side for pushes), the bell
+(notifications list, mute, the wide shell's popup), the live socket under
+the iOS lifecycle (background suspension, reconnect on return), the docked
+call panel, and the inbox's media round trips on a real device where one
+exists.

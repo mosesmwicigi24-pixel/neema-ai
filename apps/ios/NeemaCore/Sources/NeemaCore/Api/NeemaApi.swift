@@ -96,6 +96,7 @@ public final class NeemaApi {
         calls = Calls(self)
         profile = Profile(self)
         roles = Roles(self)
+        crashes = Crashes(self)
     }
 
     public private(set) var conversations: Conversations!
@@ -109,6 +110,7 @@ public final class NeemaApi {
     public private(set) var calls: Calls!
     public private(set) var profile: Profile!
     public private(set) var roles: Roles!
+    public private(set) var crashes: Crashes!
 
     static let empty: JSONValue = .object([:])
 
@@ -155,6 +157,16 @@ public final class NeemaApi {
             return try api.http.decode(try await api.http.raw("POST", "/admin/actions/\(id)/approve", body: try api.http.encode(JSONValue.object(o)), upload: true))
         }
         public func veto(id: String) async throws -> OkResponse { try await api.http.post("/admin/actions/\(id)/veto", NeemaApi.empty) }
+    }
+
+    /// The phone apps' crash reports (routers/admin.py client_crash_report / client_crash_list).
+    public final class Crashes {
+        unowned let api: NeemaApi
+        init(_ api: NeemaApi) { self.api = api }
+        /// GET /admin/client-crashes?limit=N (manage_settings): newest first, at most 100.
+        public func list(limit: Int = 20) async throws -> [ClientCrashReport] { try await api.http.get("/admin/client-crashes?limit=\(limit)") }
+        /// POST /admin/client-crashes: one report `{id, kind, at, summary, trace, thread, app_version, build, device, sdk}`; a repeated id answers `{ok, duplicate}`.
+        public func report(_ body: JSONValue) async throws -> JSONValue { try await api.http.post("/admin/client-crashes", body) }
     }
 
     public final class Settings {
