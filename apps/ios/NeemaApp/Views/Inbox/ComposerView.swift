@@ -1,5 +1,6 @@
 import SwiftUI
 import PhotosUI
+import GameController
 import UniformTypeIdentifiers
 import NeemaCore
 
@@ -56,6 +57,7 @@ struct ComposerView: View {
     let txOn: Bool
     @Environment(\.neema) private var c
     @FocusState private var focused: Bool
+    @State private var dropHover = false
 
     private var vm: InboxViewModel { model.vm }
 
@@ -182,6 +184,8 @@ struct ComposerView: View {
                         .lineLimit(1...6)
                         .font(NeemaFont.manrope(14)).foregroundColor(c.text).tint(Amber)
                         .focused($focused)
+                        // A hardware keyboard: Return sends, Shift+Return is a new line (Shortcuts.swift `composerShortcut`).
+                        .modifier(HardwareReturnSends(enabled: canSend) { vm.sendReply() })
                         .padding(.horizontal, 16).padding(.vertical, 12)
                         .accessibilityLabel("Reply")
                 }
@@ -204,6 +208,62 @@ struct ComposerView: View {
         }
         .padding(.horizontal, 12).padding(.vertical, 10)
         .background(c.bg2)
+        // A drag from another app (Split View, Stage Manager): what Neema can attach lands in the tray
+        // (Shortcuts.swift `acceptsDrop`); text and links are left to the field.
+        .onDrop(of: [UTType.item], isTargeted: $dropHover) { providers in DroppedFiles.take(providers) { vm.addMedia($0) } }
+        .overlay {
+            if dropHover {
+                RoundedRectangle(cornerRadius: 16, style: .continuous).stroke(Amber, lineWidth: 2).padding(4)
+                    .allowsHitTesting(false)
+            }
+        }
+    }
+}
+
+/// Return on a hardware keyboard sends; Shift+Return stays a new line; the on-screen keyboard's
+/// Return is always a new line (iOS 17's key presses; earlier systems keep Cmd+Return only).
+private struct HardwareReturnSends: ViewModifier {
+    let enabled: Bool
+    let send: () -> Void
+
+    func body(content: Content) -> some View {
+        if #available(iOS 17.0, *) {
+            content.onKeyPress(.return, phases: .down) { press in
+                let hardware = GCKeyboard.coalesced != nil
+                let shortcut = composerShortcut(key: .enter, down: true, shift: press.modifiers.contains(.shift),
+                                                ctrl: press.modifiers.contains(.command) || press.modifiers.contains(.control), hardwareKeyboard: hardware)
+                guard shortcut == .send, enabled else { return .ignored }
+                send()
+                return .handled
+            }
+        } else {
+            content
+        }
+    }
+}
+
+/// Files dropped onto the composer, copied into the picked folder before the system reclaims them.
+enum DroppedFiles {
+    /// True when something Neema can attach was dropped (the drop is taken); the files land through `attach`.
+    static func take(_ providers: [NSItemProvider], attach: @escaping ([URL]) -> Void) -> Bool {
+        let wanted = providers.filter { p in
+            acceptsDrop(p.registeredTypeIdentifiers.compactMap { UTType($0)?.preferredMIMEType })
+        }
+        if wanted.isEmpty { return false }
+        let group = DispatchGroup()
+        let lock = NSLock()
+        var urls: [URL] = []
+        for p in wanted {
+            guard let id = p.registeredTypeIdentifiers.first(where: { UTType($0)?.preferredMIMEType.map { acceptsDrop([$0]) } == true }) else { continue }
+            group.enter()
+            p.loadFileRepresentation(forTypeIdentifier: id) { url, _ in
+                defer { group.leave() }
+                guard let url = url, let copy = PickedFiles.copy(url) else { return }
+                lock.lock(); urls.append(copy); lock.unlock()
+            }
+        }
+        group.notify(queue: .main) { if !urls.isEmpty { attach(urls) } }
+        return true
     }
 }
 

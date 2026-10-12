@@ -37,6 +37,27 @@ struct DashboardShell: View {
         }
         .onChange(of: app.nav) { _ in savedNav = app.savedNav }
         .onChange(of: app.toast) { _ in savedToast = app.savedToast }
+        // Esc on a hardware keyboard closes what is open (Shortcuts.swift `escapeIsBack`); a button
+        // with a shortcut fires wherever focus is, which `onKeyPress` would not.
+        .background(KeyButton(.escape, modifiers: []) { app.escapeBack() })
+    }
+}
+
+/// An invisible button whose only purpose is its keyboard shortcut (an iPad with a keyboard).
+struct KeyButton: View {
+    let key: KeyEquivalent
+    let modifiers: EventModifiers
+    let action: () -> Void
+    init(_ key: KeyEquivalent, modifiers: EventModifiers = .command, action: @escaping () -> Void) {
+        self.key = key
+        self.modifiers = modifiers
+        self.action = action
+    }
+    var body: some View {
+        Button(action: action) { Color.clear.frame(width: 1, height: 1) }
+            .keyboardShortcut(key, modifiers: modifiers)
+            .opacity(0.02)
+            .accessibilityHidden(true)
     }
 }
 
@@ -444,10 +465,14 @@ struct SidebarView: View {
                                 .frame(maxWidth: .infinity).frame(height: 48).contentShape(Rectangle())
                         }
                         .buttonStyle(.plain)
+                        .keyboardShortcut("b", modifiers: .command)
                         .padding(.bottom, 6)
                         .accessibilityLabel("Expand sidebar")
                     }
-                    ForEach(app.navItems, id: \.view) { item in navRow(item) }
+                    // Cmd+1...9 opens the nth view (Shortcuts.swift `appShortcut`).
+                    ForEach(Array(app.navItems.enumerated()), id: \.element.view) { i, item in
+                        navRow(item).keyboardShortcut(i < 9 ? KeyboardShortcut(KeyEquivalent(Character(String(i + 1))), modifiers: .command) : nil)
+                    }
                 }
                 .padding(.horizontal, isCollapsed ? 6 : 8).padding(.vertical, 8)
             }
@@ -477,7 +502,9 @@ struct SidebarView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 BellButton(count: app.unreadBell) { app.bellOpen.toggle() }
                 if docked, let collapsed = collapsed {
+                    // Cmd+B shows or hides the sidebar's labels.
                     NavyIconButton(glyph: WebIcons.collapse, label: "Collapse sidebar") { collapsed.wrappedValue = true }
+                        .keyboardShortcut("b", modifiers: .command)
                 }
             }
             .padding(.horizontal, 10).padding(.vertical, 6)
