@@ -811,12 +811,13 @@ a written permission / privacy checklist.
 
 **Tests executed**
 
-- `swift test` in `apps/ios/NeemaCore` on Linux: **{TESTS} tests, 0
+- `swift test` in `apps/ios/NeemaCore` on Linux: **1377 tests, 0
   failures**, 1 skipped: cycle 6's 1362 and the 15 crash tests
   (`CrashTests`: Android's `CrashHardeningTest` — the call log's update for
   an old call, keys that look like their own suffix, lead stages, the
   reporter's two — and the vault's file rules).
-- macOS CI (`Neema app (iOS Simulator)`): {MACOS}
+- macOS CI (`Neema app (iOS Simulator)`): the build with the crash handlers, the
+  notice and the manifest — the run recorded in the PR once green.
 
 **Remaining parity gaps** (scope of this cycle)
 

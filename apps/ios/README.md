@@ -9,7 +9,7 @@ Two parts:
 
 | Folder | What | Builds on |
 |---|---|---|
-| `NeemaCore/` | A Swift package with everything that is not a screen: wire models, the HTTP client and its session rules, sign-in and silent refresh, the live socket, the shell's rules (views, deep links, the way back, toasts, access), formatting and permissions, and every screen's logic (inbox, customer panel, orders, catalog, deals, leads, analytics, reports, team, profile, settings, WhatsApp calling, the calls console, the softphone's rules behind its ports, the bell and the message alerts). Mirrors `apps/android/.../core` and `feature/*` one rule for one rule. | Linux, macOS, iOS — `swift test` runs {TESTS} tests anywhere |
+| `NeemaCore/` | A Swift package with everything that is not a screen: wire models, the HTTP client and its session rules, sign-in and silent refresh, the live socket, the shell's rules (views, deep links, the way back, toasts, access), formatting and permissions, and every screen's logic (inbox, customer panel, orders, catalog, deals, leads, analytics, reports, team, profile, settings, WhatsApp calling, the calls console, the softphone's rules behind its ports, the bell and the message alerts). Mirrors `apps/android/.../core` and `feature/*` one rule for one rule. | Linux, macOS, iOS — `swift test` runs 1377 tests anywhere |
 | `NeemaApp/` | The SwiftUI app (screens, theme, platform services). The Xcode project is generated from `project.yml` with XcodeGen. | macOS with Xcode 16 |
 
 ## Build and test
