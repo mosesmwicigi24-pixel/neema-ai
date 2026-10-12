@@ -118,14 +118,22 @@ executed and results, remaining parity gaps, blockers, next cycle.
 3. Test helpers awaiting inside `XCTAssert` autoclosures — hoisted.
 4. Two socket tests dropped their `LiveSocket` (weak-self tasks) — the tests
    keep a reference, as the container does in the app.
+5. Found by the first macOS CI run: a return to the foreground both opened
+   the socket (the live policy) and nudged it, which cancels a socket still
+   shaking hands and opens a second one. The nudge is for a socket already
+   wanted and mid-backoff, so it is sent only when the foreground state did
+   not change (`AppModel.setForeground`).
 
 **Tests executed**
 
 - `swift test` in `apps/ios/NeemaCore` on Linux (Swift 6.2): **147 tests,
   0 failures** — ErrorText 7, NeemaHTTP 21, AuthRepository 37, LiveSocket
   24, Fmt 10, Perms 6, Flows 7, ApiContract 27, Shell 7, JSONValue 1.
-- macOS CI (app build + app tests): pending the first run on the pull
-  request; the result is recorded below when it lands.
+- macOS CI (pull request #269, `Neema app (iOS Simulator)` job, macOS 15,
+  XcodeGen → xcodebuild on the iPhone 17 simulator): run 1 on `27f2cc4` —
+  **BUILD SUCCEEDED** on the first compile of the SwiftUI layer, app tests
+  3 of 4 (defect 5 above); run 2 on `7a2b7f0` — build and **4 of 4 app
+  tests green**. The Linux core job was green on both runs.
 
 **Remaining parity gaps** — everything in `PARITY_MATRIX.md` marked
 missing/partial: all screens (cycles 2–5), notifications and the softphone
@@ -134,8 +142,9 @@ in matrix §25.
 
 **Blockers**
 
-- No Xcode here: SwiftUI is compiled only by the macOS CI job. Until that
-  job is green the app layer is "implemented-unverified".
+- No Xcode here: SwiftUI is compiled and its tests run only by the macOS CI
+  job (green since run 2). The app layer is "implemented-unverified" on a
+  device: no simulator session can be driven from here, nothing is signed.
 - Backend push (APNs + PushKit VoIP + token endpoints) does not exist: alerts
   and calls to a closed app cannot work on iOS until it does (matrix §25).
 - No Apple Developer credentials: nothing can be signed, installed on a
