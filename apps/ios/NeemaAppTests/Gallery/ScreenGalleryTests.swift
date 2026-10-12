@@ -117,8 +117,10 @@ final class ScreenGalleryTests: XCTestCase {
             .preferredColorScheme(shot.dark ? .dark : .light)
             .frame(width: shot.size.width, height: shot.size.height)
             .background(colors.surface)
+        NSLog("gallery: rendering %@-%@", shot.tag, name)
         let host = UIHostingController(rootView: content)
         host.overrideUserInterfaceStyle = shot.dark ? .dark : .light
+        if #available(iOS 16.4, *) { host.safeAreaRegions = [] }
         let window: UIWindow
         if let scene = UIApplication.shared.connectedScenes.compactMap({ $0 as? UIWindowScene }).first {
             window = UIWindow(windowScene: scene)
@@ -203,11 +205,6 @@ final class ScreenGalleryTests: XCTestCase {
         await pause()
         shot(phone, "session-expired"); shot(phoneDark, "session-expired"); shot(ipad, "session-expired")
         app.sessionExpired = false
-        // The first thread open: full-screen on the phone (immersive), beside the list on the iPad.
-        app.openConversationFor("c1")
-        await quiet(transport)
-        shot(phone, "thread"); shot(phoneDark, "thread"); shot(ipad, "thread")
-        app.navigate(.conversations)
         // The calls console with a call ringing (CallsScreenshotTest.cardRinging) and after the caller gave up (the wrap-up).
         app.navigate(.calls)
         await quiet(transport)
@@ -218,6 +215,13 @@ final class ScreenGalleryTests: XCTestCase {
         await pause(600)
         shot(phone, "call-ended"); shot(phoneDark, "call-ended")
         await pause(2_500)
+        // The first thread open: full-screen on the phone (immersive), beside the list on the iPad.
+        NSLog("gallery: opening the thread")
+        app.openConversationFor("c1")
+        await quiet(transport)
+        NSLog("gallery: the thread is open")
+        shot(ipad, "thread"); shot(phone, "thread"); shot(phoneDark, "thread")
+        app.navigate(.conversations)
         app.setDark(false)
     }
 }

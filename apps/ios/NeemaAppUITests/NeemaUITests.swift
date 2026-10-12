@@ -44,7 +44,10 @@ final class NeemaUITests: XCTestCase {
     }
 
     private func signedIn(file: StaticString = #filePath, line: UInt = #line) {
-        XCTAssertTrue(nav("Inbox").waitForExistence(timeout: 20), "the shell did not appear after sign-in", file: file, line: line)
+        let shown = nav("Inbox").waitForExistence(timeout: 20)
+        // What was on screen instead, in the build log (the hierarchy as VoiceOver sees it).
+        if !shown { print("neema-ui: no shell after sign-in; hierarchy:\n\(app.debugDescription)") }
+        XCTAssertTrue(shown, "the shell did not appear after sign-in", file: file, line: line)
     }
 
     // MARK: Sign-in

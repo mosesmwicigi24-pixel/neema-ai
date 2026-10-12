@@ -203,9 +203,10 @@ struct MobileHeader: View {
                 NeemaLogo(size: 28, corner: 8, glow: false)
                 Spacer().frame(width: 12)
                 if roomy {
-                    Text("Neema").font(NeemaFont.capped(14, .semibold, maxScale: 1.5)).foregroundColor(chrome.title).lineLimit(1)
+                    // The wordmark keeps its letters; the view's name is what truncates (MobileHeader.kt).
+                    Text("Neema").font(NeemaFont.capped(14, .semibold, maxScale: 1.5)).foregroundColor(chrome.title).lineLimit(1).fixedSize().layoutPriority(1)
                     Spacer().frame(width: 12)
-                    Text("·").font(NeemaFont.capped(14, maxScale: 1.5)).foregroundColor(chrome.separator)
+                    Text("·").font(NeemaFont.capped(14, maxScale: 1.5)).foregroundColor(chrome.separator).fixedSize().layoutPriority(1)
                     Spacer().frame(width: 12)
                 }
                 Text(app.view.label)
