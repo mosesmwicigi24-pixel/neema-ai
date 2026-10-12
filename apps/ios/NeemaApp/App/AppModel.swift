@@ -96,7 +96,7 @@ final class AppModel: ObservableObject {
         callRinger = ringer
         calls = CallManager(
             api: NeemaCallApi(container.api), events: container.socket.events, connected: container.socket.connected, foreground: container.foreground,
-            signedIn: { sessions.current != nil }, media: DeviceCallMedia(), ringer: ringer, audio: SessionCallAudio(),
+            signedIn: { sessions.current != nil }, media: makeCallMedia(), ringer: ringer, audio: SessionCallAudio(),
             micGranted: { AVAudioSession.sharedInstance().recordPermission == .granted },
             outboxDir: FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first.map { $0.appendingPathComponent("call-recordings") }
                 ?? FileManager.default.temporaryDirectory.appendingPathComponent("call-recordings"),

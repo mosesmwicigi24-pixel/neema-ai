@@ -23,6 +23,11 @@ final class AppContainer {
     init(baseUrl: String = NeemaConfig.baseUrl, store: SecureStore = KeychainStore(), transport: HTTPTransport = URLSessionTransport(),
          socketFactory: WebSocketFactory = URLSessionWebSocketFactory(), watchNetwork: Bool = true) {
         self.baseUrl = baseUrl
+        // Images (AsyncImage through URLSession.shared) keep a 64 MB memory / 256 MB disk cache,
+        // Coil's defaults on Android; the system's default is a tenth of that.
+        if URLCache.shared.memoryCapacity < 64 << 20 {
+            URLCache.shared = URLCache(memoryCapacity: 64 << 20, diskCapacity: 256 << 20)
+        }
         sessionStore = SessionStore(store: store)
         auth = AuthRepository(store: sessionStore, base: baseUrl, transport: transport)
         http = NeemaHTTP(baseUrl: baseUrl, tokens: auth, transport: transport)
