@@ -627,8 +627,12 @@ exists.
   `CallNetworkStressTests` 15, `CallApiContractTests` 14,
   `CallSimulationTests` 2), the console's 41 (`CallsViewModelTests`,
   `CallLogLiveTests`) and the 38 notification tests (`NotificationTests`).
-- macOS CI (`Neema app (iOS Simulator)`): the build and the gallery on the
-  cycle's head — recorded in the PR once green.
+- macOS CI (`Neema app (iOS Simulator)`): green on fd743c5 (run
+  38300104256: XcodeGen, the simulator build, the app's test bundle with the
+  screenshot gallery — one compile defect on the first push, an unawaited
+  `UIApplication.open` in the readiness banner, fixed in one attempt); every
+  other check green on the same head (NeemaCore on Linux, API tests,
+  migrations, web, lint, import smoke).
 
 **Remaining parity gaps** (scope of this cycle)
 
