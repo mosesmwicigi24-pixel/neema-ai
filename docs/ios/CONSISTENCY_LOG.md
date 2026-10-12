@@ -41,4 +41,37 @@ reason not to.
 
 ## Screens
 
-(Filled from the cycle 9 gallery run; see below.)
+The iOS gallery of run 38318262683 (the first with the window-hosted renderer:
+every list and scroll view visible for the first time) beside the Android
+goldens, on the phone, light. "Verified" means the layout, the states shown,
+the copy and the colours agree; the differences listed are what was found
+and what was done. Two kinds of difference recur and are not defects: the
+iOS phone is 390 pt wide where Android's is 412 dp, so a row that fits on
+Android may wrap or truncate on iOS by the same rule (both apps share the
+rule); and the fixtures differ in dates and counts (the iOS gallery pins
+2026-09-25 in UTC, Android's goldens run in Africa/Nairobi), so times and
+"ago" labels differ by three hours and totals by the fixture set.
+
+| Screen | Android golden | Verdict |
+|---|---|---|
+| Sign-in | `ShellScreenshotTest_login` | **fixed**: Android centres the form vertically and puts the logo beside "Neema / ADMIN" on the left; iOS stacked and centred the brand at the top. The subtitle, the field labels and the footer are willow on Android, grey on iOS; the email placeholder rendered in the system's link blue. Now: the same row, the form centred, willow throughout, the placeholders in Android's colours (willow email, half-strength parchment password). |
+| Inbox list | `ConversationsScreenshotTest_inbox_all` | **verified**: header, "2 live", the five tabs with counts, the search, the channel chips with badges, the rows (edge colour, avatar, chips, "• Yours", preview, time) and "Loading more…" all agree. |
+| Phone header | `ShellScreenshotTest_phoneOffline` | **fixed**: Android keeps "Reconnecting…" whole and truncates the view's name ("Orde…"); iOS truncated the pill ("Rec…"), then the wordmark ("Ne…"). Now the pill and "Neema" keep their letters and the view's name gives way. |
+| Orders | `OrdersScreenshotTest_populated` | **fixed**: the channel pill used a letter ("W") for its mark where Android draws the app's glyph; now the WhatsApp / Messenger mark. Otherwise verified: the summary tiles, the search, the rows with status, hub chip, "Open in hub", phone line, items and time. |
+| Calls | `CallsScreenshotTest_log` | **verified**: the dark console card, the two chips, the day headings, the rows with outcome, duration and agent, the transcript and call-back buttons. The time sits under the outcome on iOS and to the right on Android because 390 pt is "compact" under the rule both apps share (`width / fontScale < 400`); Android's golden is 412 dp. |
+| Catalog | `CatalogScreenshotTest_grid` | **verified**: the price-gap banner, the hub note, the search, the category picker and the two-column grid (image, name, stock pill, price range, variants, aliases, SKU and id). |
+| Deals | `DealsScreenshotTest_board` | **verified**: the planned-actions card with the approval and the due action (Send / Edit & send / Veto / Open chat), the stage columns with cards, guidance, Won / Lost. |
+| Leads | `LeadsScreenshotTest_kanban` | **verified**: the pipeline line, the search, the stage chips, the columns and cards (score, channel glyph, tags, time, the move button). |
+| Analytics | `OverviewScreenshotTest_phone` | **verified**: the six tiles with their colours and lines, "Where sales come from" with the attribution rows. |
+| Reports | `ReportsScreenshotTest_overview30d` | **verified**: the range picker, Export CSV, the four tabs with the underline, the four tiles, the two bar charts with day labels. |
+| Team | `TeamScreenshotTest_agents` | **fixed**: the two tabs stretched to half the row each (the underline's greedy width); Android keeps them at their labels' width, left-aligned. Otherwise verified: the cards with role pill, email, active / joined, last seen, the availability switch and the four actions. |
+| Profile | `ProfileScreenshotTest_view_0` | **fixed**: the email wrapped mid-word ("…co.k / e"); now one line with the tail cut. Otherwise verified: the card, the three stat tiles, Availability, Password, Appearance. |
+| Settings | `SettingsScreenshotTest_blank_0` | **verified**: Standing Orders with the counter and the button, Translation with the spend line, the Offer card. |
+| Drawer | `ShellScreenshotTest_phoneDrawer` | **verified**: the navy drawer with the brand row, the bell, the eleven rows with badges, the account footer. |
+| Bell | `ShellScreenshotTest_bellSheetEmpty` | **verified**: the sheet with "Notifications", the empty state "All caught up / No new notifications". |
+| Toast | `ShellScreenshotTest_phoneToastSuccess` | **verified**: the green pill with the check, above the bottom bar. |
+| Session expired | `ShellScreenshotTest_sessionExpired` | **fixed**: the password field had no placeholder; Android shows "••••••••". Now the same. |
+| Offline | `ShellScreenshotTest_phoneOffline` | **verified** (the banner and the pill; the header fix above). |
+| Open thread, ringing call, wrap-up | `ConversationsScreenshotTest_thread_*`, `CallsScreenshotTest_cardRinging`, `CallsWrapUpScreenshotTest_*` | **pending**: the first gallery run hung at the open-thread state; the state is rendered last and logged on the next run, and compared then. |
+| iPad | `*Tablet*`, `TabS9UltraScreenshotTest_*` | **partial**: the iPad shots render (1180 × 820 pt); the Tab S9 Ultra's widths, font scales and the split-screen thirds are pinned by `TabletLayoutTests` / `AdaptiveTests`, not rendered. |
+| Dark mode | `*Dark*` | **partial**: every screen renders dark (phone); compared for legibility, not pixel by pixel. |

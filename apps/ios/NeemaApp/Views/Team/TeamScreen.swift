@@ -224,6 +224,8 @@ struct TeamBody: View {
                     .padding(.horizontal, 16).padding(.vertical, 12).frame(minHeight: 46)
                 Rectangle().fill(sel ? c.gold : .clear).frame(height: 2)
             }
+            // As wide as its label, not the row's share: the underline would otherwise stretch each tab to half the row.
+            .fixedSize(horizontal: true, vertical: false)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)

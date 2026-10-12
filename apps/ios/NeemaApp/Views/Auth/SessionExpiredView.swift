@@ -48,7 +48,7 @@ struct SessionExpiredView: View {
 
                 VStack(alignment: .leading, spacing: 4) {
                     Text("Password").font(NeemaFont.fixed(11, .semibold)).foregroundColor(Palette.stone500)
-                    SecureField("", text: $password)
+                    SecureField("••••••••", text: $password)
                         .textContentType(.password)
                         .submitLabel(.done)
                         .focused($focused)

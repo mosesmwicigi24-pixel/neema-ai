@@ -176,7 +176,8 @@ struct ProfileBody: View {
                 // Your custom role, in its colour, with whichever text colour reads on it.
                 RoleBadge(text: rn, fill: hexColor(teamRow?.roleColor), content: roleInk(teamRow?.roleColor)).padding(.top, 4)
             }
-            Text(agent.email).font(NeemaFont.manrope(14)).foregroundColor(teamFaint(c)).padding(.top, 2)
+            // One line with the tail cut: an address has no break point, and SwiftUI would split it mid-word where Compose fits it.
+            Text(agent.email).font(NeemaFont.manrope(14)).foregroundColor(teamFaint(c)).lineLimit(1).truncationMode(.tail).padding(.top, 2)
             Text(joinedLine(agent)).font(NeemaFont.manrope(12)).foregroundColor(teamFaint(c)).padding(.top, 4)
         }
     }
