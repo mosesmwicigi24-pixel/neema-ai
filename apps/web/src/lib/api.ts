@@ -123,6 +123,16 @@ async function req<T>(
 
 const get = <T>(path: string) => req<T>("GET", path);
 const post = <T>(path: string, body: unknown) => req<T>("POST", path, body);
+
+// ── Account recovery (no session needed) ──────────────────────────────────────
+// The reset link is mailed to the business recovery inbox (owner, 2026-10-12),
+// never shown here; the page tells the person where to collect it.
+export const authApi = {
+    forgotPassword: (email: string) =>
+        post<{ ok: boolean; message: string; inbox: string }>("/auth/forgot-password", { email }),
+    resetPassword: (token: string, password: string) =>
+        post<{ ok: boolean; email: string }>("/auth/reset-password", { token, password }),
+};
 const patch = <T>(path: string, body: unknown) => req<T>("PATCH", path, body);
 const put = <T>(path: string, body: unknown) => req<T>("PUT", path, body);
 

@@ -2,6 +2,7 @@
 import React, { useState, useEffect } from "react";
 import { signIn, useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 
 export default function LoginPage(): React.ReactElement {
     const { status } = useSession();
@@ -402,6 +403,12 @@ export default function LoginPage(): React.ReactElement {
                             )}
                         </button>
                     </form>
+
+                    <p className="mt-4 text-center text-xs">
+                        <Link href="/forgot-password" className="underline" style={{ color: "#9ccd65" }}>
+                            Forgot your password?
+                        </Link>
+                    </p>
 
                     <div
                         className="mt-8 pt-6 border-t"

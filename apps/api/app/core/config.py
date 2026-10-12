@@ -11,6 +11,25 @@ class Settings(BaseSettings):
     algorithm: str = "HS256"
     access_token_expire_minutes: int = 480
     refresh_token_expire_days: int = 30
+    # ── Password recovery (self-serve; Settings → Team can also reset) ──────
+    # Outgoing mail for the reset link: stdlib SMTP, STARTTLS on 587 (SMTPS on
+    # 465). Empty smtp_host = recovery mail is OFF: /auth/forgot-password answers
+    # 503 and says who can reset instead. The password is read from the box's
+    # .env only — never logged, never returned.
+    smtp_host: str = ""
+    smtp_port: int = 587
+    smtp_user: str = ""
+    smtp_password: str = ""
+    smtp_from: str = ""                 # defaults to smtp_user
+    smtp_starttls: bool = True
+    # Where reset links go: the business recovery inbox (owner, 2026-10-12:
+    # "sent to info@bethanyhouse.co.ke"), so a staff account is recovered
+    # through the office — a lost phone's mailbox never locks anyone out and
+    # nobody resets a colleague's account unseen. password_reset_copy_agent
+    # also mails the account's own address.
+    password_reset_inbox: str = "info@bethanyhouse.co.ke"
+    password_reset_copy_agent: bool = False
+    password_reset_ttl_minutes: int = 60
     cors_origins: list[str] = ["http://localhost:3000"]
     waba_token: str = ""
     waba_phone_number_id: str = ""
