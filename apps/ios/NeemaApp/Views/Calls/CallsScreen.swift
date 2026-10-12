@@ -44,12 +44,11 @@ private struct CallsScreenBody: View {
             // on the name line, and the readiness prompt its button under the words.
             let compact = width / teamFontScale < 400
             let list = model.list
-            let followUps = (list ?? []).filter { $0.followUpOpen }.count
-            // Messenger shows up (header words, the app filter) once it can call or any call was on it.
-            let anyMessenger = (model.channels.map { $0.messenger.inbound || $0.messenger.outbound } ?? false)
-                || (list ?? []).contains { channelOf($0.channel) == CallWords.MESSENGER }
-            let appFilter = anyMessenger ? model.channelFilter : "all"
-            let shown: [Call]? = list?.filter { (!model.followUpsOnly || $0.followUpOpen) && (appFilter == "all" || channelOf($0.channel) == appFilter) }
+            // Derived once per change by the model, not per frame (a thousand rows, a scrubber ticking).
+            let followUps = model.followUps
+            let anyMessenger = model.anyMessenger
+            let appFilter = model.appFilter
+            let shown = model.shown
             // Tablet: the details pane is never an empty half — the newest call in
             // view opens in it, and a filter that hides the open call moves the pane
             // to the first one still shown. Decided here, so the first frame already has it.

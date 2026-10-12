@@ -18,6 +18,11 @@ final class CallsScreenModel: ObservableObject {
     @Published private(set) var selected: Call?
     @Published private(set) var transcript: TranscriptUi?
     @Published private(set) var restriction: CallingRestriction?
+    /// The rows under the filters, derived once per change (not per frame): nil until the log has loaded.
+    @Published private(set) var shown: [Call]?
+    /// Messenger shows up (header words, the app filter) once it can call or any call was on it.
+    @Published private(set) var anyMessenger = false
+    @Published private(set) var followUps = 0
     private var subs: [Subscription] = []
 
     init(vm: CallsViewModel, calls: CallManager) {
@@ -33,16 +38,30 @@ final class CallsScreenModel: ObservableObject {
         selected = vm.selected.value
         transcript = vm.transcript.value
         restriction = calls.restriction.value
-        subs.append(vm.calls.observe { [weak self] v in onMainActor { self?.list = v } })
+        derive()
+        subs.append(vm.calls.observe { [weak self] v in onMainActor { self?.list = v; self?.derive() } })
         subs.append(vm.refreshing.observe { [weak self] v in onMainActor { self?.refreshing = v } })
         subs.append(vm.loadError.observe { [weak self] v in onMainActor { self?.loadError = v } })
-        subs.append(vm.followUpsOnly.observe { [weak self] v in onMainActor { self?.followUpsOnly = v } })
-        subs.append(vm.channelFilter.observe { [weak self] v in onMainActor { self?.channelFilter = v } })
-        subs.append(calls.channels.observe { [weak self] v in onMainActor { self?.channels = v } })
+        subs.append(vm.followUpsOnly.observe { [weak self] v in onMainActor { self?.followUpsOnly = v; self?.derive() } })
+        subs.append(vm.channelFilter.observe { [weak self] v in onMainActor { self?.channelFilter = v; self?.derive() } })
+        subs.append(calls.channels.observe { [weak self] v in onMainActor { self?.channels = v; self?.derive() } })
         subs.append(vm.doneBusy.observe { [weak self] v in onMainActor { self?.doneBusy = v } })
         subs.append(vm.selected.observe { [weak self] v in onMainActor { self?.selected = v } })
         subs.append(vm.transcript.observe { [weak self] v in onMainActor { self?.transcript = v } })
         subs.append(calls.restriction.observe { [weak self] v in onMainActor { self?.restriction = v } })
+    }
+
+    /// Which app filter applies: the chips only show once Messenger is in the picture.
+    var appFilter: String { anyMessenger ? channelFilter : "all" }
+
+    private func derive() {
+        let rows = list ?? []
+        followUps = rows.filter { $0.followUpOpen }.count
+        anyMessenger = (channels.map { $0.messenger.inbound || $0.messenger.outbound } ?? false)
+            || rows.contains { channelOf($0.channel) == CallWords.MESSENGER }
+        let app = appFilter
+        let only = followUpsOnly
+        shown = list?.filter { (!only || $0.followUpOpen) && (app == "all" || channelOf($0.channel) == app) }
     }
 
     func setFollowUpsOnly(_ v: Bool) { vm.followUpsOnly.value = v }

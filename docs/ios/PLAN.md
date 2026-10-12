@@ -669,3 +669,100 @@ APNs); no Apple credentials.
 decoding off the main thread, the catalogue's search, the socket's
 reconnect budget, memory under the gallery's three sizes, and a sweep of
 every `Task` for cancellation on sign-out.
+
+### Cycle 6 — Performance
+
+**Features implemented / verified**
+
+- **WebRTC linked.** `project.yml` takes stasel/WebRTC (Google's libwebrtc
+  as an xcframework, M155) as a package; `App/WebRTCMedia.swift` is the
+  `CallMedia` / `CallPeer` port of Android's `WebRtcMedia.kt` over
+  `RTCPeerConnection` — audio only, Unified Plan, the ICE servers from
+  ice-config through `iceSpecs`, the AEC / NS / AGC / highpass constraints,
+  `OfferToReceiveAudio`, non-trickle gathering handed to `CallManager`'s cap,
+  every SDK callback through `rtcGuard`, and a close that never touches the
+  native object twice (`live`, the teardown off the delivering thread).
+  `makeCallMedia()` picks it when the framework is present
+  (`#if canImport(WebRTC)`), else the port that ends a call honestly.
+- **Images cached as Android caches them**: `URLCache.shared` is sized to
+  64 MB memory / 256 MB disk at start (Coil's defaults), which every
+  `AsyncImage` in the app (avatars, catalogue, thread media) goes through.
+- **Nothing derived per frame on the calls screen**: the filtered rows, the
+  follow-up count and the Messenger switch are derived once per change in
+  `CallsScreenModel`, not in the view's body (a thousand rows under a
+  scrubber ticking four times a second).
+- **Off-main decoding, confirmed**: every `api.*` call decodes in
+  `NeemaHTTP` (a nonisolated async function — the cooperative pool, never
+  the main actor); the inbox's row grouping, the thread's row building and
+  the report's build run in their view models' tasks; the 14k-row report
+  builds off the screen (`ReportsStressTests`).
+- **Polling discipline and battery**: every screen's tick runs through
+  `ScreenLife` (only while shown and in front; a return reads once); the
+  feeds' polls pause in the background; the softphone's fallback poll is a
+  sleep loop that iOS suspends with the app. No timer runs in the
+  background. **Socket bursts**: `LiveSocket.EVENT_BUFFER` (1024) with
+  `droppedFrames` accounting, pinned by `LiveSocketTests`.
+- **Sign-out cancels everything**: `AppModel.logout` stops the polls, closes
+  every screen model (each cancels its jobs), stops the feeds and the
+  notifications, and ends a live call first.
+- **The stress suites ported** (`Tests/NeemaCoreTests/Stress/`):
+  `CorePerfStressTests` (Android `CorePerfStressTest`: a thousand requests,
+  the bell under a storm of 500, 10,000 coalescer kicks from eight threads,
+  the immediate coalescer, 5k phones + timestamps under 500 ms, a 2 MB error
+  page bounded and quick, 5,000 call row keys under 200 ms),
+  `NetworkStressTests` (Android `NetworkStressTest`, all 17: parallel 401s
+  sharing one refresh, a refused refresh asked once, timeouts and outages
+  that never sign anyone out, the captive portal, the outage cool-down, 429
+  with Retry-After, offline vs timeout, a dropped connection retried, empty /
+  HTML / cut-off / 5 MB bodies, the fake's delays and holds on virtual time,
+  sign-in against outages, rate limits and a half-broken NextAuth),
+  `SoftphoneStressTests` (Android `SoftphoneStressTest`, all 11: a burst of
+  200 frames rings once, ended calls stay bounded at `ENDED_MAX`, polls never
+  overlap on a slow network, and every way a call ends — hang-up, decline, a
+  failed answer, the media dropping, a blip that never recovers, the caller
+  giving up, sign-out mid-call, ten calls in a row — releases the peer, the
+  recording, the ring and the audio), `ShellStressTests` (the core-testable
+  rows of Android's `ShellStressTest` / `DashboardStressTest`: an answer that
+  lands after sign-out is dropped, a sign-out mid-poll abandons the held
+  request, 200 order alerts cost one fetch, 200 non-alert frames cost
+  nothing).
+
+**Defects corrected**
+
+1. The calls screen filtered its rows inside the view body on every render.
+   Derived once per change in the model now.
+2. Images had the system's default 4 MB URL cache: avatars and catalogue
+   thumbnails were re-fetched on every scroll back. Sized as Android's.
+
+**Tests executed**
+
+- `swift test` in `apps/ios/NeemaCore` on Linux: **{TESTS} tests, 0
+  failures**, 1 skipped: cycle 5's 1322 and the 40 stress tests above.
+- macOS CI (`Neema app (iOS Simulator)`): {MACOS}
+
+**Remaining parity gaps** (scope of this cycle)
+
+- WebRTC is linked and compiled, not exercised: no call's audio has flowed
+  on a device. The first real call is cycle 8's device checklist (blocked
+  without a device here).
+- Local two-sided recording stays platform-restricted (`startRecording`
+  returns nil); Meta's transcription stands in.
+- Android's `CallRecorderTests`, the screenshot stress tests (Paparazzi) and
+  the app-layer rows of `ShellStressTest` / `DashboardStressTest` (one
+  session-expired prompt, re-authenticating keeps the view, another agent
+  starts clean, the per-agent screen store) are not ported to Linux: the
+  app-layer rules live in `AppModel` and are only exercised by the app's
+  own tests on macOS CI.
+- Launch time and memory under the gallery's three sizes are not measured
+  (no Instruments here); the gallery run's wall time on CI is the only
+  budget watched.
+
+**Blockers** (carried) — no Xcode or device here; backend push (PushKit /
+APNs); no Apple credentials.
+
+**Next cycle** — Cycle 7: security & permissions — Keychain accessibility
+classes, no secrets in logs or snapshots, App Transport Security and the
+privacy manifest, the usage strings, the mic / camera / photos /
+notifications flows with native rationale, crash reporting from the iOS app
+without PII beyond Android's, the RBAC gates audited screen by screen, and
+a written permission / privacy checklist.

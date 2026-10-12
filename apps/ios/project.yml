@@ -18,6 +18,11 @@ settings:
 packages:
   NeemaCore:
     path: NeemaCore
+  # The WebRTC framework (Google's libwebrtc as an xcframework, stasel/WebRTC):
+  # the softphone's peer connection. WebRTCMedia.swift compiles against it.
+  WebRTC:
+    url: https://github.com/stasel/WebRTC
+    from: "155.0.0"
 targets:
   Neema:
     type: application
@@ -27,6 +32,8 @@ targets:
     dependencies:
       - package: NeemaCore
         product: NeemaCore
+      - package: WebRTC
+        product: WebRTC
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: ke.co.bethanyhouse.neema
