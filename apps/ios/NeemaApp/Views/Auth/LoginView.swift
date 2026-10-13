@@ -98,15 +98,19 @@ struct LoginView: View {
 
             label("EMAIL ADDRESS").padding(.top, 28)
             field {
-                TextField("", text: $email, prompt: Text("admin@bethanyhouse.com").foregroundColor(Self.willow))
-                    .accessibilityIdentifier("login.email")
-                    .textContentType(.username)
-                    .keyboardType(.emailAddress)
-                    .textInputAutocapitalization(.never)
-                    .autocorrectionDisabled()
-                    .submitLabel(.next)
-                    .focused($focus, equals: .email)
-                    .onSubmit { focus = .password }
+                // The placeholder drawn by hand: as a prompt, iOS styles an address like a link (blue).
+                ZStack(alignment: .leading) {
+                    if email.isEmpty { Text("admin@bethanyhouse.com").font(NeemaFont.bodyLarge).foregroundColor(Self.willow).allowsHitTesting(false) }
+                    TextField("", text: $email)
+                        .accessibilityIdentifier("login.email")
+                        .textContentType(.username)
+                        .keyboardType(.emailAddress)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                        .submitLabel(.next)
+                        .focused($focus, equals: .email)
+                        .onSubmit { focus = .password }
+                }
             }
 
             label("PASSWORD").padding(.top, 16)
