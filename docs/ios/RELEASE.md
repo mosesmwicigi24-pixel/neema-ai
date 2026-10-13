@@ -56,6 +56,43 @@ optimised build compiles and links (WebRTC's device slice included) and that
 the archive step works, which is everything that can be proven without a
 team.
 
+## 4a. On your own iPhone or iPad today — no paid membership
+
+The app declares no entitlements (no push, no associated domains), so a free
+Apple ID can sign it. Xcode calls that team your "Personal Team". An app signed
+that way runs for 7 days on the devices plugged into that Mac, then needs
+installing again. TestFlight and other people's phones need §4.
+
+What you need: a Mac with Xcode 16, a free Apple ID signed in to Xcode
+(Xcode → Settings → Accounts → +), and the iPhone or iPad with a cable.
+
+1. On the device: Settings → Privacy & Security → **Developer Mode** on
+   (it restarts). Plug it in, unlock it, tap **Trust** for this Mac.
+2. Find the team id: Xcode → Settings → Accounts → your Apple ID → the
+   Personal Team's **Team ID** (ten characters).
+3. Build, install and open it:
+
+   ```bash
+   git clone https://github.com/mosesmwicigi24-pixel/neema-ai.git
+   cd neema-ai/apps/ios
+   brew install xcodegen
+   scripts/device-install.sh --team <TEAM_ID>
+   ```
+
+   The script generates the project, builds the Release configuration for
+   the plugged-in device, signs it with that team, installs it with
+   `devicectl` and opens it.
+4. If the phone refuses to open it: Settings → General → **VPN & Device
+   Management** → your Apple ID → Trust.
+5. If Xcode says the bundle id is not available (another team holds
+   `ke.co.bethanyhouse.neema`), add `--bundle-id ke.co.bethanyhouse.neema.<yourname>`.
+
+Sign in with your Neema account as on Android. Until the backend sends
+pushes (§25 of the matrix), alerts and calls arrive only while the app is
+open. The script is untested by this programme (no Mac or device here);
+`xcodebuild` and `devicectl` errors print as they come, and the build log is
+`build/device.log`.
+
 ## 4. Signing and TestFlight — blocked here, the owner's steps
 
 Needs: an Apple Developer Program membership (the Bethany House team), a

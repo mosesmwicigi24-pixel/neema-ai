@@ -99,6 +99,9 @@ uploads the `.xcarchive` as `ios-unsigned-archive`. With an Apple team
 `scripts/ExportOptions.plist`. Versioning, the release configuration item by
 item and the TestFlight steps the owner runs are in `docs/ios/RELEASE.md`.
 
+To put the app on your own iPhone or iPad from a Mac, with a free Apple ID:
+`scripts/device-install.sh --team <TEAM_ID>` (`docs/ios/RELEASE.md` §4a).
+
 ## Where things stand
 
 `docs/ios/PARITY_MATRIX.md` lists every Android feature and the iOS status of
