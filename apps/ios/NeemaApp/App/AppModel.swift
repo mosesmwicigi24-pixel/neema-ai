@@ -595,6 +595,7 @@ final class AppModel: ObservableObject {
     /// A view restored after a process death belongs to whoever was signed in
     /// then: someone else starts on the inbox. Unknown names are ignored.
     func restoreNav(_ saved: String) {
+        if CannedBackend.requested { return }
         let parts = saved.split(separator: ",").map(String.init)
         guard parts.count >= 2, parts[0] == signedInAgent, let view = ViewId(rawValue: parts[1]) else { return }
         let history = parts.dropFirst(2).compactMap { ViewId(rawValue: $0) }
@@ -609,7 +610,7 @@ final class AppModel: ObservableObject {
     }
 
     func restorePendingLink(_ saved: String) {
-        guard session == nil, pendingLink == nil, !saved.isEmpty else { return }
+        guard !CannedBackend.requested, session == nil, pendingLink == nil, !saved.isEmpty else { return }
         let f = saved.split(separator: "\u{1F}", omittingEmptySubsequences: false).map { $0.isEmpty ? nil : String($0) }
         guard f.count == 4 else { return }
         let link = DeepLink(open: f[0], ref: f[1], view: f[2], caller: f[3])
@@ -624,7 +625,7 @@ final class AppModel: ObservableObject {
     }
 
     func restoreToast(_ saved: String) {
-        guard toast == nil, !saved.isEmpty else { return }
+        guard !CannedBackend.requested, toast == nil, !saved.isEmpty else { return }
         let f = saved.split(separator: "\u{1F}", maxSplits: 1, omittingEmptySubsequences: false).map(String.init)
         guard f.count == 2, let type = ToastType(rawValue: f[0]), !f[1].isEmpty else { return }
         toasts.show(f[1], type)

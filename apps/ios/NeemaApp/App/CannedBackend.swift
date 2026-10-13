@@ -166,6 +166,11 @@ enum CannedBackend {
         defaults.set(true, forKey: AppModel.ASKED_NOTIFICATIONS)
         let dir = FileManager.default.temporaryDirectory.appendingPathComponent("neema-canned-snapshots", isDirectory: true)
         try? FileManager.default.removeItem(at: dir)
+        // The scene's saved state too (`@SceneStorage`: the view, a pending link): the deep-link test's
+        // link came back at the next launch and every later test found the thread open.
+        if let lib = FileManager.default.urls(for: .libraryDirectory, in: .userDomainMask).first {
+            try? FileManager.default.removeItem(at: lib.appendingPathComponent("Saved Application State", isDirectory: true))
+        }
         return AppContainer(baseUrl: "https://neema.test", store: MemoryStore(), transport: transport, socketFactory: DeadSockets(), watchNetwork: false,
                             defaults: defaults, snapshots: SnapshotCache(directory: dir))
     }
