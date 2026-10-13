@@ -3,8 +3,8 @@
 The Android app's JVM test suite (`apps/android/app/src/test/java/ke/co/bethanyhouse/neema/`,
 177 files) is the reference for what the iOS app must prove. This file maps
 every one of them to where the same behaviour is proven on iOS, and says
-honestly where it is not. It was written at the end of cycle 8 and is kept
-current by later cycles (cycle 9: the keyboard and drop rules) (`docs/ios/PLAN.md` holds the cycle log).
+honestly where it is not. It is written at the end of cycle 8 and kept
+current by later cycles (`docs/ios/PLAN.md` holds the cycle log).
 
 Where the iOS proof lives:
 
@@ -310,7 +310,7 @@ twin), **missing** (no iOS proof yet).
 | support | 33 | 1 |
 | **all** | **177** | **2277** |
 
-iOS test functions: **1584** in `NeemaCore` (Linux), **5** in the app's test bundle (macOS CI, one of them the gallery's render of every screen), **6** UI tests (macOS CI).
+iOS test functions: **1584** in `NeemaCore` (Linux), **5** in the app's test bundle (macOS CI, one of them the gallery's render of every screen), **8** UI tests (macOS CI).
 
 ## How the ports were made (cycle 8)
 

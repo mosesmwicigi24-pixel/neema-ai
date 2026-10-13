@@ -1003,10 +1003,20 @@ cycles left (forms' saved state, the gallery's named states).
 
 - `swift test` in `apps/ios/NeemaCore` on Linux: **1584 tests, 0
   failures**, 1 skipped (cycle 8's 1570 + the 14 keyboard and drop tests).
-- macOS CI (`Neema app (iOS Simulator)`): see the line below once the run
-  is in. The first run of this cycle hung in the gallery at the open-thread
-  state and its UI tests then found no shell after sign-in; the state is
-  rendered last and logged, and the UI tests print the hierarchy they saw.
+- macOS CI (`Neema app (iOS Simulator)`): green on ab1a081 (run
+  38332219403): the gallery's 54 shots in 83 s (the eleven views on three
+  shots, the drawer, the account menu, the bell, three toasts, offline, the
+  session-expired card, the ringing call and the missed-call wrap-up) and
+  **8 UI tests on the simulator, all passing** — the six of cycle 8 plus
+  `testOpeningAThreadShowsIt` (a tap on a row) and
+  `testADeepLinkOpensTheThreadAfterSignIn` (a link that arrived signed out).
+  Four red runs came first, each with its lesson: the gallery hung inside
+  `openConversationFor` in the in-process host (never in the app), and the
+  UI tests found the thread open after sign-in because the app's shared
+  preferences, then its saved scene state, restored what the gallery or the
+  deep-link test had opened in the same simulator — the canned launch now
+  runs in a wiped, private preferences suite and snapshot folder, deletes
+  the saved application state and restores none of it.
 - The Migrations job failed once on a backend latency bound
   (`p95 < 0.2`, measured 218 ms) in code this PR does not touch; its one
   re-run passed.
@@ -1024,6 +1034,10 @@ cycles left (forms' saved state, the gallery's named states).
 - The keyboard and drop wiring, the saved-state restore and the toast per
   notification are compiled on CI and not driven by a UI test (no hardware
   keyboard, process death or socket on the simulator job).
+- Why `openConversationFor` hangs when the app's views are hosted in a
+  window inside the test host, while the same call opens the thread in the
+  real app (the deep-link UI test), is not known; the gallery renders no
+  thread state and the proof is the UI test.
 
 **Blockers** (carried) — no Xcode or device here; backend push (PushKit /
 APNs); no Apple credentials.
