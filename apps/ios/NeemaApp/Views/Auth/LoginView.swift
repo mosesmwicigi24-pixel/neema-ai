@@ -32,13 +32,14 @@ struct LoginView: View {
                 }
                 ScrollView {
                     VStack(spacing: 0) {
-                        if !wide { phoneHeader.padding(.top, 48).padding(.bottom, 32) }
+                        if !wide { phoneHeader.frame(maxWidth: 384, alignment: .leading).padding(.horizontal, 24).padding(.bottom, 32) }
                         form
                             .frame(maxWidth: 384)
                             .padding(.horizontal, 24)
-                            .padding(.vertical, wide ? 48 : 0)
                     }
-                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 24)
+                    // The form sits in the middle of the window, as LoginScreen.kt centres it.
+                    .frame(maxWidth: .infinity, minHeight: geo.size.height)
                 }
                 .scrollDismissesKeyboard(.interactively)
             }
@@ -56,10 +57,12 @@ struct LoginView: View {
     }
 
     private var phoneHeader: some View {
-        VStack(spacing: 10) {
+        HStack(spacing: 10) {
             logo.frame(width: 36, height: 36)
-            Text("Neema").font(NeemaFont.manrope(18, .extrabold)).foregroundColor(Self.parchment)
-            Text("ADMIN").font(NeemaFont.fixed(10, .semibold)).tracking(1.2).foregroundColor(Self.willow)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Neema").font(NeemaFont.manrope(16, .bold)).foregroundColor(.white)
+                Text("ADMIN").font(NeemaFont.fixed(10)).tracking(1).foregroundColor(Self.willow)
+            }
         }
     }
 
@@ -91,19 +94,23 @@ struct LoginView: View {
         VStack(alignment: .leading, spacing: 0) {
             Text("Sign in").font(NeemaFont.manrope(24, .bold)).foregroundColor(Self.parchment)
             Text("Enter your credentials to access the dashboard")
-                .font(NeemaFont.bodyMedium).foregroundColor(Brand.textMuted).padding(.top, 4)
+                .font(NeemaFont.bodyMedium).foregroundColor(Self.willow).padding(.top, 4)
 
             label("EMAIL ADDRESS").padding(.top, 28)
             field {
-                TextField("admin@bethanyhouse.com", text: $email)
-                    .accessibilityIdentifier("login.email")
-                    .textContentType(.username)
-                    .keyboardType(.emailAddress)
-                    .textInputAutocapitalization(.never)
-                    .autocorrectionDisabled()
-                    .submitLabel(.next)
-                    .focused($focus, equals: .email)
-                    .onSubmit { focus = .password }
+                // The placeholder drawn by hand: as a prompt, iOS styles an address like a link (blue).
+                ZStack(alignment: .leading) {
+                    if email.isEmpty { Text("admin@bethanyhouse.com").font(NeemaFont.bodyLarge).foregroundColor(Self.willow).allowsHitTesting(false) }
+                    TextField("", text: $email)
+                        .accessibilityIdentifier("login.email")
+                        .textContentType(.username)
+                        .keyboardType(.emailAddress)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                        .submitLabel(.next)
+                        .focused($focus, equals: .email)
+                        .onSubmit { focus = .password }
+                }
             }
 
             label("PASSWORD").padding(.top, 16)
@@ -111,9 +118,9 @@ struct LoginView: View {
                 HStack {
                     Group {
                         if showPassword {
-                            TextField("••••••••", text: $password)
+                            TextField("", text: $password, prompt: Text("••••••••").foregroundColor(Self.parchment.opacity(0.5)))
                         } else {
-                            SecureField("••••••••", text: $password)
+                            SecureField("", text: $password, prompt: Text("••••••••").foregroundColor(Self.parchment.opacity(0.5)))
                         }
                     }
                     .accessibilityIdentifier("login.password")
@@ -160,7 +167,7 @@ struct LoginView: View {
 
             Rectangle().fill(Self.lines).frame(height: 1).padding(.top, 28)
             Text("Access restricted to Bethany House staff.\nContact your administrator if you need access.")
-                .font(NeemaFont.bodySmall).foregroundColor(Brand.textMuted)
+                .font(NeemaFont.bodySmall).foregroundColor(Self.willow)
                 .multilineTextAlignment(.center)
                 .frame(maxWidth: .infinity)
                 .padding(.top, 18)
@@ -168,7 +175,7 @@ struct LoginView: View {
     }
 
     private func label(_ t: String) -> some View {
-        Text(t).font(NeemaFont.fixed(11, .semibold)).tracking(0.8).foregroundColor(Brand.textMuted).padding(.bottom, 6)
+        Text(t).font(NeemaFont.fixed(12, .semibold)).tracking(0.6).foregroundColor(Self.willow).padding(.bottom, 6)
     }
 
     private func field<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {

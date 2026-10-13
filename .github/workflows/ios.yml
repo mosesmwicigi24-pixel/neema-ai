@@ -27,7 +27,8 @@ jobs:
   core:
     name: NeemaCore (Linux)
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    # 30: the doubled test waits below lengthen the ~7-minute suite.
+    timeout-minutes: 30
     container: swift:6.2
     defaults:
       run:
@@ -37,6 +38,10 @@ jobs:
       - name: Build
         run: swift build --build-tests
       - name: Test
+        # The shared runner can be slower than a workstation at the hops the
+        # tests' fixed waits cover; double them here (Support.swift, TEST_WAIT_SCALE).
+        env:
+          NEEMA_TEST_WAIT_SCALE: "2"
         run: swift test
 
   app:

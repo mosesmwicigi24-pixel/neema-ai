@@ -12,7 +12,7 @@ Two parts:
 | `NeemaCore/` | A Swift package with everything that is not a screen: wire models, the HTTP client and its session rules, sign-in and silent refresh, the live socket, the shell's rules (views, deep links, the way back, toasts, access), formatting and permissions, and every screen's logic (inbox, customer panel, orders, catalog, deals, leads, analytics, reports, team, profile, settings, WhatsApp calling, the calls console, the softphone's rules behind its ports, the bell and the message alerts). Mirrors `apps/android/.../core` and `feature/*` one rule for one rule. | Linux, macOS, iOS — `swift test` runs 1570 tests anywhere |
 | `NeemaApp/` | The SwiftUI app (screens, theme, platform services). The Xcode project is generated from `project.yml` with XcodeGen. | macOS with Xcode 16 |
 | `NeemaAppTests/` | The app's test bundle: the shell's four tests and the screenshot gallery below. | macOS, the simulator |
-| `NeemaAppUITests/` | XCUITest driving the built app on the simulator against the recorded backend (`-neema-canned`): sign-in right and wrong, the bottom tabs, the drawer to Settings, the orders list, sign-out. | macOS, the simulator |
+| `NeemaAppUITests/` | XCUITest driving the built app on the simulator against the recorded backend (`-neema-canned`): sign-in right and wrong, the bottom tabs, the drawer to Settings, the orders list, a thread by a tap and by a deep link (`-neema-open <key>`), sign-out. | macOS, the simulator |
 
 ## Build and test
 
@@ -59,8 +59,18 @@ router would for the fixtures' agent (any email, password `neema`), and the
 live socket is dead on arrival. `NeemaAppUITests/NeemaUITests.swift` drives
 that app as a person would, finding controls by the accessibility labels the
 screens carry for VoiceOver and the sign-in form by its identifiers
-(`login.email`, `login.password`, `login.submit`). The scheme runs them with
-the unit tests, so the CI job above runs them on every pull request.
+(`login.email`, `login.password`, `login.submit`); `-neema-open <key>` hands
+the app a deep link at launch, as a notification tap would. The canned app
+runs in its own wiped preferences suite and snapshot folder and restores no
+saved scene state, so one test leaves nothing for the next. The scheme runs
+them with the unit tests, so the CI job above runs them on every pull request.
+
+The gallery (`ScreenGalleryTests`) hosts each view in a window of the shot's
+size and draws it as it is on screen — lists and scroll views included — and
+after the eleven views renders the states Android's screenshot suites pin
+(the drawer, the bell, toasts, offline, the session-expired card, a ringing
+call, a missed call's wrap-up). `docs/ios/CONSISTENCY_LOG.md` is the walk of
+those shots against Android's goldens.
 
 `docs/ios/TESTS.md` maps every Android test file to where the same behaviour
 is proven on iOS.

@@ -448,12 +448,20 @@ final class DashboardRulesTests: XCTestCase {
                                         role: s.role, isSuperuser: s.isSuperuser, mode: s.mode))
             d.feed!.start(agentId: s.agentId)
         }
-        await drain()
-        let afterRefreshes = orders()
+        // Repeated starts for the same agent are no-ops, but the sign-in's and the connect's own
+        // fetches can land late on a loaded runner: wait until two drains in a row see no new fetch.
+        var afterRefreshes = orders()
+        var quiet = 0
+        for _ in 0..<40 where quiet < 2 {
+            await drain()
+            if orders() == afterRefreshes { quiet += 1 } else { quiet = 0; afterRefreshes = orders() }
+        }
         await d.clock.advance(by: 91_000)
+        _ = await eventually { self.orders() >= afterRefreshes + 1 }
         await drain()
         XCTAssertEqual(afterRefreshes + 1, orders(), "one poller, one tick")
         await d.clock.advance(by: 90_000)
+        _ = await eventually { self.orders() >= afterRefreshes + 2 }
         await drain()
         XCTAssertEqual(afterRefreshes + 2, orders())
     }

@@ -25,7 +25,7 @@ final class AppModel: ObservableObject {
     /// The bell's list (Android `container.notifications`) and the message alerts, started per sign-in.
     let notifications: AgentNotifications
     let messageAlerts: MessageAlerts
-    private let callRinger: CallKitRinger
+    private let callRinger: CallRinger
     private let alertSink: SystemAlertSink
     /// Delivers the vault's crash reports once someone is signed in (Android `CrashReporter`).
     let crashReporter: CrashReporter
@@ -86,18 +86,19 @@ final class AppModel: ObservableObject {
     private var lastForbiddenRefresh: Int64 = .min / 2
     private var signedInAgent: String?
 
-    init(container: AppContainer) {
+    /// `ringer`: the screenshot gallery passes a silent one so CallKit's system call UI never opens over the test host.
+    init(container: AppContainer, ringer: CallRinger? = nil) {
         self.container = container
         session = container.sessionStore.current
         dark = container.prefs.dark.value
         online = container.online.value
         toasts = ToastPresenter(foreground: container.foreground)
-        let snapshots = SnapshotCache.standard()
+        let snapshots = container.snapshots
         ordersFeed = OrdersFeed(api: container.api, foreground: container.foreground, socketEvents: container.socket.events,
                                 reconnected: container.socket.reconnected, snapshots: snapshots)
         catalogFeed = CatalogFeed(api: container.api, foreground: container.foreground, snapshots: snapshots)
         let sessions = container.sessionStore
-        let ringer = CallKitRinger()
+        let ringer = ringer ?? CallKitRinger()
         callRinger = ringer
         calls = CallManager(
             api: NeemaCallApi(container.api), events: container.socket.events, connected: container.socket.connected, foreground: container.foreground,
@@ -129,7 +130,9 @@ final class AppModel: ObservableObject {
         }
         calls.canManageSettings = { [weak self] in self?.access.can(Perms.MANAGE_SETTINGS) ?? false }
         // The system call UI's Answer / Decline (CallKit) come back as the softphone's own actions.
-        ringer.onAction = { [weak self] action, id in Task { @MainActor in self?.calls.handleAction(action, id: id) } }
+        if let kit = ringer as? CallKitRinger {
+            kit.onAction = { [weak self] action, id in Task { @MainActor in self?.calls.handleAction(action, id: id) } }
+        }
         calls.start()
         // An error caught at the edge (a WebRTC callback, a background task) is written down and sent on.
         let vault = container.crashVault
@@ -531,6 +534,21 @@ final class AppModel: ObservableObject {
     @discardableResult
     func back() -> Bool { nav.back() }
 
+    /// Esc on a hardware keyboard: close the topmost overlay (the bell, the account menu, the
+    /// drawer, a thread open full-screen on a phone), never leave the view at the root
+    /// (`escapeIsBack`). False when nothing was open.
+    @discardableResult
+    func escapeBack() -> Bool {
+        let threadOpen = inboxScreen?.thread.threadOpen == true && view == .conversations
+        let somethingOpen = bellOpen || accountMenuOpen || drawerOpen || threadOpen
+        guard escapeIsBack(key: .escape, modified: false, somethingOpen: somethingOpen) else { return false }
+        if bellOpen { bellOpen = false }
+        else if accountMenuOpen { accountMenuOpen = false }
+        else if drawerOpen { drawerOpen = false }
+        else if threadOpen { inboxScreen?.vm.closeThread() }
+        return true
+    }
+
     var view: ViewId { nav.view }
 
     func openConversationFor(_ key: String) {
@@ -577,6 +595,7 @@ final class AppModel: ObservableObject {
     /// A view restored after a process death belongs to whoever was signed in
     /// then: someone else starts on the inbox. Unknown names are ignored.
     func restoreNav(_ saved: String) {
+        if CannedBackend.requested { return }
         let parts = saved.split(separator: ",").map(String.init)
         guard parts.count >= 2, parts[0] == signedInAgent, let view = ViewId(rawValue: parts[1]) else { return }
         let history = parts.dropFirst(2).compactMap { ViewId(rawValue: $0) }
@@ -591,7 +610,7 @@ final class AppModel: ObservableObject {
     }
 
     func restorePendingLink(_ saved: String) {
-        guard session == nil, pendingLink == nil, !saved.isEmpty else { return }
+        guard !CannedBackend.requested, session == nil, pendingLink == nil, !saved.isEmpty else { return }
         let f = saved.split(separator: "\u{1F}", omittingEmptySubsequences: false).map { $0.isEmpty ? nil : String($0) }
         guard f.count == 4 else { return }
         let link = DeepLink(open: f[0], ref: f[1], view: f[2], caller: f[3])
@@ -606,7 +625,7 @@ final class AppModel: ObservableObject {
     }
 
     func restoreToast(_ saved: String) {
-        guard toast == nil, !saved.isEmpty else { return }
+        guard !CannedBackend.requested, toast == nil, !saved.isEmpty else { return }
         let f = saved.split(separator: "\u{1F}", maxSplits: 1, omittingEmptySubsequences: false).map(String.init)
         guard f.count == 2, let type = ToastType(rawValue: f[0]), !f[1].isEmpty else { return }
         toasts.show(f[1], type)

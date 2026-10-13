@@ -1399,7 +1399,13 @@ def test_burst_of_200_deliveries_latency_and_calls_list_query_count(rig):
           f"GET /calls statements: limit=10 → {stats['q10']}, limit=100 → {stats['q100']}, "
           f"follow_up → {stats['q_follow']}")
     assert len(lat) == 200
-    assert p95 < 0.2, f"p95 {p95 * 1000:.0f} ms"
+    # Ten deliveries in flight, timed in the handler: the tail follows how busy the
+    # machine is. GitHub's shared runners measured p50 31–39 ms and p95 205–218 ms
+    # on unchanged backend code (Oct 2026), so 200 ms had no margin left there.
+    # A handler that serialises the burst would put p95 near the whole burst's
+    # wall time (about a second); 300 ms still catches that, and the query-count
+    # bounds below catch the N+1 kind.
+    assert p95 < 0.3, f"p95 {p95 * 1000:.0f} ms"
     # No N+1: a 100-row page (people, agents, chats and follow-ups on both
     # channels to join) costs a small constant — the batch lookups, never one per row.
     assert stats["q10"] <= 12 and stats["q100"] <= 12, stats

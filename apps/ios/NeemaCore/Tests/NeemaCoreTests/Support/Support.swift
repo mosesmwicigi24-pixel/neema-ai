@@ -42,8 +42,18 @@ func eventually(timeout: TimeInterval = 3, _ cond: @escaping () -> Bool) async -
 /// Lets queued tasks run for a moment, for "nothing should happen" checks.
 func settle(ms: UInt64 = 30) async {
     for _ in 0..<10 { await Task.yield() }
-    try? await Task.sleep(nanoseconds: ms * 1_000_000)
+    try? await Task.sleep(nanoseconds: ms * 1_000_000 * TEST_WAIT_SCALE)
 }
+
+/// How much to stretch the fixed waits of `drain()` and `settle()` (and so the
+/// virtual clock's `advance`): `NEEMA_TEST_WAIT_SCALE`, default 1. A shared CI
+/// runner can take longer than a workstation to run the hops a wait covers, and
+/// then a different handful of the 871 drain sites loses the race each run; the
+/// Linux job sets 2 (`.github/workflows/ios.yml`).
+let TEST_WAIT_SCALE: UInt64 = {
+    let v = ProcessInfo.processInfo.environment["NEEMA_TEST_WAIT_SCALE"].flatMap { UInt64($0) } ?? 1
+    return max(1, min(v, 10))
+}()
 
 /// A virtual clock for the socket's and auth layer's timers: `sleep` parks a
 /// task until `advance` moves time past its wake-up — the Swift twin of

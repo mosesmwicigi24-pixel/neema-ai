@@ -37,6 +37,27 @@ struct DashboardShell: View {
         }
         .onChange(of: app.nav) { _ in savedNav = app.savedNav }
         .onChange(of: app.toast) { _ in savedToast = app.savedToast }
+        // Esc on a hardware keyboard closes what is open (Shortcuts.swift `escapeIsBack`); a button
+        // with a shortcut fires wherever focus is, which `onKeyPress` would not.
+        .background(KeyButton(.escape, modifiers: []) { app.escapeBack() })
+    }
+}
+
+/// An invisible button whose only purpose is its keyboard shortcut (an iPad with a keyboard).
+struct KeyButton: View {
+    let key: KeyEquivalent
+    let modifiers: EventModifiers
+    let action: () -> Void
+    init(_ key: KeyEquivalent, modifiers: EventModifiers = .command, action: @escaping () -> Void) {
+        self.key = key
+        self.modifiers = modifiers
+        self.action = action
+    }
+    var body: some View {
+        Button(action: action) { Color.clear.frame(width: 1, height: 1) }
+            .keyboardShortcut(key, modifiers: modifiers)
+            .opacity(0.02)
+            .accessibilityHidden(true)
     }
 }
 
@@ -182,9 +203,10 @@ struct MobileHeader: View {
                 NeemaLogo(size: 28, corner: 8, glow: false)
                 Spacer().frame(width: 12)
                 if roomy {
-                    Text("Neema").font(NeemaFont.capped(14, .semibold, maxScale: 1.5)).foregroundColor(chrome.title).lineLimit(1)
+                    // The wordmark keeps its letters; the view's name is what truncates (MobileHeader.kt).
+                    Text("Neema").font(NeemaFont.capped(14, .semibold, maxScale: 1.5)).foregroundColor(chrome.title).lineLimit(1).fixedSize().layoutPriority(1)
                     Spacer().frame(width: 12)
-                    Text("·").font(NeemaFont.capped(14, maxScale: 1.5)).foregroundColor(chrome.separator)
+                    Text("·").font(NeemaFont.capped(14, maxScale: 1.5)).foregroundColor(chrome.separator).fixedSize().layoutPriority(1)
                     Spacer().frame(width: 12)
                 }
                 Text(app.view.label)
@@ -193,7 +215,8 @@ struct MobileHeader: View {
                     .lineLimit(1)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .accessibilityAddTraits(.isHeader)
-                if !app.connected && app.online { OfflineDot().padding(.trailing, 4) }
+                // The pill keeps its words; the view's name gives way (MobileHeader.kt: "Orde…" beside "Reconnecting…").
+                if !app.connected && app.online { OfflineDot().fixedSize().layoutPriority(1).padding(.trailing, 4) }
                 HeaderBell(count: app.unreadBell) { app.bellOpen = true }
                 Button { app.setDark(!app.dark) } label: {
                     WebIcon(glyph: app.dark ? WebIcons.sun : WebIcons.moon, size: 18).foregroundColor(chrome.icon)
@@ -444,10 +467,14 @@ struct SidebarView: View {
                                 .frame(maxWidth: .infinity).frame(height: 48).contentShape(Rectangle())
                         }
                         .buttonStyle(.plain)
+                        .keyboardShortcut("b", modifiers: .command)
                         .padding(.bottom, 6)
                         .accessibilityLabel("Expand sidebar")
                     }
-                    ForEach(app.navItems, id: \.view) { item in navRow(item) }
+                    // Cmd+1...9 opens the nth view (Shortcuts.swift `appShortcut`).
+                    ForEach(Array(app.navItems.enumerated()), id: \.element.view) { i, item in
+                        navRow(item).keyboardShortcut(i < 9 ? KeyboardShortcut(KeyEquivalent(Character(String(i + 1))), modifiers: .command) : nil)
+                    }
                 }
                 .padding(.horizontal, isCollapsed ? 6 : 8).padding(.vertical, 8)
             }
@@ -477,7 +504,9 @@ struct SidebarView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 BellButton(count: app.unreadBell) { app.bellOpen.toggle() }
                 if docked, let collapsed = collapsed {
+                    // Cmd+B shows or hides the sidebar's labels.
                     NavyIconButton(glyph: WebIcons.collapse, label: "Collapse sidebar") { collapsed.wrappedValue = true }
+                        .keyboardShortcut("b", modifiers: .command)
                 }
             }
             .padding(.horizontal, 10).padding(.vertical, 6)

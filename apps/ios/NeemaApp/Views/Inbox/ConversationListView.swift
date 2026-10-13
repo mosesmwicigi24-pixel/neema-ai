@@ -79,6 +79,23 @@ struct ConversationListView: View {
 
     private var vm: InboxViewModel { model.vm }
 
+    /// Alt+Down / Alt+Up on Android, Cmd+] / Cmd+[ here: the next / previous row of the list opens (`stepThrough`).
+    private func walk(_ forward: Bool) {
+        let ids = model.rows.map { $0.rep.id }
+        let current = model.thread.activeId.isEmpty ? nil : model.thread.activeId
+        if let next = stepThrough(ids, current: current, forward: forward) { vm.select(next) }
+    }
+
+    /// The hardware-keyboard shortcuts of the inbox (Shortcuts.swift `appShortcut`): invisible buttons fire wherever focus is.
+    private var keyShortcuts: some View {
+        Group {
+            KeyButton("f") { searchFocused = true }
+            KeyButton("k") { searchFocused = true }
+            KeyButton("]") { walk(true) }
+            KeyButton("[") { walk(false) }
+        }
+    }
+
     var body: some View {
         let inbox = model.inbox
         let listUi = model.list
@@ -96,6 +113,7 @@ struct ConversationListView: View {
         let heldIds = vm.selectedHeldIds()
 
         VStack(spacing: 0) {
+            keyShortcuts.frame(width: 0, height: 0)
             // ── Header ──
             VStack(spacing: 0) {
                 HStack(spacing: 0) {

@@ -138,13 +138,40 @@ enum CannedBackend {
 
     static var requested: Bool { ProcessInfo.processInfo.arguments.contains(ARGUMENT) }
 
+    /// `-neema-open <key>`: a conversation to open by deep link once signed in.
+    static var openKey: String? {
+        let args = ProcessInfo.processInfo.arguments
+        guard let i = args.firstIndex(of: "-neema-open"), i + 1 < args.count else { return nil }
+        return args[i + 1]
+    }
+
     /// The app on the canned backend, signed out, with nothing remembered
     /// between launches (an in-memory session store; the one-time notification
     /// ask already made, so no system prompt sits over the UI tests).
     @MainActor
     static func container() -> AppContainer? {
         guard requested, let transport = try? CannedTransport.bundledWithApp() else { return nil }
-        UserDefaults.standard.set(true, forKey: AppModel.ASKED_NOTIFICATIONS)
-        return AppContainer(baseUrl: "https://neema.test", store: MemoryStore(), transport: transport, socketFactory: DeadSockets(), watchNetwork: false)
+        return container(transport: transport)
+    }
+
+    /// The app on a recorded backend, in its own wiped preferences suite and
+    /// snapshot folder: nothing of the real app's (or of an earlier run's: the
+    /// gallery once left a thread open that the UI tests then restored)
+    /// reaches it, and it leaves nothing behind.
+    @MainActor
+    static func container(transport: HTTPTransport) -> AppContainer {
+        let suite = "ke.co.bethanyhouse.neema.canned"
+        let defaults = UserDefaults(suiteName: suite) ?? .standard
+        defaults.removePersistentDomain(forName: suite)
+        defaults.set(true, forKey: AppModel.ASKED_NOTIFICATIONS)
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("neema-canned-snapshots", isDirectory: true)
+        try? FileManager.default.removeItem(at: dir)
+        // The scene's saved state too (`@SceneStorage`: the view, a pending link): the deep-link test's
+        // link came back at the next launch and every later test found the thread open.
+        if let lib = FileManager.default.urls(for: .libraryDirectory, in: .userDomainMask).first {
+            try? FileManager.default.removeItem(at: lib.appendingPathComponent("Saved Application State", isDirectory: true))
+        }
+        return AppContainer(baseUrl: "https://neema.test", store: MemoryStore(), transport: transport, socketFactory: DeadSockets(), watchNetwork: false,
+                            defaults: defaults, snapshots: SnapshotCache(directory: dir))
     }
 }

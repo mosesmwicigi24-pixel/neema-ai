@@ -15,7 +15,9 @@ final class AppContainer {
     let foreground = Watched<Bool>(false)
     /// The device has a network (the shell's offline banner).
     let online = Watched<Bool>(true)
-    let prefs = AppPrefs(store: UserDefaults.standard)
+    let prefs: AppPrefs
+    /// Screens' last answers, painted on the next sign-in (`Caches/snapshots`).
+    let snapshots: SnapshotCache
     /// Crash reports that survive the crash (Application Support/crash); the handlers are installed first thing.
     let crashVault: CrashVault
 
@@ -23,8 +25,11 @@ final class AppContainer {
     private var subs: [Subscription] = []
 
     init(baseUrl: String = NeemaConfig.baseUrl, store: SecureStore = KeychainStore(), transport: HTTPTransport = URLSessionTransport(),
-         socketFactory: WebSocketFactory = URLSessionWebSocketFactory(), watchNetwork: Bool = true) {
+         socketFactory: WebSocketFactory = URLSessionWebSocketFactory(), watchNetwork: Bool = true,
+         defaults: UserDefaults = .standard, snapshots: SnapshotCache = .standard()) {
         self.baseUrl = baseUrl
+        prefs = AppPrefs(store: defaults)
+        self.snapshots = snapshots
         crashVault = CrashVault(dir: CrashHandlers.vaultDirectory())
         CrashHandlers.install(crashVault)
         // Images (AsyncImage through URLSession.shared) keep a 64 MB memory / 256 MB disk cache,

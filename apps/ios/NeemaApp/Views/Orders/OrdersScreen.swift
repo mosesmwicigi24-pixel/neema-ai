@@ -409,7 +409,12 @@ struct OrderChannelPill: View {
 
     var body: some View {
         HStack(spacing: 4) {
-            if let g = glyph { Text(g).font(NeemaFont.fixed(9, .bold)).foregroundColor(.white) }
+            // The app's own mark for WhatsApp and Messenger (Android `ChannelGlyphs.forOrder`), a letter for the rest.
+            if ch == "whatsapp" || ch == "messenger" {
+                ChannelGlyph(channel: ch, size: 10, waTint: .white)
+            } else if let g = glyph {
+                Text(g).font(NeemaFont.fixed(9, .bold)).foregroundColor(.white)
+            }
             Text(ch.prefix(1).uppercased() + ch.dropFirst()).font(NeemaFont.manrope(10, .medium)).foregroundColor(.white).lineLimit(1)
         }
         .padding(.horizontal, 6).padding(.vertical, 2)
