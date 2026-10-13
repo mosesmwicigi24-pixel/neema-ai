@@ -75,7 +75,7 @@ final class OrdersNetworkTests: OrdersTestCase {
         let vm = await vm()
         vm.select(order("o2"))
         vm.updateStatus(id: "o2", status: "confirmed")
-        await drain()
+        await finishUpdate(vm)
         XCTAssertEqual(lastToast()?.message, "Order marked as confirmed")
         XCTAssertTrue(errors.isEmpty)
         XCTAssertNil(vm.ui.selectedId)
@@ -87,7 +87,7 @@ final class OrdersNetworkTests: OrdersTestCase {
         let vm = await vm()
         vm.select(order("o2"))
         vm.updateStatus(id: "o2", status: "confirmed")
-        await drain()
+        await finishUpdate(vm)
         XCTAssertEqual(errors.last, "Order not updated — the server took too long to answer — try again")
         XCTAssertEqual(vm.ui.selectedId, "o2")
         XCTAssertNil(vm.ui.updating)
@@ -99,7 +99,7 @@ final class OrdersNetworkTests: OrdersTestCase {
         fake.failDropped("PATCH", "/admin/orders/o2")
         fake.failOffline("GET", "/admin/orders")
         vm.updateStatus(id: "o2", status: "confirmed")
-        await drain()
+        await finishUpdate(vm)
         XCTAssertEqual(errors.last, "No answer from the server — the order may not have updated. Pull down to check.")
         XCTAssertEqual(vm.ui.selectedId, "o2")
     }
@@ -110,7 +110,7 @@ final class OrdersNetworkTests: OrdersTestCase {
         vm.select(order("o1"))
         let reads = gets()
         vm.updateStatus(id: "o1", status: "delivered")
-        await drain()
+        await finishUpdate(vm)
         XCTAssertEqual(errors.last, "Failed to update order — no connection — check your internet and try again")
         XCTAssertEqual(gets(), reads, "nothing reached the server: no reconcile read")
         XCTAssertEqual(vm.ui.selectedId, "o1")
@@ -122,7 +122,7 @@ final class OrdersNetworkTests: OrdersTestCase {
         vm.select(order("o2"))
         fake.on("GET", "/admin/orders", body: SalesFixtures.ordersJson(SalesFixtures.orders.filter { !$0.contains("\"id\":\"o2\"") }))
         vm.updateStatus(id: "o2", status: "confirmed")
-        await drain()
+        await finishUpdate(vm)
         XCTAssertEqual(errors.last, "This order no longer exists — it may have been deleted")
         XCTAssertNil(vm.ui.selectedId)
         XCTAssertFalse(orders.contains { $0.id == "o2" })
@@ -133,11 +133,11 @@ final class OrdersNetworkTests: OrdersTestCase {
         vm.select(order("o1"))
         fake.on("PATCH", "/admin/orders/o1", code: 500, body: "<!doctype html><title>500</title><h1>Internal Server Error</h1>")
         vm.updateStatus(id: "o1", status: "delivered")
-        await drain()
+        await finishUpdate(vm)
         XCTAssertEqual(errors.last, "Failed to update order — the server hit an error — try again")
         fake.on("PATCH", "/admin/orders/o1", code: 403, body: #"{"detail":"Not enough permissions"}"#)
         vm.updateStatus(id: "o1", status: "delivered")
-        await drain()
+        await finishUpdate(vm)
         XCTAssertEqual(errors.last, "Failed to update order — not enough permissions")
     }
 
@@ -146,7 +146,7 @@ final class OrdersNetworkTests: OrdersTestCase {
         fake.on("POST", "/(agent-auth|auth)/refresh") { _, _ in (200, Fixtures.tokenResponse(access: fakeJwt() + "r")) }
         let vm = await vm()
         vm.updateStatus(id: "o2", status: "confirmed")
-        await drain()
+        await finishUpdate(vm)
         XCTAssertEqual(lastToast()?.message, "Order marked as confirmed")
         XCTAssertFalse(host.sessionExpired.value)
     }
@@ -157,7 +157,7 @@ final class OrdersNetworkTests: OrdersTestCase {
         let vm = await vm()
         vm.select(order("o2"))
         vm.updateStatus(id: "o2", status: "confirmed")
-        await drain()
+        await finishUpdate(vm)
         XCTAssertTrue(host.sessionExpired.value)
         XCTAssertEqual(vm.ui.selectedId, "o2")
         XCTAssertTrue(errors.isEmpty)
@@ -177,7 +177,7 @@ final class OrdersNetworkTests: OrdersTestCase {
         let vm = await vm()
         box.value = vm
         vm.updateStatus(id: "o2", status: "confirmed")
-        await drain()
+        await finishUpdate(vm)
         XCTAssertEqual(fake.calls.filter { $0.method == "PATCH" }.count, 1)
     }
 
@@ -191,7 +191,7 @@ final class OrdersNetworkTests: OrdersTestCase {
         }
         let vm = await vm()
         vm.updateStatus(id: "o2", status: "cancelled")
-        await drain()
+        await finishUpdate(vm)
         XCTAssertEqual(lastToast()?.message, "Order marked as cancelled")
     }
 
@@ -205,7 +205,7 @@ final class OrdersNetworkTests: OrdersTestCase {
         box.value = vm
         let before = host.toasts.count
         vm.updateStatus(id: "o2", status: "confirmed")
-        await drain()
+        await finishUpdate(vm)
         XCTAssertEqual(host.toasts.count, before)
     }
 }
