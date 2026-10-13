@@ -1017,6 +1017,14 @@ cycles left (forms' saved state, the gallery's named states).
   deep-link test had opened in the same simulator — the canned launch now
   runs in a wiped, private preferences suite and snapshot folder, deletes
   the saved application state and restores none of it.
+- The Linux job on the docs head (dd56407) failed two tests out of 1584
+  that read a request count after one fixed drain: on the loaded runner the
+  open thread's re-read and the sign-in's orders fetch landed a moment after
+  the assertion (`InboxStressTests.testRefreshRereadsTheOpenThreadsRowEveryTime`,
+  `DashboardRulesTests.testManyTokenRefreshesAndReturnsNeverStackPolls`).
+  Neither reproduced here, even under CPU load; both now wait for the count
+  they assert on, so a slow runner cannot move a fetch across an assertion
+  while a real double read or a stacked poller still fails.
 - The Migrations job failed once on a backend latency bound
   (`p95 < 0.2`, measured 218 ms) in code this PR does not touch; its one
   re-run passed.
