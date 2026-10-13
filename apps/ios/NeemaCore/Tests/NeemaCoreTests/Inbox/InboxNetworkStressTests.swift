@@ -34,6 +34,18 @@ final class InboxNetworkStressTests: XCTestCase {
     func posts(_ path: String) -> [FakeNeema.Call] { fake.calls.filter { $0.method == "POST" && $0.path == path } }
     func thread(_ vm: InboxViewModel, _ id: String = "c1") -> [ThreadMsg] { vm.thread.value.messages[id] ?? [] }
     func mine(_ vm: InboxViewModel, _ id: String = "c1") -> [ThreadMsg] { thread(vm, id).filter { $0.id.hasPrefix("optimistic-") } }
+
+    /// A reply's verdict after a lost answer takes the timeout and then the checks that re-read
+    /// the thread: on a slow CI runner one drain does not always cover them. Wait (up to 3 s,
+    /// yielding the main actor between looks) for what the test is about to assert, then settle.
+    func until(_ cond: () -> Bool) async {
+        let deadline = Date().addingTimeInterval(3)
+        while !cond() && Date() < deadline {
+            await Task.yield()
+            try? await Task.sleep(nanoseconds: 2_000_000)
+        }
+        await drain()
+    }
     func replyRoute(_ conv: String = "c1", _ answer: @escaping () throws -> (Int, String)) { fake.on("POST", "/admin/conversations/\(conv)/reply") { _, _ in try answer() } }
     func api(_ code: Int, _ body: String) -> ApiError { ApiError(status: code, method: "POST", path: "/x", body: body) }
 
@@ -111,10 +123,12 @@ final class InboxNetworkStressTests: XCTestCase {
         vm.select("c1"); await drain()
         vm.setReplyText("Asante Father"); vm.sendReply(); await drain()
         await idle(host, 31_000)
+        await until { self.mine(vm).first?.sendState != "sending" }
         let failed = mine(vm).first!
         XCTAssertEqual(failed.sendState, "failed")
         server.add(InboxNetFixtures.row("srv-late", "Asante Father"))   // the slow server finished delivering it
-        vm.retrySend(failed.id); await drain()
+        vm.retrySend(failed.id)
+        await until { host.toasts.last?.message == "It had already gone through — not sent twice." }
         XCTAssertEqual(posts("/admin/conversations/c1/reply").count, 1)
         XCTAssertEqual(thread(vm).filter { $0.body == "Asante Father" }.count, 1)
         XCTAssertEqual(host.toasts.last?.message, "It had already gone through — not sent twice.")
@@ -127,9 +141,11 @@ final class InboxNetworkStressTests: XCTestCase {
         vm.select("c1"); await drain()
         vm.setReplyText("Late but sent"); vm.sendReply(); await drain()
         await idle(host, 31_000)
+        await until { self.mine(vm).first?.sendState != "sending" }
         XCTAssertEqual(mine(vm).first?.sendState, "failed")
         server.add(InboxNetFixtures.row("srv-poll", "Late but sent"))
-        vm.loadMessages("c1", silent: true); await drain()
+        vm.loadMessages("c1", silent: true)
+        await until { self.mine(vm).isEmpty }
         XCTAssertEqual(thread(vm).filter { $0.body == "Late but sent" }.count, 1)
         XCTAssertTrue(mine(vm).isEmpty)
     }
@@ -146,7 +162,8 @@ final class InboxNetworkStressTests: XCTestCase {
         XCTAssertTrue(host.errors.allSatisfy { !$0.message.contains("Karibu") && !$0.message.contains("Retry") })
         // Back online (the catch-up / 20 s poll): the server never got it → Not sent, with Retry.
         server.threadDown = nil
-        vm.loadMessages("c1", silent: true); await drain()
+        vm.loadMessages("c1", silent: true)
+        await until { self.mine(vm).first?.sendState != "sending" }
         XCTAssertEqual(mine(vm).first?.sendState, "failed")
         XCTAssertEqual(mine(vm).first?.body, "Karibu")
     }
