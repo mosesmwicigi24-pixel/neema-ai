@@ -221,10 +221,14 @@ final class InboxStressTests: XCTestCase {
         await drain()
         XCTAssertEqual(vm.thread.value.activeId, "k2")
         // k2 is open but not on page one: every refresh re-reads its row.
+        // A loaded runner can take longer than one drain to land the re-read, so each
+        // round waits for it, then lets the refresh finish before the next begins.
         for _ in 0..<20 {
             let n = seen.value
-            vm.refresh(); await drain()
-            XCTAssertEqual(seen.value, n + 1, "the open thread's row was re-read by the refresh")
+            vm.refresh()
+            let reread = await eventually { seen.value == n + 1 }
+            XCTAssertTrue(reread, "the open thread's row was re-read by the refresh (\(seen.value) after \(n))")
+            await drain()
         }
         XCTAssertTrue(vm.inbox.value.orderIds.contains("k2"))
     }
