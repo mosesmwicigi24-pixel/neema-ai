@@ -47,6 +47,14 @@ extension FakeNeema {
 /// helpers Android's suites use.
 @MainActor
 class OrdersTestCase: XCTestCase {
+    /// A status change runs to its end: the PATCH and, when its answer was lost, the
+    /// list re-read that settles what happened (`updating` clears last, in a defer).
+    /// A slow CI runner can take longer than one drain for those two round trips.
+    func finishUpdate(_ vm: OrdersViewModel) async {
+        _ = await eventually { vm.ui.updating == nil }
+        await drain()
+    }
+
     var fake: FakeNeema!
     var host: TestHost!
     var hosts: [TestHost] = []

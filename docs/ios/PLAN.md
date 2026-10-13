@@ -1118,8 +1118,15 @@ status of every item, the blockers and the hand-over. Then stop.
   `NEEMA_GALLERY_OUT` set).
 - macOS CI on this cycle's pull request: the simulator job (the build,
   the app tests, the 54-shot gallery, the 8 UI tests) and, new, the unsigned
-  Release archive with its no-fixtures check. The pull request is merged
-  only with every check green, so its merge is the record of both.
+  Release archive with its no-fixtures check (Neema 1.0.0, build 55, no
+  fixtures in the bundle). Both green. The pull request was merged at the
+  owner's word while the Linux job was still running, and that job then
+  failed one test even with the doubled waits:
+  `OrdersNetworkTests.testATimeoutThatLandedIsReportedAsDone`, whose lost
+  answer is settled by a second round trip (the list re-read) that one drain
+  did not always cover. The status-change tests in that file now wait for the
+  update to finish (`finishUpdate`, `updating` clears last) before they look;
+  fixed in the follow-up pull request.
 
 **Remaining parity gaps** — none open as "missing" or "partial"; the 33
 "unverified" rows are the device-run list in `FINAL_REPORT.md` §6.
