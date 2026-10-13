@@ -9,7 +9,7 @@ Two parts:
 
 | Folder | What | Builds on |
 |---|---|---|
-| `NeemaCore/` | A Swift package with everything that is not a screen: wire models, the HTTP client and its session rules, sign-in and silent refresh, the live socket, the shell's rules (views, deep links, the way back, toasts, access), formatting and permissions, and every screen's logic (inbox, customer panel, orders, catalog, deals, leads, analytics, reports, team, profile, settings, WhatsApp calling, the calls console, the softphone's rules behind its ports, the bell and the message alerts). Mirrors `apps/android/.../core` and `feature/*` one rule for one rule. | Linux, macOS, iOS — `swift test` runs 1570 tests anywhere |
+| `NeemaCore/` | A Swift package with everything that is not a screen: wire models, the HTTP client and its session rules, sign-in and silent refresh, the live socket, the shell's rules (views, deep links, the way back, toasts, access), formatting and permissions, and every screen's logic (inbox, customer panel, orders, catalog, deals, leads, analytics, reports, team, profile, settings, WhatsApp calling, the calls console, the softphone's rules behind its ports, the bell and the message alerts). Mirrors `apps/android/.../core` and `feature/*` one rule for one rule. | Linux, macOS, iOS — `swift test` runs 1584 tests anywhere |
 | `NeemaApp/` | The SwiftUI app (screens, theme, platform services). The Xcode project is generated from `project.yml` with XcodeGen. | macOS with Xcode 16 |
 | `NeemaAppTests/` | The app's test bundle: the shell's four tests and the screenshot gallery below. | macOS, the simulator |
 | `NeemaAppUITests/` | XCUITest driving the built app on the simulator against the recorded backend (`-neema-canned`): sign-in right and wrong, the bottom tabs, the drawer to Settings, the orders list, a thread by a tap and by a deep link (`-neema-open <key>`), sign-out. | macOS, the simulator |
@@ -89,6 +89,15 @@ route changes: `python3 apps/ios/scripts/server_routes.py`.
 `scripts/make_icons.py` renders `NeemaApp/Assets.xcassets` (the 1024 px app
 icon and the launch image) from the same shapes as Android's launcher icon —
 pure Python, no image library needed: `python3 apps/ios/scripts/make_icons.py`.
+
+## Release
+
+`scripts/release.sh` archives the Release configuration (`xcodebuild
+archive` for a real iPhone); CI runs it unsigned on every pull request and
+uploads the `.xcarchive` as `ios-unsigned-archive`. With an Apple team
+(`--team <id>`) it signs and exports the `.ipa` for TestFlight with
+`scripts/ExportOptions.plist`. Versioning, the release configuration item by
+item and the TestFlight steps the owner runs are in `docs/ios/RELEASE.md`.
 
 ## Where things stand
 

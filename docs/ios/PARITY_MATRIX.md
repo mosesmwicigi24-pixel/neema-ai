@@ -61,11 +61,11 @@ signing exists (no Apple Developer credentials in the repo or on the box).
 | `AppClock` (pinned in tests) | `core/util/AppClock.kt` | `Util/AppClock.swift` | verified | 1 |
 | `SingleFlight` (one read on the wire; late callers share the next read; cancel) | `core/util/SingleFlight.kt` | `Util/SingleFlight.swift` | verified | 1 |
 | `Coalescer` (one run per burst, never overlapping, one run after a slow run) and the 500 / 800 ms windows | `core/util/ScreenLife.kt` | `Util/SingleFlight.swift` (`Coalescer`) | verified | 1 |
-| `ScreenLife` (shown × foreground × connected → catch-up, poll) | `ScreenLife.kt` | — | missing (Cycle 2, with the first screens) | 2 |
-| `AppPrefs` (theme, background_live, alert settings, mute) | `core/util/AppPrefs.kt` | — | missing (UserDefaults-backed; `background_live` is platform-restricted, see §24) | 2 |
-| `SnapshotCache` (per-agent JSON files for me/agents/orders/catalog, inbox page one, inbox memory) | `core/util/SnapshotCache.kt` | — | missing (Cycle 2; will store the raw response text so no model needs to be Encodable) | 2 |
+| `ScreenLife` (shown × foreground × connected → catch-up, poll) | `ScreenLife.kt` | `Util/ScreenLife.swift` | verified (`ScreenFreshnessTests` and every screen's lifecycle suite) | 2/10 |
+| `AppPrefs` (theme, background_live, alert settings, mute) | `core/util/AppPrefs.kt` | `Util/AppPrefs.swift` (`KeyValueStore` over `UserDefaults`; a memory store in tests) | verified (theme, alert and mute settings through every view-model suite's `TestHost`, `ProfileViewModelTests`, `NotificationTests`); `background_live` platform-restricted (§25) | 2/10 |
+| `SnapshotCache` (per-agent JSON files for me/agents/orders/catalog, inbox page one, inbox memory) | `core/util/SnapshotCache.kt` | `Util/SnapshotCache.swift` (the raw response text per agent under `Caches/snapshots`) | verified (`OrdersLifecycleTests`, `CatalogRulesTests`, the inbox paint tests); the canned launch wipes its own folder | 2/10 |
 | `UiRestore` / saved state across process death | `core/util/UiRestore.kt`, `rememberSaveable` | `@SceneStorage` in `DashboardShell` / `RootView` (the view, its history and whose they are, the pending deep link, the toast on screen) + every screen's own `@SceneStorage` (§21) | verified (rules) · the restore unverified (compile only; no process-death run without a device) | 9 |
-| `ContactNames` (LRU of 2,000 names for notifications) | `core/notify/MessageAlerts.kt` | `NeemaApi.onConversationsSeen` hook only | partial | 5 |
+| `ContactNames` (LRU of 2,000 names for notifications) | `core/notify/MessageAlerts.kt` | `Notify/MessageAlerts.swift` `ContactNames` (2,000 names, least-recent out, learned from every inbox page and opened thread) | verified (`NotificationTests`) | 5/10 |
 
 ## 2. App bootstrap, shell and navigation (`app/`)
 
@@ -83,20 +83,20 @@ signing exists (no Apple Developer credentials in the repo or on the box).
 | Notification frames → toast "{title}: {body}", inbox refetch (types), orders refetch on `order_update` (800 ms) | same | `AppModel` toasts every `incoming` notification (cycle 8); the inbox and the orders feed refetch themselves from the same frames (`InboxViewModel`, `OrdersFeed`) | verified (the refetches, `DashboardRulesTests` / `InboxLiveTests`); the toast unverified (compile only) | 8 |
 | `socket.reconnected` → orders refetch unless < 5 s ago; `sessionExpired` → dialog; `forbidden` → re-read me + agents (1 s coalesce, 15 s cooldown) | same | — | verified (the feed and the host) · shell unverified | 2 |
 | Access: team row by id then email; `permissions()` empty until it lands; `isAdmin` rule; nav gates | `access`, `Sidebar.buildNavItems` | `NeemaCore/Shell/Access.swift` | verified | 1 |
-| Logout: ignore repeats, stop polls, end a live call (3 s / 4 s caps) before the token goes, clear store (keep `last_email`), clear notifications, clear agent state, drop pending link; late answers dropped | `logout()`, `forCurrentAgent` | — | missing (call part: Cycle 5) | 2 |
+| Logout: ignore repeats, stop polls, end a live call (3 s / 4 s caps) before the token goes, clear store (keep `last_email`), clear notifications, clear agent state, drop pending link; late answers dropped | `logout()`, `forCurrentAgent` | `AppModel.logout` → `endCallBounded` (4 s over `CallManager.endForSignOut`'s 3 s) → `finishLogout` | verified (rules: `AuthRepositoryTests`, `CallLifecycleTests` sign-out, `LiveSocketTests`, `OrdersLifecycleTests`; the plain sign-out by the `testSignOutReturnsToTheForm` UI test on the simulator) · the in-call sign-out unverified (compiled) | 2/5/10 |
 | Session expired dialog: not dismissable, "Signed in as", password, "Continue"/"Signing in…", "Sign out", errors | `LoginScreen.kt` `SessionExpiredDialog` | `Views/Auth/SessionExpiredView.swift` | unverified | 1 |
 | Login screen: night palette, brand panel ≥1024 dp, exact copy, email prefilled from `last_email`, eye toggle, validation and error strings | `LoginScreen.kt` | `Views/Auth/LoginView.swift` | unverified | 1 |
 | Phone chrome: header (☰, amber logo, "Neema · {view}", reconnecting pill, bell with "9+" badge, theme toggle), bottom nav (first 4 + More, amber indicator), drawer 272 dp navy | `DashboardShell.kt`, `Sidebar.kt` | `Views/Shell/*` | unverified — the web's icon paths, the wordmark that yields at 150% text, the bell with its red count, the theme switch, the bottom bar's half-width indicator and capped labels, the 272 pt start-edge drawer | 1/3 |
 | Wide chrome: navy docked sidebar 208 dp / rail 60 dp, collapse rule (<1200 dp), bell popup 316 dp, toast top-end, offline dot, docked call panel 420 dp at ≥1000 dp | same | `NavigationSplitView` / custom sidebar | unverified — `navMode(for:)`: rail under 1200 pt (the choice holds until the mode changes), docked 208 pt × text scale beyond; toast top-end; the "Reconnecting…" pill; the bell popup is cycle 5 and the docked call panel cycle 5 | 3 |
 | Sidebar items, badges (Inbox = human, Orders = pending), account card (profile, settings, dark mode switch, sign out), signing-out spinner | `Sidebar.kt` | — | unverified — amber pill rows with navy ink, the three badge sizes with the full number, the account row (online dot, role line, rotating chevron, signing-out ring), the account card inline or as a popover on the rail | 3 |
-| Bell panel: header, mute control (1 h / 8 h / until), mark all read, rows by kind with emoji tiles, dismiss, footer "Clear all", mute status strings | `ShellParts.kt` | — | missing | 5 |
+| Bell panel: header, mute control (1 h / 8 h / until), mark all read, rows by kind with emoji tiles, dismiss, footer "Clear all", mute status strings | `ShellParts.kt` | `Views/Shell/NotificationsPanel.swift` over `AgentNotifications` | verified (rules: `NotificationTests` read / dismiss / clear / mute) · the panel rendered by the gallery (light and dark) and walked in `CONSISTENCY_LOG.md` | 5/9 |
 | Connectivity banner (offline / back online 2.5 s) | `ShellParts.kt` | — | unverified (the solid badge, the two wordings, 2.5 s fold) | 3 |
 | Back-press order: bell popup → account menu → drawer → the view → history → Inbox → exit | `ShellBack.kt` | — | platform-restricted — iOS has no system back; the shell's overlays (drawer, account card, sheets) dismiss by swipe, scrim tap or ✕, and the in-app history (`NavHistory`) stays for the keyboard's Escape in cycle 9 | 3 |
-| Keyboard shortcuts: Ctrl+1…9, Ctrl+B, Alt+↑/↓, Ctrl+[ ], Ctrl+F/K, Esc, Enter/Shift+Enter in the composer | `core/ui/Shortcuts.kt` | `.keyboardShortcut` | missing | 9 |
-| Drag-and-drop of files onto the thread | `DropFiles.kt` | `.dropDestination` (iPad) | missing | 9 |
+| Keyboard shortcuts: Ctrl+1…9, Ctrl+B, Alt+↑/↓, Ctrl+[ ], Ctrl+F/K, Esc, Enter/Shift+Enter in the composer | `core/ui/Shortcuts.kt` | `Shell/Shortcuts.swift`; `KeyButton` / `.keyboardShortcut` in `DashboardShell`, `ConversationListView`, `ComposerView` (Cmd for Ctrl, Cmd+] / Cmd+[ for Alt+↓/↑) | verified (rules, `KeyboardRulesTests` + `EscapeKeyTests`) · wiring unverified (compiled; the CI simulator has no hardware keyboard) | 9 |
+| Drag-and-drop of files onto the thread | `DropFiles.kt` | `.onDrop` on the composer (`DroppedFiles`), `acceptsDrop` in the core, the amber "Drop to attach to your reply" overlay | verified (rules) · wiring unverified (compiled) | 9 |
 | System bar icon colours by theme / signed-out | `MainActivity` | `.preferredColorScheme`, status bar style | unverified — `.preferredColorScheme`: dark over the night login and the dark theme, light otherwise (the wide shell's navy top edge is drawn under the status bar) | 3 |
 | Dark mode: app-controlled (`theme` pref), three toggles, always-night login, always-light cards | `AppPrefs`, `NeemaTheme` | `NeemaTheme` | unverified — the `theme` pref drives the environment; three toggles (header, account card pill, Profile); the login is always night; the account card always white | 3 |
-| Notification permission asked once after first sign-in | `MainActivity.maybeAskForNotifications` | `UNUserNotificationCenter.requestAuthorization` | missing | 5/7 |
+| Notification permission asked once after first sign-in | `MainActivity.maybeAskForNotifications` | `AppModel.askForNotificationsOnce` (pref `asked_post_notifications`, `UNUserNotificationCenter.requestAuthorization`) | unverified (the device prompt; the canned launch pre-sets the pref so no test sees it) | 5/7 |
 
 ## 3. Inbox list (`feature/conversations/ConversationList.kt`, `ConversationsViewModel.kt`)
 
@@ -115,7 +115,7 @@ signing exists (no Apple Developer credentials in the repo or on the box).
 | Summary fetched on every refresh (newest wins, failure keeps badges) → nav badge | logic verified · UI unverified | 2 |
 | List poll 60 s in front; frames coalesce 1.5 s; quiet refresh 2 s after a local patch | logic verified · UI unverified | 2 |
 | Open-conversation key resolution (cache → `resolve` → `get`), toasts, offline retry on reconnect | logic verified · UI unverified | 2 |
-| Keyboard stepping Alt+↓/↑ | missing | 9 |
+| Keyboard stepping Alt+↓/↑ | verified (rules: `stepThrough`, `KeyboardRulesTests`) · the Cmd+] / Cmd+[ wiring unverified | 9 |
 
 ## 4. Thread (`ThreadView.kt`, `ConversationsScreen.ThreadPane`, `MediaViews.kt`, `ThreadCall.kt`)
 
@@ -143,7 +143,7 @@ signing exists (no Apple Developer credentials in the repo or on the box).
 | Quote strip (incl. cross-channel "REPLYING TO {CHANNEL}") | logic verified · UI unverified | 2 |
 | Window strip: open / 24h closed (human agent for {left}) / closed reason, ticking per minute | logic verified · UI unverified | 2 |
 | Translate pill + preview ("THEY WILL RECEIVE — {LANG}") with 700 ms debounce | logic verified · UI unverified | 2 |
-| Lost-files note after process death | partial — the restore is `InboxMemory`'s; the note itself lands in cycle 3 | 3 |
+| Lost-files note after process death | verified (rules: `lostMedia` in `InboxState`, `InboxLifecycleTests`) · the note itself (`LostMediaNote` in the composer) unverified | 3/10 |
 | Box row: attach menu (Camera / Photos & videos / Document), 44–132 dp box, placeholders, send button rules, hardware-keyboard rules | logic verified · UI unverified | 2 |
 | Media tray: thumbnails, captions, per-file errors, add-more, Send N / Retry N / Cancel, "Images up to 5 MB each" | logic verified · UI unverified | 2 |
 | Outbox: optimistic bubble, translate step, reply body keys, `{ok:false,error}` = not delivered, refused vs no-answer (2 / 8 / 20 s reconcile), 401 hold + auto-resend after re-auth, Retry checks, Edit, restore after death | verified (logic) · UI unverified | 2 |
@@ -158,7 +158,7 @@ signing exists (no Apple Developer credentials in the repo or on the box).
 | Transfer (available agents minus assignee, "{n} active conversations"), Add Note, Clear Chat History, Ask Neema, Neema delivers, Invite to WhatsApp (phone prefill, 7–15 digits) — all with the exact strings; Ask/Answer/Invite remember their thread | logic verified · UI unverified | 2 |
 | Viewer: image pinch 1–5×, double-tap 2.5×, video player, album pager "{i} / {n}" | unverified | 2 |
 | Activity log pane/sheet with kind-coloured dots and the empty line; collapsed rails ACTIVITY (20+) / CUSTOMER | unverified | 2 |
-| Phone bottom sheets "Customer Profile" / "ACTIVITY LOG"; tablet `SideSheet` (28% scrim, 220/180 ms) and `AdaptiveSheet` (< 600 dp sheet, else 440 dp end panel) | partial — the phone sheets and the tablet `SideSheet` are in; `AdaptiveSheet` (the 440 dp end panel) is cycle 3 | 3 |
+| Phone bottom sheets "Customer Profile" / "ACTIVITY LOG"; tablet `SideSheet` (28% scrim, 220/180 ms) and `AdaptiveSheet` (< 600 dp sheet, else 440 dp end panel) | unverified — the phone sheets, the tablet `SideSheet` and `Views/Shared/AdaptiveSheet.swift` (a sheet under 600 pt, else the 440 / 480 pt end panel the catalog and leads use) all compile on CI; the iPad shots render the panel | 3 |
 
 ## 7. Customer panel (`feature/conversations/customer/*`)
 
@@ -168,8 +168,8 @@ signing exists (no Apple Developer credentials in the repo or on the box).
 | Hero: avatar, name (+ ✓), flag + phone, stage pill, country chip, lead score bar, tier badge + tooltips, cadence / Overdue, channel chips, Invite chip, "+N merged", Call button (WhatsApp green / Messenger #0066D6), "Send template" | logic verified · UI unverified | 2 |
 | Quick stats; tabs PROFILE · INSIGHTS · ACTIVITY with every section and string (contact fields, ad ref, parish, pipeline stepper + admin custom stages, tags, notes with 3-way merge note, cross-channel identity + merge form + suggestions, purchase summary, buying rhythm, top products, score breakdown, recent orders incl. hub-linked line, channel history) | logic verified · UI unverified | 2 |
 | Pinned footer: made-to-order request (push / dismiss / not pushable) and quick actions (Mark Won / Lost / Advance Stage) | logic verified · UI unverified | 2 |
-| CALLS section: 3 recent calls (wa_id + psid), permission lines, Send call request flow (138009 / template_required / errors), live frames | partial — the section renders (`CustomerCallsView`: recent calls, permission lines); the call-request flow and the live frames land with the softphone | 5 |
-| Call button decision + "call on WhatsApp instead" sheet (Messenger off / Instagram), composer prefill question | missing | 5 |
+| CALLS section: 3 recent calls (wa_id + psid), permission lines, Send call request flow (138009 / template_required / errors), live frames | verified (rules: `CustomerViewModel.sendCallRequest` with `template_required`, `138009` / `request_limit`, `already_permitted`; the `call_permission` frames — `CustomerViewModelTests`, `CustomerContractTests`) · `CustomerCallsView` unverified (compiled) | 5/10 |
+| Call button decision + "call on WhatsApp instead" sheet (Messenger off / Instagram), composer prefill question | verified (rules: `CustomerWords.CallButton`, the sheet's words in `CallWords`, the prefilled "could you share your WhatsApp number?" — `CustomerViewModelTests`) · `ReachCallButton` and the sheet unverified (compiled); the thread header's own call button is the WhatsApp shortcut the web shows, the decision lives in the panel | 5/10 |
 | PATCH bodies per field, age rule, stage, tags, notes + `notes_base`, custom stages PUT, merge / unmerge, push / decline enquiry, invite, template, Ask / Answer (panel wording), save-failure wording and rollback rules | verified (logic) · UI unverified | 2 |
 
 ## 8. Calls — softphone (`feature/calls/CallManager.kt`, `WebRtcMedia.kt`, `CallStage.kt`, `CallAlert.kt`)
@@ -192,7 +192,7 @@ signing exists (no Apple Developer credentials in the repo or on the box).
 | Ringing: ringtone loop + vibration pattern, Profile switches, mute never applies | `CallAlert` | `CallKitRinger`: in front the system alert tone every 2 s; in the background CallKit rings the device's ringtone; the two switches cannot be honoured exactly | platform-restricted (implemented) | 5 |
 | Incoming-call notification (`CallStyle`, full-screen intent, Answer / Decline actions, 120 s timeout), lock-screen takeover (`setShowWhenLocked`, `setTurnScreenOn`), `USE_FULL_SCREEN_INTENT` readiness banner | `CallAlert`, `CallStage` | CallKit `CXProvider` / `CXCallUpdate` / `CXAnswerCallAction` / `CXEndCallAction` / `CXCallEndedReason` in `CallKitRinger`, Answer / Decline into `handleAction`; no full-screen-intent concept | platform-restricted (CallKit replaces all of it; unverified on a device) | 5 |
 | Calls to a closed app (foreground service keeps the socket) | `LiveService`, `BootReceiver`, `START_STICKY` | PushKit VoIP pushes + `reportNewIncomingCall`; needs backend APNs + token endpoints | **blocked** (backend + Apple push credentials) — documented in §24 | 5 (client side) |
-| Mic permission: prompted mid-answer, MicBlocked outcome, 60 s timeout | `CallMicHost` | `CallMicHost` asks `AVAudioSession.requestRecordPermission` when the softphone raises `micRequest`; the 60 s timeout and MicBlocked are the core's (verified); a CallKit answer from the lock screen cannot prompt | partial (asked mid-answer as Android; onboarding prompt is cycle 7's) | 5/7 |
+| Mic permission: prompted mid-answer, MicBlocked outcome, 60 s timeout | `CallMicHost` | `CallMicHost` asks `AVAudioSession.requestRecordPermission` when the softphone raises `micRequest`; the 60 s timeout and MicBlocked are the core's; a CallKit answer from the lock screen cannot prompt | verified (rules, `CallManagerTests`) · the prompt itself unverified (device code); no onboarding prompt, as Android asks mid-answer too (`SECURITY_CHECKLIST.md` §3) | 5/7/10 |
 | Local two-sided recording (16 kHz mono, AAC-LC 32 kbps `.m4a`, ≥ 2000 bytes), upload queue (10 files, 3 days, oldest first, transient vs permanent errors), raw-file sweep | `CallRecorder`, `RecordingOutbox` | `RecordingOutbox` (queue, drain, prune, transient vs permanent) ported and verified; `startRecording` returns nil — no public sample hook in the iOS WebRTC SDK; Meta transcription stands in | platform-restricted (capture); verified (queue) | 5 |
 | Transcripts, insights, voicemail badge, follow-ups (`follow-up-done`) | REST | same | verified (rules); UI unverified | 5 |
 
@@ -206,7 +206,7 @@ signing exists (no Apple Developer credentials in the repo or on the box).
 | Load 60 s in front; 500 ms after call frames; reconnect / foreground / pull; `call_update` merged in place; 50 newest (follow-ups filter client-side, as Android) | verified (`CallsViewModelTests`, `CallLogLiveTests`) | 5 |
 | Details: Close, "{word} · m:ss · date", voicemail line, timeline (Rang / Called by / Answered by / On the call now / Ended), recording line variants, INSIGHTS, transcript panel (strings, 5 s polling, error table), player (play/pause/seek, "Couldn't play the recording."), Call back / Open chat / Mark follow-up done, history line, embedded customer panel; tablet ≥ 840 dp side-by-side with newest auto-opened | unverified (UI); transcript rules and `detailsPick` verified | 5 |
 | Deep-link focus `?view=calls&caller=` + "No calls with this customer yet — showing the full call log." | verified (rules) | 5 |
-| Settings → WhatsApp calling card (controls, validation strings, changed-fields POST, `call_settings` frame, template status lines, "Saved — customers may take up to 7 days…") | missing | 4 |
+| Settings → WhatsApp calling card (controls, validation strings, changed-fields POST, `call_settings` frame, template status lines, "Saved — customers may take up to 7 days…") | verified (rules: `CallingSettingsModelTests` — changed fields only, validation, the server's refusal in its words, `call_settings` reload unless edits are unsaved, the template) · `CallingSettingsCard` unverified (compiled; rendered in the gallery's Settings shot) | 4/10 |
 | Recording playback (`recording_url` without auth header) | `AVPlayer` in `RecordingPlayer`; `/api/admin/media/*` access still to confirm on a device | unverified | 5 |
 
 ## 10. Notifications and alerts (`core/notify/*`, `app/ShellParts.kt`)
@@ -218,7 +218,7 @@ signing exists (no Apple Developer credentials in the repo or on the box).
 | Channels (alerts, messages, updates, calls, live) and their importance | `Notifier.createChannels` | `UNNotificationCategory` + interruption levels | platform-restricted (no channels UI; categories instead) | 5 |
 | Per-type table (channel, content, tap, switch, beep, side effects) | `NotificationCenter.alertFor` | `AgentNotifications.alertFor` | verified | 5 |
 | Mute (1 h / 8 h / until), status strings, never silences calls | `AppPrefs`, `MuteControl` | same (`AppPrefs.muteFor`, the bell panel's menu) | verified (rules); menu unverified | 5 |
-| Profile switches (`notif_*`, defaults), Sounds & vibration switches, "Try the message alert" | `ProfileScreen` | same (vibrate switches map to haptics) | missing | 5/6 |
+| Profile switches (`notif_*`, defaults), Sounds & vibration switches, "Try the message alert" | `ProfileScreen` | same (vibrate switches map to haptics) | verified (rules: `ProfileViewModelTests` — the alert switches and their defaults, the background switch as a device preference) · the rows and "Try the message alert" unverified (compiled; the Profile shot) | 5/6/10 |
 | Background delivery when the app is closed | `LiveService` foreground service | APNs alert pushes (backend) | **blocked** (backend) | — |
 | "Stay connected in background", battery link, boot receiver, live-connection notification | Android only | none | platform-restricted (dropped; documented in Profile copy) | 5 |
 
@@ -362,7 +362,7 @@ signing exists (no Apple Developer credentials in the repo or on the box).
 | Icons: `WebIcons` (heroicons paths), `OverviewIcons`, Material icons | SF Symbols equivalents (+ custom paths for brand glyphs) | unverified — `WebIcons` (the heroicon paths, stroked) across the chrome and the login; `OverviewIcons` and `ChannelIcons` for the panels and brand marks; SF Symbols remain where the web has no icon of its own | 3 |
 | Shared components: Avatar (initials / person glyph / image, 10-hue palette), ChannelChip, Pill, Loading, EmptyState, ErrorState, Panel, SectionTitle, StatTile, SearchField, FilterChips, ConfirmDialog, CountBadge, LoadProblem, StaleBanner, InlineError | `Views/Components/*` | unverified — `AvatarView`, `ChannelCodeChip`, `TeamPill`, `LoadingView`, `EmptyStateView`, `ErrorStateView`, `PanelCard`, `SectionLabel`, `StatTile`, `CompactSearchField`, `WebBtn` / `TeamBtn`, `FormSheet`, `AmberBadge`, `LoadProblem`, `StaleBanner`, `InlineError`, `AdaptiveSheet` | 2/3 |
 | Adaptive rules: `THREAD_MIN 480`, `TWO_PANE_MIN 801`, `DOCKED_NAV_MIN 1200`, `navModeFor` (<600 drawer / <1200 rail / docked), `inboxPanes`, `LocalContentWidthDp` | `NeemaCore/Shell/Adaptive.swift` | verified (`Adaptive.swift`, `AdaptiveTests`) · the shell uses `navMode(for:)`, the inbox `inboxPanes` | 3 |
-| Screenshot goldens (Paparazzi, 173+ call PNGs, inbox 141…) as visual references | snapshot tests on macOS CI in a later cycle | partial — a screenshot gallery renders the sign-in screen and every view (phone light/dark, iPad) on the macOS job into the `ios-screenshots` artifact; comparison against Android's goldens is cycle 9 | 3/9 |
+| Screenshot goldens (Paparazzi, 173+ call PNGs, inbox 141…) as visual references | snapshot tests on macOS CI in a later cycle | verified — the gallery renders the sign-in screen, every view (phone light / dark, iPad) and the named states (drawer, account menu, bell, toasts, offline, session expired, ringing and missed call) into the `ios-screenshots` artifact, and `CONSISTENCY_LOG.md` is the walk against Android's goldens (17 screens and states; no pixel comparison — the phones differ by 22 dp) | 3/9 |
 
 ## 23. Endpoint coverage (81 endpoints the Android app calls)
 
@@ -395,7 +395,7 @@ Every path, query name and body below exists in `Api/NeemaApi.swift` unless the 
 | `ai_draft_ready`, `translations`, `history_cleared` | thread | verified | 2 |
 | `notification` (13 types + legacy) | bell, toast, refetches, tray | verified — the orders feed (`order_update`), Deals (`planned_action`, `hub_event`), the Overview's reload list, the bell and the tray (`AgentNotifications`); the in-front toast is the bell's row + the sound | 5 |
 | `incoming_call`, `outbound_answer`, `call_answered`, `call_status`, `media_update`, `call_ended`, `call_update`, `call_permission`, `calling_restricted` | CallManager, console, panel, thread | verified — `CallManager` (every frame, `CallManagerTests` / `CallLifecycleTests`), the console (`CallLogLiveTests`), the thread's call pill and the customer panel's calls | 5 |
-| `call_settings` | Settings calling card | missing | 4 |
+| `call_settings` | Settings calling card | verified (`CallingSettingsModelTests.testLiveSettingsFramesReloadUnlessEditsAreUnsaved`) | 4 |
 | `pong` | dropped | verified | 1 |
 
 ## 25. Platform-restricted items and backend gaps (carried every cycle)

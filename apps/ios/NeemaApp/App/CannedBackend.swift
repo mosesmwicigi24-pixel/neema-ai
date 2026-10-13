@@ -1,6 +1,11 @@
 import Foundation
 import NeemaCore
 
+// Debug only: the Release build (what TestFlight and the store get) carries
+// neither the recorded backend nor its fixtures (`project.yml` leaves
+// `fixtures.json` out of Release; `scripts/release.sh` checks the archive).
+#if DEBUG
+
 /// A backend made of recorded answers: the screenshot gallery's fixture set
 /// (`NeemaAppTests/Gallery/fixtures.json`, written by NeemaCore's
 /// `GalleryFixtureExportTests`), served by method and path — the exact query
@@ -175,3 +180,14 @@ enum CannedBackend {
                             defaults: defaults, snapshots: SnapshotCache(directory: dir))
     }
 }
+
+#else
+
+/// The Release build: no recorded backend, whatever the launch arguments say.
+enum CannedBackend {
+    static let requested = false
+    static let openKey: String? = nil
+    @MainActor static func container() -> AppContainer? { nil }
+}
+
+#endif

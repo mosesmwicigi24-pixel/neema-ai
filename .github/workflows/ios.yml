@@ -93,3 +93,31 @@ jobs:
           name: ios-screenshots
           path: apps/ios/screenshots
           if-no-files-found: warn
+
+  release:
+    # The Release configuration, archived for a real iPhone (generic/platform=iOS)
+    # with the run number as the build number — unsigned, since no Apple team
+    # lives in this repository, so it proves the optimised build and the
+    # archive, not a TestFlight upload (apps/ios/scripts/release.sh does that
+    # with a team; docs/ios/RELEASE.md).
+    name: Neema release archive (unsigned)
+    runs-on: macos-15
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: apps/ios
+    steps:
+      - uses: actions/checkout@v4
+      - name: XcodeGen
+        run: brew install xcodegen && xcodegen generate
+      - name: Archive
+        run: scripts/release.sh --build "$GITHUB_RUN_NUMBER" --out build
+      - name: Upload the archive
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-unsigned-archive
+          path: |
+            apps/ios/build/Neema.xcarchive
+            apps/ios/build/archive.log
+          if-no-files-found: warn
