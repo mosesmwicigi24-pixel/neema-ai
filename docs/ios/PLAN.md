@@ -1025,9 +1025,13 @@ cycles left (forms' saved state, the gallery's named states).
   Neither reproduced here, even under CPU load; both now wait for the count
   they assert on, so a slow runner cannot move a fetch across an assertion
   while a real double read or a stacked poller still fails.
-- The Migrations job failed once on a backend latency bound
-  (`p95 < 0.2`, measured 218 ms) in code this PR does not touch; its one
-  re-run passed.
+- The Migrations job's backend burst test
+  (`test_calls_adversarial_db.py`, `p95 < 0.2`) failed three times on
+  GitHub's runners, in code this PR does not touch: 218, 205 and 210 ms
+  against a p50 of 31–39 ms. The bound had no margin left on a shared
+  runner, so it is now 300 ms with the measurements beside it: a handler
+  that serialised the burst would sit near the burst's one-second wall
+  time, and the query-count bounds still catch an N+1.
 
 **Remaining parity gaps** (scope of this cycle)
 
