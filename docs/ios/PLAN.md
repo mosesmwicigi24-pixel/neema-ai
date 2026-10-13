@@ -1024,7 +1024,12 @@ cycles left (forms' saved state, the gallery's named states).
   `DashboardRulesTests.testManyTokenRefreshesAndReturnsNeverStackPolls`).
   Neither reproduced here, even under CPU load; both now wait for the count
   they assert on, so a slow runner cannot move a fetch across an assertion
-  while a real double read or a stacked poller still fails.
+  while a real double read or a stacked poller still fails. The next run
+  lost the same race in three other tests (`InboxLiveTests`,
+  `InboxNetworkStressTests`, `OrdersNetworkTests`): 871 assertions sit behind
+  the shared `drain()` / `settle()` waits, so patching tests one by one would
+  not converge. The waits now take a scale (`NEEMA_TEST_WAIT_SCALE`, default
+  1); the Linux job sets 2 and its limit is 30 minutes.
 - The Migrations job's backend burst test
   (`test_calls_adversarial_db.py`, `p95 < 0.2`) failed three times on
   GitHub's runners, in code this PR does not touch: 218, 205 and 210 ms
@@ -1058,3 +1063,72 @@ APNs); no Apple credentials.
 release configuration, versioning, the signing / TestFlight instructions
 (blocked without credentials), `docs/ios/FINAL_REPORT.md` with the honest
 status of every item, the blockers and the hand-over. Then stop.
+
+### Cycle 10 — Final verification & production readiness
+
+**Features implemented / verified**
+
+- **The Release configuration built on every pull request.** A third iOS
+  job, `Neema release archive (unsigned)`, runs `apps/ios/scripts/release.sh`:
+  `xcodebuild archive` of the Release configuration for a real iPhone
+  (`generic/platform=iOS`, WebRTC's device slice), the workflow's run number
+  as the build number, unsigned (no Apple team), the `.xcarchive` and its log
+  uploaded as `ios-unsigned-archive`. With `--team <id>` (or
+  `NEEMA_APPLE_TEAM`) the same script signs, archives and exports the `.ipa`
+  for TestFlight with `scripts/ExportOptions.plist` (`app-store-connect`,
+  automatic signing, symbols uploaded).
+- **The test backend kept out of what ships.** `CannedBackend` (the recorded
+  backend the UI tests launch with `-neema-canned`) compiles only in Debug;
+  Release gets a stub that ignores the launch arguments, `fixtures.json` is
+  excluded from the Release bundle, and the release script refuses an
+  archive that carries it.
+- **Versioning** written down (`docs/ios/RELEASE.md` §2): `MARKETING_VERSION`
+  1.0.0 / `CURRENT_PROJECT_VERSION` 1 in `project.yml`, in step with
+  Android's `versionName` / `versionCode`; CI archives with the run number;
+  `--version` / `--build` override both without editing the project.
+- **`docs/ios/RELEASE.md`**: the release configuration item by item with its
+  status, what each CI job proves, the signing and TestFlight steps for the
+  owner (blocked here), the CI secrets that would let the workflow sign and
+  upload, and the checklist for the first device run.
+- **The matrix's last stale rows set straight.** Nineteen rows still read
+  "missing" or "partial" from the cycle that planned them although later
+  cycles built and tested them (`ScreenLife`, `AppPrefs`, `SnapshotCache`,
+  `ContactNames`, logout, the bell, the keyboard and drop rows, the
+  notification ask, Alt+↓/↑, the lost-files note, `AdaptiveSheet`, the call
+  request flow, the call button decision, the mic prompt, the calling card,
+  the Profile switches, the screenshot row, `call_settings`). Each was
+  checked against the code and its tests and given its real status: the
+  matrix now reads 115 verified, 33 unverified, 7 platform-restricted, none
+  partial or missing.
+- **`docs/ios/FINAL_REPORT.md`**: the verdict, what was built, the status of
+  every area, the evidence, the blockers, the device-run list, the ten
+  cycles and the hand-over.
+
+**Defects corrected**
+
+1. The Release app bundled the UI tests' fixture set and the recorded
+   backend (reachable only with a launch argument a phone cannot pass, but
+   test code and data have no place in a store build).
+2. Nineteen parity-matrix rows understated the app (above).
+
+**Tests executed**
+
+- `swift test` in `apps/ios/NeemaCore` on Linux: **1584 tests, 0
+  failures**, 1 skipped (the gallery fixture export, which runs only with
+  `NEEMA_GALLERY_OUT` set).
+- macOS CI on this cycle's pull request: the simulator job (the build,
+  the app tests, the 54-shot gallery, the 8 UI tests) and, new, the unsigned
+  Release archive with its no-fixtures check. The pull request is merged
+  only with every check green, so its merge is the record of both.
+
+**Remaining parity gaps** — none open as "missing" or "partial"; the 33
+"unverified" rows are the device-run list in `FINAL_REPORT.md` §6.
+
+**Blockers** (carried, final) — no Xcode or device here; no Apple
+Developer team (signing, TestFlight, store, push certificates, associated
+domains); the backend sends no APNs / PushKit pushes; the host serves no
+`apple-app-site-association`. Each with what unblocks it in
+`FINAL_REPORT.md` §5.
+
+**Next cycle** — none. Cycle 10 was the last; the programme ends with
+`docs/ios/FINAL_REPORT.md`.

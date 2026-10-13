@@ -24,6 +24,7 @@ Linux or macOS CI; unverified = compiled only; platform-restricted; blocked).
 | App Transport Security | No `NSAppTransportSecurity` key in `project.yml`: the system default (TLS 1.2+, no arbitrary loads, no cleartext). The base URL is `https://neema.bethanyhouse.co.ke`; the socket is `wss://`. | verified (the plist has no exception) |
 | Certificates | The system trust store; no pinning (Android pins nothing either). | n/a |
 | Redirects | `followRedirects` true by default; the auth flows that must not follow (NextAuth's callback) pass false. | verified (`AuthRepositoryTests`) |
+| Test fixtures and the recorded backend in the shipped app | `CannedBackend.swift` is `#if DEBUG`; Release has a stub (`requested` always false) and no `fixtures.json` (`project.yml` excludes it from Release; `scripts/release.sh` refuses an archive that carries it). Added in cycle 10. | verified from cycle 10's archive run |
 
 ## 3. Permissions and their rationale
 
