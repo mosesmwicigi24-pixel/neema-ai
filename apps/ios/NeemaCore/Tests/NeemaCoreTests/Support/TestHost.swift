@@ -28,7 +28,7 @@ final class Ref<T>: @unchecked Sendable {
 func drain() async {
     for _ in 0..<3 {
         for _ in 0..<25 { await Task.yield() }
-        try? await Task.sleep(nanoseconds: 12_000_000)
+        try? await Task.sleep(nanoseconds: 12_000_000 * TEST_WAIT_SCALE)
     }
 }
 

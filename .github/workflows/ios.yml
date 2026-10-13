@@ -37,6 +37,10 @@ jobs:
       - name: Build
         run: swift build --build-tests
       - name: Test
+        # The shared runner can be slower than a workstation at the hops the
+        # tests' fixed waits cover; double them here (Support.swift, TEST_WAIT_SCALE).
+        env:
+          NEEMA_TEST_WAIT_SCALE: "2"
         run: swift test
 
   app:
