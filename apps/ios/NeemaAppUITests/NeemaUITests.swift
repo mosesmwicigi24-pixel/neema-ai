@@ -12,6 +12,7 @@ final class NeemaUITests: XCTestCase {
         continueAfterFailure = false
         app = XCUIApplication()
         app.launchArguments = ["-neema-canned"]
+        if name.contains("DeepLink") { app.launchArguments += ["-neema-open", "254712345678"] }
         app.launch()
     }
 
@@ -121,6 +122,15 @@ final class NeemaUITests: XCTestCase {
         // The full-screen thread on a phone: the header's actions and the messages.
         XCTAssertTrue(app.buttons["Call on WhatsApp"].waitForExistence(timeout: 15))
         XCTAssertTrue(text("Can you deliver to Nyeri by Friday?").waitForExistence(timeout: 15))
+        XCTAssertTrue(app.buttons["Back"].exists)
+    }
+
+    /// A deep link that arrived signed out (`neema://?open=254712345678`, a notification tap) is kept and
+    /// opens the thread right after sign-in: the path `AppModel.openConversationFor` takes on the main thread.
+    func testADeepLinkOpensTheThreadAfterSignIn() {
+        signIn()
+        XCTAssertTrue(app.buttons["Call on WhatsApp"].waitForExistence(timeout: 20), "the deep link did not open the thread")
+        XCTAssertTrue(text("Fr. Peter Kamau").waitForExistence(timeout: 10))
         XCTAssertTrue(app.buttons["Back"].exists)
     }
 

@@ -15,7 +15,12 @@ struct NeemaApp: App {
                 .preferredColorScheme(app.session == nil ? .dark : (app.dark ? .dark : .light))
                 .onOpenURL { url in app.open(url) }
                 .onChange(of: scenePhase) { phase in app.setForeground(phase == .active) }
-                .onAppear { app.setForeground(scenePhase == .active) }
+                .onAppear {
+                    app.setForeground(scenePhase == .active)
+                    // `-neema-open <key>` with `-neema-canned`: a deep link at launch, as a notification tap or
+                    // `neema://?open=<key>` would deliver one (the UI tests cannot open a custom scheme themselves).
+                    if CannedBackend.requested, let key = CannedBackend.openKey { app.applyDeepLink(DeepLink(open: key)) }
+                }
         }
     }
 }

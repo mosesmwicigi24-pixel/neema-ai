@@ -138,6 +138,13 @@ enum CannedBackend {
 
     static var requested: Bool { ProcessInfo.processInfo.arguments.contains(ARGUMENT) }
 
+    /// `-neema-open <key>`: a conversation to open by deep link once signed in.
+    static var openKey: String? {
+        let args = ProcessInfo.processInfo.arguments
+        guard let i = args.firstIndex(of: "-neema-open"), i + 1 < args.count else { return nil }
+        return args[i + 1]
+    }
+
     /// The app on the canned backend, signed out, with nothing remembered
     /// between launches (an in-memory session store; the one-time notification
     /// ask already made, so no system prompt sits over the UI tests).

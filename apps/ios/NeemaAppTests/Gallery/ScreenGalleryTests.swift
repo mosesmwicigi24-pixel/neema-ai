@@ -205,14 +205,10 @@ final class ScreenGalleryTests: XCTestCase {
         await pause(600)
         shot(phone, "call-ended"); shot(phoneDark, "call-ended")
         await pause(2_500)
-        // The first thread open beside the list on the iPad. The phone's full-screen thread is not
-        // rendered here: hosting it in a window hangs the test host (twice, in the first two runs of
-        // this renderer); the UI tests open it in the real app instead (`testOpeningAThreadShowsIt`).
-        NSLog("gallery: opening the thread")
-        app.openConversationFor("c1")
-        await quiet(transport)
-        NSLog("gallery: the thread is open")
-        shot(ipad, "thread")
+        // No open-thread state here: `openConversationFor` in this in-process host never returned
+        // (three runs; the last log line was always "opening the thread"), while the same path in the
+        // real app on the simulator opens the thread (the UI tests `testOpeningAThreadShowsIt` and
+        // `testADeepLinkOpensTheThreadAfterSignIn`). The iPad's inbox shot carries the thread pane.
         app.setDark(false)
     }
 }
