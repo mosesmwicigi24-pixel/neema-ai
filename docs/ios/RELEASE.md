@@ -61,7 +61,7 @@ team.
 The app declares no entitlements (no push, no associated domains), so a free
 Apple ID can sign it. Xcode calls that team your "Personal Team". An app signed
 that way runs for 7 days on the devices plugged into that Mac, then needs
-installing again. TestFlight and other people's phones need §4.
+installing again. No Mac? §4b. TestFlight and other people's phones need §4.
 
 What you need: a Mac with Xcode 16, a free Apple ID signed in to Xcode
 (Xcode → Settings → Accounts → +), and the iPhone or iPad with a cable.
@@ -92,6 +92,39 @@ pushes (§25 of the matrix), alerts and calls arrive only while the app is
 open. The script is untested by this programme (no Mac or device here);
 `xcodebuild` and `devicectl` errors print as they come, and the build log is
 `build/device.log`.
+
+## 4b. Without a Mac — the .ipa from GitHub, signed with Sideloadly
+
+Every change to the iOS app on `main` publishes a GitHub Release
+**Neema iOS 1.0.0 (build N)** with `Neema-iOS-<version>-<sha>-unsigned.ipa`
+(the same Release build CI archives; also the `neema-ios-ipa` artifact of
+each iOS workflow run). It is unsigned: Apple lets an iPhone install only an
+app signed for it, so a sideloading tool signs it with your own Apple ID.
+Works for any iPhone on iOS 16 or later — iPhone 17 included.
+
+What you need: a Windows PC or a Mac, the iPhone and its cable, and an Apple
+ID (a free one is fine; better a separate one than your main account).
+
+1. On the computer: install **Sideloadly** (sideloadly.io). On Windows also
+   install **iTunes** and **iCloud** from apple.com — the web installers, not
+   the Microsoft Store versions — so the PC can talk to the iPhone.
+2. Download the `.ipa` from the repository's **Releases** page (the newest
+   "Neema iOS" release).
+3. Plug the iPhone in, unlock it, tap **Trust**.
+4. Open Sideloadly: drag the `.ipa` in, pick the iPhone, type your Apple ID,
+   **Start**. Enter the Apple ID password (and the two-factor code) when asked.
+   If it says the bundle id is taken, open **Advanced options** and change the
+   bundle id (e.g. `ke.co.bethanyhouse.neema.moses`).
+5. On the iPhone: Settings → Privacy & Security → **Developer Mode** on (it
+   restarts; confirm **Turn On**). The switch appears only after the first
+   sideloaded app is installed.
+6. Settings → General → **VPN & Device Management** → your Apple ID →
+   **Trust**. Open Neema and sign in as on Android.
+
+With a free Apple ID the signature lasts **7 days** and at most 3 sideloaded
+apps can be on the phone; after 7 days the app won't open until it is
+installed again (step 4, the data stays). A paid Apple Developer account
+(§4) lifts both limits and opens TestFlight.
 
 ## 4. Signing and TestFlight — blocked here, the owner's steps
 
