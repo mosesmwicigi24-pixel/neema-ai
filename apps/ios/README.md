@@ -100,7 +100,7 @@ uploads the `.xcarchive` as `ios-unsigned-archive`. With an Apple team
 item and the TestFlight steps the owner runs are in `docs/ios/RELEASE.md`.
 
 To put the app on your own iPhone or iPad from a Mac, with a free Apple ID:
-`scripts/device-install.sh --team <TEAM_ID>` (`docs/ios/RELEASE.md` §4a).
+`scripts/device-install.sh --team <TEAM_ID>` (`docs/ios/RELEASE.md` §4a). No Mac: every change on `main` publishes an unsigned `.ipa` as a GitHub Release, installed with Sideloadly from Windows or a Mac (§4b).
 
 ## Where things stand
 
