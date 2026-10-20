@@ -103,6 +103,9 @@ jobs:
     name: Neema release archive (unsigned)
     runs-on: macos-15
     timeout-minutes: 30
+    # Writes the GitHub Release on main (the .ipa the owner sideloads).
+    permissions:
+      contents: write
     defaults:
       run:
         working-directory: apps/ios
@@ -121,3 +124,35 @@ jobs:
             apps/ios/build/Neema.xcarchive
             apps/ios/build/archive.log
           if-no-files-found: warn
+      # The archive's app, zipped as an .ipa (Payload/Neema.app) — unsigned. A
+      # sideloading tool (Sideloadly, on Windows or a Mac) signs it with the
+      # owner's own Apple ID and installs it on the iPhone: no Mac or Xcode
+      # needed (docs/ios/RELEASE.md §4b). A free Apple ID's signature lasts 7 days.
+      - name: Package the .ipa
+        id: ipa
+        run: |
+          version=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' build/Neema.xcarchive/Products/Applications/Neema.app/Info.plist)
+          name="Neema-iOS-${version}-${GITHUB_SHA::7}-unsigned.ipa"
+          rm -rf build/ipa && mkdir -p build/ipa/Payload
+          cp -R build/Neema.xcarchive/Products/Applications/Neema.app build/ipa/Payload/
+          (cd build/ipa && zip -qry "../$name" Payload)
+          ls -la "build/$name"
+          echo "name=$name" >> "$GITHUB_OUTPUT"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+      - name: Upload the .ipa
+        uses: actions/upload-artifact@v4
+        with:
+          name: neema-ios-ipa
+          path: apps/ios/build/${{ steps.ipa.outputs.name }}
+          if-no-files-found: error
+      - name: Publish release
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          IPA: ${{ steps.ipa.outputs.name }}
+          VERSION: ${{ steps.ipa.outputs.version }}
+        run: |
+          gh release create "ios-v${VERSION}-${GITHUB_RUN_NUMBER}" "build/$IPA" \
+            --title "Neema iOS ${VERSION} (build ${GITHUB_RUN_NUMBER})" \
+            --notes "iPhone (iOS 16 or later, iPhone 17 included): \`$IPA\` is unsigned. Install it with Sideloadly (Windows or Mac) signed with your Apple ID — docs/ios/RELEASE.md §4b. With a free Apple ID it runs for 7 days, then install it again. Built from ${GITHUB_SHA::7}." \
+            --target "$GITHUB_SHA"
