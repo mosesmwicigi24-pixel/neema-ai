@@ -79,7 +79,8 @@ def test_a_kind_of_thing_is_a_range_and_one_item_is_not():
     assert range_for("aluminium 4-stack communion set") is None
     # a neighbour is not the range
     assert range_for("chalice") is None
-    assert range_for("communion wafers") is None
+    # wafers are the bread's own range (owner, 2026-10-21), never the trays'
+    assert range_for("communion wafers")["name"] == "communion bread"
 
 
 def test_the_range_is_the_trays_and_sets_cheapest_first_and_no_chalice():

@@ -877,6 +877,36 @@ async def product_from_vision(redis, thumb_url: str, catalog: list[dict],
 # ── the resolver + the sweep ─────────────────────────────────────────────────
 
 
+def declared_family(text: str, catalog: list[dict]) -> dict | None:
+    """A product the owner declared ONE product in packs (core/synonyms
+    `one_product`, e.g. communion bread: 200 / 500 / 1,000 pieces), named by
+    the caption without a pack ("Mkate wa ushirika upo") → the family, priced
+    "from" its smallest pack. None when the caption names a pack (that row
+    answers) or no such product."""
+    from app.core.synonyms import range_for, range_members
+    rng = range_for(text)
+    if not rng or not rng.get("one_product"):
+        return None
+    if re.search(rng["exclude"], text, re.IGNORECASE):
+        return None          # "a tray for your communion bread" is the tray
+    rows = range_members(rng, catalog)
+    if not rows:
+        return None
+
+    def _kes(r):
+        try:
+            return float(r.get("price") or 0) or float("inf")
+        except (TypeError, ValueError):
+            return float("inf")
+    cheapest = min(rows, key=_kes)
+    fam = dict(cheapest)
+    fam["name"] = rng["one_product"]
+    fam["family"] = [r.get("slug") or r.get("name") for r in rows]
+    priced = [_kes(r) for r in rows if _kes(r) != float("inf")]
+    fam["price_from"] = bool(priced) and max(priced) > min(priced)
+    return fam
+
+
 def caption_identity(text: str, catalog: list[dict]) -> tuple[dict | None, str]:
     """The caption rungs of the ladder, on the post's WHOLE words: (row,
     "link") for a storefront link, (row, "caption") for a set, a bundle, a
@@ -912,6 +942,9 @@ def caption_identity(text: str, catalog: list[dict]) -> tuple[dict | None, str]:
     hit = product_from_caption(title, catalog)
     if hit is not None:
         return _ev(hit, f'the caption names "{hit.get("name")}"'), "caption"
+    fam = declared_family(title, catalog)
+    if fam is not None:
+        return _ev(fam, f'the caption names "{fam.get("name")}" (every pack, from the smallest)'), "caption"
     if hit is None:
         # The hub's names SCORED against the whole caption (runtime's
         # scorer: coverage, the phrase in order, an alias, size families,

@@ -4612,12 +4612,16 @@ def _hub_caption_match(catalog: list, title: str) -> dict | None:
             core_count[c] = core_count.get(c, 0) + 1
     scored = []
     alias_hit: set = set()
+    from app.core.synonyms import one_product_ruled_out as _ruled_out
     for prod in catalog:
+        if _ruled_out(prod, title):
+            continue
         full_seq = _caption_token_seq(prod.get("name") or "")
         core = _core_tokens(prod)
         if core and core_count.get(core, 0) > 1:
-            name_seq = [t for t in _caption_token_seq(_strip_pack(_strip_size(prod.get("name") or "")))
-                        if t not in _SIZE_WORDS and not t.isdigit()] or full_seq
+            name_seq = list(core) if _one_family(prod) else \
+                [t for t in _caption_token_seq(_strip_pack(_strip_size(prod.get("name") or "")))
+                 if t not in _SIZE_WORDS and not t.isdigit()] or full_seq
         else:
             name_seq = full_seq
         ntoks = set(name_seq)
@@ -4738,13 +4742,24 @@ _PACK_RE = re.compile(
     re.IGNORECASE)
 
 
+def _one_family(prod: dict) -> str:
+    from app.core.synonyms import one_product_family
+    return one_product_family(prod)
+
+
 def _strip_pack(name: str) -> str:
     return " ".join(_PACK_RE.sub(" ", name or "").split()).strip(" -—–:/")
 
 
 def _core_tokens(prod: dict) -> frozenset:
     """The name's tokens with its size words — and a pack count or volume —
-    removed."""
+    removed. A row the owner declared ONE PACK of a product (core/synonyms
+    `one_product`: the three communion-bread packs) has that product's name
+    as its core, so its packs are one family whatever the hub calls each row."""
+    from app.core.synonyms import one_product_family
+    fam = one_product_family(prod)
+    if fam:
+        return frozenset(_caption_token_seq(fam))
     return frozenset(t for t in _caption_token_seq(_strip_pack(_strip_size(prod.get("name") or "")))
                      if t not in _SIZE_WORDS and not t.isdigit())
 
@@ -4789,7 +4804,8 @@ def _size_family(rows: list, caption_toks: set) -> dict | None:
     cheapest = min(rows, key=_kes)
     prices = [_kes(r) for r in rows if _kes(r) != float("inf")]
     fam = dict(cheapest)
-    fam["name"] = _strip_pack(_strip_size(cheapest.get("name") or "")) or cheapest.get("name")
+    fam["name"] = _one_family(cheapest) or \
+        _strip_pack(_strip_size(cheapest.get("name") or "")) or cheapest.get("name")
     fam["family"] = [r.get("slug") or r.get("name") for r in rows]
     fam["price_from"] = bool(prices) and (max(prices) > min(prices))
     return fam
