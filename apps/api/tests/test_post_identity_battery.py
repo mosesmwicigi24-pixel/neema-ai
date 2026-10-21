@@ -130,3 +130,19 @@ def test_an_alias_never_claims_another_product_s_name():
 def test_the_more_specific_name_wins_when_the_caption_covers_it():
     assert rt._hub_caption_match(
         CATALOG, "Bishop's pectoral cross in a bright gold finish")["name"] == "Pectoral Cross — Gold Finish"
+
+
+# ── variants kept as separate hub rows (variants audit, 2026-10-21) ──────────
+
+def test_a_pack_or_volume_family_is_one_product_priced_from_the_cheapest():
+    hit, _ = pc.caption_identity("Communion wafer bread available now", CATALOG)
+    assert hit["name"] == "Communion Wafer Bread" and hit["price"] == 400.0
+    assert hit["price_from"] is True
+    assert set(hit["family"]) == {"communion-wafer-bread-200pcs", "communion-wafer-bread-500pcs"}
+    hit, _ = pc.caption_identity("Refiller bottle for communion cups", CATALOG)
+    assert hit["name"] == "Refiller Bottle" and hit["price_from"] is False   # both sizes cost the same
+
+
+def test_a_named_pack_is_that_pack():
+    hit, _ = pc.caption_identity("Communion Wafer Bread 500PCS in stock", CATALOG)
+    assert hit["name"] == "Communion Wafer Bread 500PCS" and hit["price"] == 1000.0

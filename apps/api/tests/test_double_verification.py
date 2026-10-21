@@ -134,8 +134,10 @@ def test_the_turn_hands_the_writer_todays_rate_only_when_asked():
     src = inspect.getsource(rt.run_turn)
     assert '_fx_code = _fx.currency_asked(user_text) if currency == "USD" else None' in src
     assert "_fx_rates = await _fx.rates(redis)" in src
-    assert "tail += (_fx.context_line(_fx_code, _fx_rates[_fx_code]) if _fx_rates.get(_fx_code)" in src
-    assert "else _fx.no_rate_line(_fx_code))" in src
+    # the rate rides on THIS message (turn_notes), and the gate still knows it
+    assert "turn_notes.append(_fx.context_line(_fx_code, _fx_rates[_fx_code])" in src
+    assert "if _fx_rates.get(_fx_code) else _fx.no_rate_line(_fx_code))" in src
+    assert "extra_known=_turn_note" in src
     p = " ".join(build_system_prompt(currency="USD").split())
     assert "TODAY'S RATE GIVEN IN YOUR CONTEXT" in p
     assert "never invent a rate from memory" in p and "never promise to 'confirm the rate with the team'" in p
@@ -195,3 +197,23 @@ def test_the_hold_guard_marks_and_remembers():
     assert asyncio.run(rv.held_recently(r, "whatsapp", "K")) is False     # first hold: marked
     assert asyncio.run(rv.held_recently(r, "whatsapp", "K")) is True      # within hours: already
     assert asyncio.run(rv.held_recently(None, "whatsapp", "K")) is False
+
+
+# ── the cache-stable prompt (cost audit, 2026-10-21) ──────────────────────────
+
+def test_a_turn_note_rides_on_the_message_and_the_prefix_stays_byte_identical():
+    from app.agent import runtime as rt
+    history = [{"role": "user", "content": "How much is the cope set?"},
+               {"role": "assistant", "content": [{"type": "text", "text": "KES 45,000."}]},
+               {"role": "user", "content": "In rands please"}]
+    with_note = [dict(m) for m in history]
+    text = rt._attach_turn_notes(with_note, ["\n\nTODAY'S RATE: 1 USD = 18.10 ZAR"])
+    assert text == "TODAY'S RATE: 1 USD = 18.10 ZAR"
+    assert with_note[:-1] == history[:-1]                     # the cached prefix is untouched
+    assert with_note[-1]["content"].startswith("In rands please")
+    assert rt.TURN_NOTE_HEADER in with_note[-1]["content"]
+    plain = [dict(m) for m in history]
+    assert rt._attach_turn_notes(plain, ["", ""]) == "" and plain == history
+    photo = [{"role": "user", "content": [{"type": "image", "source": {}}]}]
+    rt._attach_turn_notes(photo, ["note"])
+    assert photo[0]["content"][-1]["text"].endswith("note")

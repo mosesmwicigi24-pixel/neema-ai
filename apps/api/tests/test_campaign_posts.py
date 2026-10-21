@@ -514,7 +514,7 @@ def test_the_engine_hands_entries_to_the_host():
     # the gift's words are set aside for the guard and the reviewer before either reads
     assert "_campaign_allow = tuple(_dom0.gift_terms(_cap0))" in src2
     assert "allow=_campaign_allow, names=_guard_names)" in src2
-    assert "allow=_campaign_allow)" in src2
+    assert "allow=_campaign_allow, extra_known=_turn_note)" in src2
     assert inspect.getsource(rt._gate_turn_reply).count("allow=allow") == 2
     assert "if is_campaign_post" not in inspect.getsource(rt._resolve_post_product)
     assert rt._names_exactly("the Purple Cassock is KES 12,000", "Purple Cassock")

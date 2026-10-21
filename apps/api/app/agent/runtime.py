@@ -1184,6 +1184,32 @@ _SW_REVIEW_HOLD_DM_PRICE = ("Ngoja nihakikishe bidhaa kamili na bei sahihi 🙏 
                             "atakuthibitishia hapa hivi karibuni.")
 
 
+TURN_NOTE_HEADER = "[For this message — context from Neema's systems, not the customer's words:]"
+
+
+def _attach_turn_notes(messages: list, notes: list[str]) -> str:
+    """Put THIS message's notes on the current (last) user message, after the
+    cached conversation, and return them as one text ("" when none). The
+    system blocks and every earlier message stay byte-identical turn to turn,
+    so the next turn READS the conversation from the cache (0.1×) instead of
+    re-writing it (1.25–2×) whenever a note comes or goes."""
+    text = "".join(n for n in notes if n).strip()
+    if not text:
+        return ""
+    block = TURN_NOTE_HEADER + "\n" + text
+    if messages and messages[-1].get("role") == "user":
+        last = dict(messages[-1])
+        c = last.get("content")
+        if isinstance(c, list):
+            last["content"] = list(c) + [{"type": "text", "text": block}]
+        else:
+            last["content"] = (str(c or "").rstrip() + "\n\n" + block).strip()
+        messages[-1] = last
+    else:
+        messages.append({"role": "user", "content": block})
+    return text
+
+
 async def _reply_in_words(llm, sys_blocks, messages: list, tools: list) -> str:
     """The reply itself, in words, from what the turn has already gathered:
     one call on the loop's own cached prefix, tools present but not callable
@@ -1218,7 +1244,8 @@ async def _gate_turn_reply(reply: str, *, user_text: str, transcript: list, tool
                            swahili: bool = False, fx: dict | None = None,
                            closer: bool = False, tools: list | None = None,
                            greeting: bool = False, allow: tuple = (),
-                           post_caption: str = "", campaign: bool = False) -> tuple[str, list[str], str]:
+                           post_caption: str = "", campaign: bool = False,
+                           extra_known: str = "") -> tuple[str, list[str], str]:
     """DOUBLE VERIFICATION (owner, 2026-09-25: "change from gating to double
     verifying"). Every reply is read twice — by the rules and by the reviewer
     — and the reply that goes out is the best VERIFIED draft:
@@ -1244,6 +1271,10 @@ async def _gate_turn_reply(reply: str, *, user_text: str, transcript: list, tool
     mode = "comment" if public_comment else "dm"
     known = _rv.prompt_figures(currency)
     known_text = " ".join(str(b) for b in (sys_blocks if isinstance(sys_blocks, list) else [sys_blocks]))
+    if extra_known:
+        # this message's notes (a rate, a shared link…) ride on the message, not
+        # the system blocks — the gate knows them all the same
+        known_text += " " + extra_known
     seen = ctx.seen_products
 
     # A plain turn — a greeting or a thank-you answered with words alone (no
@@ -1479,6 +1510,14 @@ async def run_turn(db: AsyncSession, redis, wa_id: str, user_text: str, llm: LLM
     except Exception:
         _promise = ""
     tail = customer_context(customer_name, loc.get("country") or "", _promise, clock=True)
+    # What THIS message alone brings (a guard's note, a pacing note, a rate the
+    # customer just asked for, a link they just shared, the products of late):
+    # it rides AFTER the conversation, on the current message — never in the
+    # system tail, where any change re-writes the whole cached conversation
+    # behind it at 1.25–2× the input price on the next turn (cost audit,
+    # 2026-10-21: cache WRITES were over half of a $24 day). The reply gate
+    # still counts these as known facts (`extra_known`).
+    turn_notes: list[str] = []
 
     # 40 messages of context (was 20): re-asking an answered question is the
     # most robotic failure there is, and it usually happened because the answer
@@ -1563,7 +1602,7 @@ async def run_turn(db: AsyncSession, redis, wa_id: str, user_text: str, llm: LLM
                 turn_facts.update({"tools": [], "held": [], "review": "guard", "guard": "decline"})
             return _verdict["reply"]
         if _verdict and _verdict.get("action") == "note":
-            tail += _verdict["note"]
+            turn_notes.append(_verdict["note"])
 
     # PACING (owner, 2026-09-26: "some people want to chat with neema non-stop
     # … enhance cooling off without betraying the quality of the sales"). Read
@@ -1605,7 +1644,7 @@ async def run_turn(db: AsyncSession, redis, wa_id: str, user_text: str, llm: LLM
             if getattr(llm, "_model", None) == settings.tier2_model:
                 llm = build_llm(model=settings.tier2_model_light,
                                 purpose=getattr(llm, "purpose", "turn"))
-            tail += _pv.get("note") or ""
+            turn_notes.append(_pv.get("note") or "")
             if turn_facts is not None:
                 turn_facts["pacing"] = "economy"
 
@@ -1618,8 +1657,8 @@ async def run_turn(db: AsyncSession, redis, wa_id: str, user_text: str, llm: LLM
         _fx_code = _fx.currency_asked(user_text) if currency == "USD" else None
         if _fx_code:
             _fx_rates = await _fx.rates(redis)
-            tail += (_fx.context_line(_fx_code, _fx_rates[_fx_code]) if _fx_rates.get(_fx_code)
-                     else _fx.no_rate_line(_fx_code))
+            turn_notes.append(_fx.context_line(_fx_code, _fx_rates[_fx_code])
+                              if _fx_rates.get(_fx_code) else _fx.no_rate_line(_fx_code))
     except Exception:
         _fx_rates = {}
     # Cross-channel memory: what the SAME person said on their other linked
@@ -1638,7 +1677,7 @@ async def run_turn(db: AsyncSession, redis, wa_id: str, user_text: str, llm: LLM
         from app.services.link_preview import shared_link_context
         _link = await shared_link_context(user_text, redis)
         if _link:
-            tail += _link
+            turn_notes.append(_link)
     except Exception:
         pass
 
@@ -1662,7 +1701,7 @@ async def run_turn(db: AsyncSession, redis, wa_id: str, user_text: str, llm: LLM
         _pi = product_interest.context_block(
             await product_interest.recall(redis, channel, key))
         if _pi:
-            tail += _pi
+            turn_notes.append(_pi)
     except Exception:
         pass
 
@@ -1905,6 +1944,8 @@ async def run_turn(db: AsyncSession, redis, wa_id: str, user_text: str, llm: LLM
     # Two system blocks: [shared rules | this customer]. The list form is what
     # tells the LLM client to put the fleet-shared 1h cache breakpoint on block 0.
     sys_blocks: str | list[str] = [system, tail] if tail else [system]
+    # This message's own notes ride on it, after the cached conversation.
+    _turn_note = _attach_turn_notes(messages, turn_notes)
 
     reply = None
     # THE GATE BEFORE POSTING (owner, 2026-09-25): the transcript as the
@@ -1990,7 +2031,7 @@ async def run_turn(db: AsyncSession, redis, wa_id: str, user_text: str, llm: LLM
                 post_caption=_gate_post_caption, campaign=_campaign_post,
                 fx=_fx_rates, closer=is_closer(user_text or ""), tools=tools,
                 greeting=bool(_GREETING_RE.match((user_text or "").strip())),
-                allow=_campaign_allow)
+                allow=_campaign_allow, extra_known=_turn_note)
         except Exception as exc:
             _log.warning("reply gate failed open for %s: %s", key, exc)
     if turn_facts is not None:
@@ -4575,8 +4616,8 @@ def _hub_caption_match(catalog: list, title: str) -> dict | None:
         full_seq = _caption_token_seq(prod.get("name") or "")
         core = _core_tokens(prod)
         if core and core_count.get(core, 0) > 1:
-            name_seq = [t for t in _caption_token_seq(_strip_size(prod.get("name") or ""))
-                        if t not in _SIZE_WORDS] or full_seq
+            name_seq = [t for t in _caption_token_seq(_strip_pack(_strip_size(prod.get("name") or "")))
+                        if t not in _SIZE_WORDS and not t.isdigit()] or full_seq
         else:
             name_seq = full_seq
         ntoks = set(name_seq)
@@ -4688,10 +4729,24 @@ def _specific_sibling(generic: dict, other: dict) -> bool:
     return bool({t for t in (o - g) if t not in _QUALIFIER_WORDS and t not in _SIZE_WORDS})
 
 
+# A pack count or a volume in a name is that product's SIZE: "Communion Wafer
+# Bread 200PCs" / "… 500PCS", "Refiller Bottle 500ML" / "… — 1000 ml" are one
+# product in two sizes — priced "from" the cheapest when a caption names the
+# product but not the size (variants audit, 2026-10-21).
+_PACK_RE = re.compile(
+    r"\s*[-—–(]?\s*\b\d[\d,.]*\s*(?:pcs?|pieces?|ml|ltrs?|litres?|liters?|l)\b\)?\.?",
+    re.IGNORECASE)
+
+
+def _strip_pack(name: str) -> str:
+    return " ".join(_PACK_RE.sub(" ", name or "").split()).strip(" -—–:/")
+
+
 def _core_tokens(prod: dict) -> frozenset:
-    """The name's tokens with its size words removed."""
-    return frozenset(t for t in _caption_token_seq(_strip_size(prod.get("name") or ""))
-                     if t not in _SIZE_WORDS)
+    """The name's tokens with its size words — and a pack count or volume —
+    removed."""
+    return frozenset(t for t in _caption_token_seq(_strip_pack(_strip_size(prod.get("name") or "")))
+                     if t not in _SIZE_WORDS and not t.isdigit())
 
 
 _SIZE_WORDS = {"small", "medium", "large", "big", "xl", "xxl", "xs", "sm", "md", "lg",
@@ -4734,7 +4789,7 @@ def _size_family(rows: list, caption_toks: set) -> dict | None:
     cheapest = min(rows, key=_kes)
     prices = [_kes(r) for r in rows if _kes(r) != float("inf")]
     fam = dict(cheapest)
-    fam["name"] = _strip_size(cheapest.get("name") or "") or cheapest.get("name")
+    fam["name"] = _strip_pack(_strip_size(cheapest.get("name") or "")) or cheapest.get("name")
     fam["family"] = [r.get("slug") or r.get("name") for r in rows]
     fam["price_from"] = bool(prices) and (max(prices) > min(prices))
     return fam
