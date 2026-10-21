@@ -134,7 +134,9 @@ def test_a_live_comment_asking_for_a_pendant_names_an_item():
 def test_a_post_captioned_cross_and_chain_is_a_pectoral_cross_post():
     hit = rt._hub_caption_match(CATALOG, "Cross and chain available today ✨")
     assert hit and "Pectoral Cross" in hit["name"]
-    hit = pc.product_from_caption("Pendant for bishops, gold finish", CATALOG)
+    # the ladder's caption rungs: the name rung reads it as the hub's words,
+    # and the gold finish makes it the specific row (2026-10-21)
+    hit, _src = pc.caption_identity("Pendant for bishops, gold finish", CATALOG)
     assert hit and "Pectoral Cross" in hit["name"]
 
 

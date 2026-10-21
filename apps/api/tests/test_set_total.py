@@ -159,9 +159,10 @@ def test_the_owner_caption_lists_five_items():
 # ── 3. the ladder: the set row, never one of its pieces ──────────────────────
 
 def test_the_owner_caption_is_the_cassock_set_not_the_cassock(monkeypatch):
-    # the old rung, on its own, picked ONE piece by longest name containment
+    # the old rung, on its own, picked ONE piece by longest name containment;
+    # since 2026-10-21 it reads names only, and the set's own name is the longest
     old = pc.product_from_caption(OWNER_CAPTION, CATALOG)
-    assert old is not None and old["name"] in ("Cassock", "CINCTURE BELT")
+    assert old is None or old["name"] in ("Cassock", "CINCTURE BELT", "Cassock Set")
     hit = _resolve(monkeypatch, OWNER_CAPTION)
     assert hit is not None and hit["name"] == "Cassock Set"
     assert hit["_identity_source"] == "caption" and pc.identity_trusted(

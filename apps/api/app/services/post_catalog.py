@@ -60,16 +60,68 @@ UNRESOLVED_KEY = "postcat:unresolved"       # redis: count from the last sweep
 # ── the deterministic rungs ──────────────────────────────────────────────────
 
 
+_APOS_RE = re.compile(r"[’'`´]")
+
+
+def norm_text(text: str) -> str:
+    """Lower case, apostrophes dropped ("ladies' cassock set" reads as the
+    alias "ladies cassock set", "bishop's" as "bishops"), spaces collapsed."""
+    return " ".join(_APOS_RE.sub("", (text or "").lower()).split())
+
+
 def words_in(needle: str, hay: str) -> bool:
     """Does `hay` carry `needle` as WHOLE words (a plural 's'/'es' allowed)?
     Plain substring containment read the Bib's alias "clergy vest" inside
     "handcrafted clergy vestments" and sold a cope set as the $15 Bib for
     days (owner, 2026-10-21)."""
-    n = " ".join((needle or "").lower().split())
+    n = norm_text(needle)
     if not n:
         return False
     return re.search(r"(?<![a-z0-9])" + re.escape(n) + r"(?:e?s)?(?![a-z0-9])",
-                     (hay or "").lower()) is not None
+                     norm_text(hay)) is not None
+
+
+_ALIAS_MEMO: dict = {}
+
+
+def distinctive_aliases(catalog: list[dict]) -> dict[int, list[str]]:
+    """id(row) → the aliases that point at THAT row alone. An alias is not
+    distinctive when it is another product's own name, or part of it ("altar
+    wine" is Devai's alias AND the Altar Wine row; "bishopric ring" the Ring's
+    alias AND the Bishopric Ring; "biblia" the NIV Bible's alias AND the
+    Swahili children's Bible's name), or when another row carries it too
+    ("communion bread" on three bread rows). Such an alias says the caption is
+    near a product, never which one (catalogue audit, 2026-10-21). Memoised on
+    the catalogue's names and aliases."""
+    sig = hash(tuple((p.get("name") or "", tuple(p.get("aliases") or [])) for p in catalog))
+    memo = _ALIAS_MEMO.get(sig)
+    if memo is not None and len(memo[1]) == len(catalog):
+        return {id(p): memo[0].get(i, []) for i, p in enumerate(catalog)}
+    norm_names = [norm_text(p.get("name") or "") for p in catalog]
+    owners: dict[str, set] = {}
+    for i, p in enumerate(catalog):
+        for a in (p.get("aliases") or []):
+            owners.setdefault(norm_text(str(a)), set()).add(i)
+    by_index: dict[int, list[str]] = {}
+    for i, p in enumerate(catalog):
+        keep = []
+        for a in (p.get("aliases") or []):
+            a_n = norm_text(str(a))
+            if not a_n or len(owners.get(a_n, ())) > 1:
+                continue
+            if any(j != i and nm and words_in(a_n, nm) for j, nm in enumerate(norm_names)):
+                continue
+            # …nor inside another row's alias ("bishops cape" on the cope set,
+            # "bishops cape kenya" on the Purple Red Cope: the same words).
+            if any(j != i and words_in(a_n, o) for o, js in owners.items() if o != a_n
+                   for j in js):
+                continue
+            keep.append(a_n)
+        by_index[i] = keep
+    if len(_ALIAS_MEMO) > 8:
+        _ALIAS_MEMO.clear()
+    _ALIAS_MEMO[sig] = (by_index, list(range(len(catalog))))
+    return {id(p): by_index.get(i, []) for i, p in enumerate(catalog)}
 
 
 def post_text(pctx: dict | None) -> str:
@@ -82,26 +134,57 @@ def post_text(pctx: dict | None) -> str:
 
 
 def product_from_caption(text: str, catalog: list[dict]) -> dict | None:
-    """Rungs 1+2: a storefront slug link, else a product name/alias contained
-    in the caption as whole words. Longest match wins so 'Silver Communion
-    Tray' beats 'Silver Tray' when both appear."""
-    t = " ".join(_canonical(text or "").lower().split())
-    if not t:
+    """Rungs 1+2: a storefront slug link, else a product's own NAME in the
+    caption as whole words — read in the hub's words first (the synonym
+    table: "pendant" IS the Pectoral Cross, the owner's rule), then as
+    written. Longest name wins so
+    'Silver Communion Tray' beats 'Silver Tray'; two different names of the
+    same length is a tie, and a tie is None. A one-word GENERIC name with a
+    more specific sibling ("Cassock" beside "White Princes Cassock") never
+    decides here. Aliases do not decide here either: alias evidence goes to
+    the scored rung, which weighs it against the name words and refuses a
+    near-tie (catalogue audit, 2026-10-21 — a longest-alias-anywhere rule
+    sold the Purple Red Cope as the complete cope set and a gold bread tray
+    as communion bread)."""
+    raw = norm_text(text)
+    if not raw:
         return None
-    m = _SLUG_RE.search(t)
-    if m:
-        slug = m.group(1).lower()
+    canon = norm_text(_canonical(text or ""))
+    for t in (raw, canon):
+        m = _SLUG_RE.search(t)
+        if m:
+            slug = m.group(1).lower()
+            for p in catalog:
+                if (p.get("slug") or "").lower() == slug:
+                    return p
+    from app.agent.runtime import _specific_sibling
+    for t in (canon, raw):
+        best, best_len, tie = None, 0, False
         for p in catalog:
-            if (p.get("slug") or "").lower() == slug:
-                return p
-    best, best_len = None, 0
-    for p in catalog:
-        candidates = [p.get("name") or ""] + list(p.get("aliases") or [])
-        for c in candidates:
-            c_norm = " ".join(c.lower().split())
-            if len(c_norm) >= 6 and len(c_norm) > best_len and words_in(c_norm, t):
-                best, best_len = p, len(c_norm)
-    return best
+            n = norm_text(p.get("name") or "")
+            if len(n) < 6 or len(n) < best_len or not words_in(n, t):
+                continue
+            if any(_specific_sibling(p, o) for o in catalog):
+                continue
+            if len(n) > best_len:
+                best, best_len, tie = p, len(n), False
+            elif best is not None and norm_text(best.get("name") or "") != n:
+                tie = True
+        if best is not None:
+            if tie:
+                return None
+            # A name the caption carries as PART of a more specific name it also
+            # covers word for word ("pectoral cross in a bright gold finish" →
+            # "Pectoral Cross — Gold Finish", not "Pectoral Cross") is left to
+            # the scored rung, which prefers the specific row.
+            from app.agent.runtime import _caption_tokens
+            cap_toks = _caption_tokens(t)
+            mine = _caption_tokens(best.get("name") or "")
+            if any(mine < _caption_tokens(o.get("name") or "") <= cap_toks
+                   for o in catalog if o is not best and o.get("name")):
+                return None
+            return best
+    return None
 
 
 def dhash_bytes(raw: bytes, size: int = 8) -> int | None:
@@ -458,6 +541,7 @@ def product_set_from_caption(caption: str, catalog: list[dict],
     want = set(kinds)
     by_kind = _kinds_of(catalog)
     scored = []
+    distinct = distinctive_aliases(catalog)
     for p in catalog:
         if not p.get("name") or not is_set_row(p):
             continue
@@ -480,7 +564,10 @@ def product_set_from_caption(caption: str, catalog: list[dict],
             continue
         ntoks = set(name_seq)
         coverage = len(ntoks & cap_toks) / len(ntoks) if ntoks else 0.0
-        score = (1 if (covers or named) else 0, round(coverage, 3), 1 if named else 0,
+        # The set's own alias in the caption ("ladies' cassock set" → the
+        # Classic Princes Cassock Set, not the plain Cassock Set).
+        alias_hit = 1 if any(words_in(a, text) for a in distinct.get(id(p), [])) else 0
+        score = (1 if (covers or named) else 0, alias_hit, round(coverage, 3), 1 if named else 0,
                  len(ntoks & cap_toks), len(comp_kinds & want), -len(comp_kinds - want))
         scored.append((score, p))
     if not scored:

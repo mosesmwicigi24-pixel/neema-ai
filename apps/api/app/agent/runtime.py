@@ -4503,7 +4503,9 @@ async def _post_identity(redis, channel: str, pctx: dict) -> dict:
 
 # Caption spelling drifts the hub's names don't: US spellings and plurals must
 # still hit ("Aluminum trays" → Aluminium Tray).
-_CAPTION_NORM = {"aluminum": "aluminium", "colors": "colour", "color": "colour"}
+_CAPTION_NORM = {"aluminum": "aluminium", "colors": "colour", "color": "colour",
+                 # the hub spells its ladies' cassocks "Princes"; captions say "princess"
+                 "princess": "prince", "princes": "prince"}
 
 
 def _caption_tokens(text: str) -> set:
@@ -4555,12 +4557,15 @@ def _hub_caption_match(catalog: list, title: str) -> dict | None:
     # "Tallits / Prayer shawls" covers the item fully, the size word no
     # longer dilutes it below the bar (owner, 2026-09-21). A lone "Small
     # cross" or "Large bell" keeps its size word: there it is the product.
+    from app.services.post_catalog import distinctive_aliases as _da
+    _distinct = _da(catalog)
     core_count: dict = {}
     for prod in catalog:
         c = _core_tokens(prod)
         if c:
             core_count[c] = core_count.get(c, 0) + 1
     scored = []
+    alias_hit: set = set()
     for prod in catalog:
         full_seq = _caption_token_seq(prod.get("name") or "")
         core = _core_tokens(prod)
@@ -4582,11 +4587,14 @@ def _hub_caption_match(catalog: list, title: str) -> dict | None:
         # a human reads the caption.
         if _contains_phrase(cap_seq, name_seq):
             score += 4.0
-        for a in (prod.get("aliases") or []):
+        for a in _distinct.get(id(prod), []):
             # WHOLE words: "clergy vest" (a Bib alias) inside "clergy
-            # vestments" priced a cope set as the Bib (owner, 2026-10-21).
-            if len(str(a)) > 3 and _pc_words_in(str(a), text_l):
+            # vestments" priced a cope set as the Bib; and only an alias
+            # that points at THIS row alone — not another product's name,
+            # not shared with a sibling (owner, 2026-10-21).
+            if len(a) > 3 and _pc_words_in(a, text_l):
                 score += 3.0
+                alias_hit.add(id(prod))
                 break
         if score > 0:
             scored.append((score, prod, frozenset(ntoks), cov))
@@ -4609,9 +4617,21 @@ def _hub_caption_match(catalog: list, title: str) -> dict | None:
             if supersets:
                 if any(id(p) in fully for p in supersets):
                     continue
-                unsaid.add(id(prod))
+                # …unless the caption also carries an alias that is THIS row's
+                # alone ("Clergy bib (rabat)" — "rabat" is the Bib's, not the
+                # BIB Clerical Shirt's): then it has said which.
+                if id(prod) not in alias_hit:
+                    unsaid.add(id(prod))
         kept.append(e)
     scored = kept
+    # The MORE SPECIFIC name wins when the caption carries all of it: a caption
+    # covering "Pectoral Cross — Gold Finish" also covers "Pectoral Cross", and
+    # "smart straight-collar clergy shirt" covers "Straight Collar" as well as
+    # "Straight Collar Shirt" — the shorter name is a part of what was said,
+    # never the product (catalogue audit, 2026-10-21).
+    full_sets = [e[2] for e in scored if e[3] == 1.0]
+    scored = [e for e in scored
+              if not (e[3] == 1.0 and any(e[2] < other for other in full_sets))]
     if not scored:
         return None
     scored.sort(key=lambda x: -x[0])

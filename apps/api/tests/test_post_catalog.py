@@ -45,9 +45,11 @@ def test_alias_match_longest_wins():
     # specific name must win.
     hit = pc.product_from_caption("Our Silver Communion Tray, made to serve", _CATALOG)
     assert hit["slug"] == "silver-communion-tray"
-    # Swahili alias from the hub's own alias lists.
-    hit2 = pc.product_from_caption("Mkate wa ushirika sasa unapatikana", _CATALOG)
-    assert hit2["slug"] == "communion-wafer-bread-500pcs"
+    # Swahili alias from the hub's own alias lists: aliases decide in the
+    # scored rung (2026-10-21), so the ladder's caption rungs carry it.
+    assert pc.product_from_caption("Mkate wa ushirika sasa unapatikana", _CATALOG) is None
+    hit2, src = pc.caption_identity("Mkate wa ushirika sasa unapatikana", _CATALOG)
+    assert hit2["slug"] == "communion-wafer-bread-500pcs" and src == "caption"
     assert pc.product_from_caption("Blessed Sunday to all!", _CATALOG) is None
     assert pc.product_from_caption("", _CATALOG) is None
 
