@@ -419,7 +419,7 @@ def test_the_engine_hands_the_set_line_its_items():
 def test_run_turn_tells_the_model_what_the_post_sells():
     src = inspect.getsource(rt.run_turn)
     assert "line += _set_context(_known, _catalog)" in src
-    assert 'line += _listed_items_context(pctx["title"], _catalog)' in src
+    assert 'line += _listed_items_context(post_caption(pctx), _catalog)' in src
     ctx = rt._set_context({"name": "Cassock Set", "slug": "cassock-set"}, CATALOG)
     assert "It is a SET the hub prices as ONE row" in ctx
     assert "it comes with cassock, stole, belt, straight collar shirt, 12 inch clergy collar" in ctx

@@ -1733,8 +1733,15 @@ async def run_turn(db: AsyncSession, redis, wa_id: str, user_text: str, llm: LLM
         except Exception:
             pass
         line = "(Context — this customer reached us from our Facebook/Instagram post"
-        if pctx.get("title"):
-            line += f' "{pctx["title"]}"'
+        # The caption WHOLE (to 800 characters), never the 200-char inbox
+        # title: a caption whose products come after its opening line ("…From
+        # our Copes, Cassocks, Stoles…") showed the model only "handcrafted
+        # clergy vestments" (owner, 2026-10-21).
+        _post_words = post_caption(pctx)
+        if _post_words:
+            if len(_post_words) > 800:
+                _post_words = _post_words[:800].rsplit(" ", 1)[0] + "…"
+            line += f' "{_post_words}"'
         if source_post.get("comment"):
             line += f'; their comment there was: "{source_post["comment"]}"'
         _campaign_cap = post_caption(pctx)
@@ -1802,8 +1809,8 @@ async def run_turn(db: AsyncSession, redis, wa_id: str, user_text: str, llm: LLM
                     line += (f"; as it appears in the post: {_known['seen']} — name it "
                              "to the customer in those plain words, colour and trim "
                              "included, never the catalogue label alone")
-            elif pctx.get("title"):
-                line += _listed_items_context(pctx["title"], _catalog)
+            elif post_caption(pctx):
+                line += _listed_items_context(post_caption(pctx), _catalog)
             line += (". Unless they say otherwise, their questions refer to the product "
                      "in that post — identify it, find it with search_catalog, and "
                      "answer about THAT item. Do not ask what they are looking for.)")
@@ -4410,7 +4417,7 @@ async def _post_identity(redis, channel: str, pctx: dict) -> dict:
             fresh = bool(await redis.set(retry_key, "1", nx=True, ex=6 * 3600)) if redis is not None else True
         except Exception:
             fresh = True
-        if fresh and (pctx.get("title") or pctx.get("thumb")):
+        if fresh and (post_caption(pctx) or pctx.get("thumb")):
             try:
                 from app.database import AsyncSessionLocal as _ASL2
                 from app.services import n8n_bridge as _svc2
@@ -4434,14 +4441,14 @@ async def _post_identity(redis, channel: str, pctx: dict) -> dict:
         # several (owner, 2026-09-21: "Cassock" under the five-piece outfit)
         # is re-read by the ladder: the set row or the total replaces it,
         # and nothing at all replaces it when neither can be named.
-        if known.get("source") == "caption" and (pctx.get("title") or "").strip():
+        if known.get("source") == "caption" and post_caption(pctx):
             try:
                 from app.database import AsyncSessionLocal as _ASL
                 from app.services import n8n_bridge as _svc
                 from app.services import post_catalog as _pc
                 async with _ASL() as _db:
                     _cat = await _svc.catalog_items(_db, redis)
-                stale = _pc.caption_record_stale(known, pctx.get("title") or "", _cat)
+                stale = _pc.caption_record_stale(known, post_caption(pctx), _cat)
             except Exception:
                 stale = False
         if not stale:
@@ -4519,6 +4526,11 @@ def _contains_phrase(hay: list, needle: list) -> bool:
     return n > 0 and any(hay[i:i + n] == needle for i in range(len(hay) - n + 1))
 
 
+def _pc_words_in(needle: str, hay: str) -> bool:
+    from app.services.post_catalog import words_in       # lazy: post_catalog imports runtime
+    return words_in(needle, hay)
+
+
 def _hub_caption_match(catalog: list, title: str) -> dict | None:
     """The hub product a post caption is ABOUT — deterministic, no model.
 
@@ -4571,7 +4583,9 @@ def _hub_caption_match(catalog: list, title: str) -> dict | None:
         if _contains_phrase(cap_seq, name_seq):
             score += 4.0
         for a in (prod.get("aliases") or []):
-            if len(str(a)) > 3 and str(a).lower() in text_l:
+            # WHOLE words: "clergy vest" (a Bib alias) inside "clergy
+            # vestments" priced a cope set as the Bib (owner, 2026-10-21).
+            if len(str(a)) > 3 and _pc_words_in(str(a), text_l):
                 score += 3.0
                 break
         if score > 0:
@@ -4710,7 +4724,8 @@ async def _resolve_post_product(redis, channel: str, ext: str,
     storefront product page, never the bare wa.me fallback. Appends the
     matched hub rows into `sink` (the same seen_products list)."""
     known = await _post_identity(redis, channel, post_ctx)
-    title = (post_ctx.get("title") or "").strip()
+    # The WHOLE caption: the 200-char title can stop before the product words.
+    title = post_caption(post_ctx)
     from app.database import AsyncSessionLocal
     from app.agent import tools as _tools
     from app.services import post_catalog as _pc
@@ -5296,7 +5311,7 @@ async def _run_comment_engage(redis, channel: str, comment: dict, own_pages: set
             # one entrant is never the post's identity either.
             _log.info("post %s is %s — not recording a product identity", post_id,
                       "live" if is_live else "a campaign")
-        elif _post_identity_compatible(_known_product, post_ctx.get("title"), matched,
+        elif _post_identity_compatible(_known_product, post_caption(post_ctx), matched,
                                        comment_text=comment_text, saw_image=bool(media)):
             # Recorded as the MODEL's read (source "model" unless the row came
             # stamped by the ladder): enough to keep later replies on the same
