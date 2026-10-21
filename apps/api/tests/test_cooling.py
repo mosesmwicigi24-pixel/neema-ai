@@ -304,6 +304,7 @@ def test_the_slow_lanes_own_turn_is_one_brief_answer(monkeypatch):
 
 def test_run_turn_economy_swaps_to_the_light_model_with_a_pacing_note(monkeypatch):
     seen = []
+    last = []
 
     class _Main:
         _model = settings.tier2_model
@@ -319,6 +320,7 @@ def test_run_turn_economy_swaps_to_the_light_model_with_a_pacing_note(monkeypatc
 
         async def complete(self, *, system, messages, tools, **kw):
             seen.append(("light", system))
+            last.append(messages[-1])
             return types.SimpleNamespace(text="Noted.", tool_calls=[], assistant_content=[], usage={})
 
     async def _econ(redis, db, **kw):
@@ -328,9 +330,15 @@ def test_run_turn_economy_swaps_to_the_light_model_with_a_pacing_note(monkeypatc
     out = asyncio.run(rt.run_turn(_db(), _R(), "254700000001", "so what else do you do", _Main()))
     assert out == "Noted."
     assert seen and seen[0][0] == "light" and all(m != "main" for m, _ in seen)
+    # The pacing note rides on THIS message, after the cached conversation —
+    # never in the system tail, whose change would re-write the whole cached
+    # conversation (cost audit, 2026-10-21).
     tail = seen[0][1][1]                                # the loop's call: [rules, this customer]
-    assert "PACING: this person has been chatting a long while" in tail
-    assert "`pause_conversation`" in tail and "A buyer is never paced" in tail
+    assert "PACING" not in tail
+    note = str(last[0]["content"])
+    assert rt.TURN_NOTE_HEADER in note
+    assert "PACING: this person has been chatting a long while" in note
+    assert "`pause_conversation`" in note and "A buyer is never paced" in note
 
 
 def test_pacing_never_touches_drafts_scribes_or_public_comments():

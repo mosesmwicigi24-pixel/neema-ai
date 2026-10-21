@@ -164,6 +164,31 @@ def hub_terms() -> tuple[str, ...]:
 # words that mean ONE member rather than the range ("silver tray" is a row).
 RANGES: tuple[dict, ...] = (
     {
+        # Owner, 2026-10-21: "Bread for 200pcs is 400, 500pcs is 1000, 1000pcs
+        # is 1800." ONE product in three packs — the hub keeps them as three
+        # rows (Communion Wafer Bread 200PCs / 500PCS, Holy Communion Bread
+        # 1000 Pcs). Asked for "communion bread", every pack is offered,
+        # smallest first; a named pack is that row. The hosts row (Communion
+        # Hosts — 1,000 pieces) is not in the owner's list and stays out.
+        "name": "communion bread",
+        # These rows are ONE product in pack sizes: a post or caption naming
+        # the bread but no pack is the family, priced "from" the smallest.
+        "one_product": "Communion Bread",
+        "asked": (
+            r"(?:holy\s+)?communion\s+(?:wafer\s+)?bread",
+            r"(?:communion\s+|altar\s+)?wafers?(?:\s+bread)?",
+            r"altar\s+bread",
+            r"mkate\s+wa\s+ushirika",
+        ),
+        "include": r"communion\s+(?:wafer\s+)?bread",
+        "exclude": r"tray|container|plate|basket|box|bowl|holder|dish|stand|paten|ciborium|\bhosts?\b",
+        # A pack named ("500 pieces", "1000pcs") is one row: the ordinary search answers.
+        "specific": r"\b\d[\d,]*\s*(?:pcs?|pieces?|wafers?)\b|\b(?:200|500|1000|1,000)\b",
+        "stay": ("this is the communion bread in its three packs only — 200 pieces "
+                 "KES 400, 500 pieces KES 1,000, 1,000 pieces KES 1,800 (the hub's "
+                 "figures); trays, plates, containers and hosts are other things"),
+    },
+    {
         "name": "communion trays and sets",
         # The customer's words for the range itself (whole words, plurals).
         "asked": (
@@ -210,6 +235,31 @@ _RANGE_ASKED = tuple(
 )
 
 
+def one_product_family(row: dict | None) -> str:
+    """The owner-declared product a hub row is ONE PACK of ("Communion Wafer
+    Bread 200PCs" → "Communion Bread"), or "" — so a caption naming the product
+    but no pack prices the family "from" its smallest pack."""
+    name = (row or {}).get("name") or ""
+    for r in RANGES:
+        fam = r.get("one_product")
+        if fam and re.search(r["include"], name, re.IGNORECASE) \
+                and not re.search(r["exclude"], name, re.IGNORECASE):
+            return fam
+    return ""
+
+
+def one_product_ruled_out(row: dict | None, text: str) -> bool:
+    """True when `row` is one pack of an owner-declared product but the words
+    are about one of the range's EXCLUDED things — "a bread plate for serving
+    the communion bread" is the plate, never the bread."""
+    name = (row or {}).get("name") or ""
+    for r in RANGES:
+        if r.get("one_product") and re.search(r["include"], name, re.IGNORECASE) \
+                and not re.search(r["exclude"], name, re.IGNORECASE):
+            return bool(re.search(r["exclude"], text or "", re.IGNORECASE))
+    return False
+
+
 def range_for(query: str | None) -> dict | None:
     """The RANGE a customer's words ask about, or None when they name one
     member (or nothing in the table).
@@ -222,6 +272,9 @@ def range_for(query: str | None) -> dict | None:
     text = query or ""
     for pattern, rng in _RANGE_ASKED:
         if pattern.search(text) and not re.search(rng["specific"], text, re.IGNORECASE):
+            # "a bowl for the communion wafers" is the bowl, not the bread
+            if rng.get("one_product") and re.search(rng["exclude"], text, re.IGNORECASE):
+                continue
             return rng
     return None
 

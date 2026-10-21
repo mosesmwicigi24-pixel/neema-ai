@@ -184,6 +184,7 @@ def test_the_next_turn_reads_the_memory_in_its_tail(monkeypatch):
     class _RecLLM:
         async def complete(self, *, system, messages, tools, **kw):
             seen["system"] = system
+            seen["last"] = str(messages[-1]["content"])
             return types.SimpleNamespace(text="You asked about the Brass Thurible —",
                                          tool_calls=[], assistant_content=[], usage={})
 
@@ -191,7 +192,11 @@ def test_the_next_turn_reads_the_memory_in_its_tail(monkeypatch):
     asyncio.run(pi.remember(r, "whatsapp", "254700000001", [THURIBLE]))
     asyncio.run(runtime.run_turn(_turn_db(), r, "254700000001",
                                  "is this product now available?", _RecLLM()))
+    # The memory rides on THIS message (after the cached conversation), not in
+    # the system tail — a new product discussed must not re-write the cached
+    # conversation (cost audit, 2026-10-21).
     sys_blocks = seen["system"]
     tail = sys_blocks[1] if isinstance(sys_blocks, list) and len(sys_blocks) > 1 else ""
-    assert "Brass Thurible — was OUT OF STOCK when last discussed" in tail
-    assert "PRODUCTS RECENTLY DISCUSSED" in tail
+    assert "PRODUCTS RECENTLY DISCUSSED" not in tail
+    assert "Brass Thurible — was OUT OF STOCK when last discussed" in seen["last"]
+    assert "PRODUCTS RECENTLY DISCUSSED" in seen["last"]

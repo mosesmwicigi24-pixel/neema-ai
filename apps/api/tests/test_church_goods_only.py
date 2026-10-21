@@ -280,7 +280,7 @@ def test_run_turn_asks_the_guard_before_the_writer():
     assert 'if not read_only and not scribe_only and _gate_applies(user_text):' in src[:i]
     assert 'if _verdict and _verdict.get("action") == "silence":' in src and 'return ""' in src
     assert 'if _verdict and _verdict.get("action") == "decline":' in src and 'return _verdict["reply"]' in src
-    assert 'tail += _verdict["note"]' in src
+    assert 'turn_notes.append(_verdict["note"])' in src
     assert "_flag_guard(db, channel, key," in src
     assert '"guard": "silence"' in src and '"guard": "decline"' in src
     # no "typing…" on a paused Messenger thread; a paused commenter hears no canned line

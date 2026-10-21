@@ -130,3 +130,69 @@ def test_an_alias_never_claims_another_product_s_name():
 def test_the_more_specific_name_wins_when_the_caption_covers_it():
     assert rt._hub_caption_match(
         CATALOG, "Bishop's pectoral cross in a bright gold finish")["name"] == "Pectoral Cross — Gold Finish"
+
+
+# ── variants kept as separate hub rows (variants audit, 2026-10-21) ──────────
+
+def test_a_pack_or_volume_family_is_one_product_priced_from_the_cheapest():
+    hit, _ = pc.caption_identity("Refiller bottle for communion cups", CATALOG)
+    assert hit["name"] == "Refiller Bottle" and hit["price_from"] is False   # both sizes cost the same
+
+
+def test_a_named_pack_is_that_pack():
+    hit, _ = pc.caption_identity("Communion Wafer Bread 500PCS in stock", CATALOG)
+    assert hit["name"] == "Communion Wafer Bread 500PCS" and hit["price"] == 1000.0
+
+
+# ── communion bread: ONE product in three packs (owner, 2026-10-21) ──────────
+# "Bread for 200pcs is 400, 500pcs is 1000, 1000pcs is 1800."
+
+BREAD = {"communion-wafer-bread-200pcs": 400.0, "communion-wafer-bread-500pcs": 1000.0,
+         "holy-communion-bread-1000pcs": 1800.0}
+
+
+@pytest.mark.parametrize("caption", [
+    "Communion bread available now", "Communion wafer bread in stock", "Mkate wa ushirika upo",
+])
+def test_a_bread_post_is_every_pack_from_the_smallest(caption):
+    hit, _ = pc.caption_identity(caption, CATALOG)
+    assert hit["name"] == "Communion Bread" and hit["price"] == 400.0 and hit["price_from"] is True
+    assert set(hit["family"]) == set(BREAD)
+
+
+def test_the_owner_s_bread_prices_are_the_hub_s():
+    for slug, kes in BREAD.items():
+        assert next(p for p in CATALOG if p["slug"] == slug)["price"] == kes
+
+
+def test_a_bread_question_offers_every_pack_smallest_first_and_a_named_pack_is_that_pack():
+    from app.core.synonyms import range_for, range_members
+    for q in ("how much is communion bread", "do you have communion wafers", "mkate wa ushirika bei gani"):
+        rows = range_members(range_for(q), CATALOG)
+        assert [(r["slug"], r["price"]) for r in rows] == list(BREAD.items())
+    assert range_for("1000 pcs communion bread") is None          # the row itself answers
+    hit, _ = pc.caption_identity("Holy Communion Bread 1000 Pcs restocked", CATALOG)
+    assert hit["name"] == "Holy Communion Bread 1000 Pcs" and hit["price"] == 1800.0
+
+
+def test_hosts_and_trays_are_not_bread():
+    from app.core.synonyms import one_product_family
+    by = {p["name"]: p for p in CATALOG}
+    assert one_product_family(by["Communion Hosts — 1,000 pieces"]) == ""
+    assert one_product_family(by["Gold bread tray"]) == ""
+    assert one_product_family(by["Communion Wafer Bread 200PCs"]) == "Communion Bread"
+
+
+def test_a_bread_tray_post_is_the_tray_never_the_bread():
+    for cap in ("Silver-tone bread plate with matching lid — for serving the communion bread",
+                "Gold bread tray for your communion bread"):
+        hit, _ = pc.caption_identity(cap, CATALOG)
+        assert hit is None or "bread" not in (hit.get("name") or "").lower() \
+            or "tray" in hit["name"].lower() or "plate" in hit["name"].lower(), hit
+
+
+def test_a_vessel_for_the_bread_is_not_the_bread_range():
+    from app.core.synonyms import range_for
+    for q in ("bowl for the communion wafers", "communion bread plate", "a tray for communion bread"):
+        rng = range_for(q)
+        assert rng is None or rng["name"] != "communion bread", q
