@@ -4310,6 +4310,11 @@ async def _remember_post_product(redis, channel: str, post_id: str, product: dic
                   "slug": product.get("slug") or "",
                   "hub_product_id": product.get("hub_product_id"),
                   "source": source, "confidence": round(confidence, 2)}
+        # WHY, in words the team can check on the post card (2026-10-21).
+        evidence = str(product.get("_identity_evidence") or "") or \
+            (str(known.get("evidence") or "") if same else "")
+        if evidence:
+            record["evidence"] = evidence[:200]
         if product.get("price_from"):
             record["price_from"] = True
         if product.get("family"):

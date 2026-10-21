@@ -1458,17 +1458,45 @@ async def set_post_product(post_id: str, request: Request, body: dict,
     if not q:
         raise HTTPException(status_code=422, detail="product is required — a slug, name or alias")
     catalog = await svc.catalog_items(db, request.app.state.redis)
+    # A slug, a name, an alias or a near spelling: the team types what they
+    # call it. Several products fitting one word ("stole") is a 409 with the
+    # choices, never a guess.
+    from app.agent.tools import _match_product, _product_candidates
+    from app.services.post_catalog import caption_identity
     hit = next((p for p in catalog if (p.get("slug") or "").lower() == q.lower()), None) \
-        or product_from_caption(q, catalog)
+        or _match_product(q, catalog) or product_from_caption(q, catalog) \
+        or caption_identity(q, catalog)[0]
     if hit is None:
+        could = [p.get("name") for p in _product_candidates(q, catalog)][:8]
+        if len(could) > 1:
+            raise HTTPException(status_code=409, detail={
+                "message": f"'{q}' fits several products — pick one", "could_be": could})
         raise HTTPException(status_code=404, detail=f"no catalogue product matches '{q}'")
     # The team's word is the strongest rung there is: source "team", 1.0 —
     # the one identity a canned reply may always price.
     from app.services.post_catalog import with_provenance
+    who = (getattr(agent, "name", "") or "the team").strip()
     await _remember_post_product(request.app.state.redis, channel, post_id,
-                                 with_provenance(hit, "team"))
+                                 with_provenance(hit, "team", evidence=f"set by {who}"))
     return {"ok": True, "post_id": post_id, "channel": channel,
             "product": hit.get("name"), "slug": hit.get("slug")}
+
+
+@router.get("/posts/{post_id}/product")
+async def get_post_product(post_id: str, request: Request, channel: str = "facebook",
+                           agent: Agent = Depends(get_current_agent)):
+    """What Neema reads a post as — the product every comment under it is
+    priced from, how it was identified, and why (owner, 2026-10-21: the cope
+    post was sold as the Bib for days with nobody able to see why). The post
+    card shows this beside a one-tap correction."""
+    from app.agent.runtime import _recall_post_product, identity_trusted_record
+    rec = await _recall_post_product(request.app.state.redis, channel, post_id) or {}
+    if not rec.get("name"):
+        return {"post_id": post_id, "channel": channel, "product": None}
+    return {"post_id": post_id, "channel": channel, "product": rec.get("name"),
+            "slug": rec.get("slug") or "", "source": rec.get("source") or "",
+            "confidence": rec.get("confidence"), "trusted": identity_trusted_record(rec),
+            "evidence": rec.get("evidence") or ""}
 
 
 @router.post("/conversations/{conv_id}/reply")

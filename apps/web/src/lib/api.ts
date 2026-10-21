@@ -121,6 +121,17 @@ async function req<T>(
     return res.json();
 }
 
+export interface PostIdentity {
+    post_id: string;
+    channel: string;
+    product: string | null;
+    slug?: string;
+    source?: string;
+    confidence?: number;
+    trusted?: boolean;
+    evidence?: string;
+}
+
 const get = <T>(path: string) => req<T>("GET", path);
 const post = <T>(path: string, body: unknown) => req<T>("POST", path, body);
 
@@ -487,6 +498,21 @@ export const conversationsApi = {
         get<{ video_url: string }>(
             `/admin/post-video/${encodeURIComponent(postId)}` +
             (channel ? `?channel=${encodeURIComponent(channel)}` : ""),
+        ),
+
+    /** What Neema reads a post as — the product every comment under it is
+     *  priced from — how, and why. `product` is null when not identified. */
+    postIdentity: (postId: string, channel?: string) =>
+        get<PostIdentity>(
+            `/admin/posts/${encodeURIComponent(postId)}/product` +
+            (channel ? `?channel=${encodeURIComponent(channel)}` : ""),
+        ),
+
+    /** The team's correction: "this post is actually X" (a name, alias or slug). */
+    setPostIdentity: (postId: string, product: string, channel?: string) =>
+        post<{ ok: boolean; product: string; slug: string }>(
+            `/admin/posts/${encodeURIComponent(postId)}/product`,
+            { product, channel: channel || "facebook" },
         ),
 
     /**

@@ -671,15 +671,32 @@ TRUSTED_SOURCES = ("team", "link", "caption", "image", "vision")
 TRUST_MIN = 0.8
 
 
-def with_provenance(row: dict | None, source: str, confidence: float | None = None) -> dict | None:
-    """A copy of the hub row stamped with how it was identified."""
+def with_provenance(row: dict | None, source: str, confidence: float | None = None,
+                    evidence: str = "") -> dict | None:
+    """A copy of the hub row stamped with how it was identified — and WHY, in
+    words the team can check at a glance ("the caption names \"Cassock Set\""),
+    so a wrong identity is seen on the post card, not after days of replies
+    (owner, 2026-10-21)."""
     if row is None:
         return None
     out = dict(row)
+    ev = evidence or str(row.get("_identity_evidence") or "") or _EVIDENCE_BY_SOURCE.get(source, "")
+    if ev:
+        out["_identity_evidence"] = ev[:200]
     out["_identity_source"] = source
     out["_identity_confidence"] = float(SOURCE_CONFIDENCE.get(source, 0.5)
                                         if confidence is None else confidence)
     return out
+
+
+_EVIDENCE_BY_SOURCE = {
+    "link": "the caption links its storefront page",
+    "image": "the photo is our catalogue photo of it",
+    "vision": "the photo, read and compared with our catalogue photo",
+    "vision-name": "the photo, read (no catalogue photo to compare)",
+    "team": "set by the team",
+    "model": "Neema's reading of a reply (a lead, not a fact)",
+}
 
 
 def identity_trusted(record: dict | None) -> bool:
@@ -868,21 +885,33 @@ def caption_identity(text: str, catalog: list[dict]) -> tuple[dict | None, str]:
     title = (text or "").strip()
     if not title:
         return None, ""
+    def _ev(row: dict, why: str) -> dict:
+        out = dict(row)
+        out["_identity_evidence"] = why[:200]
+        return out
+
     m = _SLUG_RE.search(title)
     if m:
         slug = m.group(1).lower()
         for p in catalog:
             if (p.get("slug") or "").lower() == slug:
-                return p, "link"
+                return _ev(p, f"the caption links its storefront page ({slug})"), "link"
     kinds = caption_item_kinds(title, catalog)
     if len(kinds) >= 2:
         # Several items listed as one outfit: the set row that covers them,
         # else their total — and NEVER one of the pieces by name (owner,
         # 2026-09-21: "Cassock" was sold under a five-piece set).
-        hit = product_set_from_caption(title, catalog, kinds=kinds) \
-            or bundle_from_caption(title, catalog, kinds=kinds)
-        return (hit, "caption") if hit is not None else (None, "")
+        listed = ", ".join(kinds)
+        hit = product_set_from_caption(title, catalog, kinds=kinds)
+        if hit is not None:
+            return _ev(hit, f"the caption lists {listed} as one outfit — the hub's set"), "caption"
+        hit = bundle_from_caption(title, catalog, kinds=kinds)
+        if hit is not None:
+            return _ev(hit, f"the caption lists {listed} as one outfit — priced as their total"), "caption"
+        return None, ""
     hit = product_from_caption(title, catalog)
+    if hit is not None:
+        return _ev(hit, f'the caption names "{hit.get("name")}"'), "caption"
     if hit is None:
         # The hub's names SCORED against the whole caption (runtime's
         # scorer: coverage, the phrase in order, an alias, size families,
@@ -894,7 +923,9 @@ def caption_identity(text: str, catalog: list[dict]) -> tuple[dict | None, str]:
         # (owner, 2026-09-23). Deterministic first.
         from app.agent.runtime import _hub_caption_match
         hit = _hub_caption_match(catalog, title)
-    return (hit, "caption") if hit is not None else (None, "")
+    if hit is None:
+        return None, ""
+    return _ev(hit, f'the caption\'s words match "{hit.get("name")}" best (name words or its alias)'), "caption"
 
 
 async def resolve_post(redis, pctx: dict, catalog: list[dict]) -> dict | None:

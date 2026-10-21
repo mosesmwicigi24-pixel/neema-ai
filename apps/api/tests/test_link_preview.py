@@ -210,3 +210,42 @@ def test_titles_are_html_unescaped():
     assert lp._title_from_html("<title>78&#xa0;K vues &#xb7; Bethany House</title>") \
         != "78&#xa0;K vues &#xb7; Bethany House"
     assert "&amp;" not in lp._og('<meta property="og:title" content="Cups &amp; Trays">', "title")
+
+
+def test_a_shared_post_shows_the_whole_caption_and_the_post_s_identity(monkeypatch):
+    # The cope post (owner, 2026-10-21): its products come after the 200-char
+    # title, and a shared link must be identified as the post itself is.
+    _fake_client("https://www.facebook.com/story.php?story_fbid=9&id=1", "", monkeypatch)
+    caption = ("There is something beautiful about a well-dressed minister of God! " * 3
+               + "From our beautifully designed Copes, Cassocks, Stoles, and complete "
+                 "Ordination Vestments.")
+
+    async def fake_ctx(post_id, channel="facebook"):
+        return {"title": caption[:200], "caption": caption, "permalink": "", "thumb": ""}
+    monkeypatch.setattr("app.services.meta_send.fetch_post_context", fake_ctx)
+
+    seen = {}
+
+    async def fake_identity(redis, channel, pctx):
+        seen.update(pctx)
+        return {"name": "Cope — Complete Set", "source": "caption", "confidence": 0.95}
+    monkeypatch.setattr("app.agent.runtime._post_identity", fake_identity)
+
+    block = asyncio.run(lp.shared_link_context("see https://www.facebook.com/share/p/C/"))
+    assert "Copes, Cassocks, Stoles" in block
+    assert 'OUR RECORDS: this post shows our "Cope — Complete Set"' in block
+    assert seen["caption"] == caption
+
+
+def test_a_shared_post_with_only_a_lead_names_no_product(monkeypatch):
+    _fake_client("https://www.facebook.com/story.php?story_fbid=8&id=1", "", monkeypatch)
+
+    async def fake_ctx(post_id, channel="facebook"):
+        return {"title": "Vestments", "caption": "Vestments", "permalink": "", "thumb": ""}
+    monkeypatch.setattr("app.services.meta_send.fetch_post_context", fake_ctx)
+
+    async def fake_identity(redis, channel, pctx):
+        return {"name": "Bib", "source": "model", "confidence": 0.6}      # a lead, not a fact
+    monkeypatch.setattr("app.agent.runtime._post_identity", fake_identity)
+    block = asyncio.run(lp.shared_link_context("see https://www.facebook.com/share/p/D/"))
+    assert "OUR RECORDS" not in block

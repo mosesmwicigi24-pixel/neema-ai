@@ -127,3 +127,73 @@ def test_the_post_photo_is_read_by_the_main_model_and_knows_sets():
     assert "tier2_model_light" not in src
     assert "is ONE item when the list has that set" in src
     assert settings.tier2_model_vision == "" or isinstance(settings.tier2_model_vision, str)
+
+
+# ── the team can SEE what a post was identified as, and why (2026-10-21) ─────
+
+def test_every_caption_identity_says_why():
+    hit = _resolve(PCTX)
+    assert hit["_identity_evidence"].startswith("the caption lists cope, cassock, stole")
+    named, _ = pc.caption_identity("Our Purple Red Cope — made to order.", CATALOG)
+    assert named["_identity_evidence"] == 'the caption names "Purple Red Cope"'
+
+
+class _Redis:
+    def __init__(self):
+        self.kv = {}
+
+    async def get(self, k):
+        return self.kv.get(k)
+
+    async def set(self, k, v, ex=None, nx=False):
+        if nx and k in self.kv:
+            return False
+        self.kv[k] = v
+        return True
+
+    async def delete(self, k):
+        self.kv.pop(k, None)
+
+
+def test_the_post_card_reads_the_identity_and_its_reason(monkeypatch):
+    import types
+    from app.routers import admin
+    redis = _Redis()
+    monkeypatch.setattr(rt, "_describe_post_image", lambda thumb: _none())
+    asyncio.run(rt._remember_post_product(redis, "facebook", "p1", _resolve(PCTX)))
+    req = types.SimpleNamespace(app=types.SimpleNamespace(state=types.SimpleNamespace(redis=redis)))
+    out = asyncio.run(admin.get_post_product("p1", req, "facebook", types.SimpleNamespace(id="a1")))
+    assert out["product"] == "Cope — Complete Set"
+    assert out["source"] == "caption" and out["trusted"] is True
+    assert out["evidence"].startswith("the caption lists cope, cassock, stole")
+    empty = asyncio.run(admin.get_post_product("nope", req, "facebook", types.SimpleNamespace(id="a1")))
+    assert empty["product"] is None
+
+
+async def _none():
+    return ""
+
+
+def test_the_team_corrects_a_post_by_any_name_and_is_never_guessed_for(monkeypatch):
+    import types
+    import pytest
+    from fastapi import HTTPException
+    from app.routers import admin
+
+    async def _catalog(db, redis):
+        return CATALOG
+    monkeypatch.setattr("app.services.n8n_bridge.catalog_items", _catalog)
+    stored = {}
+
+    async def _remember(redis, channel, pid, product, thumb=""):
+        stored[pid] = (product.get("name"), product.get("_identity_source"),
+                       product.get("_identity_evidence"))
+    monkeypatch.setattr("app.agent.runtime._remember_post_product", _remember)
+    req = types.SimpleNamespace(app=types.SimpleNamespace(state=types.SimpleNamespace(redis=None)))
+    who = types.SimpleNamespace(id="a1", name="Moses")
+    out = asyncio.run(admin.set_post_product("p2", req, {"product": "cope set"}, None, who))
+    assert out["product"] == "Cope — Complete Set"
+    assert stored["p2"] == ("Cope — Complete Set", "team", "set by Moses")
+    with pytest.raises(HTTPException) as e:
+        asyncio.run(admin.set_post_product("p3", req, {"product": "stole"}, None, who))
+    assert e.value.status_code == 409 and "Double sided stole" in e.value.detail["could_be"]

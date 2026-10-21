@@ -2341,40 +2341,65 @@ async def _share_catalog(args: dict, ctx: ToolContext) -> dict:
                 "note": "Share this so the customer can browse our products with photos and prices."}
 
     catalog = await svc.catalog_items(ctx.db, ctx.redis)
-    pn = product.lower().strip()
-    match = None
-    for p in catalog:                                   # exact name first
-        if p.get("slug") and (p.get("name") or "").lower().strip() == pn:
-            match = p
-            break
-    if not match:                                       # then substring (longest wins)
-        cands = [p for p in catalog if p.get("slug") and pn
-                 and (pn in (p.get("name") or "").lower() or (p.get("name") or "").lower() in pn)]
-        cands.sort(key=lambda p: len(p.get("name") or ""), reverse=True)
-        match = cands[0] if cands else None
-
+    match = _match_product(product, catalog)
     if match:
         return {"link": _product_url(match["slug"]), "product": match.get("name"),
                 "note": "Share this so the customer can see this product's photos and price, and order in one tap."}
+    could = [p.get("name") for p in _product_candidates(product, catalog)][:6]
+    if len(could) > 1:
+        return {"link": store, "could_be": could,
+                "note": (f"'{product}' could be any of these — call again with the EXACT name of "
+                         "the one the customer means (or ask them which), not this general link.")}
     return {"link": store,
             "note": "Couldn't find that exact product — sharing the full catalog instead."}
 
 
+def _product_candidates(query: str, catalog: list[dict]) -> list[dict]:
+    """The linkable rows a product name could mean, by WHOLE words: the rows
+    whose name carries the query ("stole" → the three stoles), else the rows
+    whose name the query carries ("the Bib for my husband" → Bib), longest
+    first. Substring matching once turned "bib" into "Bible" and "stole" into
+    whichever stole had the longest name (catalogue audit, 2026-10-21)."""
+    from app.services.post_catalog import norm_text, words_in
+    ql = norm_text(_canonical(query or ""))
+    if not ql:
+        return []
+    rows = [p for p in catalog if p.get("slug") and p.get("name")]
+    carry = [p for p in rows if words_in(ql, p.get("name") or "")]
+    if not carry:
+        carry = [p for p in rows if len(norm_text(p.get("name") or "")) >= 3
+                 and words_in(norm_text(p.get("name") or ""), ql)]
+    carry.sort(key=lambda p: -len(p.get("name") or ""))
+    return carry
+
+
 def _match_product(query: str, catalog: list[dict]) -> dict | None:
-    """Find the catalogue product for a name/SKU: exact name or SKU first, then the
-    longest substring match. Only products with a storefront `slug` are eligible."""
-    ql = _canonical(query or "").lower().strip()
+    """Find the catalogue product for a name/SKU: exact name or SKU first, then
+    the ONE row a whole-word match leaves. Several rows a name could mean is
+    None — never a guess (the caller says which ones). Only products with a
+    storefront `slug` are eligible."""
+    from app.services.post_catalog import norm_text
+    ql = norm_text(_canonical(query or ""))
+    raw = norm_text(query or "")
     if not ql:
         return None
     for p in catalog:                                    # exact name / sku
         if not p.get("slug"):
             continue
-        if (p.get("name") or "").lower().strip() == ql or (p.get("sku") or "").lower().strip() == ql:
+        n = norm_text(p.get("name") or "")
+        if n in (ql, raw) or norm_text(p.get("sku") or "") in (ql, raw):
             return p
-    cands = [p for p in catalog if p.get("slug") and                     # substring
-             (ql in (p.get("name") or "").lower() or (p.get("name") or "").lower() in ql)]
-    cands.sort(key=lambda p: len(p.get("name") or ""), reverse=True)
-    return cands[0] if cands else None
+    cands = _product_candidates(query, catalog)
+    if len(cands) == 1:
+        return cands[0]
+    if len(cands) > 1:
+        # The query naming the whole of one row (its name read from the query)
+        # beats rows that merely contain the query.
+        whole = [p for p in cands if norm_text(p.get("name") or "") and
+                 norm_text(p.get("name") or "") in ql]
+        if len(whole) == 1:
+            return whole[0]
+    return None
 
 
 async def _record_shared_media(ctx: "ToolContext", *, media_url: str | None, caption: str,
@@ -2529,8 +2554,16 @@ async def _send_product_cards(args: dict, ctx: ToolContext) -> dict:
         })
 
     if not cards:
-        return {"error": "none of those products were found in the catalogue",
-                "hint": "call search_catalog first, then pass the exact product names it returns"}
+        could = {q: [p.get("name") for p in _product_candidates(q, catalog)][:6] for q in names}
+        could = {q: v for q, v in could.items() if len(v) > 1}
+        out = {"error": "none of those products were found in the catalogue",
+               "hint": "call search_catalog first, then pass the exact product names it returns"}
+        if could:
+            # A name that fits several rows ("stole") is never sent as a guess.
+            out["could_be"] = could
+            out["hint"] = ("those names fit several products — pass the EXACT name of the one the "
+                           "customer means (could_be), or ask them which")
+        return out
 
     # The album rule: when exactly ONE product is being shown and the hub
     # carries several photos of it, the card is followed by the REST of its
