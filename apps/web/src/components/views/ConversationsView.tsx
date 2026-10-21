@@ -12,7 +12,7 @@ import { Toggle } from "@/components/ui/Layout";
 import { timeAgo, formatPhone, displayName, countryName, dayLabel, dayKey, clockTime } from "@/lib/utils";
 import { formatWa } from "@/lib/waText";
 import { CHANNEL_CONFIG, ALL_CHANNELS } from "@/lib/channels";
-import { conversationsApi, mapConversation, profileApi, whatsappApi, type ApiActivityEvent } from "@/lib/api";
+import { conversationsApi, mapConversation, profileApi, whatsappApi, type ApiActivityEvent, type PostIdentity } from "@/lib/api";
 import { useCallPresence } from "@/lib/callContext";
 import type { Inbox } from "@/hooks/useInbox";
 import { useConversationEvents, buildSystemEventFromWs } from "@/lib/websocket";
@@ -322,6 +322,95 @@ function AlbumViewer({ items, start, onClose }: {
 }
 
 // ── CommentContextCard ────────────────────────────────────────────────────────
+// What Neema reads a post as — the product every comment under it is priced
+// from — and WHY, with a one-tap correction (owner, 2026-10-21: the cope post
+// was sold as the $15 Bib for days and nobody could see why). One read per
+// post, shared by every card on screen.
+const postIdentityCache = new Map<string, Promise<PostIdentity | null>>();
+
+function PostIdentityLine({ postId, channel }: { postId: string; channel?: string }) {
+    const key = `${channel || "facebook"}:${postId}`;
+    const [ident, setIdent] = React.useState<PostIdentity | null | undefined>(undefined);
+    const [busy, setBusy] = React.useState(false);
+    const [note, setNote] = React.useState("");
+
+    React.useEffect(() => {
+        let alive = true;
+        let p = postIdentityCache.get(key);
+        if (!p) {
+            p = conversationsApi.postIdentity(postId, channel).catch(() => null);
+            postIdentityCache.set(key, p);
+        }
+        p.then((v) => {
+            if (alive) setIdent(v);
+        });
+        return () => {
+            alive = false;
+        };
+    }, [key, postId, channel]);
+
+    const change = async () => {
+        const answer = window.prompt(
+            "Which product is this post? Type its name, alias or slug — every comment under it will be priced from it.",
+            ident?.product || "",
+        );
+        if (!answer || !answer.trim()) return;
+        setBusy(true);
+        setNote("");
+        try {
+            const r = await conversationsApi.setPostIdentity(postId, answer.trim(), channel);
+            const next: PostIdentity = {
+                post_id: postId,
+                channel: channel || "facebook",
+                product: r.product,
+                slug: r.slug,
+                source: "team",
+                trusted: true,
+                evidence: "set by you",
+            };
+            postIdentityCache.set(key, Promise.resolve(next));
+            setIdent(next);
+        } catch (e) {
+            const detail = (e as { body?: { detail?: unknown } })?.body?.detail;
+            const could =
+                detail && typeof detail === "object" && Array.isArray((detail as { could_be?: unknown }).could_be)
+                    ? ((detail as { could_be: string[] }).could_be)
+                    : [];
+            setNote(
+                could.length
+                    ? `"${answer.trim()}" fits several products: ${could.join(", ")}. Type the exact one.`
+                    : `No product matches "${answer.trim()}".`,
+            );
+        }
+        setBusy(false);
+    };
+
+    if (!postId || ident === undefined) return null;
+    const lead = ident?.product && ident.trusted === false;
+    return (
+        <div className="mt-1.5 text-[10px] leading-snug text-[#3a5c28]">
+            {ident?.product ? (
+                <>
+                    <span className="text-[#699a32]">Neema reads this as </span>
+                    <span className="font-semibold">{ident.product}</span>
+                    {lead && <span className="text-amber-700"> · a lead, not confirmed</span>}
+                    {ident.evidence && <div className="text-[#6b7d63]">{ident.evidence}</div>}
+                </>
+            ) : (
+                <span className="text-[#6b7d63]">Neema hasn&apos;t identified this post&apos;s product yet.</span>
+            )}{" "}
+            <button
+                onClick={change}
+                disabled={busy}
+                className="font-medium text-[#427425] underline underline-offset-2 hover:text-[#2f5419] disabled:opacity-50"
+            >
+                {busy ? "Saving…" : ident?.product ? "Change" : "Set product"}
+            </button>
+            {note && <div className="text-red-700 mt-0.5">{note}</div>}
+        </div>
+    );
+}
+
 // A Facebook/Instagram comment is a reply to one of our posts — but the comment
 // text alone ("how much?") is meaningless without it. This card shows WHAT the
 // comment is on: a big poster of the post/reel that PLAYS INLINE (video source
@@ -459,6 +548,8 @@ function CommentContextCard({
                     </svg>
                 </a>
             )}
+
+            {isInbound && postId && <PostIdentityLine postId={postId} channel={channel} />}
 
             {lightbox && (
                 <Lightbox src={lightbox.src} kind={lightbox.kind} onClose={() => setLightbox(null)} />

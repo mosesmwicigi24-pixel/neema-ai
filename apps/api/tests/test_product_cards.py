@@ -443,3 +443,23 @@ def test_a_broken_album_photo_never_blocks_the_rest(monkeypatch):
     assert out["sent_cards"] == 1
     assert out["album_photos"] == 2                     # the other two still landed
     assert albums == ["https://img/al_2.jpg", "https://img/al_4.jpg"]
+
+
+def test_match_product_is_whole_words_and_never_guesses():
+    # catalogue audit, 2026-10-21: substring matching turned "bib" into a Bible
+    # and "stole" into whichever stole had the longest name.
+    cat = [
+        {"name": "Bib", "slug": "bib", "price": 1500},
+        {"name": "Good news bible", "slug": "good-news-bible", "price": 1500},
+        {"name": "Single Sided Stole", "slug": "single-sided-stole", "price": 2500},
+        {"name": "Double sided stole", "slug": "double-sided-stole", "price": 4000},
+        {"name": "Cope — Complete Set", "slug": "cope-complete-set", "price": 45000},
+    ]
+    assert tools._match_product("bib", cat)["slug"] == "bib"
+    assert tools._match_product("Bible", cat)["slug"] == "good-news-bible"
+    assert tools._match_product("stole", cat) is None                 # three stoles: ask
+    assert tools._match_product("double sided stole", cat)["slug"] == "double-sided-stole"
+    assert tools._match_product("the Bib for my husband", cat)["slug"] == "bib"
+    assert tools._match_product("cope", cat)["slug"] == "cope-complete-set"   # the only cope
+    assert [p["slug"] for p in tools._product_candidates("stole", cat)] == [
+        "single-sided-stole", "double-sided-stole"]

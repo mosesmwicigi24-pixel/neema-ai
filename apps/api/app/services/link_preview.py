@@ -137,7 +137,7 @@ async def _fetch_video_context(video_id: str) -> dict | None:
     permalink = d.get("permalink_url") or ""
     if permalink.startswith("/"):
         permalink = f"https://www.facebook.com{permalink}"
-    return {"title": title[:200], "permalink": permalink,
+    return {"title": title[:200], "caption": title[:1500], "permalink": permalink,
             "thumb": d.get("picture") or "", "post_id": video_id, "source": "graph"}
 
 
@@ -201,7 +201,8 @@ async def resolve_facebook_link(url: str, redis=None) -> dict | None:
             from app.services.meta_send import fetch_post_context
             ctx = await fetch_post_context(post_id, "facebook")
             if ctx.get("title"):
-                out = {"title": ctx["title"], "permalink": ctx.get("permalink") or final_url,
+                out = {"title": ctx["title"], "caption": ctx.get("caption") or ctx["title"],
+                       "permalink": ctx.get("permalink") or final_url,
                        "thumb": ctx.get("thumb") or "", "post_id": post_id, "source": "graph"}
 
         if out is None:
@@ -251,13 +252,31 @@ async def shared_link_context(text: str | None, redis=None) -> str:
     if not info:
         return ""
     # Only a Graph read proves the post is ours; Open Graph could be any page.
-    whose = ("this is OUR OWN Facebook post" if info.get("source") == "graph"
-             else "this is the post they linked")
+    ours = info.get("source") == "graph"
+    whose = "this is OUR OWN Facebook post" if ours else "this is the post they linked"
+    # The caption WHOLE (to 800 characters), never the 200-char title: a
+    # caption's products can come after its opening line (owner, 2026-10-21).
+    words = str(info.get("caption") or info.get("title") or "").strip()
+    if len(words) > 800:
+        words = words[:800].rsplit(" ", 1)[0] + "…"
     block = (f"\n\nTHE LINK THEY JUST SHARED — you CAN see it, {whose}, "
              "opened for you:\n"
-             f'  "{info["title"]}"\n')
+             f'  "{words}"\n')
     if info.get("permalink"):
         block += f"  ({info['permalink']})\n"
+    if ours and info.get("post_id"):
+        # Our own post: the SAME identity every comment under it gets — so a
+        # shared link is never identified differently from the post itself.
+        try:
+            from app.agent.runtime import _post_identity, identity_trusted_record
+            known = await _post_identity(redis, "facebook", {
+                "post_id": info["post_id"], "title": info.get("title") or "",
+                "caption": info.get("caption") or "", "thumb": info.get("thumb") or ""})
+            if identity_trusted_record(known):
+                block += (f"  OUR RECORDS: this post shows our \"{known['name']}\" — "
+                          "that is the product; find it with search_catalog for its price.\n")
+        except Exception:
+            pass
     block += ("Treat it exactly like a photo they sent: name the product it "
               "shows, price it from the catalogue, and carry on. NEVER say you "
               "cannot open a link or ask them to describe it in words.")

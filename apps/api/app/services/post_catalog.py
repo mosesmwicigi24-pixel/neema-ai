@@ -60,27 +60,131 @@ UNRESOLVED_KEY = "postcat:unresolved"       # redis: count from the last sweep
 # ── the deterministic rungs ──────────────────────────────────────────────────
 
 
+_APOS_RE = re.compile(r"[’'`´]")
+
+
+def norm_text(text: str) -> str:
+    """Lower case, apostrophes dropped ("ladies' cassock set" reads as the
+    alias "ladies cassock set", "bishop's" as "bishops"), spaces collapsed."""
+    return " ".join(_APOS_RE.sub("", (text or "").lower()).split())
+
+
+def words_in(needle: str, hay: str) -> bool:
+    """Does `hay` carry `needle` as WHOLE words (a plural 's'/'es' allowed)?
+    Plain substring containment read the Bib's alias "clergy vest" inside
+    "handcrafted clergy vestments" and sold a cope set as the $15 Bib for
+    days (owner, 2026-10-21)."""
+    n = norm_text(needle)
+    if not n:
+        return False
+    return re.search(r"(?<![a-z0-9])" + re.escape(n) + r"(?:e?s)?(?![a-z0-9])",
+                     norm_text(hay)) is not None
+
+
+_ALIAS_MEMO: dict = {}
+
+
+def distinctive_aliases(catalog: list[dict]) -> dict[int, list[str]]:
+    """id(row) → the aliases that point at THAT row alone. An alias is not
+    distinctive when it is another product's own name, or part of it ("altar
+    wine" is Devai's alias AND the Altar Wine row; "bishopric ring" the Ring's
+    alias AND the Bishopric Ring; "biblia" the NIV Bible's alias AND the
+    Swahili children's Bible's name), or when another row carries it too
+    ("communion bread" on three bread rows). Such an alias says the caption is
+    near a product, never which one (catalogue audit, 2026-10-21). Memoised on
+    the catalogue's names and aliases."""
+    sig = hash(tuple((p.get("name") or "", tuple(p.get("aliases") or [])) for p in catalog))
+    memo = _ALIAS_MEMO.get(sig)
+    if memo is not None and len(memo[1]) == len(catalog):
+        return {id(p): memo[0].get(i, []) for i, p in enumerate(catalog)}
+    norm_names = [norm_text(p.get("name") or "") for p in catalog]
+    owners: dict[str, set] = {}
+    for i, p in enumerate(catalog):
+        for a in (p.get("aliases") or []):
+            owners.setdefault(norm_text(str(a)), set()).add(i)
+    by_index: dict[int, list[str]] = {}
+    for i, p in enumerate(catalog):
+        keep = []
+        for a in (p.get("aliases") or []):
+            a_n = norm_text(str(a))
+            if not a_n or len(owners.get(a_n, ())) > 1:
+                continue
+            if any(j != i and nm and words_in(a_n, nm) for j, nm in enumerate(norm_names)):
+                continue
+            # …nor inside another row's alias ("bishops cape" on the cope set,
+            # "bishops cape kenya" on the Purple Red Cope: the same words).
+            if any(j != i and words_in(a_n, o) for o, js in owners.items() if o != a_n
+                   for j in js):
+                continue
+            keep.append(a_n)
+        by_index[i] = keep
+    if len(_ALIAS_MEMO) > 8:
+        _ALIAS_MEMO.clear()
+    _ALIAS_MEMO[sig] = (by_index, list(range(len(catalog))))
+    return {id(p): by_index.get(i, []) for i, p in enumerate(catalog)}
+
+
+def post_text(pctx: dict | None) -> str:
+    """The post's words WHOLE — the caption when the context carries it, else
+    the 200-char inbox title. Identification reads this, never the title alone:
+    a caption whose product words come after its first 200 characters ("…From
+    our Copes, Cassocks, Stoles…") was identified from its opening line."""
+    p = pctx or {}
+    return str(p.get("caption") or "").strip() or str(p.get("title") or "").strip()
+
+
 def product_from_caption(text: str, catalog: list[dict]) -> dict | None:
-    """Rungs 1+2: a storefront slug link, else a product name/alias contained
-    in the caption. Longest match wins so 'Silver Communion Tray' beats
-    'Silver Tray' when both appear."""
-    t = " ".join(_canonical(text or "").lower().split())
-    if not t:
+    """Rungs 1+2: a storefront slug link, else a product's own NAME in the
+    caption as whole words — read in the hub's words first (the synonym
+    table: "pendant" IS the Pectoral Cross, the owner's rule), then as
+    written. Longest name wins so
+    'Silver Communion Tray' beats 'Silver Tray'; two different names of the
+    same length is a tie, and a tie is None. A one-word GENERIC name with a
+    more specific sibling ("Cassock" beside "White Princes Cassock") never
+    decides here. Aliases do not decide here either: alias evidence goes to
+    the scored rung, which weighs it against the name words and refuses a
+    near-tie (catalogue audit, 2026-10-21 — a longest-alias-anywhere rule
+    sold the Purple Red Cope as the complete cope set and a gold bread tray
+    as communion bread)."""
+    raw = norm_text(text)
+    if not raw:
         return None
-    m = _SLUG_RE.search(t)
-    if m:
-        slug = m.group(1).lower()
+    canon = norm_text(_canonical(text or ""))
+    for t in (raw, canon):
+        m = _SLUG_RE.search(t)
+        if m:
+            slug = m.group(1).lower()
+            for p in catalog:
+                if (p.get("slug") or "").lower() == slug:
+                    return p
+    from app.agent.runtime import _specific_sibling
+    for t in (canon, raw):
+        best, best_len, tie = None, 0, False
         for p in catalog:
-            if (p.get("slug") or "").lower() == slug:
-                return p
-    best, best_len = None, 0
-    for p in catalog:
-        candidates = [p.get("name") or ""] + list(p.get("aliases") or [])
-        for c in candidates:
-            c_norm = " ".join(c.lower().split())
-            if len(c_norm) >= 6 and c_norm in t and len(c_norm) > best_len:
-                best, best_len = p, len(c_norm)
-    return best
+            n = norm_text(p.get("name") or "")
+            if len(n) < 6 or len(n) < best_len or not words_in(n, t):
+                continue
+            if any(_specific_sibling(p, o) for o in catalog):
+                continue
+            if len(n) > best_len:
+                best, best_len, tie = p, len(n), False
+            elif best is not None and norm_text(best.get("name") or "") != n:
+                tie = True
+        if best is not None:
+            if tie:
+                return None
+            # A name the caption carries as PART of a more specific name it also
+            # covers word for word ("pectoral cross in a bright gold finish" →
+            # "Pectoral Cross — Gold Finish", not "Pectoral Cross") is left to
+            # the scored rung, which prefers the specific row.
+            from app.agent.runtime import _caption_tokens
+            cap_toks = _caption_tokens(t)
+            mine = _caption_tokens(best.get("name") or "")
+            if any(mine < _caption_tokens(o.get("name") or "") <= cap_toks
+                   for o in catalog if o is not best and o.get("name")):
+                return None
+            return best
+    return None
 
 
 def dhash_bytes(raw: bytes, size: int = 8) -> int | None:
@@ -241,6 +345,20 @@ def product_kind(row: dict | None) -> str:
     return toks[-1] if toks else ""
 
 
+def set_head_kind(row: dict | None) -> str:
+    """The garment or item a SET row is built around — its name's head with the
+    set words dropped ("Cope — Complete Set" → cope, "Cassock Set" → cassock,
+    "Double Stacked Silver Tray Set" → tray). "" for a row that is not a set."""
+    if not is_set_row(row):
+        return ""
+    from app.agent.runtime import _strip_size
+    name = _strip_size((row or {}).get("name") or "")
+    head = re.split(r"\s+[—–-]\s+|:|\(", name, maxsplit=1)[0]
+    toks = [t for t in _name_tokens(head) if not any(ch.isdigit() for ch in t)
+            and t not in _PACK_WORDS and t not in _SET_WORDS]
+    return toks[-1] if toks else ""
+
+
 def _kinds_of(catalog: list[dict]) -> dict[str, list[dict]]:
     """kind → the non-set rows of that kind."""
     out: dict[str, list[dict]] = {}
@@ -383,6 +501,15 @@ def caption_record_stale(known: dict | None, caption: str, catalog: list[dict]) 
     from app.agent.runtime import _specific_sibling
     if any(_specific_sibling({"name": str(known.get("name") or "")}, p) for p in catalog):
         return True
+    # The record the caption rungs, as they read TODAY on the whole caption,
+    # would not make: a name matched inside a longer word ("clergy vest" in
+    # "clergy vestments" — the cope set sold as the $15 Bib), or read off the
+    # 200-char title when the caption's product words came later (owner,
+    # 2026-10-21). Re-read: the ladder's answer, or the photo's, replaces it.
+    fresh, _src = caption_identity(caption or "", catalog)
+    if fresh is None or " ".join(str(fresh.get("name") or "").lower().split()) != \
+            " ".join(str(known.get("name") or "").lower().split()):
+        return True
     if len(caption_item_kinds(caption or "", catalog)) < 2:
         return False
     slug = (known.get("slug") or "").lower()
@@ -414,6 +541,7 @@ def product_set_from_caption(caption: str, catalog: list[dict],
     want = set(kinds)
     by_kind = _kinds_of(catalog)
     scored = []
+    distinct = distinctive_aliases(catalog)
     for p in catalog:
         if not p.get("name") or not is_set_row(p):
             continue
@@ -425,12 +553,22 @@ def product_set_from_caption(caption: str, catalog: list[dict],
         # part of it, and at most one part went unlisted. "Complete set:
         # cassock and stole" is not the five-piece Cassock Set.
         covers = bool(comp_kinds) and want <= comp_kinds and len(comp_kinds - want) <= 1
-        if not (covers or named):
+        # A set whose description does not list its contents ("A bishop's
+        # ceremonial cope supplied as a complete coordinated set") is still the
+        # set of ITS garment: a caption listing the cope among the pieces of a
+        # complete outfit is that set (owner, 2026-10-21: "this is a cope with a
+        # cassock with stole and cincture belt" — answered as the Bib). Ranked
+        # below a set whose listed contents cover the caption.
+        head_covers = not comps and set_head_kind(p) in want
+        if not (covers or named or head_covers):
             continue
         ntoks = set(name_seq)
         coverage = len(ntoks & cap_toks) / len(ntoks) if ntoks else 0.0
-        score = (round(coverage, 3), 1 if named else 0, len(ntoks & cap_toks),
-                 len(comp_kinds & want), -len(comp_kinds - want))
+        # The set's own alias in the caption ("ladies' cassock set" → the
+        # Classic Princes Cassock Set, not the plain Cassock Set).
+        alias_hit = 1 if any(words_in(a, text) for a in distinct.get(id(p), [])) else 0
+        score = (1 if (covers or named) else 0, alias_hit, round(coverage, 3), 1 if named else 0,
+                 len(ntoks & cap_toks), len(comp_kinds & want), -len(comp_kinds - want))
         scored.append((score, p))
     if not scored:
         return None
@@ -533,15 +671,32 @@ TRUSTED_SOURCES = ("team", "link", "caption", "image", "vision")
 TRUST_MIN = 0.8
 
 
-def with_provenance(row: dict | None, source: str, confidence: float | None = None) -> dict | None:
-    """A copy of the hub row stamped with how it was identified."""
+def with_provenance(row: dict | None, source: str, confidence: float | None = None,
+                    evidence: str = "") -> dict | None:
+    """A copy of the hub row stamped with how it was identified — and WHY, in
+    words the team can check at a glance ("the caption names \"Cassock Set\""),
+    so a wrong identity is seen on the post card, not after days of replies
+    (owner, 2026-10-21)."""
     if row is None:
         return None
     out = dict(row)
+    ev = evidence or str(row.get("_identity_evidence") or "") or _EVIDENCE_BY_SOURCE.get(source, "")
+    if ev:
+        out["_identity_evidence"] = ev[:200]
     out["_identity_source"] = source
     out["_identity_confidence"] = float(SOURCE_CONFIDENCE.get(source, 0.5)
                                         if confidence is None else confidence)
     return out
+
+
+_EVIDENCE_BY_SOURCE = {
+    "link": "the caption links its storefront page",
+    "image": "the photo is our catalogue photo of it",
+    "vision": "the photo, read and compared with our catalogue photo",
+    "vision-name": "the photo, read (no catalogue photo to compare)",
+    "team": "set by the team",
+    "model": "Neema's reading of a reply (a lead, not a fact)",
+}
 
 
 def identity_trusted(record: dict | None) -> bool:
@@ -658,7 +813,10 @@ async def product_from_vision(redis, thumb_url: str, catalog: list[dict],
         if not cands:
             return None
         listing = "\n".join(f"{i + 1}. {p.get('name')}" for i, p in enumerate(cands))
-        llm = build_llm(model=settings.tier2_model_light, purpose="vision", cache=False)
+        # Once per post, cached: the main model, not the light one (owner,
+        # 2026-10-21 — a post's identity prices every comment under it).
+        llm = build_llm(model=(settings.tier2_model_vision or settings.tier2_model),
+                        purpose="vision", cache=False)
         resp = await llm.complete(
             system=("You identify which catalogue item a shop's post photo shows. You "
                     "answer only in the exact format asked, and you say NONE whenever "
@@ -669,8 +827,10 @@ async def product_from_vision(redis, thumb_url: str, catalog: list[dict],
                     "Catalogue items (name only):\n" + listing + "\n\n"
                     "Which ONE listed item is the main item for sale in this photo? "
                     "Judge the object itself — its type, shape, finish and colour — not the "
-                    "caption. If it is a design drawing, a person, several items, or an item "
-                    "not in the list, answer NONE.\n"
+                    "caption. A complete outfit shown as one (a cope over a cassock with its "
+                    "stole and belt, say) is ONE item when the list has that set — name the "
+                    "set. If it is a design drawing, a person, several separate products, or "
+                    "an item not in the list, answer NONE.\n"
                     "Reply with exactly one line: NAME=<exact name from the list> | "
                     "CONF=<high|medium|low>   or   NONE")}]}],
             tools=[])
@@ -717,41 +877,65 @@ async def product_from_vision(redis, thumb_url: str, catalog: list[dict],
 # ── the resolver + the sweep ─────────────────────────────────────────────────
 
 
-async def resolve_post(redis, pctx: dict, catalog: list[dict]) -> dict | None:
-    """One post → its product, by the ladder, each hit stamped with its rung
-    (`_identity_source`, `_identity_confidence` — see with_provenance). None =
-    leave it to the model's careful read and the team override."""
-    title = (pctx.get("title") or "").strip()
-    m = _SLUG_RE.search(title) if title else None
+def caption_identity(text: str, catalog: list[dict]) -> tuple[dict | None, str]:
+    """The caption rungs of the ladder, on the post's WHOLE words: (row,
+    "link") for a storefront link, (row, "caption") for a set, a bundle, a
+    whole-word name or alias, or the scored caption; (None, "") when the
+    caption names nothing it can stand behind."""
+    title = (text or "").strip()
+    if not title:
+        return None, ""
+    def _ev(row: dict, why: str) -> dict:
+        out = dict(row)
+        out["_identity_evidence"] = why[:200]
+        return out
+
+    m = _SLUG_RE.search(title)
     if m:
         slug = m.group(1).lower()
         for p in catalog:
             if (p.get("slug") or "").lower() == slug:
-                return with_provenance(p, "link")
-    kinds = caption_item_kinds(title, catalog) if title else []
+                return _ev(p, f"the caption links its storefront page ({slug})"), "link"
+    kinds = caption_item_kinds(title, catalog)
     if len(kinds) >= 2:
         # Several items listed as one outfit: the set row that covers them,
         # else their total — and NEVER one of the pieces by name (owner,
         # 2026-09-21: "Cassock" was sold under a five-piece set).
-        hit = product_set_from_caption(title, catalog, kinds=kinds) \
-            or bundle_from_caption(title, catalog, kinds=kinds)
+        listed = ", ".join(kinds)
+        hit = product_set_from_caption(title, catalog, kinds=kinds)
         if hit is not None:
-            return with_provenance(hit, "caption")
-    else:
-        hit = product_from_caption(title, catalog)
-        if hit is None and title:
-            # The hub's names SCORED against the whole caption (runtime's
-            # scorer: coverage, the phrase in order, an alias, size families,
-            # a near-tie is None). It used to run only as the comment
-            # resolver's fallback — after the model had already read the
-            # post; so a caption saying "Premium Bishop's Ring" (the hub's
-            # "Ring", too short a name for containment) went to the model,
-            # which picked the Apostolic Ring off a photo the two rows share
-            # (owner, 2026-09-23). Deterministic first.
-            from app.agent.runtime import _hub_caption_match
-            hit = _hub_caption_match(catalog, title)
+            return _ev(hit, f"the caption lists {listed} as one outfit — the hub's set"), "caption"
+        hit = bundle_from_caption(title, catalog, kinds=kinds)
         if hit is not None:
-            return with_provenance(hit, "caption")
+            return _ev(hit, f"the caption lists {listed} as one outfit — priced as their total"), "caption"
+        return None, ""
+    hit = product_from_caption(title, catalog)
+    if hit is not None:
+        return _ev(hit, f'the caption names "{hit.get("name")}"'), "caption"
+    if hit is None:
+        # The hub's names SCORED against the whole caption (runtime's
+        # scorer: coverage, the phrase in order, an alias, size families,
+        # a near-tie is None). It used to run only as the comment
+        # resolver's fallback — after the model had already read the
+        # post; so a caption saying "Premium Bishop's Ring" (the hub's
+        # "Ring", too short a name for containment) went to the model,
+        # which picked the Apostolic Ring off a photo the two rows share
+        # (owner, 2026-09-23). Deterministic first.
+        from app.agent.runtime import _hub_caption_match
+        hit = _hub_caption_match(catalog, title)
+    if hit is None:
+        return None, ""
+    return _ev(hit, f'the caption\'s words match "{hit.get("name")}" best (name words or its alias)'), "caption"
+
+
+async def resolve_post(redis, pctx: dict, catalog: list[dict]) -> dict | None:
+    """One post → its product, by the ladder, each hit stamped with its rung
+    (`_identity_source`, `_identity_confidence` — see with_provenance). None =
+    leave it to the model's careful read and the team override."""
+    title = post_text(pctx)
+    hit, source = caption_identity(title, catalog)
+    if hit is not None:
+        return with_provenance(hit, source)
     thumb = (pctx.get("thumb") or "").strip()
     hit = await product_from_image(redis, thumb, catalog)
     if hit is not None:

@@ -413,6 +413,9 @@ class Settings(BaseSettings):
     translate_for_team: bool = True
     tier2_memory: bool = True        # cross-conversation customer memory (facts + past orders)
     tier2_vision: bool = True         # let the agent SEE product photos natively (Claude vision)
+    # The model that identifies a POST's product from its photo — once per post,
+    # cached, so the strongest read is worth its few cents. Empty = tier2_model.
+    tier2_model_vision: str = ""
     # ── Call recording + transcription (self-hosted Whisper = zero marginal cost) ──
     # Audio is recorded in the agent's browser (both sides mixed) and uploaded on
     # hangup — free. Transcription runs on OUR box via faster-whisper (no per-call
