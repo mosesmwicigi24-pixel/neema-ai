@@ -10,10 +10,10 @@ import json
 import logging
 import re
 
-from sqlalchemy import select
+from sqlalchemy import func as sa_func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.agent.llm import LLM, LLMResponse
+from app.agent.llm import LLM, LLMResponse, TURN_NOTE_HEADER
 from app.agent.memory import build_memory_context
 from app.agent.prompt import build_system_prompt, customer_context
 from app.agent.tools import TOOLS, ToolContext, run_tool
@@ -896,23 +896,50 @@ def _thread_rows(rows: list, post_id: str) -> list:
     return kept
 
 
+def _window_keep(total: int, limit: int) -> int:
+    """How many of the newest rows to keep so the window's FIRST row stays put.
+
+    A plain "last 40" slides by a message or two every turn once a thread is
+    longer than that — the transcript's first block changes, and the whole
+    conversation is re-written to the cache (1.25×) on every turn instead of
+    read (0.1×). Instead the window starts on a multiple of half the limit and
+    holds that start for half a window of messages: it carries between `limit`
+    and 1.5× `limit` rows (never fewer than asked), then steps forward once."""
+    step = max(limit // 2, 1)
+    if total <= limit:
+        return total
+    return total - ((total - limit) // step) * step
+
+
 async def _history(db: AsyncSession, key: str, limit: int = 20,
                    *, channel: str = "whatsapp", post_id: str | None = None) -> list[dict]:
     # WhatsApp keys on wa_id (the compat shim); other channels key on
     # (channel, external_id) since their messages carry no wa_id.
     where = (Message.wa_id == key) if channel == "whatsapp" else (
         (Message.channel == channel) & (Message.external_id == key))
+    # Internal NOTES are operator-private (escalation notes, call summaries,
+    # silent-decision records) — they were never sent to the customer and must
+    # NEVER reach the model as assistant turns it could echo back.
+    not_note = Message.media_type.is_(None) | (Message.media_type != "note")
     # A public comment turn reads ONE post's thread (see _thread_rows): fetch
     # wider, then keep the thread's last `limit` turns.
-    fetch = max(limit * 4, 60) if post_id else limit
-    rows = list(reversed((await db.execute(
-        select(Message).where(where)
-        # Internal NOTES are operator-private (escalation notes, call summaries,
-        # silent-decision records) — they were never sent to the customer and must
-        # NEVER reach the model as assistant turns it could echo back.
-        .where(Message.media_type.is_(None) | (Message.media_type != "note"))
+    fetch = max(limit * 4, 60) if post_id else limit + max(limit // 2, 1)
+    newest = list((await db.execute(
+        select(Message).where(where).where(not_note)
         .order_by(Message.created_at.desc()).limit(fetch)
-    )).scalars().all()))
+    )).scalars().all())
+    if not post_id:
+        total = len(newest)
+        if total >= fetch:
+            # Longer than the read: the thread's full length places the start.
+            try:
+                total = int((await db.execute(
+                    select(sa_func.count()).select_from(Message).where(where).where(not_note)
+                )).scalar() or 0) or total
+            except Exception:
+                total = limit
+        newest = newest[:_window_keep(total, limit)]
+    rows = list(reversed(newest))
     if post_id:
         rows = _thread_rows(rows, post_id)[-limit:]
     msgs: list[dict] = []
@@ -1184,7 +1211,6 @@ _SW_REVIEW_HOLD_DM_PRICE = ("Ngoja nihakikishe bidhaa kamili na bei sahihi 🙏 
                             "atakuthibitishia hapa hivi karibuni.")
 
 
-TURN_NOTE_HEADER = "[For this message — context from Neema's systems, not the customer's words:]"
 
 
 def _attach_turn_notes(messages: list, notes: list[str]) -> str:
@@ -1196,17 +1222,22 @@ def _attach_turn_notes(messages: list, notes: list[str]) -> str:
     text = "".join(n for n in notes if n).strip()
     if not text:
         return ""
-    block = TURN_NOTE_HEADER + "\n" + text
+    block = {"type": "text", "text": TURN_NOTE_HEADER + "\n" + text}
     if messages and messages[-1].get("role") == "user":
         last = dict(messages[-1])
         c = last.get("content")
+        # The customer's words stay a block of their own, exactly as stored —
+        # the notes are a SEPARATE last block (llm._cache_last_message caches
+        # up to the words, the part the next turn repeats).
         if isinstance(c, list):
-            last["content"] = list(c) + [{"type": "text", "text": block}]
+            last["content"] = list(c) + [block]
+        elif c:
+            last["content"] = [{"type": "text", "text": str(c)}, block]
         else:
-            last["content"] = (str(c or "").rstrip() + "\n\n" + block).strip()
+            last["content"] = [block]
         messages[-1] = last
     else:
-        messages.append({"role": "user", "content": block})
+        messages.append({"role": "user", "content": [block]})
     return text
 
 
@@ -1876,16 +1907,20 @@ async def run_turn(db: AsyncSession, redis, wa_id: str, user_text: str, llm: LLM
             "search_catalog by the hub's own name, price THAT item first and "
             "take the order. Do not ask what they are looking for, and do not "
             "open with a list of other products.)")
+    # What we know about them changes whenever a fact is saved (a name, a
+    # size, a parish — often mid-sale), and a comment's reading is new with
+    # every comment: on the transcript's FIRST message either one re-wrote the
+    # whole conversation to the cache. They ride on the current message.
     if settings.tier2_memory:
         mem_ctx = await build_memory_context(db, redis, key, user=user, channel=channel)
         if mem_ctx:
-            lead_ctx.append(f"(Context — what you know about this customer:\n{mem_ctx})")
+            turn_notes.append(f"\n\n(Context — what you know about this customer:\n{mem_ctx})")
     if public_comment and comment_reading:
         # What this comment IS (owner, 2026-09-22): a request is answered with
         # the shelf, a question with the answer, praise in kind.
         _rline = _reading_context(comment_reading)
         if _rline:
-            lead_ctx.append(_rline)
+            turn_notes.append("\n\n" + _rline)
     if lead_ctx:
         content = "\n\n".join(lead_ctx)
         if post_img:
@@ -1925,21 +1960,33 @@ async def run_turn(db: AsyncSession, redis, wa_id: str, user_text: str, llm: LLM
         base = [t for t in TOOLS if t["name"] != "whatsapp_checkout_link"] \
             if channel == "whatsapp" else TOOLS
     tools = base if settings.tier2_memory else [t for t in base if t["name"] != "remember"]
-    if read_only:
-        # Draft mode: strip to read-only tools so composing a suggestion never
-        # creates an order, edits the cart, or sends a message.
-        tools = [t for t in tools if t["name"] in _READONLY_TOOL_NAMES]
+    if read_only or scribe_only:
+        # Draft mode never creates an order, edits the cart or sends a message;
+        # the copilot scribe (plan C3) only keeps records while a human talks.
+        # Both are SHOWN one list — the look-only tools and the record-keeping
+        # ones — so a copilot draft and the scribe pass right after it share
+        # one cached prefix (tools render first: two lists were two full cache
+        # writes per customer message). What each may RUN is enforced at the
+        # call (tools.run_tool), and the order-writing tools stay hidden.
+        tools = [t for t in tools if t["name"] in _READONLY_TOOL_NAMES | _SCRIBE_TOOL_NAMES]
+        ctx.allowed_tools = frozenset(
+            _SCRIBE_TOOL_NAMES if scribe_only else _READONLY_TOOL_NAMES)
     if scribe_only:
-        # Copilot scribe (plan C3): a human is talking to the customer; Neema is
-        # ONLY the record-keeper this turn — CRM-writing tools, no reply.
-        tools = [t for t in tools if t["name"] in _SCRIBE_TOOL_NAMES]
-        system += ("\n\n[SCRIBE MODE — a human colleague is handling this chat. "
-                   "You are ONLY the record-keeper this turn: from the latest "
-                   "messages, call tools to save any facts revealed (name, city, "
-                   "phone, role/title, church/ministry, measurements, durable "
-                   "preferences). Do NOT compose anything customer-facing. When "
-                   "done (or if there is nothing to save), reply with exactly: "
-                   "noted]")
+        # The instruction rides on the message, never in the shared rules
+        # block — that block is cached fleet-wide and must not change.
+        turn_notes.append(
+            "\n\n[SCRIBE MODE — a human colleague is handling this chat. "
+            "You are ONLY the record-keeper this turn: from the latest "
+            "messages, call tools to save any facts revealed (name, city, "
+            "phone, role/title, church/ministry, measurements, durable "
+            "preferences). Do NOT compose anything customer-facing. When "
+            "done (or if there is nothing to save), reply with exactly: "
+            "noted]")
+    elif read_only:
+        turn_notes.append(
+            "\n\n(Look-only turn: of your tools only "
+            + ", ".join(sorted(_READONLY_TOOL_NAMES))
+            + " run now — nothing is ordered, saved or sent.)")
 
     # Two system blocks: [shared rules | this customer]. The list form is what
     # tells the LLM client to put the fleet-shared 1h cache breakpoint on block 0.

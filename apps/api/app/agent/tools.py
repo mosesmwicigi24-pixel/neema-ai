@@ -47,6 +47,10 @@ class ToolContext:
     # Draft/preview mode: look-only. Tools must not write ANYTHING — not even a
     # best-effort side log like a demand signal.
     read_only: bool = False
+    # The only tools this turn may RUN (None = every tool it was shown). A
+    # copilot draft and its scribe pass are shown one shared list so they read
+    # one cache entry; what each may actually do is decided here, at the call.
+    allowed_tools: frozenset | None = None
 
 
 def _channel_label(ctx: "ToolContext") -> str:
@@ -537,6 +541,9 @@ async def run_tool(name: str, args: dict, ctx: ToolContext) -> dict:
         fn = _HANDLERS.get(name)
         if fn is None:
             return {"error": f"unknown tool {name}"}
+        if ctx.allowed_tools is not None and name not in ctx.allowed_tools:
+            return {"error": f"{name} is not available on this turn — only "
+                             f"{', '.join(sorted(ctx.allowed_tools))} run here"}
         return await fn(args or {}, ctx)
     except Exception as exc:  # tools never crash the loop — the model sees the error
         _log.warning("tool %s failed for %s: %s", name, ctx.wa_id, exc)

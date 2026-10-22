@@ -102,5 +102,19 @@ def test_run_turn_read_only_offers_only_readonly_tools():
     out = asyncio.run(runtime.run_turn(db, None, "254700000001", "how much is a mitre?",
                                        _RecLLM(), read_only=True))
     assert out == "Here's a suggested reply."
-    assert set(seen["tools"]) <= _READONLY_TOOL_NAMES        # nothing mutating offered
+    # Shown: the look-only tools plus the record-keeping ones (one list shared
+    # with the copilot scribe, one cache entry) — never an order-writing tool.
+    assert set(seen["tools"]) <= _READONLY_TOOL_NAMES | runtime._SCRIBE_TOOL_NAMES
+    for writer in ("create_order", "update_cart", "add_to_cart", "send_product_cards"):
+        assert writer not in seen["tools"]
     assert "search_catalog" in seen["tools"]
+
+
+def test_a_draft_can_only_run_its_look_only_tools():
+    from app.agent.tools import ToolContext, run_tool
+    ctx = ToolContext(db=None, redis=None, wa_id="254700000001",
+                      read_only=True, allowed_tools=frozenset(runtime._READONLY_TOOL_NAMES))
+    out = asyncio.run(run_tool("capture_customer", {"name": "Moses"}, ctx))
+    assert "not available" in out["error"]
+    out = asyncio.run(run_tool("create_order", {}, ctx))
+    assert "not available" in out["error"]

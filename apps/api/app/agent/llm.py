@@ -71,6 +71,12 @@ def _blocks_to_response(content: list[Any]) -> LLMResponse:
                        text="".join(text_parts).strip())
 
 
+# THIS message's notes (runtime._attach_turn_notes) ride on the current user
+# message as their own block under this header. They are never stored, so next
+# turn that message comes back WITHOUT them — the cache entry worth writing
+# ends at the customer's own words, which do come back byte-identical.
+TURN_NOTE_HEADER = "[For this message — context from Neema's systems, not the customer's words:]"
+
 _EPHEMERAL = {"type": "ephemeral"}                  # 5-minute TTL (write bills 1.25×)
 _EPHEMERAL_1H = {"type": "ephemeral", "ttl": "1h"}  # 1-hour TTL (write bills 2×)
 
@@ -101,6 +107,11 @@ def _cached_system(system: str | list[str]):
     return blocks
 
 
+def _is_turn_note(block) -> bool:
+    return (isinstance(block, dict) and block.get("type") == "text"
+            and str(block.get("text") or "").startswith(TURN_NOTE_HEADER))
+
+
 def _cache_last_message(messages: list[dict]) -> list[dict]:
     """Return a shallow copy of messages with a cache breakpoint on the last
     block, so the whole conversation prefix is cached and read incrementally
@@ -115,6 +126,12 @@ def _cache_last_message(messages: list[dict]) -> list[dict]:
     elif isinstance(content, list) and content:
         new_content = list(content)
         new_content[-1] = {**new_content[-1], "cache_control": _EPHEMERAL}
+        # A turn's notes are its last block: mark the customer's words before
+        # them too, so the NEXT turn — where this message returns without its
+        # notes — reads the whole conversation instead of re-writing it.
+        if (len(new_content) > 1 and _is_turn_note(new_content[-1])
+                and isinstance(new_content[-2], dict)):
+            new_content[-2] = {**new_content[-2], "cache_control": _EPHEMERAL}
         last["content"] = new_content
     out[-1] = last
     return out

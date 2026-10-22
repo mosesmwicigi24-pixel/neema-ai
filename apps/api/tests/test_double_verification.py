@@ -210,10 +210,59 @@ def test_a_turn_note_rides_on_the_message_and_the_prefix_stays_byte_identical():
     text = rt._attach_turn_notes(with_note, ["\n\nTODAY'S RATE: 1 USD = 18.10 ZAR"])
     assert text == "TODAY'S RATE: 1 USD = 18.10 ZAR"
     assert with_note[:-1] == history[:-1]                     # the cached prefix is untouched
-    assert with_note[-1]["content"].startswith("In rands please")
-    assert rt.TURN_NOTE_HEADER in with_note[-1]["content"]
+    words, note = with_note[-1]["content"]
+    assert words == {"type": "text", "text": "In rands please"}   # exactly as stored
+    assert note["text"].startswith(rt.TURN_NOTE_HEADER)
     plain = [dict(m) for m in history]
     assert rt._attach_turn_notes(plain, ["", ""]) == "" and plain == history
     photo = [{"role": "user", "content": [{"type": "image", "source": {}}]}]
     rt._attach_turn_notes(photo, ["note"])
     assert photo[0]["content"][-1]["text"].endswith("note")
+
+
+def _rendered(m):
+    """A message as the API renders it for caching: a string is one text
+    block; the breakpoint marker is not part of the content."""
+    c = m["content"]
+    blocks = [{"type": "text", "text": c}] if isinstance(c, str) else list(c)
+    return {"role": m["role"],
+            "content": [{k: v for k, v in b.items() if k != "cache_control"} for b in blocks]}
+
+
+def test_the_next_turn_reads_what_this_turn_cached():
+    """A turn's notes are never stored, so next turn its message comes back
+    WITHOUT them. The cache entry must end at the customer's own words, or
+    every turn after a note re-writes the whole conversation (1.25×) instead
+    of reading it (0.1×)."""
+    from app.agent import runtime as rt
+    from app.agent.llm import _cache_last_message
+    turn = [{"role": "user", "content": "How much is the cope set?"},
+            {"role": "assistant", "content": "KES 45,000."},
+            {"role": "user", "content": "In rands please"}]
+    rt._attach_turn_notes(turn, ["\n\nTODAY'S RATE: 1 USD = 18.10 ZAR"])
+    sent = _cache_last_message(turn)
+    words = sent[-1]["content"][0]
+    assert words.get("cache_control")                         # a breakpoint on their words
+    cached = [_rendered(m) for m in sent[:-1]] + [
+        {"role": "user", "content": [_rendered(sent[-1])["content"][0]]}]
+
+    # Next turn, from the database: the same words, no note, then more.
+    nxt = [{"role": "user", "content": "How much is the cope set?"},
+           {"role": "assistant", "content": "KES 45,000."},
+           {"role": "user", "content": "In rands please"},
+           {"role": "assistant", "content": "About R 6,300."},
+           {"role": "user", "content": "Ok I'll take it"}]
+    assert [_rendered(m) for m in nxt[:len(cached)]] == cached
+
+
+def test_the_history_window_holds_its_first_message_for_half_a_window():
+    from app.agent import runtime as rt
+    limit, starts = 40, []
+    for total in range(1, 200):
+        keep = rt._window_keep(total, limit)
+        assert keep == total if total <= limit else limit <= keep < limit + limit // 2
+        starts.append(total - keep)
+    # The first message moves only every 20 messages (about ten turns), never
+    # on every turn.
+    moves = sum(1 for a, b in zip(starts, starts[1:]) if a != b)
+    assert moves == len({s for s in starts}) - 1 and moves <= (200 - limit) // 20 + 1
