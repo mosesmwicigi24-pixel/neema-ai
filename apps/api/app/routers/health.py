@@ -73,6 +73,15 @@ async def health(request: Request):
         from app.services.ai_budget import read_breakdown
         spend = await read_breakdown(getattr(request.app.state, "redis", None))
         if spend:
+            # How long cached prompts waited between uses, per purpose — the
+            # evidence for (or against) a longer cache TTL.
+            try:
+                from app.services.cache_gaps import read_gaps
+                gaps = await read_gaps(getattr(request.app.state, "redis", None))
+                if gaps:
+                    spend["cache_gaps"] = gaps
+            except Exception:
+                pass
             out["spend"] = spend
     except Exception:
         pass
