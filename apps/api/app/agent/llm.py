@@ -196,6 +196,14 @@ class AnthropicLLM:
             await ai_budget.meter(self._model, r.usage, self.purpose)
         except Exception:
             pass
+        # How long the cached prefixes waited since their last use — whether a
+        # longer cache TTL would pay is a question of these gaps (cache_gaps).
+        if self._cache:
+            try:
+                from app.services import cache_gaps
+                await cache_gaps.record(self.purpose, system, messages, tools, r.usage)
+            except Exception:
+                pass
         return r
 
 
