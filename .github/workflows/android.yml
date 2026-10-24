@@ -59,6 +59,11 @@ jobs:
           NEEMA_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           NEEMA_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           NEEMA_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          # Firebase (calls ring with the app closed; docs/PUSH_SETUP.md). Unset = push off.
+          NEEMA_FCM_PROJECT_ID: ${{ secrets.NEEMA_FCM_PROJECT_ID }}
+          NEEMA_FCM_APP_ID: ${{ secrets.NEEMA_FCM_APP_ID }}
+          NEEMA_FCM_API_KEY: ${{ secrets.NEEMA_FCM_API_KEY }}
+          NEEMA_FCM_SENDER_ID: ${{ secrets.NEEMA_FCM_SENDER_ID }}
         run: ./gradlew :app:assembleRelease --no-daemon
 
       - name: Upload test reports

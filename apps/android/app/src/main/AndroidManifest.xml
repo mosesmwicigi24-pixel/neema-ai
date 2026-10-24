@@ -64,6 +64,14 @@
             </intent-filter>
         </activity>
 
+        <!-- Firebase call events (core/notify/Push.kt): calls ring with the app closed. -->
+        <service
+            android:name=".core.notify.NeemaPushService"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.google.firebase.MESSAGING_EVENT" />
+            </intent-filter>
+        </service>
         <service
             android:name=".core.notify.LiveService"
             android:exported="false"

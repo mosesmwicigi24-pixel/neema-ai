@@ -87,6 +87,11 @@ class AppContainer(val context: Context, val config: ContainerConfig = Container
         agentIdFn = { sessionStore.session.value?.agentId },
         agentNameFn = { sessionStore.session.value?.name },
     )
+    /** Tells the server which phone to ring for calls with the app closed (core/notify/Push.kt). */
+    val push = ke.co.bethanyhouse.neema.core.notify.PushRegistrar(
+        appScope, http,
+        sessionStore.session.map { it?.agentId }.stateIn(appScope, SharingStarted.Eagerly, sessionStore.session.value?.agentId),
+    )
     private var crashReporterRef: CrashReporter? = null
 
     /** Sends saved crash reports to the server once someone is signed in. */

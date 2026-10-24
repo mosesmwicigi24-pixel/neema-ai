@@ -683,6 +683,10 @@ class DashboardViewModel(
                 withTimeoutOrNull(SIGN_OUT_CALL_MS) {
                     try { endCall() } catch (e: CancellationException) { throw e } catch (_: Exception) { /* sign out regardless */ }
                 }
+                // This phone stops ringing for the team's calls — while the session can still say so.
+                withTimeoutOrNull(SIGN_OUT_CALL_MS) {
+                    try { container.push.unregister() } catch (e: CancellationException) { throw e } catch (_: Exception) { }
+                }
             } finally {
                 container.auth.logout()
                 container.notifications.clear()
