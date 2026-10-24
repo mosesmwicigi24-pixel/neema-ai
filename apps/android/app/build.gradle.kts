@@ -136,6 +136,7 @@ dependencies {
     implementation(libs.media3.ui)
     implementation(libs.webrtc)
     implementation(libs.firebase.messaging)
+    implementation(libs.androidx.fragment)
 
     testImplementation(libs.junit)
     testImplementation(libs.kotlinx.coroutines.test)
