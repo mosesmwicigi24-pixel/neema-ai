@@ -14,6 +14,7 @@ from app.models.user import User
 from app.models.person import Person, Identity
 from app.models.call import Call  # noqa: F401 — register the mapper at boot
 from app.models.client_crash import ClientCrash
+from app.models.push_device import PushDevice
 from app.models.parish import Parish  # noqa: F401 — Person.parish_id FK needs the table registered
 from app.models.demand_signal import DemandSignal  # noqa: F401 — register at boot
 from app.models.intercept import Intercept, InterceptAction
@@ -3921,6 +3922,51 @@ async def client_crash_report(
         return {"ok": True, "duplicate": True}
     _log.warning("android %s from %s (build %s, %s, API %s): %s", kind, agent.name, row.build,
                  row.device, row.sdk, row.summary)
+    return {"ok": True}
+
+
+@router.post("/push/register")
+async def push_register(
+    body: dict,
+    agent: Agent = Depends(get_current_agent),
+    db: AsyncSession = Depends(get_db),
+):
+    """This phone rings for incoming calls even with the app closed: keep its
+    Firebase token against the signed-in agent (services/push.py). The same
+    token signed in as someone else moves to them — one phone, one owner."""
+    token = _crash_str(body, "token", 512).strip()
+    if len(token) < 20:
+        raise HTTPException(status_code=422, detail="A push registration needs the device token")
+    platform = _crash_str(body, "platform", 16).strip().lower() or "android"
+    from datetime import datetime, timezone
+    row = (await db.execute(select(PushDevice).where(PushDevice.token == token))).scalar_one_or_none()
+    now = datetime.now(timezone.utc)
+    if row is None:
+        row = PushDevice(token=token, agent_id=str(agent.id))
+        db.add(row)
+    row.agent_id = str(agent.id)
+    row.platform = platform if platform in ("android", "ios") else "android"
+    row.app_version = _crash_str(body, "app_version", 40)
+    row.device = _crash_str(body, "device", 120)
+    row.last_seen_at = now
+    await db.commit()
+    from app.services import push
+    return {"ok": True, "push": push.configured()}
+
+
+@router.post("/push/unregister")
+async def push_unregister(
+    body: dict,
+    agent: Agent = Depends(get_current_agent),
+    db: AsyncSession = Depends(get_db),
+):
+    """Signing out: this phone stops ringing for calls. Only the agent's own
+    phone can be taken off (a token is not a secret worth trusting alone)."""
+    token = _crash_str(body, "token", 512).strip()
+    if token:
+        await db.execute(delete(PushDevice).where(PushDevice.token == token,
+                                                  PushDevice.agent_id == str(agent.id)))
+        await db.commit()
     return {"ok": True}
 
 

@@ -91,7 +91,13 @@ def _who(c) -> tuple[str, str] | None:
 
 
 async def publish(redis, event: dict) -> None:
-    """Tell every connected agent. Never raises."""
+    """Tell every connected agent — and, for a ring and its end, every
+    registered phone whose app may be closed (services/push.py). Never raises."""
+    try:
+        from app.services import push
+        push.schedule(event)
+    except Exception as exc:
+        _log.warning("call push not scheduled: %s", exc)
     if redis is None:
         return
     try:

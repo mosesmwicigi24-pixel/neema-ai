@@ -49,6 +49,8 @@ class NeemaApplication : Application() {
         container.notifications.start(foreground)
         container.messageAlerts.start(foreground)
         container.calls.start()
+        // Calls ring this phone with the app closed (off until the build carries Firebase).
+        if (ke.co.bethanyhouse.neema.core.notify.Push.init(this)) container.push.start()
         container.crashReporter.start()
     }
 

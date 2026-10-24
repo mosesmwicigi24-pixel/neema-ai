@@ -27,6 +27,16 @@ android {
                 .inputStream.bufferedReader().readText().trim().ifEmpty { null }
         }.getOrNull()
         buildConfigField("String", "BUILD_NUMBER", "\"${System.getenv("GITHUB_RUN_NUMBER") ?: commit ?: "local"}\"")
+        // Firebase Cloud Messaging: a call rings this phone with the app closed
+        // (core/notify/Push.kt). The four values from the Firebase console's
+        // google-services.json (none of them secret — every installed APK carries
+        // them); from gradle properties or the environment (CI: repository
+        // secrets). Empty = push off: calls ring only while the app is running.
+        fun fcm(name: String) = (project.findProperty(name) as String?) ?: System.getenv(name) ?: ""
+        buildConfigField("String", "FCM_PROJECT_ID", "\"${fcm("NEEMA_FCM_PROJECT_ID")}\"")
+        buildConfigField("String", "FCM_APP_ID", "\"${fcm("NEEMA_FCM_APP_ID")}\"")
+        buildConfigField("String", "FCM_API_KEY", "\"${fcm("NEEMA_FCM_API_KEY")}\"")
+        buildConfigField("String", "FCM_SENDER_ID", "\"${fcm("NEEMA_FCM_SENDER_ID")}\"")
     }
 
     signingConfigs {
@@ -125,6 +135,7 @@ dependencies {
     implementation(libs.media3.exoplayer)
     implementation(libs.media3.ui)
     implementation(libs.webrtc)
+    implementation(libs.firebase.messaging)
 
     testImplementation(libs.junit)
     testImplementation(libs.kotlinx.coroutines.test)

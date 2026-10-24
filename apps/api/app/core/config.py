@@ -30,6 +30,12 @@ class Settings(BaseSettings):
     password_reset_inbox: str = "info@bethanyhouse.co.ke"
     password_reset_copy_agent: bool = False
     password_reset_ttl_minutes: int = 60
+    # ── Push (Firebase Cloud Messaging) — calls ring phones with the app closed ──
+    # The Firebase service account key (Project settings → Service accounts →
+    # Generate new private key): the JSON itself, its base64 (one line — the safe
+    # form for .env: `base64 -w0 key.json`), or a path to the file. Empty =
+    # push is OFF and calls ring only phones whose app is running (services/push.py).
+    fcm_service_account_json: str = ""
     cors_origins: list[str] = ["http://localhost:3000"]
     waba_token: str = ""
     waba_phone_number_id: str = ""

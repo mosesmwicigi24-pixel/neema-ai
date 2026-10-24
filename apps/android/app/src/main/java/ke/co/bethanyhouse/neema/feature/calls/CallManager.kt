@@ -1224,6 +1224,22 @@ class CallManager internal constructor(
 
     private fun coolingDown(callId: String, t: Long) = endedAt[callId]?.let { t - it < RERING_COOLDOWN_MS } == true
 
+    /**
+     * A call event that came by push, not the socket (core/notify/Push.kt): the
+     * app may have been closed. Handled exactly like the socket frame — a ring
+     * already heard over the socket is not rung twice — then the call log is
+     * read, so a phone that slept through part of it agrees with the server.
+     */
+    fun onPush(frame: JsonObject) {
+        ui.launch {
+            try { onFrame(frame) } catch (x: CancellationException) { throw x } catch (x: Exception) {
+                logW("push frame failed: ${frame.str("type")}", x)
+                ke.co.bethanyhouse.neema.core.crash.CrashVault.recordNonFatal(x, "push-frame:${frame.str("type")}")
+            }
+            catchUp()
+        }
+    }
+
     /** A notification action (answer/decline/end/show) routed through MainActivity or a broadcast. */
     fun handleIntent(intent: Intent) {
         val action = intent.getStringExtra(Notifier.EXTRA_CALL_ACTION) ?: return
