@@ -80,6 +80,17 @@ class Settings(BaseSettings):
     # "Hello {{1}}, this is Bethany House…". Name + language must match the
     # approved template exactly.
     wa_invite_template: str = "whatsapp_invite"
+    # Approved WhatsApp template that RE-OPENS a chat with a customer who wrote
+    # to us ON WHATSAPP and went quiet past the 24-hour window. The invite above
+    # says "we saw your message on Facebook/Messenger" — true only for people
+    # who came from there, so it is never sent to someone who wrote on WhatsApp
+    # (owner, 2026-10-27). Empty = not set up: the console says so instead of
+    # sending the wrong words. The body below mirrors the approved template
+    # ({first} → the template's {{1}}), recorded verbatim in the thread.
+    wa_followup_template: str = ""
+    wa_followup_body: str = ("Hello {first}, this is Bethany House following up on your "
+                             "enquiry. Reply to this message and we'll pick up right "
+                             "where we left off.")
     # Approved MARKETING template for seasonal outreach (app/jobs/seasonal_outreach.py).
     # Messaging a customer who hasn't written in 24h REQUIRES an approved template —
     # free-form is not allowed. Body should take {{1}}=first name, {{2}}=season,

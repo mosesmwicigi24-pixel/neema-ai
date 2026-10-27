@@ -691,6 +691,11 @@ async def send_agent_reply(
         await _broadcast(redis, str(conv.id), {
             "type": "new_message",
             "conversationId": str(conv.id),
+            # The saved row's id and its sender's name: the console matches the
+            # live event to the message the send itself returned, instead of
+            # drawing a second, nameless "AGENT" bubble (owner, 2026-10-27).
+            "id": (str(msg.id) if saved and msg.id else None),
+            "agentName": getattr(agent, "name", None),
             "sender": "human_agent",
             "text": text,
             "replyTo": reply_to,
