@@ -1535,11 +1535,25 @@ export function ConversationsView({
                 translated_from: event.translatedFrom ?? undefined,
                 // A voice note arrives "queued" — its words follow (voice_transcript).
                 transcript_status: event.transcriptStatus ?? undefined,
-            };
+                // Who on the team sent it — the bubble's label, as on reload.
+                ...(event.agentName ? { agent_name: event.agentName } : {}),
+            } as Message;
             setMessages((m) => {
                 const existing = m[activeConvId] ?? [];
                 // Primary dedup: exact DB id match
                 if (existing.some((x) => x.id === msg.id)) return m;
+                // A team reply whose event carried no id (an older server, or a
+                // save that failed): the same words from the same side within
+                // 15s are the message already shown — never a second "Agent"
+                // bubble beside the named one.
+                if (!event.id && msg.sender === "human_agent" && msg.text) {
+                    const tMs = new Date(msg.created_at).getTime();
+                    if (existing.some((x) =>
+                        x.sender === "human_agent" && x.direction === msg.direction &&
+                        (x.text || "") === msg.text &&
+                        Math.abs(new Date(x.created_at).getTime() - tMs) < 15_000))
+                        return m;
+                }
                 // Secondary dedup: audio replies broadcast before the DB row is
                 // committed get a crypto.randomUUID() id that never matches the
                 // real DB id on the next poll. Guard with media_url + direction

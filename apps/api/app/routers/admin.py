@@ -2466,17 +2466,61 @@ async def whatsapp_invite(
         raise HTTPException(status_code=503, detail="WhatsApp sending is not configured.")
 
     first = (name.split()[0] if name else "there")
-    # The FULL message the customer receives — recorded verbatim so the Neema chat
-    # view shows the whole invite, not a truncated placeholder. Mirrors the
-    # approved `whatsapp_invite` template body (keep in sync if the template edits).
-    full_body = (
-        f"Hello {first}, this is Bethany House. We saw your message on "
-        "Facebook/Messenger. May we continue here on WhatsApp to finalise your "
-        "order? Reply and we'll help right away."
-    )
+
+    # The template must fit the conversation it lands in (owner, 2026-10-27:
+    # Prof Irungu, mid-chat on WhatsApp with 18h of the window left, was sent
+    # "we saw your message on Facebook/Messenger").
+    from app.models.conversation import Conversation
+    from app.services.conversation import messaging_window
+    wrote_on_whatsapp = False
+    existing = (await db.execute(select(Conversation).where(
+        Conversation.channel == "whatsapp", Conversation.wa_id == wa_id))).scalars().first()
+    if existing is not None:
+        win = await messaging_window(db, existing)
+        if win.get("mode") == "open":
+            # Inside 24h a plain reply is delivered — a template here only
+            # interrupts the conversation with canned words.
+            raise HTTPException(status_code=409, detail=(
+                f"{first}'s WhatsApp chat is open — just type your reply. A template "
+                "is only needed once the 24-hour window has closed."))
+        wrote_on_whatsapp = bool(win.get("last_inbound_at"))
+    # "We saw your message on Facebook/Messenger" is true only for someone who
+    # reached us there: a WhatsApp identity whose person has no Messenger /
+    # Instagram / Facebook handle wrote or called us on WhatsApp. No identity
+    # at all is the invite's own case — started from a Messenger chat.
+    from app.models.person import Identity
+    wa_ident = (await db.execute(select(Identity).where(
+        Identity.channel == "whatsapp", Identity.external_id == wa_id))).scalars().first()
+    came_from_meta = wa_ident is None and not wrote_on_whatsapp
+    if wa_ident is not None and wa_ident.person_id is not None:
+        came_from_meta = (await db.execute(select(Identity.id).where(
+            Identity.person_id == wa_ident.person_id,
+            Identity.channel.in_(("messenger", "instagram", "facebook"))))).first() is not None
+    if wrote_on_whatsapp or not came_from_meta:
+        # They reached us ON WhatsApp: the Messenger invite would tell them
+        # something untrue. Re-open with the follow-up template, or say why not.
+        if not settings.wa_followup_template:
+            raise HTTPException(status_code=409, detail=(
+                f"{first} reached us on WhatsApp, not Messenger, so the invite would say "
+                "the wrong thing. Ask an admin to approve a follow-up template in WhatsApp "
+                "Manager and set WA_FOLLOWUP_TEMPLATE — until then, call them or wait "
+                "for their next message."))
+        template = settings.wa_followup_template
+        full_body = settings.wa_followup_body.replace("{first}", first)
+    else:
+        template = settings.wa_invite_template
+        # The FULL message the customer receives — recorded verbatim so the
+        # Neema chat view shows the whole invite, not a truncated placeholder.
+        # Mirrors the approved `whatsapp_invite` template body (keep in sync if
+        # the template edits).
+        full_body = (
+            f"Hello {first}, this is Bethany House. We saw your message on "
+            "Facebook/Messenger. May we continue here on WhatsApp to finalise your "
+            "order? Reply and we'll help right away."
+        )
     try:
         await bridge.send_wa_template(
-            wa_id, settings.wa_invite_template, settings.wa_invite_lang,
+            wa_id, template, settings.wa_invite_lang,
             body_params=[first],
         )
     except Exception as exc:
@@ -2496,7 +2540,7 @@ async def whatsapp_invite(
             channel="whatsapp", external_id=wa_id, wa_id=wa_id,
             person_id=ident.person_id, conversation_id=conv.id,
             direction=MsgDirection.outbound, sender=MsgSender.human_agent,
-            text=full_body,
+            text=full_body, agent_id=agent.id,
         ))
         # Tag on the WhatsApp User row (the inbox tag filter reads user.state.tags).
         from sqlalchemy.orm.attributes import flag_modified

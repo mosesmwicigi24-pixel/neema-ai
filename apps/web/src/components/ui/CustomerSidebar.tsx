@@ -16,7 +16,7 @@ import {
     displayName,
 } from "@/lib/utils";
 import type { Conversation, Order } from "@/types";
-import { whatsappApi, callsApi, askNeema, answerViaNeema, settingsApi, type ApiCall, type CallPermission } from "@/lib/api";
+import { apiErrorDetail, whatsappApi, callsApi, askNeema, answerViaNeema, settingsApi, type ApiCall, type CallPermission } from "@/lib/api";
 import { useWs } from "@/lib/websocket";
 import { callStatus, fmtCallDuration, upsertCall, CALL_ICON_PATH, permissionLines, type PermTone } from "@/lib/callStatus";
 import { lastCallBrief } from "@/lib/callCard";
@@ -1561,8 +1561,10 @@ export function CustomerSidebar({
                                     try {
                                         await whatsappApi.invite(profile.phone || digits, profile.name || "");
                                         onToast("Template sent ✓");
-                                    } catch {
-                                        onToast("Couldn't send the template", "error");
+                                    } catch (e) {
+                                        // The server says why — the chat is still open (just
+                                        // reply), or this customer needs the follow-up template.
+                                        onToast(apiErrorDetail(e) || "Couldn't send the template", "error");
                                     } finally { setTemplateBusy(false); }
                                 }}
                                 title="Send the approved WhatsApp template (re-opens the chat)"
