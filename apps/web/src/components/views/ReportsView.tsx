@@ -269,7 +269,7 @@ export function ReportsView({ agents, orders, onToast, isMobile }: ReportsViewPr
                 <div className="space-y-4">
                     <div className={`grid gap-3 ${isMobile ? "grid-cols-2" : "grid-cols-4"}`}>
                         <StatBox label="Total Conversations" value={filteredConvs.length}
-                            sub={`${humanConvs} human · ${aiConvs} AI`} accent="border-l-[#589b31]" />
+                            sub={`${humanConvs} human · ${aiConvs} Neema`} accent="border-l-[#589b31]" />
                         <StatBox label="Revenue" value={fmtCurrency(totalRevenue)}
                             sub={`${filteredOrders.length} orders`} accent="border-l-[#427425]" />
                         <StatBox label="Pending Orders" value={pendingOrders}

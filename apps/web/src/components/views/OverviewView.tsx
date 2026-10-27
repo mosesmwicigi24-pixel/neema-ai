@@ -256,7 +256,7 @@ export function OverviewView({
                 <StatCard label="Pending Orders" value={stats.pendingOrders}
                     sub="Awaiting confirmation" icon="📦" accent="border-t-orange-400"
                     loading={statsLoading && !apiStats} />
-                <StatCard label="AI Conversations" value={stats.aiConvs}
+                <StatCard label="Neema's conversations" value={stats.aiConvs}
                     sub="Fully automated" icon="🤖" accent="border-t-blue-400"
                     loading={statsLoading && !apiStats} />
                 <StatCard label="Catalog Items" value={stats.totalItems}

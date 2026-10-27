@@ -2295,7 +2295,7 @@ async def _is_echo(db, channel: str, key: str, reply: str,
 
 
 async def _run_and_send(redis, wa_id: str, text: str, media: dict | None = None,
-                        *, deferred: bool = False) -> None:
+                        *, deferred: bool = False) -> bool:
     from app.database import AsyncSessionLocal
     from app.services import n8n_bridge as svc
     try:
@@ -2309,10 +2309,14 @@ async def _run_and_send(redis, wa_id: str, text: str, media: dict | None = None,
                                    deferred=deferred, turn_facts=facts)
             if not (reply or "").strip():
                 _log.info("silence for %s: nothing to send (a closer, or a held acknowledgement)", wa_id)
-                return
+                # A decision, not a miss: the missed-reply sweep leaves it be
+                # (as on Messenger) instead of re-running the silence.
+                await _mark_silenced(redis, "whatsapp", wa_id)
+                return False
             if await _is_echo(db, "whatsapp", wa_id, reply):
                 _log.info("echo guard: identical reply within minutes suppressed for %s", wa_id)
-                return
+                await _mark_silenced(redis, "whatsapp", wa_id)
+                return False
         wamid = await svc._send_waba(wa_id, reply)
         async with AsyncSessionLocal() as db2:
             await svc.save_outbound_message(db2, redis, wa_id, reply, waba_msg_id=wamid)
@@ -2329,6 +2333,7 @@ async def _run_and_send(redis, wa_id: str, text: str, media: dict | None = None,
                                     tools=facts.get("tools"))
         except Exception:
             pass
+        return True
     except Exception as exc:
         _log.exception("tier2 background turn failed for %s", wa_id)
         # Count it so the hourly self-check can say the AI has stopped replying —
@@ -2337,6 +2342,7 @@ async def _run_and_send(redis, wa_id: str, text: str, media: dict | None = None,
         from app.services.agent_health import record_turn_failure
         await record_turn_failure(redis, wa_id, exc)
         await _send_hold_line(redis, "whatsapp", wa_id)
+        return False
 
 
 async def schedule_reply(redis, wa_id: str, text: str, dedup_id: str | None,

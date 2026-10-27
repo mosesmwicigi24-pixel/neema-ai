@@ -17,7 +17,7 @@ import type { CustomRole } from "@/lib/api";
 const ALL_PERMISSIONS = [
     { key: "view_conversations",     label: "View conversations",      group: "Conversations" },
     { key: "reply_conversations",    label: "Send replies",            group: "Conversations" },
-    { key: "intercept_release",      label: "Intercept / Release AI",  group: "Conversations" },
+    { key: "intercept_release",      label: "Take over / Release to Neema",  group: "Conversations" },
     { key: "close_conversations",    label: "Close conversations",     group: "Conversations" },
     { key: "transfer_conversations", label: "Transfer conversations",  group: "Conversations" },
     { key: "add_notes",              label: "Add internal notes",      group: "Conversations" },

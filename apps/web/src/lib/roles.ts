@@ -61,7 +61,7 @@ export const ALL_PERMISSIONS: PermissionDef[] = [
     { key: "send_messages", label: "Send Messages", group: "Conversations" },
     {
         key: "intercept",
-        label: "Intercept / Release AI",
+        label: "Take over / Release to Neema",
         group: "Conversations",
     },
     { key: "manage_agents", label: "Manage Agents", group: "Team" },

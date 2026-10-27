@@ -373,6 +373,18 @@ async def slow_lane(redis, channel: str, key: str, text: str, media: dict | None
     return True
 
 
+async def on_slow_lane(redis, channel: str, key: str) -> bool:
+    """True while this thread's chat is buffered on the slow lane — it WILL be
+    answered, together, when the lane runs. The missed-reply sweep must not
+    answer it early (that undid pacing on every cooled thread)."""
+    if redis is None:
+        return False
+    try:
+        return bool(await redis.exists(_k("lanelock", channel, key)))
+    except Exception:
+        return False
+
+
 async def _run_lane(redis, channel: str, key: str, runner, secs: int) -> None:
     import asyncio
     import json

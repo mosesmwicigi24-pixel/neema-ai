@@ -28,12 +28,23 @@ from app.models.message import Message, MsgDirection, MsgSender
 _log = logging.getLogger("neema.agent")
 
 _META_DM = ("messenger", "instagram")
+# The sweep's channels: Meta DMs, and WhatsApp (owner, 2026-10-27). A thread
+# in Neema's hands is never "unread" in the inbox — so a reply she lost (a
+# deploy mid-turn, a transient error) must be found HERE and answered, or
+# after three attempts handed to a person, on every channel she answers.
+_SWEPT = _META_DM + ("whatsapp",)
 
 
-def _answerable_turn(text: str | None, media_type: str | None, media_url: str | None):
+def _answerable_turn(text: str | None, media_type: str | None, media_url: str | None,
+                     meta: dict | None = None):
     """What the sweep should send for a last-inbound message: (text, media).
     Returns (None, None) when there's nothing to answer — a bare attachment
-    placeholder like "[video]"/"[file]" with no words and no image."""
+    placeholder like "[video]"/"[file]" with no words and no image, or a kind
+    that never wakes Neema (a reaction, a sticker, a deleted message: stored
+    as words like "🙏 (reacted to your message)", which read as a question)."""
+    from app.services.inbound_kinds import _NO_WAKE_KINDS
+    if isinstance(meta, dict) and meta.get("kind") in _NO_WAKE_KINDS:
+        return None, None
     t = (text or "").strip()
     if media_type == "image" and media_url:
         caption = "" if t.startswith("[") else t
@@ -324,7 +335,7 @@ async def sweep_missed_replies(redis, *, min_age_s: int = 90, max_age_h: int = 2
     async with AsyncSessionLocal() as db:
         latest = (
             select(Message.conversation_id, func.max(Message.created_at).label("m"))
-            .where(Message.channel.in_(_META_DM))
+            .where(Message.channel.in_(_SWEPT))
             .group_by(Message.conversation_id).subquery()
         )
         q = (
@@ -345,8 +356,13 @@ async def sweep_missed_replies(redis, *, min_age_s: int = 90, max_age_h: int = 2
 
     sent = 0
     for msg, conv in rows:
-        channel, ext = conv.channel, msg.external_id
-        text, media = _answerable_turn(msg.text, msg.media_type, msg.media_url)
+        channel = conv.channel
+        # A WhatsApp thread is keyed on the number; older rows carry no external id.
+        ext = (conv.wa_id or msg.wa_id or msg.external_id) if channel == "whatsapp" else msg.external_id
+        if not ext or str(ext).startswith("web_"):      # web chat is a live session, not a DM
+            continue
+        text, media = _answerable_turn(msg.text, msg.media_type, msg.media_url,
+                                       getattr(msg, "raw_meta", None))
         if text is None and media is None:
             continue
         # One worker, one attempt per conversation per window — no double-sends.
@@ -357,6 +373,11 @@ async def sweep_missed_replies(redis, *, min_age_s: int = 90, max_age_h: int = 2
         except Exception:
             pass
         if await _is_paused(redis, channel, ext):
+            continue
+        # Pacing holds a cooled thread's chat to answer it together, later —
+        # answering it now would undo the slow lane.
+        from app.agent.cooling import on_slow_lane
+        if await on_slow_lane(redis, channel, ext):
             continue
         # Deliberate silence is not a miss: the turn ran and chose to say
         # nothing (a closer, a held acknowledgement, the guard's pause, an
@@ -375,13 +396,14 @@ async def sweep_missed_replies(redis, *, min_age_s: int = 90, max_age_h: int = 2
         # Fresh recheck: has an outbound landed since we queried? (normal path or
         # a human just replied) — if so, leave it alone.
         async with AsyncSessionLocal() as db2:
+            where = ((Message.conversation_id == conv.id) if channel == "whatsapp"
+                     else and_(Message.channel == channel, Message.external_id == ext))
             still = (await db2.execute(
-                select(Message.direction)
-                .where(Message.channel == channel, Message.external_id == ext)
+                select(Message.direction).where(where)
                 .order_by(Message.created_at.desc()).limit(1))).scalar_one_or_none()
             if still != MsgDirection.inbound:
                 continue
-            page_id = await _page_id_for(db2, channel, ext)
+            page_id = await _page_id_for(db2, channel, ext) if channel in _META_DM else None
         # Three strikes per stuck message, counted on the message id so a NEW
         # inbound naturally earns fresh attempts. No redis → no counter → the
         # 300s lock still paces attempts (fail-open, like every guard here).
@@ -405,7 +427,8 @@ async def sweep_missed_replies(redis, *, min_age_s: int = 90, max_age_h: int = 2
             if not await escalate_to_human(
                     channel, ext,
                     "Neema composed a reply 3 times but delivery keeps failing on "
-                    f"{channel} — please answer from here and check the page connection."):
+                    f"{channel} — please answer from here and check the "
+                    f"{'WhatsApp number' if channel == 'whatsapp' else 'page'} connection."):
                 await _unclaim_escalation(redis, msg.id)
                 continue
             await _ring_team(redis, conv, ext, msg.text, channel)
@@ -413,8 +436,13 @@ async def sweep_missed_replies(redis, *, min_age_s: int = 90, max_age_h: int = 2
                          "handed to a human", channel, ext)
             continue
         try:
-            if await _run_and_send_meta(redis, channel, ext, text or "",
-                                        page_id=page_id, media=media):
+            if channel == "whatsapp":
+                from app.agent.runtime import _run_and_send
+                went = await _run_and_send(redis, ext, text or "", media)
+            else:
+                went = await _run_and_send_meta(redis, channel, ext, text or "",
+                                                page_id=page_id, media=media)
+            if went:
                 sent += 1                       # count only messages that truly went out
         except Exception as exc:
             _log.warning("missed-reply send failed for %s/%s: %s", channel, ext, exc)

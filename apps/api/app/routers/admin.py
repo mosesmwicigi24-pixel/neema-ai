@@ -308,6 +308,7 @@ async def conversations_summary(
         select(Conversation.channel, func.count(Message.id))
         .select_from(Message)
         .join(Conversation, Conversation.id == Message.conversation_id)
+        .where(_PERSON_HELD)
         .outerjoin(last_out, last_out.c.cid == Message.conversation_id)
         .where(Message.direction == "inbound")
         .where(or_(last_out.c.last_out.is_(None), Message.created_at > last_out.c.last_out))
@@ -465,10 +466,22 @@ async def _inbox_page(db: AsyncSession, *, limit: int, cursor: str | None, condi
     return [r[0] for r in got], nxt
 
 
+# The threads a person holds — the only ones that can be unread (see below).
+_PERSON_HELD = Conversation.intercept_mode != InterceptMode.ai
+
+
 def _unread_conv_ids():
     """Conversations with an inbound message after our last reply (staff notes
     don't count as a reply) — the row builder's own definition of unread, so a
-    count, a filter and a row can never disagree."""
+    count, a filter and a row can never disagree.
+
+    Only threads a PERSON holds (human, or paused) can be unread (owner,
+    2026-10-27: "apart from the messages that are in human, all these should be
+    read"). A thread in AI mode is Neema's: she answers it, or stays quiet on
+    purpose (a 👍, an "okay", spam), and anything she can't handle is handed
+    to a human — an escalation, a failed reply, the missed-reply sweep — which
+    moves it to Human and back into Unread. Counting her deliberate silences
+    as unread made 1,500 threads look neglected."""
     from sqlalchemy import or_
     last_out = (
         select(
@@ -482,6 +495,8 @@ def _unread_conv_ids():
     )
     return (
         select(Message.conversation_id)
+        .join(Conversation, Conversation.id == Message.conversation_id)
+        .where(_PERSON_HELD)
         .outerjoin(last_out, last_out.c.cid == Message.conversation_id)
         # 8 inbound messages carry no conversation; grouped, they formed one
         # phantom "unread conversation" the inbox could never show.
@@ -713,6 +728,8 @@ async def _conversation_rows(
             Message.conversation_id == last_outbound_sub.c.conversation_id,
         )
         .where(Message.conversation_id.in_(conv_ids))
+        .join(Conversation, Conversation.id == Message.conversation_id)
+        .where(_PERSON_HELD)
         .where(Message.direction == "inbound")
         .where(
             last_outbound_sub.c.last_out_at.is_(None)
@@ -907,7 +924,7 @@ async def get_thread(
         InterceptAction.escalated: "Escalated — needs human",
         InterceptAction.flag:      "Flagged: Needs Attention",
         InterceptAction.intercept: "Picked up by agent",
-        InterceptAction.release:   "Released to AI",
+        InterceptAction.release:   "Released to Neema",
         InterceptAction.transfer:  "Transferred",
         InterceptAction.pause:     "Paused — replies held",
     }
@@ -923,7 +940,7 @@ async def get_thread(
         if e.action == InterceptAction.intercept and agent_name:
             label = f"Picked up by {agent_name}"
         elif e.action == InterceptAction.release and agent_name:
-            label = f"Released to AI by {agent_name}"
+            label = f"Released to Neema by {agent_name}"
         elif e.action == InterceptAction.transfer and e.note:
             label = f"Transferred — {e.note}"
 
@@ -1089,7 +1106,7 @@ async def get_conversation_activity(
         InterceptAction.escalated: "Escalated — needs human",
         InterceptAction.flag:      "Flagged: needs attention",
         InterceptAction.intercept: "Picked up by agent",
-        InterceptAction.release:   "Released to AI",
+        InterceptAction.release:   "Released to Neema",
         InterceptAction.transfer:  "Transferred",
         InterceptAction.pause:     "Paused — replies held",
     }
@@ -1107,7 +1124,7 @@ async def get_conversation_activity(
         if e.action == InterceptAction.intercept and who:
             label = f"Picked up by {who}"
         elif e.action == InterceptAction.release and who:
-            label = f"Released to AI by {who}"
+            label = f"Released to Neema by {who}"
         events.append({
             "id": f"icpt-{e.id}", "kind": e.action.value, "label": label,
             "detail": e.note, "at": e.created_at.isoformat() if e.created_at else None,

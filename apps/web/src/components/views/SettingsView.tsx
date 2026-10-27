@@ -484,7 +484,7 @@ export function SettingsView({ onToast, isMobile, canManageCalling = false }: Sh
         setSavingAi(true);
         await new Promise((r) => setTimeout(r, 600));
         setSavingAi(false);
-        onToast("AI settings saved");
+        onToast("Neema settings saved");
     };
 
     const toggleIntegration = (key: string) => {
@@ -541,7 +541,7 @@ export function SettingsView({ onToast, isMobile, canManageCalling = false }: Sh
                 </SectionCard>
 
                 {/* AI */}
-                <SectionCard title="AI Configuration" description="How the AI handles conversations">
+                <SectionCard title="Neema" description="How Neema handles conversations">
                     <div className="grid grid-cols-2 gap-x-3">
                         <Field label="Escalation Threshold" hint="Messages before escalating">
                             <SmallInput value={ai.auto_intercept_threshold} type="number"
@@ -560,7 +560,7 @@ export function SettingsView({ onToast, isMobile, canManageCalling = false }: Sh
                     <div className="flex items-center justify-between py-3 border-y border-[#e6f3d8] mb-3">
                         <div>
                             <div className="text-xs font-medium text-[#16270c]">Require draft approval</div>
-                            <div className="text-[10px] text-stone-400 mt-0.5">AI drafts need agent approval before sending</div>
+                            <div className="text-[10px] text-stone-400 mt-0.5">Neema's drafts need agent approval before sending</div>
                         </div>
                         <Toggle checked={ai.draft_approval}
                             onChange={() => setAi((s) => ({ ...s, draft_approval: !s.draft_approval }))} />
@@ -569,7 +569,7 @@ export function SettingsView({ onToast, isMobile, canManageCalling = false }: Sh
                         className="h-8 px-4 rounded-lg text-xs font-semibold text-white transition-colors flex items-center gap-1.5 disabled:opacity-60"
                         style={{ backgroundColor: "#589b31" }}>
                         {savingAi && <div className="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin" />}
-                        {savingAi ? "Saving…" : "Save AI Settings"}
+                        {savingAi ? "Saving…" : "Save Neema settings"}
                     </button>
                 </SectionCard>
             </div>
@@ -672,7 +672,7 @@ export function SettingsView({ onToast, isMobile, canManageCalling = false }: Sh
                     <div className="space-y-2">
                         {[
                             { label: "Clear conversation history", sub: "Permanently delete messages older than 90 days", action: "Clear" },
-                            { label: "Reset AI memory",            sub: "Clear all customer facts and session history",    action: "Reset" },
+                            { label: "Reset Neema's memory",            sub: "Clear all customer facts and session history",    action: "Reset" },
                         ].map((item) => (
                             <div key={item.label} className="flex items-center justify-between p-3 rounded-lg border border-red-100 bg-red-50">
                                 <div>
