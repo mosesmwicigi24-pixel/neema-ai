@@ -1828,7 +1828,7 @@ export function ConversationsView({
         try {
             await conversationsApi.release(convId);
             refetchConversations?.();
-            onToast("Conversation released back to AI");
+            onToast("Conversation released back to Neema");
         } catch {
             onToast("Failed to release", "error");
         } finally {
@@ -2042,7 +2042,7 @@ export function ConversationsView({
             const msgs = await conversationsApi.messages(activeConvId);
             setMessages((m) => ({ ...m, [activeConvId]: msgs }));
             refetchConversations?.();
-            onToast("AI draft approved & sent");
+            onToast("Neema's draft approved & sent");
         } catch {
             setMessages((m) => ({
                 ...m,
@@ -3548,7 +3548,7 @@ export function ConversationsView({
                                             // Only show the first escalation; suppress repeats
                                             if (escalationShown) return null;
                                             escalationShown = true;
-                                            const reasonText = msg.event_reason || "AI could not continue — agent needed";
+                                            const reasonText = msg.event_reason || "Neema could not continue — agent needed";
                                             return (
                                                 <React.Fragment key={msg.id}>
                                                     {showDivider && (
@@ -3627,8 +3627,8 @@ export function ConversationsView({
                                                 const reasonText =
                                                     msg.event_reason ||
                                                     (hasInboundMedia
-                                                        ? "Media received — AI cannot process"
-                                                        : "AI could not continue — agent needed");
+                                                        ? "Media received — Neema cannot open it"
+                                                        : "Neema could not continue — agent needed");
 
                                                 return (
                                                     <React.Fragment key={msg.id}>
@@ -3871,7 +3871,7 @@ export function ConversationsView({
                                                     {!isInbound && (
                                                         <div className="text-[10px] opacity-70 mb-1 font-medium uppercase tracking-wide">
                                                             {msg.sender === "ai"
-                                                                ? "AI"
+                                                                ? "Neema"
                                                                 : (msg as any)
                                                                         .agent_name
                                                                   ? (msg as any)
@@ -4241,7 +4241,7 @@ export function ConversationsView({
                                                 🤖
                                             </span>
                                             <span className="text-xs font-semibold text-blue-700 flex-1">
-                                                AI has a draft ready
+                                                Neema has a draft ready
                                             </span>
                                             <span className="text-[10px] text-blue-400 flex-shrink-0">
                                                 Tap to review ↑
@@ -4259,7 +4259,7 @@ export function ConversationsView({
                                                         🤖
                                                     </span>
                                                     <p className="text-xs font-semibold text-blue-700">
-                                                        AI Draft
+                                                        Neema&apos;s draft
                                                     </p>
                                                 </div>
                                                 <div className="flex items-center gap-1">
@@ -4323,7 +4323,7 @@ export function ConversationsView({
                                                 ) : (
                                                     <p className="text-xs text-blue-700 whitespace-pre-wrap leading-relaxed">
                                                         {draftText ||
-                                                            "AI has a reply ready."}
+                                                            "Neema has a reply ready."}
                                                     </p>
                                                 )}
                                             </div>
@@ -4382,7 +4382,7 @@ export function ConversationsView({
                                                         </>
                                                     ) : (
                                                         <>
-                                                            🤖 Generate AI draft
+                                                            🤖 Ask Neema for a draft
                                                         </>
                                                     )}
                                                 </button>

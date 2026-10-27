@@ -199,8 +199,8 @@ async def release_conversation(
         await _broadcast(redis, "agents:all", {
             "event":          "notification",
             "type":           "system",
-            "title":          f"↩ Released to AI",
-            "body":           f"{agent.name} released conversation with {conv.wa_id} back to AI",
+            "title":          "↩ Released to Neema",
+            "body":           f"{agent.name} released conversation with {conv.wa_id} back to Neema",
             "conversationId": str(conv.id),
         })
 

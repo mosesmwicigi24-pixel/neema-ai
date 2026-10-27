@@ -184,15 +184,15 @@ export function buildSystemEventFromWs(wsEvent: any): Message | null {
                            ? `Picked up by ${wsEvent.eventAgentName}`
                            : "Picked up by agent",
         release:       wsEvent.eventAgentName
-                           ? `Released to AI by ${wsEvent.eventAgentName}`
-                           : "Released to AI",
+                           ? `Released to Neema by ${wsEvent.eventAgentName}`
+                           : "Released to Neema",
         transfer:      wsEvent.eventNote
                            ? `Transferred — ${wsEvent.eventNote}`
                            : "Transferred",
         pause:         wsEvent.eventAgentName
                            ? `Paused by ${wsEvent.eventAgentName} — replies held`
                            : "Paused — replies held",
-        approve_draft: "AI draft approved",
+        approve_draft: "Neema's draft approved",
         call:          "Call",
     };
 

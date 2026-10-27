@@ -16,7 +16,7 @@ export function InterceptBadge({
     const map: Record<InterceptMode, { cls: string; label: string }> = {
         ai: {
             cls: "bg-blue-50 text-blue-700 dark:bg-blue-950/40 dark:text-blue-400 border border-blue-200 dark:border-blue-800",
-            label: "AI",
+            label: "Neema",
         },
         human: {
             cls: "bg-amber-50 text-amber-700 dark:bg-amber-950/40 dark:text-amber-400 border border-amber-200 dark:border-amber-800",

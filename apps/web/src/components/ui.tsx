@@ -55,7 +55,7 @@ interface BadgeProps {
 
 export function Badge({ type }: BadgeProps) {
     const map: Record<string, { label: string; bg: string; color: string }> = {
-        ai: { label: "AI", bg: "var(--blue-dim)", color: "var(--blue)" },
+        ai: { label: "Neema", bg: "var(--blue-dim)", color: "var(--blue)" },
         human: {
             label: "HUMAN",
             bg: "var(--green-dim)",

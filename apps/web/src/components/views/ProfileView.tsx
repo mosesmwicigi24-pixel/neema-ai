@@ -109,7 +109,7 @@ export function ProfileView({
     const ALL_PERMISSIONS = [
         { key: PERMS.VIEW_CONVERSATIONS,     label: "View conversations"      },
         { key: PERMS.REPLY_CONVERSATIONS,    label: "Send replies"            },
-        { key: PERMS.INTERCEPT_RELEASE,      label: "Intercept / Release AI"  },
+        { key: PERMS.INTERCEPT_RELEASE,      label: "Take over / Release to Neema"  },
         { key: PERMS.CLOSE_CONVERSATIONS,    label: "Close conversations"     },
         { key: PERMS.TRANSFER_CONVERSATIONS, label: "Transfer conversations"  },
         { key: PERMS.ADD_NOTES,              label: "Add internal notes"      },
