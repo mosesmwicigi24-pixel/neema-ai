@@ -629,6 +629,92 @@ function MediaFallback({
     );
 }
 
+// ── DocumentBubble ────────────────────────────────────────────────────────────
+// A shared document drawn the way WhatsApp draws it (owner, 2026-10-27): the
+// top of its first page, a type badge, the name on up to two lines and
+// "236 pages · 772 KB · pdf", with a download button. The picture and the
+// numbers come from the document's own signed link + /preview and /info
+// (services/doc_preview); a file we can't preview — or one that isn't in our
+// store — is still a clean card with what we do know.
+const DOC_BADGE: Record<string, { bg: string; label: string }> = {
+    pdf: { bg: "#e5252a", label: "PDF" },
+    doc: { bg: "#2b579a", label: "DOC" }, docx: { bg: "#2b579a", label: "DOC" },
+    xls: { bg: "#217346", label: "XLS" }, xlsx: { bg: "#217346", label: "XLS" }, csv: { bg: "#217346", label: "CSV" },
+    ppt: { bg: "#d24726", label: "PPT" }, pptx: { bg: "#d24726", label: "PPT" },
+};
+
+function docSubUrl(url: string, sub: "info" | "preview"): string | null {
+    // Only our own media store answers /info and /preview.
+    const [path, query] = url.split("?", 2);
+    if (!/\/api\/admin\/media\/[^/]+$/.test(path)) return null;
+    return `${path}/${sub}${query ? `?${query}` : ""}`;
+}
+
+function formatBytes(n: number): string {
+    if (n >= 1024 * 1024) return `${(n / (1024 * 1024)).toFixed(1)} MB`;
+    if (n >= 1024) return `${Math.round(n / 1024)} KB`;
+    return `${n} B`;
+}
+
+function DocumentBubble({ url, name, mime }: { url: string; name: string; mime: string | null }) {
+    const [info, setInfo] = React.useState<{ ext: string; bytes: number; pages: number | null; preview: boolean } | null>(null);
+    const [noPicture, setNoPicture] = React.useState(false);
+    const infoUrl = docSubUrl(url, "info");
+    const previewUrl = docSubUrl(url, "preview");
+    React.useEffect(() => {
+        if (!infoUrl) return;
+        let live = true;
+        fetch(infoUrl).then((r) => (r.ok ? r.json() : null)).then((d) => { if (live && d) setInfo(d); })
+            .catch(() => {});
+        return () => { live = false; };
+    }, [infoUrl]);
+
+    const fileName = (name || "").trim() || decodeURIComponent(url.split("?")[0].split("/").pop() || "") || "Document";
+    const ext = (info?.ext || fileName.split(".").pop() || (mime || "").split("/").pop() || "").toLowerCase().slice(0, 5);
+    const badge = DOC_BADGE[ext] ?? { bg: "#64748b", label: (ext || "FILE").toUpperCase().slice(0, 4) };
+    const details = [
+        info?.pages ? `${info.pages} page${info.pages === 1 ? "" : "s"}` : null,
+        info ? formatBytes(info.bytes) : null,
+        ext || null,
+    ].filter(Boolean).join(" · ");
+    // The picture doesn't wait on /info (a cross-site fetch can be refused
+    // where an <img> is not): a PDF from our store tries it, and a 404 hides it.
+    const showPicture = !!previewUrl && ext === "pdf" && !noPicture && (info ? info.preview : true);
+
+    return (
+        <div className="w-[280px] max-w-full rounded-xl overflow-hidden bg-white text-[#1c2917]"
+            style={{ border: "1px solid rgba(0,0,0,0.08)" }}>
+            <a href={url} target="_blank" rel="noopener noreferrer" className="block hover:opacity-95"
+                title={`Open ${fileName}`}>
+                {showPicture && (
+                    <img src={previewUrl!} alt="" loading="lazy" onError={() => setNoPicture(true)}
+                        className="block w-full h-36 object-cover object-top border-b"
+                        style={{ borderColor: "rgba(0,0,0,0.06)", backgroundColor: "#f5f5f4" }} />
+                )}
+                <div className="flex items-start gap-2.5 px-3 py-2.5" style={{ backgroundColor: "#f7f8f6" }}>
+                    <span aria-hidden className="mt-0.5 flex-shrink-0 rounded-md px-1.5 py-1 text-[10px] font-bold text-white leading-none"
+                        style={{ backgroundColor: badge.bg }}>
+                        {badge.label}
+                    </span>
+                    <span className="min-w-0 flex-1">
+                        <span className="block text-[13px] font-medium leading-snug break-words line-clamp-2">{fileName}</span>
+                        {details && <span className="block mt-0.5 text-[11px] text-[#78716c]">{details}</span>}
+                    </span>
+                </div>
+            </a>
+            <a href={url} download={fileName} target="_blank" rel="noopener noreferrer"
+                className="flex items-center justify-center gap-1.5 h-9 text-[12px] font-semibold border-t hover:bg-[#f0f9e8]"
+                style={{ borderColor: "rgba(0,0,0,0.06)", color: "#427425" }}>
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden>
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                        d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                </svg>
+                Download
+            </a>
+        </div>
+    );
+}
+
 // ── Messaging-window strip ───────────────────────────────────────────────────
 // Meta and WhatsApp both shut free-form replies 24h after the customer's last
 // message. Nothing used to say so, so a carefully typed reply was refused only
@@ -4040,57 +4126,12 @@ export function ConversationsView({
                                                                 />
                                                             );
                                                         }
-                                                        const fileName =
-                                                            msg.text ||
-                                                            mu
-                                                                .split("/")
-                                                                .pop() ||
-                                                            "file";
                                                         return (
-                                                            <a
-                                                                href={mu}
-                                                                target="_blank"
-                                                                rel="noopener noreferrer"
-                                                                className={`flex items-center gap-2 px-3 py-2 rounded-xl border transition-opacity hover:opacity-80 ${
-                                                                    isInbound
-                                                                        ? "bg-white border-[#edf0ea] text-[#1c2917]"
-                                                                        : "bg-white/20 border-white/30 text-white"
-                                                                }`}
-                                                            >
-                                                                <svg
-                                                                    className="w-5 h-5 flex-shrink-0 opacity-70"
-                                                                    fill="none"
-                                                                    stroke="currentColor"
-                                                                    viewBox="0 0 24 24"
-                                                                >
-                                                                    <path
-                                                                        strokeLinecap="round"
-                                                                        strokeLinejoin="round"
-                                                                        strokeWidth={
-                                                                            1.5
-                                                                        }
-                                                                        d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z"
-                                                                    />
-                                                                </svg>
-                                                                <span className="text-xs font-medium truncate max-w-[160px]">
-                                                                    {fileName}
-                                                                </span>
-                                                                <svg
-                                                                    className="w-4 h-4 flex-shrink-0 opacity-60"
-                                                                    fill="none"
-                                                                    stroke="currentColor"
-                                                                    viewBox="0 0 24 24"
-                                                                >
-                                                                    <path
-                                                                        strokeLinecap="round"
-                                                                        strokeLinejoin="round"
-                                                                        strokeWidth={
-                                                                            2
-                                                                        }
-                                                                        d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"
-                                                                    />
-                                                                </svg>
-                                                            </a>
+                                                            <DocumentBubble
+                                                                url={mu}
+                                                                name={(msg as any).filename || msg.text || ""}
+                                                                mime={(msg as any).mime_type || null}
+                                                            />
                                                         );
                                                     })()}
                                                     {/* Reading glass: English under a foreign message —

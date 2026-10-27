@@ -114,6 +114,11 @@ async def serve_media(filename: str, exp: str | None = None, sig: str | None = N
     '/' out of `filename` today, but this handler must not depend on that
     (".." used to raise a 500 on a directory; `{filename:path}` would have
     made it a reader of any file the process can open)."""
+    return FileResponse(_resolve(filename, exp, sig, request))
+
+
+def _resolve(filename: str, exp, sig, request) -> str:
+    """The stored file a link names, or the one 404 for every refusal."""
     if exp is not None or sig is not None:
         if not media_urls.verify(filename, exp, sig):
             raise HTTPException(status_code=404, detail="File not found")
@@ -127,7 +132,32 @@ async def serve_media(filename: str, exp: str | None = None, sig: str | None = N
     if (filename.startswith(".") or os.path.dirname(filepath) != root
             or not os.path.isfile(filepath)):
         raise HTTPException(status_code=404, detail="File not found")
-    return FileResponse(filepath)
+    return filepath
+
+
+# A shared document drawn like WhatsApp draws it (owner, 2026-10-27): the top
+# of its first page, its name, "236 pages · 772 KB · pdf". Same signed link
+# as the file itself — the signature covers the file's name, so the console
+# reaches both by appending /info or /preview to the document's own URL.
+@router.get("/admin/media/{filename}/info")
+async def media_document_info(filename: str, exp: str | None = None, sig: str | None = None,
+                              request: Request = None):
+    import asyncio
+    from app.services.doc_preview import document_info
+    return await asyncio.to_thread(document_info, _resolve(filename, exp, sig, request))
+
+
+@router.get("/admin/media/{filename}/preview")
+async def media_document_preview(filename: str, exp: str | None = None, sig: str | None = None,
+                                 request: Request = None):
+    import asyncio
+    from app.services.doc_preview import document_info, preview_path
+    filepath = _resolve(filename, exp, sig, request)
+    info = await asyncio.to_thread(document_info, filepath)
+    if not info.get("preview") or not os.path.isfile(preview_path(filepath)):
+        raise HTTPException(status_code=404, detail="No preview")
+    return FileResponse(preview_path(filepath), media_type="image/jpeg",
+                        headers={"Cache-Control": "private, max-age=86400"})
 
 
 def _mime_to_ext(mime: str) -> str:
