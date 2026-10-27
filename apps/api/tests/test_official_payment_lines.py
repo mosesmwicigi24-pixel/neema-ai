@@ -19,6 +19,7 @@ def test_both_official_lines_and_every_route_are_in_her_rules():
         rules = prompt.build_system_prompt(country_iso=iso, currency=ccy)
         assert "OUR OFFICIAL PAYMENT CHANNELS" in rules
         assert "+254727891989" in rules and "+254785490805" in rules
+        assert "0727891989" in rules and "0785490805" in rules   # the local way, too
         assert "Bank transfer" in rules
         # Kenyans pay by M-Pesa (owner, 2026-08-22): the international rails
         # are named only for customers abroad.
@@ -38,7 +39,8 @@ def test_a_payment_to_our_line_called_personal_or_fraud_is_held():
 
 
 def test_the_same_line_in_any_form_and_the_second_line_count():
-    for said in ("sent to 254727891989", "paid +254 727 891 989", "I sent to 0785490805"):
+    for said in ("sent to 254727891989", "paid +254 727 891 989", "I sent to 0785490805",
+                 "sent to MOSES 0727891989", "paid 0785 490 805"):
         assert review.our_lines_named(said), said
 
 

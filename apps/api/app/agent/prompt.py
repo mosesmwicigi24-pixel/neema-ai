@@ -43,7 +43,15 @@ def payment_channels_block(*, kenya: bool = False) -> str:
     (Kenya / abroad): no per-customer text, so the rules block stays one
     cached prefix per market bucket."""
     lines = official_mpesa_numbers()
-    mpesa = (" and ".join(lines) + " (Send Money)") if lines else ""
+
+    def _both(n: str) -> str:
+        # Customers and M-Pesa receipts write a Kenyan line the local way
+        # (owner, 2026-10-27: "sometimes the numbers might be 0727891989 or
+        # 0785490805") — the same line, so she must know it in both forms.
+        d = "".join(ch for ch in n if ch.isdigit())
+        local = ("0" + d[-9:]) if d.startswith("254") and len(d) == 12 else ""
+        return f"{n} (also written {local})" if local else n
+    mpesa = (" and ".join(_both(n) for n in lines) + " (Send Money)") if lines else ""
     return (
         "\n\nOUR OFFICIAL PAYMENT CHANNELS — money sent through ANY of these "
         "reaches Bethany House:\n"
