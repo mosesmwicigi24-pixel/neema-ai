@@ -1,11 +1,13 @@
-"""Our own M-Pesa lines are payments TO Bethany House (owner, 2026-10-27).
+"""Our own M-Pesa and Airtel Money lines are payments TO Bethany House
+(owner, 2026-10-27; "+254785490805 is Airtel payment number").
 
 Pst Samuel Kiarie paid KES 2,500 to 0727 891 989 — our official line — and
 Neema answered "That payment went to a personal M-Pesa number, not Bethany
 House" and later "this looks like someone impersonating us". M-Pesa shows the
 name the line is registered to (a person's), and her only rule was "never ask
-them to pay a personal number". Now the lines, the link, bank, Western Union
-and MoneyGram are her official channels, and the reviewer holds the mistake.
+them to pay a personal number". Now the M-Pesa line, the Airtel Money line,
+the link, bank, Western Union and MoneyGram are her official channels, and the
+reviewer holds the mistake.
 """
 import app.main  # noqa: F401 — registers all SQLAlchemy models
 from app.agent import prompt, review
@@ -20,6 +22,9 @@ def test_both_official_lines_and_every_route_are_in_her_rules():
         assert "OUR OFFICIAL PAYMENT CHANNELS" in rules
         assert "+254727891989" in rules and "+254785490805" in rules
         assert "0727891989" in rules and "0785490805" in rules   # the local way, too
+        # Each line on its own rail: 0727 is M-Pesa, 0785 is Airtel Money.
+        assert "M-Pesa (Send Money) to our own line: +254727891989" in rules
+        assert "Airtel Money to our own line: +254785490805" in rules
         assert "Bank transfer" in rules
         # Kenyans pay by M-Pesa (owner, 2026-08-22): the international rails
         # are named only for customers abroad.
@@ -62,3 +67,10 @@ def test_the_receipt_earlier_in_the_thread_still_counts():
     assert found and found[0]["kind"] == "payment_line"
     assert any(f["kind"] == "payment_line" for f in review.rule_findings(
         "Is it not yours?", "No — it is not our official line.", [], transcript=transcript))
+
+
+def test_an_airtel_money_payment_to_our_airtel_line_is_ours_too():
+    airtel = ("TID: MP261026.1830.A12345 Confirmed. You have sent Ksh 2,500.00 to "
+              "0785490805 MOSES NGANGA. Airtel Money")
+    found = review.payment_line_issues(airtel, "That number is not our official line.")
+    assert found and "+254785490805" in found[0]["text"]

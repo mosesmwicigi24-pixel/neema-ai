@@ -995,10 +995,10 @@ def _last9(digits: str) -> str:
 
 
 def our_lines_named(text: str) -> list[str]:
-    """Our official M-Pesa lines that `text` names (any form: 0727…, 254727…,
-    +254 727 …) — what a pasted M-Pesa confirmation carries."""
-    from app.agent.prompt import official_mpesa_numbers
-    ours = {_last9("".join(ch for ch in n if ch.isdigit())): n for n in official_mpesa_numbers()}
+    """Our official M-Pesa / Airtel Money lines that `text` names (any form:
+    0727…, 254727…, +254 727 …) — what a pasted confirmation carries."""
+    from app.agent.prompt import official_payment_numbers
+    ours = {_last9("".join(ch for ch in n if ch.isdigit())): n for n in official_payment_numbers()}
     ours.pop("", None)
     said = {_last9(m.replace(" ", "")) for m in re.findall(r"\+?\d[\d ]{8,15}\d", text or "")}
     return [ours[k] for k in said if k in ours]
@@ -1016,8 +1016,8 @@ def payment_line_issues(comment: str, answer: str, transcript: list | None = Non
         return []
     return [{"kind": "payment_line", "hard": True,
              "text": f"the payment went to OUR official line {named[0]} — that IS Bethany House "
-                     "(M-Pesa shows the name the line is registered to). Thank them, note the "
-                     "M-Pesa code, say the team will match it to their order; never call it "
+                     "(the receipt shows the name the line is registered to). Thank them, note "
+                     "the transaction code, say the team will match it to their order; never call it "
                      "personal, unofficial, a scam, fraud or impersonation"}]
 
 

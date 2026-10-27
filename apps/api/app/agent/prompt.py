@@ -28,11 +28,25 @@ def _nairobi_daypart() -> str:
 MUKURU_SEND_ISO = {"ZA", "GB", "ZW", "ZM", "MW", "BW", "LS", "UG", "RW"}
 
 
+def _numbers(field: str) -> list[str]:
+    from app.core.config import settings
+    raw = getattr(settings, field, "") or ""
+    return [n.strip() for n in raw.split(",") if n.strip()]
+
+
 def official_mpesa_numbers() -> list[str]:
     """Our M-Pesa receiving lines, as configured (settings.official_mpesa_numbers)."""
-    from app.core.config import settings
-    raw = getattr(settings, "official_mpesa_numbers", "") or ""
-    return [n.strip() for n in raw.split(",") if n.strip()]
+    return _numbers("official_mpesa_numbers")
+
+
+def official_airtel_numbers() -> list[str]:
+    """Our Airtel Money receiving lines (settings.official_airtel_numbers)."""
+    return _numbers("official_airtel_numbers")
+
+
+def official_payment_numbers() -> list[str]:
+    """Every mobile-money line that receives our payments, M-Pesa and Airtel."""
+    return official_mpesa_numbers() + official_airtel_numbers()
 
 
 def payment_channels_block(*, kenya: bool = False) -> str:
@@ -42,23 +56,29 @@ def payment_channels_block(*, kenya: bool = False) -> str:
     someone was "impersonating us"). The same for every customer in a market
     (Kenya / abroad): no per-customer text, so the rules block stays one
     cached prefix per market bucket."""
-    lines = official_mpesa_numbers()
 
     def _both(n: str) -> str:
-        # Customers and M-Pesa receipts write a Kenyan line the local way
-        # (owner, 2026-10-27: "sometimes the numbers might be 0727891989 or
+        # Customers and receipts write a Kenyan line the local way (owner,
+        # 2026-10-27: "sometimes the numbers might be 0727891989 or
         # 0785490805") — the same line, so she must know it in both forms.
         d = "".join(ch for ch in n if ch.isdigit())
         local = ("0" + d[-9:]) if d.startswith("254") and len(d) == 12 else ""
         return f"{n} (also written {local})" if local else n
-    mpesa = (" and ".join(_both(n) for n in lines) + " (Send Money)") if lines else ""
+
+    def _rail(name: str, numbers: list[str]) -> str:
+        if not numbers:
+            return ""
+        return f"- {name} to our own line: {' and '.join(_both(n) for n in numbers)}.\n"
+    lines = (_rail("M-Pesa (Send Money)", official_mpesa_numbers())
+             + _rail("Airtel Money", official_airtel_numbers()))
     return (
         "\n\nOUR OFFICIAL PAYMENT CHANNELS — money sent through ANY of these "
         "reaches Bethany House:\n"
         "- The secure M-Pesa payment link from `create_order` (paybill checkout).\n"
-        + (f"- M-Pesa to our own lines: {mpesa}. M-Pesa shows the NAME the line is "
-           "registered to — a person's name. That is still us: a payment to these "
-           "numbers is a payment to Bethany House.\n" if mpesa else "")
+        + lines
+        + ("- The M-Pesa / Airtel Money receipt shows the NAME the line is registered "
+           "to — a person's name. That is still us: a payment to these numbers is a "
+           "payment to Bethany House.\n" if lines else "")
         # Kenyans pay by M-Pesa (owner, 2026-08-22): the international rails
         # are never offered to them — bank is the only other door at home.
         + ("- Bank transfer (a colleague gives the account details — never invent "
@@ -66,7 +86,7 @@ def payment_channels_block(*, kenya: bool = False) -> str:
            "- Bank transfer, Western Union and MoneyGram (a colleague gives the "
            "receiving details — never invent them).\n")
         + "- When a customer shows a payment to one of these, THANK them, note the "
-        "M-Pesa code, and say the team will match it to their order. NEVER call "
+        "transaction code, and say the team will match it to their order. NEVER call "
         "it a personal number, never say it is not ours, never suggest fraud, a "
         "scam or impersonation.\n"
         "- If money went to a number that is NOT on this list, say gently that it "
