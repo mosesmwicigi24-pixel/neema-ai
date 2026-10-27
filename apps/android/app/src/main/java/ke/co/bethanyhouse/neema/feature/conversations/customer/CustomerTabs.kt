@@ -142,7 +142,7 @@ private fun PipelineSection(vm: CustomerViewModel, ctx: PanelCtx) {
         if (p.leadStageSource == "auto") {
             Row(Modifier.padding(bottom = 6.dp), verticalAlignment = Alignment.CenterVertically) {
                 Text(
-                    "✦ AI", fontSize = 10.sp, fontWeight = FontWeight.SemiBold, color = Palette.Violet600.themed(),
+                    "✦ Neema", fontSize = 10.sp, fontWeight = FontWeight.SemiBold, color = Palette.Violet600.themed(),
                     modifier = Modifier.clip(RoundedCornerShape(4.dp)).background(Palette.Violet600.dim(0.08f))
                         .border(1.dp, Palette.Violet200, RoundedCornerShape(4.dp)).padding(horizontal = 4.dp, vertical = 1.dp),
                 )

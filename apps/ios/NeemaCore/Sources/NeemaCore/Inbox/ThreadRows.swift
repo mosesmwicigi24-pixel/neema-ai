@@ -93,7 +93,7 @@ public enum ThreadRows {
                 } else if kind == "escalated" {
                     if !escalationShown {
                         escalationShown = true
-                        row = .escalated(msg, reason: msg.eventReason ?? "AI could not continue — agent needed")
+                        row = .escalated(msg, reason: msg.eventReason ?? "Neema could not continue — agent needed")
                     }
                 } else if kind == "flag" {
                     row = .flag(msg)
@@ -103,7 +103,7 @@ public enum ThreadRows {
                     if !escalationShown {
                         escalationShown = true
                         let hasInboundMedia = sorted[0..<idx].contains { $0.inbound && $0.mediaType != nil }
-                        row = .escalated(msg, reason: msg.eventReason ?? (hasInboundMedia ? "Media received — AI cannot process" : "AI could not continue — agent needed"))
+                        row = .escalated(msg, reason: msg.eventReason ?? (hasInboundMedia ? "Media received — Neema cannot open it" : "Neema could not continue — agent needed"))
                     }
                 } else {
                     row = .pill(msg)

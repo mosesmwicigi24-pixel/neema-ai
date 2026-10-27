@@ -1231,7 +1231,7 @@ class ConversationsViewModel(val dash: DashboardViewModel) : ViewModel() {
     }
 
     fun release(id: String) = busy(id, "release") {
-        control(id, "Conversation released back to AI", "Failed to release", null, done = { it.interceptMode == "ai" }) { inboxApi.release(id) }
+        control(id, "Conversation released back to Neema", "Failed to release", null, done = { it.interceptMode == "ai" }) { inboxApi.release(id) }
     }
 
     fun pause(id: String) = busy(id, "pause") {
@@ -1443,7 +1443,7 @@ class ConversationsViewModel(val dash: DashboardViewModel) : ViewModel() {
 
     private fun whoOf(convId: String): String = _inbox.value.cache[convId]?.let(::inboxName) ?: "this customer"
 
-    private fun noun(k: OutKind) = when (k) { OutKind.Reply -> "Reply"; OutKind.Approve -> "AI draft"; OutKind.Note -> "Note" }
+    private fun noun(k: OutKind) = when (k) { OutKind.Reply -> "Reply"; OutKind.Approve -> "Neema's draft"; OutKind.Note -> "Note" }
 
     /** Post one send and decide what its answer means. */
     private suspend fun deliver(localId: String) {
@@ -1475,7 +1475,7 @@ class ConversationsViewModel(val dash: DashboardViewModel) : ViewModel() {
         outgoing.remove(o.localId)
         bubble(o.convId, o.localId, null)
         when (o.kind) {
-            OutKind.Approve -> dash.toast("AI draft approved & sent")
+            OutKind.Approve -> dash.toast("Neema's draft approved & sent")
             OutKind.Note -> dash.toast("Note saved")
             OutKind.Reply -> {}
         }
@@ -1581,7 +1581,7 @@ class ConversationsViewModel(val dash: DashboardViewModel) : ViewModel() {
                 // Checked and found: the same outcome a prompt answer would have had.
                 if (o.checking && !o.failed) {
                     when (o.kind) {
-                        OutKind.Approve -> dash.toast("AI draft approved & sent")
+                        OutKind.Approve -> dash.toast("Neema's draft approved & sent")
                         OutKind.Note -> dash.toast("Note saved")
                         OutKind.Reply -> {}
                     }

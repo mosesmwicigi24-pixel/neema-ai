@@ -351,7 +351,7 @@ class ConversationsViewModelTest {
         socket(dash, """{"type":"intercept_changed","conversationId":"c1","eventKind":"release","eventAgentName":"Grace"}""")
         socket(dash, """{"type":"intercept_changed","conversationId":"c1","eventKind":"release","eventAgentName":"Grace"}""")
         val live = vm.thread.value.messages["c1"]!!.filter { it.id.startsWith("live-evt-") }
-        assertEquals(1, live.size); assertEquals("Released to AI by Grace", live.single().text)
+        assertEquals(1, live.size); assertEquals("Released to Neema by Grace", live.single().text)
 
         socket(dash, """{"type":"history_cleared","conversationId":"c1","clearedBy":"Grace"}""")
         assertTrue(vm.thread.value.messages["c1"]!!.isEmpty())
@@ -442,7 +442,7 @@ class ConversationsViewModelTest {
         vm.pause("c2")
         assertEquals("Paused — Neema holds all replies until you resume", toasts.last().message)
         vm.release("c2")
-        assertEquals("Conversation released back to AI", toasts.last().message)
+        assertEquals("Conversation released back to Neema", toasts.last().message)
         vm.transfer(Fixtures.AGENT2_ID, "Grace Wanjiru")
         assertEquals("\"${Fixtures.AGENT2_ID}\"", lastBody("POST", "/admin/conversations/c2/transfer")!!["agent_id"].toString())
         assertEquals("Transferred to Grace Wanjiru", toasts.last().message)
@@ -472,7 +472,7 @@ class ConversationsViewModelTest {
         vm.setDraftText("Edited draft")
         vm.approveDraft()
         assertEquals("\"Edited draft\"", lastBody("POST", "/admin/conversations/c1/approve-draft")!!["text"].toString())
-        assertEquals("AI draft approved & sent", toasts.last().message)
+        assertEquals("Neema's draft approved & sent", toasts.last().message)
         assertFalse(vm.composer.value.draftVisible)
 
         vm.showClear(true); vm.clearHistory()

@@ -146,13 +146,13 @@ final class InboxLogicTests: XCTestCase {
         XCTAssertEqual("Flagged: Needs Attention", ev("flag"))
         XCTAssertEqual("Picked up by Grace", ev("intercept", agent: "Grace"))
         XCTAssertEqual("Picked up by agent", ev("intercept"))
-        XCTAssertEqual("Released to AI by Grace", ev("release", agent: "Grace"))
-        XCTAssertEqual("Released to AI", ev("release"))
+        XCTAssertEqual("Released to Neema by Grace", ev("release", agent: "Grace"))
+        XCTAssertEqual("Released to Neema", ev("release"))
         XCTAssertEqual("Transferred — to sales", ev("transfer", note: "to sales"))
         XCTAssertEqual("Transferred", ev("transfer"))
         XCTAssertEqual("Paused by Grace — replies held", ev("pause", agent: "Grace"))
         XCTAssertEqual("Paused — replies held", ev("pause"))
-        XCTAssertEqual("AI draft approved", ev("approve_draft"))
+        XCTAssertEqual("Neema's draft approved", ev("approve_draft"))
         XCTAssertNil(Inbox.systemEvent(fromWs: .object(["type": "intercept_changed"])))
         let e = Inbox.systemEvent(fromWs: .object(["eventKind": "escalated", "eventReason": "media"]))!
         XCTAssertTrue(e.id.hasPrefix("live-evt-")); XCTAssertEqual("system_event", e.type); XCTAssertEqual("media", e.eventReason)
@@ -196,7 +196,7 @@ final class InboxLogicTests: XCTestCase {
         ])
         XCTAssertEqual(["img", "sys"], list.map { $0.id }, "the system intercept sorts just after the inbound it followed")
         let reasons = ThreadRows.build(list, unreadSnap: 0).compactMap { row -> String? in if case .escalated(_, let r) = row { return r } else { return nil } }
-        XCTAssertEqual(["Media received — AI cannot process"], reasons)
+        XCTAssertEqual(["Media received — Neema cannot open it"], reasons)
     }
 
     func testThreadRowsPostCardOncePerRunOurRepliesDontBreakIt() {

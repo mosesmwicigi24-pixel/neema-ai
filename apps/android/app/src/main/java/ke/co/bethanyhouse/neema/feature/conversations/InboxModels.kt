@@ -359,10 +359,10 @@ internal fun systemEventFromWs(e: JsonObject): ThreadMsg? {
         "escalated" -> "Escalated — needs human"
         "flag" -> "Flagged: Needs Attention"
         "intercept" -> if (agent != null) "Picked up by $agent" else "Picked up by agent"
-        "release" -> if (agent != null) "Released to AI by $agent" else "Released to AI"
+        "release" -> if (agent != null) "Released to Neema by $agent" else "Released to Neema"
         "transfer" -> if (note != null) "Transferred — $note" else "Transferred"
         "pause" -> if (agent != null) "Paused by $agent — replies held" else "Paused — replies held"
-        "approve_draft" -> "AI draft approved"
+        "approve_draft" -> "Neema's draft approved"
         else -> kind
     }
     return ThreadMsg(

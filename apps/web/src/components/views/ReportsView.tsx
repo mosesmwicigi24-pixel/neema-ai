@@ -3,7 +3,7 @@
 
 import React, { useState, useEffect, useCallback } from "react";
 import { fmtCurrency, fmtDate, timeAgo, formatPhone, displayName } from "@/lib/utils";
-import { conversationsApi, mapConversation } from "@/lib/api";
+import { apiErrorDetail, conversationsApi, mapConversation, reportsApi, type UnansweredItem } from "@/lib/api";
 import type { Conversation, Agent, Order, SharedViewProps } from "@/types";
 
 interface ReportsViewProps extends SharedViewProps {
@@ -12,7 +12,11 @@ interface ReportsViewProps extends SharedViewProps {
 }
 
 type Range = "7d" | "30d" | "90d" | "custom";
-type ReportTab = "overview" | "conversations" | "orders" | "agents";
+type ReportTab = "overview" | "conversations" | "orders" | "agents" | "unanswered";
+const TAB_LABEL: Record<ReportTab, string> = {
+    overview: "Overview", conversations: "Conversations", orders: "Orders", agents: "Agents",
+    unanswered: "Never answered",
+};
 
 function rangeLabel(r: Range) {
     return { "7d": "Last 7 days", "30d": "Last 30 days", "90d": "Last 90 days", custom: "Custom range" }[r];
@@ -91,6 +95,63 @@ function Table({ cols, rows, emptyText = "No data" }: {
                     )}
                 </tbody>
             </table>
+        </div>
+    );
+}
+
+// Neema's threads whose customer's last real message never got an answer —
+// they count as read (Unread is for threads a person holds), so this is where
+// someone finds them to follow up. Reactions, "thanks", "okay" are left out;
+// anything under a day old is still the missed-reply sweep's to answer.
+function UnansweredPanel({ onToast }: { onToast: ReportsViewProps["onToast"] }) {
+    const [items, setItems] = useState<UnansweredItem[] | null>(null);
+    const [failed, setFailed] = useState<string | null>(null);
+    const [saving, setSaving] = useState(false);
+    useEffect(() => {
+        let alive = true;
+        reportsApi.unanswered().then((r) => { if (alive) setItems(r.items); })
+            .catch((e) => { if (alive) setFailed(apiErrorDetail(e) || "Couldn't load the list"); });
+        return () => { alive = false; };
+    }, []);
+    const download = async () => {
+        setSaving(true);
+        try { await reportsApi.downloadUnanswered(); }
+        catch (e) { onToast(apiErrorDetail(e) || "Couldn't download the list", "error"); }
+        finally { setSaving(false); }
+    };
+    return (
+        <div className="bg-white rounded-xl border border-[#cee6b2] shadow-sm overflow-hidden">
+            <div className="px-4 py-3 border-b border-[#e6f3d8] flex flex-wrap items-center justify-between gap-2">
+                <div>
+                    <span className="text-xs font-bold text-[#699a32] uppercase tracking-wider">
+                        {items ? `${items.length} customer${items.length === 1 ? "" : "s"} never answered` : "Never answered"}
+                    </span>
+                    <p className="text-[11px] text-[#78716c] mt-0.5">
+                        Neema&apos;s chats where the customer&apos;s last message, a day old or more, got no reply.
+                        Reactions, thanks and &ldquo;okay&rdquo; are left out. Search the name in the inbox to answer.
+                    </p>
+                </div>
+                <button onClick={download} disabled={saving || !items?.length}
+                    className="h-9 px-4 rounded-lg text-xs font-semibold bg-[#589b31] text-white hover:bg-[#427425] disabled:opacity-50">
+                    {saving ? "Preparing…" : "Download CSV"}
+                </button>
+            </div>
+            {failed ? (
+                <p className="px-4 py-6 text-sm text-[#b91c1c]">{failed}</p>
+            ) : !items ? (
+                <p className="px-4 py-6 text-sm text-[#699a32]">Loading…</p>
+            ) : (
+                <Table
+                    cols={["Customer", "Channel", "Their last message", "Waiting"]}
+                    emptyText="Every customer has had an answer."
+                    rows={items.slice(0, 200).map((it) => [
+                        displayName(it.name, it.contact),
+                        <span className="capitalize">{it.channel}</span>,
+                        <span className="block max-w-[420px] truncate" title={it.said}>{it.said}</span>,
+                        `${it.days_waiting} day${it.days_waiting === 1 ? "" : "s"}`,
+                    ])}
+                />
+            )}
         </div>
     );
 }
@@ -253,14 +314,14 @@ export function ReportsView({ agents, orders, onToast, isMobile }: ReportsViewPr
 
             {/* Tab nav */}
             <div className="flex gap-1 mb-5 border-b border-[#cee6b2]">
-                {(["overview", "conversations", "orders", "agents"] as ReportTab[]).map((t) => (
+                {(["overview", "conversations", "orders", "agents", "unanswered"] as ReportTab[]).map((t) => (
                     <button key={t} onClick={() => setTab(t)}
-                        className={`px-4 py-2 text-xs font-semibold capitalize transition-colors border-b-2 -mb-px ${
+                        className={`px-4 py-2 text-xs font-semibold transition-colors border-b-2 -mb-px ${
                             tab === t
                                 ? "text-[#427425] border-[#427425]"
                                 : "text-[#9ccd65] border-transparent hover:text-[#427425]"
                         }`}
-                    >{t}</button>
+                    >{TAB_LABEL[t]}</button>
                 ))}
             </div>
 
@@ -352,6 +413,9 @@ export function ReportsView({ agents, orders, onToast, isMobile }: ReportsViewPr
                     <Table cols={["Customer", "Phone", "Amount", "Status", "Date"]} rows={orderRows} />
                 </div>
             )}
+
+            {/* ── NEVER ANSWERED ────────────────────────────────────────────── */}
+            {tab === "unanswered" && <UnansweredPanel onToast={onToast} />}
 
             {/* ── AGENTS ────────────────────────────────────────────────────── */}
             {tab === "agents" && (

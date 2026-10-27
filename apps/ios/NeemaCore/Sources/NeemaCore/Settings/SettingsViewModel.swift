@@ -541,7 +541,7 @@ public final class SettingsViewModel {
             try? await self.sleep(600)
             if self.closed { return }
             self.mut { $0.savingAi = false }
-            self.host.toast("AI settings saved", .success)
+            self.host.toast("Neema settings saved", .success)
         }
     }
 

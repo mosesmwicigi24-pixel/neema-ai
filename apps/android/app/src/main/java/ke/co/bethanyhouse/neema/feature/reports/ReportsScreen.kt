@@ -510,7 +510,7 @@ private fun OverviewTab(r: Report, wide: Boolean) {
     val c = Neema.colors
     val deliveryRate = if (r.orders.isNotEmpty()) Math.round(r.delivered * 100.0 / r.orders.size) else 0
     val tiles = listOf<@Composable (Modifier) -> Unit>(
-        { StatBox("Total Conversations", r.convs.size.toString(), "${r.humanConvs} human · ${r.aiConvs} AI", c.gold, it) },
+        { StatBox("Total Conversations", r.convs.size.toString(), "${r.humanConvs} human · ${r.aiConvs} Neema", c.gold, it) },
         { StatBox("Revenue", Fmt.currency(r.revenue), "${r.orders.size} orders", c.gold2, it) },
         { StatBox("Pending Orders", r.pending.toString(), "Awaiting confirmation", c.amber, it) },
         { StatBox("Delivered Orders", r.delivered.toString(), "$deliveryRate% delivery rate", c.blue, it) },

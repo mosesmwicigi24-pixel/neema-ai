@@ -345,7 +345,7 @@ class InboxContractTest {
         fake.on("POST", "/admin/conversations/k1/approve-draft", body = Contract.approved("Yes Father"))
         vm.setDraftText("Yes Father"); vm.approveDraft()
         assertEquals("""{"text":"Yes Father"}""", calls("POST", "/admin/conversations/k1/approve-draft").last().body)
-        assertEquals("AI draft approved & sent", toasts.last().message)
+        assertEquals("Neema's draft approved & sent", toasts.last().message)
 
         // No text → {"text": null}: the server sends its own held draft.
         vm.dismissDraft(); vm.approveDraft()
@@ -362,7 +362,7 @@ class InboxContractTest {
         vm.select("k1")
         fake.on("GET", "/admin/conversations/[^/]+/messages", code = 500, body = """{"detail":"db"}""")
         vm.setDraftText("Yes Father"); vm.approveDraft()
-        assertEquals("AI draft approved & sent", toasts.last().message)
+        assertEquals("Neema's draft approved & sent", toasts.last().message)
         assertFalse(vm.composer.value.draftVisible)
     }
 
@@ -398,7 +398,7 @@ class InboxContractTest {
         fake.on("POST", "/admin/conversations/k1/intercept", body = Contract.interceptAlready)
         fake.on("POST", "/admin/conversations/k1/release", body = Contract.releaseAlready)
         vm.intercept("k1"); assertEquals("Conversation claimed — you now control replies", toasts.last().message)
-        vm.release("k1"); assertEquals("Conversation released back to AI", toasts.last().message)
+        vm.release("k1"); assertEquals("Conversation released back to Neema", toasts.last().message)
     }
 
     @Test fun controls_409s() {

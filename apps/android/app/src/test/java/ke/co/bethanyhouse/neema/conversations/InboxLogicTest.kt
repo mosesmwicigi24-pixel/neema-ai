@@ -146,13 +146,13 @@ class InboxLogicTest {
         assertEquals("Flagged: Needs Attention", ev("flag"))
         assertEquals("Picked up by Grace", ev("intercept", "Grace"))
         assertEquals("Picked up by agent", ev("intercept"))
-        assertEquals("Released to AI by Grace", ev("release", "Grace"))
-        assertEquals("Released to AI", ev("release"))
+        assertEquals("Released to Neema by Grace", ev("release", "Grace"))
+        assertEquals("Released to Neema", ev("release"))
         assertEquals("Transferred — to sales", ev("transfer", note = "to sales"))
         assertEquals("Transferred", ev("transfer"))
         assertEquals("Paused by Grace — replies held", ev("pause", "Grace"))
         assertEquals("Paused — replies held", ev("pause"))
-        assertEquals("AI draft approved", ev("approve_draft"))
+        assertEquals("Neema's draft approved", ev("approve_draft"))
         assertNull(systemEventFromWs(buildJsonObject { put("type", "intercept_changed") }))
         val e = systemEventFromWs(buildJsonObject { put("eventKind", "escalated"); put("eventReason", JsonPrimitive("media")) })!!
         assertTrue(e.id.startsWith("live-evt-")); assertEquals("system_event", e.type); assertEquals("media", e.eventReason)
@@ -213,7 +213,7 @@ class InboxLogicTest {
         // The system intercept sorts just after the inbound it followed.
         assertEquals(listOf("img", "sys"), list.map { it.id })
         val esc = buildThreadRows(list, 0).filterIsInstance<TEscalated>().single()
-        assertEquals("Media received — AI cannot process", esc.reason)
+        assertEquals("Media received — Neema cannot open it", esc.reason)
     }
 
     @Test fun threadRows_postCardOncePerRunOurRepliesDontBreakIt() {

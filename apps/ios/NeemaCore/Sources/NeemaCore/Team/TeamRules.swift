@@ -15,7 +15,7 @@ public enum PermissionCatalog {
     public static let ALL: [PermissionDef] = [
         PermissionDef(Perms.VIEW_CONVERSATIONS, "View conversations", "Conversations"),
         PermissionDef(Perms.REPLY_CONVERSATIONS, "Send replies", "Conversations"),
-        PermissionDef(Perms.INTERCEPT_RELEASE, "Intercept / Release AI", "Conversations"),
+        PermissionDef(Perms.INTERCEPT_RELEASE, "Take over / Release to Neema", "Conversations"),
         PermissionDef(Perms.CLOSE_CONVERSATIONS, "Close conversations", "Conversations"),
         PermissionDef(Perms.TRANSFER_CONVERSATIONS, "Transfer conversations", "Conversations"),
         PermissionDef(Perms.ADD_NOTES, "Add internal notes", "Conversations"),

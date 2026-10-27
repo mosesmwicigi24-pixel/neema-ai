@@ -355,7 +355,7 @@ async def record_escalation(
         await _broadcast(redis, "agents:all", {
             "event":          "notification",
             "type":           "intercept",
-            "title":          "🤖 AI Escalation",
+            "title":          "🤖 Neema escalated",
             "body":           reason,
             "conversationId": str(conv_id),
         })

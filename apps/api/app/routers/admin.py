@@ -263,6 +263,82 @@ async def list_conversations(
     return {"items": await _conversation_rows(db, conv_ids=ids), "next_cursor": nxt}
 
 
+@router.get("/reports/unanswered")
+async def report_unanswered(
+    min_age_h: int = 24,
+    format: str = "json",
+    db: AsyncSession = Depends(get_db),
+    agent: Agent = Depends(get_current_agent),
+):
+    """Neema's threads whose customer's LAST message never got an answer
+    (owner, 2026-10-27). Since Unread counts only threads a person holds,
+    these read as handled — a one-off list for someone to follow up.
+
+    Only real asks: a reaction, a sticker, a "thanks"/"okay", a bare
+    attachment placeholder are left out (the same test the missed-reply sweep
+    uses). Younger than `min_age_h` (default a day) is still the sweep's to
+    answer. Staff notes count as handling (a recorded "did not reply —
+    spam" is a decision). Newest first: the most recent waits are the ones
+    still worth a message. format=csv downloads it (export_reports)."""
+    from datetime import datetime, timedelta, timezone
+    from app.core.permissions import require_permission
+    from app.models.person import Person
+    from app.services.reply_sweeper import _answerable_turn
+    fmt = (format or "json").lower()
+    await require_permission(db, agent, "export_reports" if fmt == "csv" else "view_reports",
+                             "You need reports access to see this list")
+    min_age_h = max(1, min(int(min_age_h or 24), 24 * 365))
+    cutoff = datetime.now(timezone.utc) - timedelta(hours=min_age_h)
+
+    latest = (
+        select(Message.conversation_id.label("cid"), func.max(Message.created_at).label("at"))
+        .where(Message.conversation_id.isnot(None))
+        .group_by(Message.conversation_id)
+        .subquery()
+    )
+    rows = (await db.execute(
+        select(Message, Conversation, Person.display_name)
+        .join(latest, (latest.c.cid == Message.conversation_id) & (latest.c.at == Message.created_at))
+        .join(Conversation, Conversation.id == Message.conversation_id)
+        .outerjoin(Person, Person.id == Conversation.person_id)
+        .where(Conversation.intercept_mode == InterceptMode.ai)
+        .where(Message.direction == "inbound")
+        .where(Message.created_at < cutoff)
+        .order_by(Message.created_at.desc())
+    )).all()
+
+    now = datetime.now(timezone.utc)
+    items = []
+    for m, c, person_name in rows:
+        text, media = _answerable_turn(m.text, m.media_type, m.media_url, m.raw_meta)
+        if text is None and media is None:
+            continue
+        at = m.created_at if m.created_at.tzinfo else m.created_at.replace(tzinfo=timezone.utc)
+        items.append({
+            "conversation_id": str(c.id),
+            "name": person_name or m.name or "",
+            "channel": c.channel,
+            "contact": c.wa_id or c.external_id or "",
+            "said": (m.text or ("[photo]" if media else ""))[:500],
+            "at": at.isoformat(),
+            "days_waiting": (now - at).days,
+        })
+    if fmt == "csv":
+        import csv
+        import io
+        from fastapi.responses import Response
+        buf = io.StringIO()
+        w = csv.writer(buf)
+        w.writerow(["name", "channel", "contact", "their last message", "sent (UTC)", "days waiting",
+                    "conversation id"])
+        for it in items:
+            w.writerow([it["name"], it["channel"], it["contact"], it["said"], it["at"][:16].replace("T", " "),
+                        it["days_waiting"], it["conversation_id"]])
+        return Response(buf.getvalue(), media_type="text/csv; charset=utf-8", headers={
+            "Content-Disposition": 'attachment; filename="neema-unanswered.csv"'})
+    return {"count": len(items), "min_age_h": min_age_h, "items": items}
+
+
 @router.get("/conversations/summary")
 async def conversations_summary(
     db: AsyncSession = Depends(get_db),

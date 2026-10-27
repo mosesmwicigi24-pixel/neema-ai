@@ -395,7 +395,7 @@ class InboxNetworkStressTest {
         assertTrue(errors().isEmpty())
         idle(2_100)
         assertEquals(1, thread(vm).count { it.body == "Yes Father" })
-        assertEquals("AI draft approved & sent", toasts.last().message)
+        assertEquals("Neema's draft approved & sent", toasts.last().message)
         assertFalse(vm.composer.value.draftVisible)
     }
 

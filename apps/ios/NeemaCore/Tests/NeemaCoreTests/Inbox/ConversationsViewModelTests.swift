@@ -324,7 +324,7 @@ final class ConversationsViewModelTests: XCTestCase {
         await socket(host, #"{"type":"intercept_changed","conversationId":"c1","eventKind":"release","eventAgentName":"Grace"}"#)
         await socket(host, #"{"type":"intercept_changed","conversationId":"c1","eventKind":"release","eventAgentName":"Grace"}"#)
         let live = vm.thread.value.messages["c1"]!.filter { $0.id.hasPrefix("live-evt-") }
-        XCTAssertEqual(live.count, 1); XCTAssertEqual(live.first?.text, "Released to AI by Grace")
+        XCTAssertEqual(live.count, 1); XCTAssertEqual(live.first?.text, "Released to Neema by Grace")
 
         await socket(host, #"{"type":"history_cleared","conversationId":"c1","clearedBy":"Grace"}"#)
         XCTAssertTrue(vm.thread.value.messages["c1"]!.isEmpty)
@@ -418,7 +418,7 @@ final class ConversationsViewModelTests: XCTestCase {
         vm.pause("c2"); await drain()
         XCTAssertEqual(host.toasts.last?.message, "Paused — Neema holds all replies until you resume")
         vm.release("c2"); await drain()
-        XCTAssertEqual(host.toasts.last?.message, "Conversation released back to AI")
+        XCTAssertEqual(host.toasts.last?.message, "Conversation released back to Neema")
         vm.transfer(agentId: Fixtures.AGENT2_ID, agentName: "Grace Wanjiru"); await drain()
         XCTAssertEqual(lastBody("POST", "/admin/conversations/c2/transfer")["agent_id"]?.content, Fixtures.AGENT2_ID)
         XCTAssertEqual(host.toasts.last?.message, "Transferred to Grace Wanjiru")
@@ -448,7 +448,7 @@ final class ConversationsViewModelTests: XCTestCase {
         vm.setDraftText("Edited draft")
         vm.approveDraft(); await drain()
         XCTAssertEqual(lastBody("POST", "/admin/conversations/c1/approve-draft")["text"]?.content, "Edited draft")
-        XCTAssertEqual(host.toasts.last?.message, "AI draft approved & sent")
+        XCTAssertEqual(host.toasts.last?.message, "Neema's draft approved & sent")
         XCTAssertFalse(vm.composer.value.draftVisible)
 
         vm.showClear(true); vm.clearHistory(); await drain()

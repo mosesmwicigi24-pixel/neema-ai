@@ -81,7 +81,7 @@ private struct PipelineSection: View {
         CrmSection("Lead Pipeline") {
             if p.leadStageSource == "auto" {
                 HStack(spacing: 0) {
-                    Text("✦ AI").font(NeemaFont.manrope(10, .semibold)).foregroundColor(Palette.violet600.themed(c.isDark))
+                    Text("✦ Neema").font(NeemaFont.manrope(10, .semibold)).foregroundColor(Palette.violet600.themed(c.isDark))
                         .padding(.horizontal, 4).padding(.vertical, 1)
                         .background(RoundedRectangle(cornerRadius: 4).fill(Palette.violet600.dim(0.08)))
                         .roundedBorder(Palette.violet200, radius: 4)
