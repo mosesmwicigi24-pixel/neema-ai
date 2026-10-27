@@ -340,7 +340,7 @@ final class SettingsViewModelTests: SettingsTestCase {
         v.saveAi()
         await host.clock.advance(by: 600)
         await settled(v)
-        XCTAssertEqual(lastToast()?.message, "AI settings saved")
+        XCTAssertEqual(lastToast()?.message, "Neema settings saved")
         XCTAssertTrue(writes().isEmpty)
     }
 }

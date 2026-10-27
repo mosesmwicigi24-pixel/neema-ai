@@ -499,7 +499,7 @@ private struct MessageBubble: View {
                 VStack(alignment: inbound ? .leading : .trailing, spacing: 0) {
                     VStack(alignment: .leading, spacing: 0) {
                         if !inbound {
-                            Text((msg.sender == "ai" ? "AI" : (msg.agentName ?? "Agent")).uppercased())
+                            Text((msg.sender == "ai" ? "Neema" : (msg.agentName ?? "Agent")).uppercased())
                                 .font(NeemaFont.manrope(10, .medium)).tracking(0.5).foregroundColor(fg.opacity(0.7))
                                 .padding(.bottom, 4).padding(.leading, isMedia ? 4 : 0)
                         }

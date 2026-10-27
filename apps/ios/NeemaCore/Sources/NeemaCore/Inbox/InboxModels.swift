@@ -379,10 +379,10 @@ public enum Inbox {
         case "escalated": label = "Escalated — needs human"
         case "flag": label = "Flagged: Needs Attention"
         case "intercept": label = agent.map { "Picked up by \($0)" } ?? "Picked up by agent"
-        case "release": label = agent.map { "Released to AI by \($0)" } ?? "Released to AI"
+        case "release": label = agent.map { "Released to Neema by \($0)" } ?? "Released to Neema"
         case "transfer": label = note.map { "Transferred — \($0)" } ?? "Transferred"
         case "pause": label = agent.map { "Paused by \($0) — replies held" } ?? "Paused — replies held"
-        case "approve_draft": label = "AI draft approved"
+        case "approve_draft": label = "Neema's draft approved"
         default: label = kind
         }
         return ThreadMsg(

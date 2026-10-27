@@ -762,7 +762,7 @@ private fun AiCard(vm: SettingsViewModel) {
     val ai by vm.ai.collectAsStateWithLifecycle()
     val saving by vm.savingAi.collectAsStateWithLifecycle()
     val c = Neema.colors
-    SectionCard("AI Configuration", "How the AI handles conversations") {
+    SectionCard("Neema", "How Neema handles conversations") {
         SideBySide(
             { m ->
                 Field("Escalation Threshold", "Messages before escalating", modifier = m) {
@@ -787,14 +787,14 @@ private fun AiCard(vm: SettingsViewModel) {
         ) {
             Column(Modifier.weight(1f)) {
                 Text("Require draft approval", fontSize = 13.sp, fontWeight = FontWeight.Medium, color = c.text)
-                Text("AI drafts need agent approval before sending", fontSize = 11.sp, color = c.muted)
+                Text("Neema's drafts need agent approval before sending", fontSize = 11.sp, color = c.muted)
             }
             Spacer(Modifier.width(8.dp))
             Switch(checked = ai.draftApproval, onCheckedChange = null, colors = neemaSwitchColors())
         }
         HorizontalDivider(color = c.bg3)
         Spacer(Modifier.height(12.dp))
-        SaveButton("Save AI Settings", saving, onClick = vm::saveAi)
+        SaveButton("Save Neema settings", saving, onClick = vm::saveAi)
     }
 }
 
@@ -930,7 +930,7 @@ private fun DangerZoneCard(vm: SettingsViewModel) {
     SectionCard("Danger Zone", "Irreversible actions. Proceed with caution.") {
         listOf(
             Triple("Clear conversation history", "Permanently delete messages older than 90 days", "Clear"),
-            Triple("Reset AI memory", "Clear all customer facts and session history", "Reset"),
+            Triple("Reset Neema's memory", "Clear all customer facts and session history", "Reset"),
         ).forEach { (label, sub, action) ->
             Row(
                 Modifier.fillMaxWidth().padding(bottom = 8.dp).clip(RoundedCornerShape(8.dp)).background(rowFill)

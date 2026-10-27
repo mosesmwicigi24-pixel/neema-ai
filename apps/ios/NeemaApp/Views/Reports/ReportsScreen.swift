@@ -298,7 +298,7 @@ struct OverviewTab: View {
     var body: some View {
         let deliveryRate = r.orders.isEmpty ? 0 : Int((Double(r.delivered) * 100.0 / Double(r.orders.count)).rounded())
         let tiles: [(String, String, String, Color)] = [
-            ("Total Conversations", String(r.convs.count), "\(r.humanConvs) human · \(r.aiConvs) AI", c.gold),
+            ("Total Conversations", String(r.convs.count), "\(r.humanConvs) human · \(r.aiConvs) Neema", c.gold),
             ("Revenue", Fmt.currency(r.revenue), "\(r.orders.count) orders", c.gold2),
             ("Pending Orders", String(r.pending), "Awaiting confirmation", c.amber),
             ("Delivered Orders", String(r.delivered), "\(deliveryRate)% delivery rate", c.blue),

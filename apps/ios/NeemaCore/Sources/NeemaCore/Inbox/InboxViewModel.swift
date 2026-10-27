@@ -1241,7 +1241,7 @@ public final class InboxViewModel {
     public func release(_ id: String) {
         busy(id, "release") { [weak self] in
             guard let self = self else { return }
-            _ = await self.control(id, ok: "Conversation released back to AI", fail: "Failed to release", conflict: nil,
+            _ = await self.control(id, ok: "Conversation released back to Neema", fail: "Failed to release", conflict: nil,
                                    done: { $0.interceptMode == "ai" }) { try await self.inboxApi.release(id: id) }
         }
     }
@@ -1450,7 +1450,7 @@ public final class InboxViewModel {
     private func whoOf(_ convId: String) -> String { inbox.value.cache[convId].map(Inbox.inboxName) ?? "this customer" }
 
     private func noun(_ k: OutKind) -> String {
-        switch k { case .reply: return "Reply"; case .approve: return "AI draft"; case .note: return "Note" }
+        switch k { case .reply: return "Reply"; case .approve: return "Neema's draft"; case .note: return "Note" }
     }
 
     private func putOutgoing(_ o: Outgoing) {
@@ -1495,7 +1495,7 @@ public final class InboxViewModel {
         removeOutgoing(o.localId)
         bubble(o.convId, o.localId, nil)
         switch o.kind {
-        case .approve: toast("AI draft approved & sent")
+        case .approve: toast("Neema's draft approved & sent")
         case .note: toast("Note saved")
         case .reply: break
         }
@@ -1613,7 +1613,7 @@ public final class InboxViewModel {
                 // Checked and found: the same outcome a prompt answer would have had.
                 if o.checking && !o.failed {
                     switch o.kind {
-                    case .approve: toast("AI draft approved & sent")
+                    case .approve: toast("Neema's draft approved & sent")
                     case .note: toast("Note saved")
                     case .reply: break
                     }

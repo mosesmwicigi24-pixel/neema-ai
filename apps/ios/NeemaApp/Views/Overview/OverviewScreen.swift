@@ -99,7 +99,7 @@ struct OverviewBody: View {
             StatCardData(label: "Active Agents", value: String(s.activeAgents), sub: "of \(s.totalAgents) total", icon: OverviewIcons.team, accent: accentEmerald),
             StatCardData(label: "Total Revenue", value: Fmt.currency(s.revenue), sub: "\(s.totalOrders) orders", icon: OverviewIcons.money, accent: accentGreen),
             StatCardData(label: "Pending Orders", value: String(s.pendingOrders), sub: "Awaiting confirmation", icon: OverviewIcons.box, accent: accentOrange),
-            StatCardData(label: "AI Conversations", value: String(s.aiConvs), sub: "Fully automated", icon: OverviewIcons.robot, accent: accentBlue),
+            StatCardData(label: "Neema's conversations", value: String(s.aiConvs), sub: "Fully automated", icon: OverviewIcons.robot, accent: accentBlue),
             StatCardData(label: "Catalog Items", value: String(s.totalItems), sub: "\(s.inStockItems) in stock", icon: OverviewIcons.box, accent: accentViolet),
         ]
         let cols = gridColumns(width: inner, max: wide ? 3 : 2, fontScale: fontScale)

@@ -153,7 +153,7 @@ fun OverviewScreen(
                     { StatCard("Active Agents", stats.activeAgents.toString(), "of ${stats.totalAgents} total", OverviewIcons.Team, AccentEmerald, cardsLoading, it) },
                     { StatCard("Total Revenue", Fmt.currency(stats.revenue), "${stats.totalOrders} orders", OverviewIcons.Money, AccentGreen, cardsLoading, it) },
                     { StatCard("Pending Orders", stats.pendingOrders.toString(), "Awaiting confirmation", OverviewIcons.Box, AccentOrange, cardsLoading, it) },
-                    { StatCard("AI Conversations", stats.aiConvs.toString(), "Fully automated", OverviewIcons.Robot, AccentBlue, cardsLoading, it) },
+                    { StatCard("Neema's conversations", stats.aiConvs.toString(), "Fully automated", OverviewIcons.Robot, AccentBlue, cardsLoading, it) },
                     { StatCard("Catalog Items", stats.totalItems.toString(), "${stats.inStockItems} in stock", OverviewIcons.Box, AccentViolet, cardsLoading, it) },
                 )
                 // The web's grid-cols-2 sm:grid-cols-3 — one a row when a large

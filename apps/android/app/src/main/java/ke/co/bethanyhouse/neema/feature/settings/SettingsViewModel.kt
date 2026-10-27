@@ -635,7 +635,7 @@ class SettingsViewModel(private val dash: DashboardViewModel) : ViewModel(), ke.
             _savingAi.value = true
             delay(600)
             _savingAi.value = false
-            dash.toast("AI settings saved")
+            dash.toast("Neema settings saved")
         }
     }
 

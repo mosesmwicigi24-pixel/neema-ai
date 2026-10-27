@@ -243,7 +243,7 @@ struct InterceptBadge: View {
             switch mode {
             case "human": return dark ? (Palette.amber950.opacity(0.4), Palette.amber400, Palette.amber800, "Human") : (Palette.amber50, Palette.amber700, Palette.amber200, "Human")
             case "paused": return dark ? (Palette.gray800, Palette.gray400, Palette.gray700, "Paused") : (Palette.gray100, Palette.gray500, Palette.gray200, "Paused")
-            default: return dark ? (Palette.blue950.opacity(0.4), Palette.blue400, Palette.blue800, "AI") : (Palette.blue50, Palette.blue700, Palette.blue200, "AI")
+            default: return dark ? (Palette.blue950.opacity(0.4), Palette.blue400, Palette.blue800, "Neema") : (Palette.blue50, Palette.blue700, Palette.blue200, "Neema")
             }
         }()
         Text(label).font(NeemaFont.manrope(11, .medium)).foregroundColor(fg).lineLimit(1)

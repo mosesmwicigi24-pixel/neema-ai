@@ -303,7 +303,7 @@ final class InboxContractTests: XCTestCase {
         fake.on("POST", "/admin/conversations/k1/approve-draft", body: Contract.approved("Yes Father"))
         vm.setDraftText("Yes Father"); vm.approveDraft(); await drain()
         XCTAssertEqual(json(calls("POST", "/admin/conversations/k1/approve-draft").last!.body!), ["text": .string("Yes Father")])
-        XCTAssertEqual(host.toasts.last?.message, "AI draft approved & sent")
+        XCTAssertEqual(host.toasts.last?.message, "Neema's draft approved & sent")
 
         // No text → {"text": null}: the server sends its own held draft.
         vm.dismissDraft(); vm.approveDraft(); await drain()
@@ -320,7 +320,7 @@ final class InboxContractTests: XCTestCase {
         vm.select("k1"); await drain()
         fake.on("GET", "/admin/conversations/[^/]+/messages", code: 500, body: #"{"detail":"db"}"#)
         vm.setDraftText("Yes Father"); vm.approveDraft(); await drain()
-        XCTAssertEqual(host.toasts.last?.message, "AI draft approved & sent")
+        XCTAssertEqual(host.toasts.last?.message, "Neema's draft approved & sent")
         XCTAssertFalse(vm.composer.value.draftVisible)
     }
 
@@ -365,7 +365,7 @@ final class InboxContractTests: XCTestCase {
         fake.on("POST", "/admin/conversations/k1/intercept", body: Contract.interceptAlready)
         fake.on("POST", "/admin/conversations/k1/release", body: Contract.releaseAlready)
         vm.intercept("k1"); await drain(); XCTAssertEqual(host.toasts.last?.message, "Conversation claimed — you now control replies")
-        vm.release("k1"); await drain(); XCTAssertEqual(host.toasts.last?.message, "Conversation released back to AI")
+        vm.release("k1"); await drain(); XCTAssertEqual(host.toasts.last?.message, "Conversation released back to Neema")
     }
 
     func testControls409s() async {

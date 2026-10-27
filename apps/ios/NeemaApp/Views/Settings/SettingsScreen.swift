@@ -528,7 +528,7 @@ struct AiCard: View {
 
     var body: some View {
         let stack = (width - 40) / teamFontScale < 340
-        SettingsCard(title: "AI Configuration", description: "How the AI handles conversations") {
+        SettingsCard(title: "Neema", description: "How Neema handles conversations") {
             SettingsPair(stack: stack) {
                 SettingsField(label: "Escalation Threshold", hint: "Messages before escalating") {
                     SettingsInput(text: digits(model.ai(\.autoInterceptThreshold)), keyboard: .numberPad)
@@ -545,7 +545,7 @@ struct AiCard: View {
             Toggle(isOn: model.ai(\.draftApproval)) {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Require draft approval").font(NeemaFont.manrope(13, .medium)).foregroundColor(c.text)
-                    Text("AI drafts need agent approval before sending").font(NeemaFont.manrope(11)).foregroundColor(c.muted)
+                    Text("Neema's drafts need agent approval before sending").font(NeemaFont.manrope(11)).foregroundColor(c.muted)
                 }
                 .padding(.trailing, 8)
             }
@@ -554,7 +554,7 @@ struct AiCard: View {
             .frame(minHeight: 48)
             Hairline(color: c.bg3)
             Spacer().frame(height: 12)
-            SettingsSaveButton(label: "Save AI Settings", saving: model.ui.savingAi) { model.vm.saveAi() }
+            SettingsSaveButton(label: "Save Neema settings", saving: model.ui.savingAi) { model.vm.saveAi() }
         }
     }
 
@@ -711,7 +711,7 @@ struct DangerZoneCard: View {
 
     private let rows: [(label: String, sub: String, action: String)] = [
         ("Clear conversation history", "Permanently delete messages older than 90 days", "Clear"),
-        ("Reset AI memory", "Clear all customer facts and session history", "Reset"),
+        ("Reset Neema's memory", "Clear all customer facts and session history", "Reset"),
     ]
 
     var body: some View {

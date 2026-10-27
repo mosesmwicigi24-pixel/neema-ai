@@ -125,14 +125,14 @@ internal fun buildThreadRows(sorted: List<ThreadMsg>, unreadSnap: Int): List<TRo
                     kind == "release" || kind == "transfer" || kind == "approve_draft" || agentPickup -> null
                     kind == "escalated" -> if (escalationShown) null else {
                         escalationShown = true
-                        TEscalated(msg, msg.eventReason ?: "AI could not continue — agent needed")
+                        TEscalated(msg, msg.eventReason ?: "Neema could not continue — agent needed")
                     }
                     kind == "flag" -> TFlag(msg)
                     kind == "call" -> TCall(msg)
                     kind == "intercept" -> if (escalationShown) null else {
                         escalationShown = true
                         val hasInboundMedia = sorted.subList(0, idx).any { it.inbound && it.mediaType != null }
-                        TEscalated(msg, msg.eventReason ?: if (hasInboundMedia) "Media received — AI cannot process" else "AI could not continue — agent needed")
+                        TEscalated(msg, msg.eventReason ?: if (hasInboundMedia) "Media received — Neema cannot open it" else "Neema could not continue — agent needed")
                     }
                     else -> TPill(msg)
                 }
@@ -407,7 +407,7 @@ private fun MessageBubble(msg: ThreadMsg, album: List<ThreadMsg>?, channel: Stri
             ) {
                 if (!inbound) {
                     Text(
-                        (if (msg.sender == "ai") "AI" else msg.agentName ?: "Agent").uppercase(),
+                        (if (msg.sender == "ai") "Neema" else msg.agentName ?: "Agent").uppercase(),
                         fontSize = 10.sp, fontWeight = FontWeight.Medium, letterSpacing = 0.5.sp, color = fg.copy(alpha = 0.7f),
                         modifier = Modifier.padding(bottom = 4.dp, start = if (isMedia) 4.dp else 0.dp),
                     )
@@ -816,8 +816,8 @@ internal fun InterceptBadge(mode: String) {
         else Quad(Palette.Amber50, Palette.Amber700, Palette.Amber200, "Human")
         "paused" -> if (dark) Quad(Palette.Gray800, Palette.Gray400, Palette.Gray700, "Paused")
         else Quad(Palette.Gray100, Palette.Gray500, Palette.Gray200, "Paused")
-        else -> if (dark) Quad(Palette.Blue950.copy(alpha = 0.4f), Palette.Blue400, Palette.Blue800, "AI")
-        else Quad(Palette.Blue50, Palette.Blue700, Palette.Blue200, "AI")
+        else -> if (dark) Quad(Palette.Blue950.copy(alpha = 0.4f), Palette.Blue400, Palette.Blue800, "Neema")
+        else Quad(Palette.Blue50, Palette.Blue700, Palette.Blue200, "Neema")
     }
     Text(
         label, fontSize = 11.sp, lineHeight = 14.sp, fontWeight = FontWeight.Medium, color = fg, maxLines = 1,

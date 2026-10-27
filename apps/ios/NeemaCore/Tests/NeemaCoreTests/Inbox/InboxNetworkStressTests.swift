@@ -375,7 +375,7 @@ final class InboxNetworkStressTests: XCTestCase {
         XCTAssertTrue(host.errors.isEmpty)
         await idle(host, 2_100)
         XCTAssertEqual(thread(vm).filter { $0.body == "Yes Father" }.count, 1)
-        XCTAssertEqual(host.toasts.last?.message, "AI draft approved & sent")
+        XCTAssertEqual(host.toasts.last?.message, "Neema's draft approved & sent")
         XCTAssertFalse(vm.composer.value.draftVisible)
     }
 

@@ -74,12 +74,12 @@ internal fun Composer(
         if (state.draftVisible && !state.draftExpanded) {
             Row(
                 Modifier.padding(bottom = 8.dp).fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(blue.bg)
-                    .border(1.dp, blue.border, RoundedCornerShape(12.dp)).clickable(onClickLabel = "Review the AI draft") { vm.expandDraft(true) }.padding(horizontal = 12.dp, vertical = 8.dp),
+                    .border(1.dp, blue.border, RoundedCornerShape(12.dp)).clickable(onClickLabel = "Review Neema's draft") { vm.expandDraft(true) }.padding(horizontal = 12.dp, vertical = 8.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Text("🤖", fontSize = 14.sp)
                 Spacer(Modifier.width(8.dp))
-                Text("AI has a draft ready", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = blue.fg, modifier = Modifier.weight(1f))
+                Text("Neema has a draft ready", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = blue.fg, modifier = Modifier.weight(1f))
                 Text("Tap to review ↑", fontSize = 10.sp, color = ink(Palette.Blue500))
             }
         }
@@ -96,7 +96,7 @@ internal fun Composer(
                     if (state.generatingDraft) {
                         CircularProgressIndicator(Modifier.size(12.dp), strokeWidth = 2.dp, color = Palette.Blue400)
                         Spacer(Modifier.width(6.dp)); Text("Generating…", fontSize = 12.sp)
-                    } else Text("🤖 Generate AI draft", fontSize = 12.sp)
+                    } else Text("🤖 Ask Neema for a draft", fontSize = 12.sp)
                 }
             }
         }
@@ -219,14 +219,14 @@ private fun DraftPanel(vm: ConversationsViewModel, state: ComposerUi) {
     Column(Modifier.padding(bottom = 8.dp).fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(blue.bg).border(1.dp, blue.border, RoundedCornerShape(12.dp))) {
         Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
             Text("🤖", fontSize = 14.sp); Spacer(Modifier.width(6.dp))
-            Text("AI Draft", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = blue.fg, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text("Neema's draft", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = blue.fg, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
             Text(
                 if (state.draftEditing) "Preview" else "Edit", fontSize = 10.sp, color = soft, maxLines = 1,
                 modifier = Modifier.clip(RoundedCornerShape(4.dp)).border(1.dp, blue.border, RoundedCornerShape(4.dp)).clickable(onClick = vm::toggleDraftEditing).padding(horizontal = 8.dp, vertical = 2.dp),
             )
             // Web-sized (28 dp) glyph buttons; Compose widens their hit area to 48 dp.
-            IconButton(onClick = { vm.expandDraft(false) }, modifier = Modifier.size(28.dp)) { Icon(Icons.Filled.KeyboardArrowDown, "Collapse the AI draft", tint = soft, modifier = Modifier.size(16.dp)) }
-            IconButton(onClick = vm::dismissDraft, modifier = Modifier.size(28.dp)) { Icon(Icons.Filled.Close, "Dismiss the AI draft", tint = soft, modifier = Modifier.size(14.dp)) }
+            IconButton(onClick = { vm.expandDraft(false) }, modifier = Modifier.size(28.dp)) { Icon(Icons.Filled.KeyboardArrowDown, "Collapse Neema's draft", tint = soft, modifier = Modifier.size(16.dp)) }
+            IconButton(onClick = vm::dismissDraft, modifier = Modifier.size(28.dp)) { Icon(Icons.Filled.Close, "Dismiss Neema's draft", tint = soft, modifier = Modifier.size(14.dp)) }
         }
         HorizontalDivider(color = if (ke.co.bethanyhouse.neema.core.ui.theme.Neema.colors.isDark) blue.border else Palette.Blue100)
         Box(Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
@@ -238,7 +238,7 @@ private fun DraftPanel(vm: ConversationsViewModel, state: ComposerUi) {
                     modifier = Modifier.fillMaxWidth(),
                 )
             } else {
-                Text(state.draftText.ifEmpty { "AI has a reply ready." }, fontSize = 12.sp, lineHeight = 18.sp, color = blue.fg)
+                Text(state.draftText.ifEmpty { "Neema has a reply ready." }, fontSize = 12.sp, lineHeight = 18.sp, color = blue.fg)
             }
         }
         Row(Modifier.padding(start = 12.dp, end = 12.dp, bottom = 10.dp).horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {

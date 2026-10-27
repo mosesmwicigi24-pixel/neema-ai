@@ -76,7 +76,7 @@ struct ComposerView: View {
                         Button { vm.expandDraft(true) } label: {
                             HStack(spacing: 8) {
                                 Text("🤖").font(.system(size: 14))
-                                Text("AI has a draft ready").font(NeemaFont.manrope(12, .semibold)).foregroundColor(blue.fg)
+                                Text("Neema has a draft ready").font(NeemaFont.manrope(12, .semibold)).foregroundColor(blue.fg)
                                 Spacer()
                                 Text("Tap to review ↑").font(NeemaFont.manrope(10)).foregroundColor(ink(Palette.blue500, dark: c.isDark))
                             }
@@ -85,7 +85,7 @@ struct ComposerView: View {
                             .roundedBorder(blue.border, radius: 12)
                         }
                         .buttonStyle(.plain)
-                        .accessibilityLabel("Review the AI draft")
+                        .accessibilityLabel("Review Neema's draft")
                         .padding(.bottom, 8)
                     }
                     if state.draftVisible && state.draftExpanded { DraftPanel(model: model) }
@@ -99,7 +99,7 @@ struct ComposerView: View {
                                         ProgressView().tint(Palette.blue400).scaleEffect(0.6).frame(width: 12, height: 12)
                                         Text("Generating…").font(NeemaFont.manrope(12))
                                     } else {
-                                        Text("🤖 Generate AI draft").font(NeemaFont.manrope(12))
+                                        Text("🤖 Ask Neema for a draft").font(NeemaFont.manrope(12))
                                     }
                                 }
                                 .foregroundColor(ink(Palette.blue600, dark: c.isDark).opacity(state.generatingDraft ? 0.5 : 1))
@@ -284,7 +284,7 @@ private struct DraftPanel: View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 6) {
                 Text("🤖").font(.system(size: 14))
-                Text("AI Draft").font(NeemaFont.manrope(12, .semibold)).foregroundColor(blue.fg).lineLimit(1)
+                Text("Neema's draft").font(NeemaFont.manrope(12, .semibold)).foregroundColor(blue.fg).lineLimit(1)
                 Spacer()
                 Button { vm.toggleDraftEditing() } label: {
                     Text(state.draftEditing ? "Preview" : "Edit").font(NeemaFont.manrope(10)).foregroundColor(soft).lineLimit(1)
@@ -292,9 +292,9 @@ private struct DraftPanel: View {
                 }
                 .buttonStyle(.plain)
                 Button { vm.expandDraft(false) } label: { Image(systemName: "chevron.down").font(.system(size: 13)).foregroundColor(soft).frame(width: 28, height: 28) }
-                    .accessibilityLabel("Collapse the AI draft")
+                    .accessibilityLabel("Collapse Neema's draft")
                 Button { vm.dismissDraft() } label: { Image(systemName: "xmark").font(.system(size: 12)).foregroundColor(soft).frame(width: 28, height: 28) }
-                    .accessibilityLabel("Dismiss the AI draft")
+                    .accessibilityLabel("Dismiss Neema's draft")
             }
             .padding(.horizontal, 12).padding(.vertical, 6)
             Hairline(color: c.isDark ? blue.border : Palette.blue100)
@@ -306,7 +306,7 @@ private struct DraftPanel: View {
                         .background(RoundedRectangle(cornerRadius: 8).fill(c.isDark ? c.bg3 : .white))
                         .roundedBorder(blue.border, radius: 8)
                 } else {
-                    Text(state.draftText.isEmpty ? "AI has a reply ready." : state.draftText).font(NeemaFont.manrope(12)).lineSpacing(3).foregroundColor(blue.fg)
+                    Text(state.draftText.isEmpty ? "Neema has a reply ready." : state.draftText).font(NeemaFont.manrope(12)).lineSpacing(3).foregroundColor(blue.fg)
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .textSelection(.enabled)
                 }

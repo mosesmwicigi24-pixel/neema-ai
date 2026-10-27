@@ -770,6 +770,38 @@ export const statsApi = {
     overview: () => get<ApiStats>("/admin/stats"),
 };
 
+// Neema's threads whose customer's last real message never got an answer
+// (owner, 2026-10-27) — they read as handled since Unread counts only threads
+// a person holds, so this is the list for someone to follow up.
+export interface UnansweredItem {
+    conversation_id: string;
+    name: string;
+    channel: string;
+    contact: string;
+    said: string;
+    at: string;
+    days_waiting: number;
+}
+
+export const reportsApi = {
+    unanswered: (minAgeH = 24) =>
+        get<{ count: number; min_age_h: number; items: UnansweredItem[] }>(
+            `/admin/reports/unanswered?min_age_h=${minAgeH}`),
+    /** The same list as a CSV file, saved by the browser. */
+    downloadUnanswered: async (minAgeH = 24) => {
+        const res = await fetch(`${BASE}/admin/reports/unanswered?min_age_h=${minAgeH}&format=csv`, {
+            headers: await authHeaders(), credentials: "include",
+        });
+        if (!res.ok) throw new Error(`GET /admin/reports/unanswered → ${res.status}: ${await res.text()}`);
+        const url = URL.createObjectURL(await res.blob());
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = "neema-unanswered.csv";
+        a.click();
+        setTimeout(() => URL.revokeObjectURL(url), 10_000);
+    },
+};
+
 // Send the approved WhatsApp invite template to a customer's number, opening a
 // WhatsApp thread with someone who reached us on Messenger/Facebook.
 export const whatsappApi = {
