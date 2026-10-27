@@ -28,6 +28,45 @@ def _nairobi_daypart() -> str:
 MUKURU_SEND_ISO = {"ZA", "GB", "ZW", "ZM", "MW", "BW", "LS", "UG", "RW"}
 
 
+def official_mpesa_numbers() -> list[str]:
+    """Our M-Pesa receiving lines, as configured (settings.official_mpesa_numbers)."""
+    from app.core.config import settings
+    raw = getattr(settings, "official_mpesa_numbers", "") or ""
+    return [n.strip() for n in raw.split(",") if n.strip()]
+
+
+def payment_channels_block(*, kenya: bool = False) -> str:
+    """Every way a customer may pay us — so a real payment to our own line is
+    never taken for a stranger's (owner, 2026-10-27: Neema told a pastor his
+    KES 2,500 to our 0727 891 989 went "to a personal M-Pesa number" and that
+    someone was "impersonating us"). The same for every customer in a market
+    (Kenya / abroad): no per-customer text, so the rules block stays one
+    cached prefix per market bucket."""
+    lines = official_mpesa_numbers()
+    mpesa = (" and ".join(lines) + " (Send Money)") if lines else ""
+    return (
+        "\n\nOUR OFFICIAL PAYMENT CHANNELS — money sent through ANY of these "
+        "reaches Bethany House:\n"
+        "- The secure M-Pesa payment link from `create_order` (paybill checkout).\n"
+        + (f"- M-Pesa to our own lines: {mpesa}. M-Pesa shows the NAME the line is "
+           "registered to — a person's name. That is still us: a payment to these "
+           "numbers is a payment to Bethany House.\n" if mpesa else "")
+        # Kenyans pay by M-Pesa (owner, 2026-08-22): the international rails
+        # are never offered to them — bank is the only other door at home.
+        + ("- Bank transfer (a colleague gives the account details — never invent "
+           "them).\n" if kenya else
+           "- Bank transfer, Western Union and MoneyGram (a colleague gives the "
+           "receiving details — never invent them).\n")
+        + "- When a customer shows a payment to one of these, THANK them, note the "
+        "M-Pesa code, and say the team will match it to their order. NEVER call "
+        "it a personal number, never say it is not ours, never suggest fraud, a "
+        "scam or impersonation.\n"
+        "- If money went to a number that is NOT on this list, say gently that it "
+        "isn't one of our lines and a colleague will look into it with them — "
+        "no accusations, no alarm."
+    )
+
+
 def build_system_prompt(*, country_iso: str = "", currency: str = "KES",
                         directives: str = "", house_voice: str = "",
                         offer: str = "") -> str:
@@ -135,7 +174,7 @@ def build_system_prompt(*, country_iso: str = "", currency: str = "KES",
             "improvise a link, and never present a reference code as an order "
             "number unless a tool gave you that order number."
         )
-    business += contacts
+    business += contacts + payment_channels_block(kenya=is_kenya)
     # Standing orders — the owner's live steering ("push copes this week").
     # Steers EMPHASIS only; pricing, payment and stock rules always win.
     d = (directives or "").strip()[:1800]     # standing orders (600) + learned rules (1200)
@@ -266,7 +305,8 @@ def build_system_prompt(*, country_iso: str = "", currency: str = "KES",
             "  share the payment details. Only on their yes: call `create_order`, give\n"
             "  the order number, and send the secure M-Pesa payment link it returns —\n"
             "  that link is how they pay (the paybill checkout Kenyans know). Never send\n"
-            "  the link before they say yes, and never ask them to pay a personal number.\n"
+            "  the link before they say yes, and never ask them to pay any number that is\n"
+            "  not one of OUR OFFICIAL PAYMENT CHANNELS.\n"
             "- THEY MAY PAY LITTLE BY LITTLE (owner's standing offer). Nobody has to\n"
             "  find the whole amount at once: they can pay in instalments, as they are\n"
             "  able, through that same link/paybill until the purchase is complete —\n"

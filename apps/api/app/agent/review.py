@@ -983,6 +983,44 @@ def variant_issues(ask: str, answer: str, row: dict | None, currency: str = "USD
     return out
 
 
+_DOUBTS_OUR_LINE_RE = re.compile(
+    r"\bpersonal\s+(?:m-?pesa\s+)?(?:number|line|account)|not\s+(?:our|bethany\s+house'?s?)\s+"
+    r"(?:official\s+)?(?:line|number|account|till|paybill)|not\s+(?:an?\s+)?official|"
+    r"impersonat|\bscam|\bfraud|wrong\s+number|not\s+(?:to\s+)?bethany\s+house",
+    re.IGNORECASE)
+
+
+def _last9(digits: str) -> str:
+    return digits[-9:] if len(digits) >= 9 else ""
+
+
+def our_lines_named(text: str) -> list[str]:
+    """Our official M-Pesa lines that `text` names (any form: 0727…, 254727…,
+    +254 727 …) — what a pasted M-Pesa confirmation carries."""
+    from app.agent.prompt import official_mpesa_numbers
+    ours = {_last9("".join(ch for ch in n if ch.isdigit())): n for n in official_mpesa_numbers()}
+    ours.pop("", None)
+    said = {_last9(m.replace(" ", "")) for m in re.findall(r"\+?\d[\d ]{8,15}\d", text or "")}
+    return [ours[k] for k in said if k in ours]
+
+
+def payment_line_issues(comment: str, answer: str, transcript: list | None = None) -> list[dict]:
+    """A payment to OUR OWN line must never be called a stranger's (owner,
+    2026-10-27: a pastor's KES 2,500 to 0727 891 989 was answered 'that went
+    to a personal M-Pesa number … someone impersonating us'). HARD: the
+    reply is rewritten before it goes."""
+    said = (comment or "") + " " + " ".join(t for r, t in transcript_text(transcript, limit=6)
+                                           if r == "user")
+    named = our_lines_named(said)
+    if not named or not _DOUBTS_OUR_LINE_RE.search(answer or ""):
+        return []
+    return [{"kind": "payment_line", "hard": True,
+             "text": f"the payment went to OUR official line {named[0]} — that IS Bethany House "
+                     "(M-Pesa shows the name the line is registered to). Thank them, note the "
+                     "M-Pesa code, say the team will match it to their order; never call it "
+                     "personal, unofficial, a scam, fraud or impersonation"}]
+
+
 def rule_findings(comment: str, answer: str, seen: list,
                   known_figures: set[float] | frozenset[float] = frozenset(), *,
                   tool_results: list | None = None, transcript: list | None = None,
@@ -1046,6 +1084,7 @@ def rule_findings(comment: str, answer: str, seen: list,
     if sold is not None:
         out.extend(variant_issues(comment, answer, sold, currency))
     out.extend(colour_issues(comment, answer))
+    out.extend(payment_line_issues(comment, answer, transcript))
     out.extend(domain_issues(comment, answer, allow))
     out.extend(gift_issues(answer, allow))
     out.extend(context_issues(comment, answer, seen, post_product=post_product,

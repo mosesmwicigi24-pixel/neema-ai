@@ -254,6 +254,13 @@ class Settings(BaseSettings):
     whatsapp_handoff_number: str = "+254727891989"
     # Second official line (calls) — quoted verbatim in prompts alongside the above.
     whatsapp_handoff_alt: str = "+254785490805"
+    # The M-Pesa numbers that RECEIVE our payments (owner, 2026-10-27: "the
+    # +254727891989 and +254785490805 are our official numbers and payment made
+    # via these lines are received"). M-Pesa shows the name the line is
+    # registered to — a person's name — so without this Neema called a real
+    # payment to our own line "a personal number" and "impersonation".
+    # Comma-separated; a box env value overrides.
+    official_mpesa_numbers: str = "+254727891989,+254785490805"
     # ── Facebook/Instagram comment engagement (comment → public reply + DM) ──
     # When true, a NEW comment on a Page post/reel/ad fires BOTH a short public
     # acknowledgement AND a private reply that opens a Messenger DM (where Neema
