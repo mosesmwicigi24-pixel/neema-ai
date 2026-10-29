@@ -783,7 +783,28 @@ export interface UnansweredItem {
     days_waiting: number;
 }
 
+export interface RecoveryJobResult {
+    job: "cart_recovery" | "payment_followup" | "reengage" | "quote_follow_up";
+    sent: number;
+    waiting: number;
+    settled: number;
+    replied: number;
+    converted: number;
+    reply_rate: number | null;
+    convert_rate: number | null;
+}
+
+export interface RecoveryResults {
+    days: number;
+    reply_hours: number;
+    order_days: number;
+    tracking_since: string | null;
+    jobs: RecoveryJobResult[];
+}
+
 export const reportsApi = {
+    /** What each kind of follow-up achieved: sent, answered within 72 h, then ordered / paid. */
+    recovery: (days = 30) => get<RecoveryResults>(`/admin/reports/recovery?days=${days}`),
     unanswered: (minAgeH = 24) =>
         get<{ count: number; min_age_h: number; items: UnansweredItem[] }>(
             `/admin/reports/unanswered?min_age_h=${minAgeH}`),

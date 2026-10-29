@@ -263,6 +263,19 @@ async def list_conversations(
     return {"items": await _conversation_rows(db, conv_ids=ids), "next_cursor": nxt}
 
 
+@router.get("/reports/recovery")
+async def report_recovery(
+    days: int = 30,
+    db: AsyncSession = Depends(get_db),
+    agent: Agent = Depends(get_current_agent),
+):
+    """What Neema's follow-ups achieved (owner, 2026-10-29): per job, messages
+    sent in the last `days`, how many customers wrote back within 72 hours and
+    how many then ordered (or, for payment reminders, paid). Counts only."""
+    from app.services import recovery_results
+    return await recovery_results.results(db, days)
+
+
 @router.get("/reports/unanswered")
 async def report_unanswered(
     min_age_h: int = 24,
