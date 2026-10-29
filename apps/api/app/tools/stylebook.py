@@ -149,6 +149,12 @@ def usable_answer(text: str | None) -> bool:
     return 1 <= n <= 60
 
 
+def is_neemas_own(msg) -> bool:
+    if ((getattr(msg, "raw_meta", None) or {}).get("from_ai_draft")) == "unchanged":
+        return True
+    return "—" in (getattr(msg, "text", None) or "")
+
+
 def usable_question(text: str | None) -> bool:
     """A question an example can stand on: words, not a phone number pasted
     on its own or a run-together line nobody could read."""
@@ -183,6 +189,11 @@ async def collect_pairs(db) -> tuple[list[dict], list[int], list[int]]:
     )).scalars().all()
     # Internal notes (briefings etc.) are team-facing — never customer voice.
     human = [m for m in human if (m.media_type or "") != "note"]
+    # Neema's own words sent by a person are not the team's voice (owner,
+    # 2026-10-30): a draft sent unchanged is marked at send time, and before
+    # the marker existed her long dash gives it away — Neema writes "—" in two
+    # messages of three, the team's phones almost never (54 of 2,668).
+    human = [m for m in human if not is_neemas_own(m)]
 
     human_wc = [_words(m.text) for m in human if _clean(m.text)]
 

@@ -122,7 +122,8 @@ def test_the_prompt_closes_instead_of_chatting():
     assert "CLOSE, DON'T CHAT (owner rule, 2026-09-15)" in p
     assert "Every question you ask must move the order" in p
     assert '"which colour would you prefer?" on its own' in p
-    assert "Kindly place your order — let us know the colour and how many you need. How soon do you want the shirt?" in p
+    assert "is ZMW 900. Kindly place your order — which colour would you like?" in p
+    assert "how many and how soon come in the replies after, one at a time" in p
     # one piece stays the default, and "how many" is part of the order, not a gate
     assert "ONE PIECE IS THE DEFAULT" in p
     assert 'Never make "how many?" the gate before a price' in p

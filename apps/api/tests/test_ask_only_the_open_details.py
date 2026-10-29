@@ -124,12 +124,11 @@ def test_the_prompt_asks_only_what_the_hub_cannot_answer():
     assert "THERE the colour and the size or measurements are the open details" in p
     assert "Every search result says which it is (`ask_next`)" in p
     assert ("The Silver Communion Tray is KES 18,000 — it holds 40 cups and comes with its lid, "
-            "holder and basin. Kindly place your order — tell us how many you need and your city. "
-            "How soon do you want it?") in p
+            "holder and basin. How many do you need?") in p           # one ask (owner, 2026-10-30)
     # the Swahili specifics and the Swahili stock close
     assert '"inabeba vikombe 40", "inakuja na kifuniko, kishikilio na beseni"' in p
     assert '("mfuko wa kumshika" was invented)' in p
-    assert "Tafadhali weka oda yako — tuambie idadi unayohitaji na mji wako. Unaihitaji lini?" in p
+    assert 'close asks no colour, and one thing: "Unahitaji ngapi?"' in p
 
 
 def test_comment_rules_carry_the_same_split():

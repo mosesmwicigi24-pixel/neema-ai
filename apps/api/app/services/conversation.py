@@ -557,6 +557,45 @@ async def _remember_reply_id(redis, key, result: dict):
             pass
 
 
+# The last AI draft offered to a person on this thread (generate-draft, the
+# copilot banner). A send that matches it word for word is Neema's text, not
+# the team's — marked on the row so the house voice never learns her own words
+# back as "how the team speaks" (owner, 2026-10-30).
+DRAFT_KEY = "draft:last:{}"
+DRAFT_TTL = 24 * 3600
+
+
+def _same_words(a: str, b: str) -> bool:
+    return " ".join((a or "").split()) == " ".join((b or "").split())
+
+
+async def remember_draft(redis, conv_id, draft: str) -> None:
+    """Best-effort: a draft that can't be remembered is only unmarked."""
+    if redis is None or not (draft or "").strip():
+        return
+    try:
+        await redis.set(DRAFT_KEY.format(conv_id), draft, ex=DRAFT_TTL)
+    except Exception:
+        pass
+
+
+async def _draft_origin(redis, conv_id, sent: str) -> str | None:
+    """'unchanged' / 'edited' when a draft was offered on this thread, else
+    None. The draft is used once: the next message is the person's own."""
+    if redis is None:
+        return None
+    try:
+        key = DRAFT_KEY.format(conv_id)
+        draft = await redis.get(key)
+        if draft is None:
+            return None
+        await redis.delete(key)
+        draft = draft.decode() if isinstance(draft, bytes) else str(draft)
+        return "unchanged" if _same_words(draft, sent) else "edited"
+    except Exception:
+        return None
+
+
 async def send_agent_reply(
     db: AsyncSession,
     conv_id: str,
@@ -641,6 +680,9 @@ async def send_agent_reply(
     q_sender = None
     if quoted is not None:
         q_sender = quoted.sender.value if hasattr(quoted.sender, "value") else str(quoted.sender)
+    # What the person typed (the English original under a translation) is what
+    # is compared with the draft they were offered.
+    origin = await _draft_origin(redis, conv.id, (original_text or "").strip() or text)
     msg = Message(
         wa_id=conv.wa_id,
         external_id=conv.external_id,
@@ -660,6 +702,7 @@ async def send_agent_reply(
         # thread's gray reading-glass line renders under the sent bubble.
         translated_text=((original_text or "").strip() or None),
         translated_from=((original_lang or "").strip()[:24] or None),
+        raw_meta=({"from_ai_draft": origin} if origin else None),
     )
     # It went out. From here nothing may report a failed send: a DB hiccup
     # answered as an error made the agent press Send again and the customer

@@ -1,12 +1,11 @@
 """Owner's rules (2026-08-12): a customer who says "I'll get back to you".
 
-Three moves, warmly, in one short message: thank them and say we'll be waiting;
-ask whether there's a time to remind them (booking it as a real promise); and
-tell them they may pay little by little until the purchase is complete.
-
-"Later" is usually money, said politely. The instalment offer removes that
-reason without discounting a shilling — and the scheduled check-in means the
-sale returns to us instead of relying on the customer to remember.
+Thank them and say we'll be waiting, and ask whether there's a time to remind
+them (booking it as a real promise). The instalment offer joins only when money
+is the reason they gave (owner, 2026-10-30: it is for when price or budget
+comes up, never a tail) — then it removes that reason without discounting a
+shilling. The scheduled check-in means the sale returns to us instead of
+relying on the customer to remember.
 """
 import app.main  # noqa: F401 — registers models before agent imports
 from app.agent.prompt import build_system_prompt
@@ -43,9 +42,21 @@ def test_after_the_deferral_she_stops():
     assert "the scheduled check-in is how we return" in flat
 
 
-def test_the_instalment_line_is_a_statement_not_a_second_question():
+def test_the_instalment_line_comes_only_when_money_is_the_reason():
+    """Owner, 2026-10-30: the offer is for when price or budget comes up —
+    a plain "I'll come back" gets thanks and the reminder question only."""
     flat = _flat()
-    assert "TELL them, as a statement (not a second question)" in flat
+    assert "ONLY IF money is the reason they gave" in flat
+    assert "TELL them, as a statement, that they may pay little by little" in flat
+    assert 'A plain "I\'ll come back" gets no instalment line' in flat
+
+
+def test_the_payment_rule_offers_instalments_only_on_price_or_budget():
+    for iso, ccy in (("KE", "KES"), ("", "USD"), ("ZM", "ZMW")):
+        flat = _flat(country_iso=iso, currency=ccy)
+        assert "they say they'll come back later" not in flat, ccy
+        assert "ONLY when price or budget comes up" in flat, ccy
+        assert "never as a tail" in flat.lower(), ccy
 
 
 # ── the instalment offer, in both payment worlds ─────────────────────────────

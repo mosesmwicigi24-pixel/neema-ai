@@ -22,8 +22,8 @@ def _p(**kw):
 def test_the_prompt_reads_as_one_mind():
     p = _p(country_iso="", currency="USD", offer="Harvest Offer — 10% off")
     ke = _p(country_iso="KE", currency="KES")
-    # the one-question rule names its two sanctioned shapes
-    assert "The ONE sanctioned shape" in p and 'choices ("gold or silver?", "the 200 or the 500 pack?")' in p
+    # the one-question rule: one ask per reply, and the hub's fixed choices
+    assert "ONE ASK PER REPLY (owner, 2026-10-30" in p and 'choices ("gold or silver?", "the 200 or the 500 pack?")' in p
     # two readings, one reply — never a silent pick
     assert "TWO READINGS, ONE REPLY" in p and "never a silent pick, least of all the dearer" in p
     # colour truth: sewn takes any colour; a stock line has its own

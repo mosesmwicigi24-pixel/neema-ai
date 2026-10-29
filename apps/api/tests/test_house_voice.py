@@ -415,3 +415,61 @@ def test_the_takeover_lessons_are_in_the_prompt():
         assert rule in flat, rule
     # the team's own size is the target now
     assert "1–2 short sentences, roughly 20 words" in flat
+
+
+# ── Neema's own drafts are not the team's voice (owner, 2026-10-30) ──────────
+
+class _Redis:
+    def __init__(self):
+        self.d = {}
+
+    async def set(self, k, v, ex=None):
+        self.d[k] = v
+
+    async def get(self, k):
+        return self.d.get(k)
+
+    async def delete(self, k):
+        self.d.pop(k, None)
+
+
+def test_a_draft_sent_word_for_word_is_marked_unchanged_and_used_once():
+    from app.services.conversation import remember_draft, _draft_origin
+    r = _Redis()
+    asyncio.run(remember_draft(r, "c1", "The silver tray is $180. How many do you need?"))
+    assert asyncio.run(_draft_origin(r, "c1", "The silver tray is $180.  How many do you need?")) \
+        == "unchanged"                                   # whitespace is not an edit
+    assert asyncio.run(_draft_origin(r, "c1", "anything typed next")) is None
+
+
+def test_an_edited_draft_is_marked_edited():
+    from app.services.conversation import remember_draft, _draft_origin
+    r = _Redis()
+    asyncio.run(remember_draft(r, "c1", "The silver tray is $180 — it holds 40 cups."))
+    assert asyncio.run(_draft_origin(r, "c1", "The silver tray is 180USD")) == "edited"
+
+
+def test_no_redis_or_no_draft_marks_nothing():
+    from app.services.conversation import _draft_origin
+    assert asyncio.run(_draft_origin(None, "c1", "hi")) is None
+    assert asyncio.run(_draft_origin(_Redis(), "c1", "hi")) is None
+
+
+def test_every_draft_path_remembers_what_it_offered():
+    import inspect
+    from app.routers import admin
+    from app.services import copilot, conversation
+    assert "remember_draft(request.app.state.redis, conv.id, draft)" in inspect.getsource(admin.generate_draft)
+    assert "remember_draft(redis, conv.id, draft)" in inspect.getsource(copilot._human_held)
+    src = inspect.getsource(conversation.send_agent_reply)
+    assert 'raw_meta=({"from_ai_draft": origin} if origin else None)' in src
+
+
+def test_neemas_own_words_never_become_the_house_voice():
+    from app.tools.stylebook import is_neemas_own
+    def m(text, meta=None):
+        return types.SimpleNamespace(text=text, raw_meta=meta)
+    assert is_neemas_own(m("The tray is $180.", {"from_ai_draft": "unchanged"}))
+    assert is_neemas_own(m("Amen, Pastor — blessings to you too."))     # her long dash
+    assert not is_neemas_own(m("The tray is 180USD", {"from_ai_draft": "edited"}))
+    assert not is_neemas_own(m("moi avenue sonalux building 7th floor room 18"))

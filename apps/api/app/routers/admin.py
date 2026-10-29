@@ -1394,7 +1394,10 @@ async def generate_draft(
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"Draft generation failed: {str(e)}")
 
-    return {"draft": (draft or "").strip()}
+    draft = (draft or "").strip()
+    from app.services.conversation import remember_draft
+    await remember_draft(request.app.state.redis, conv.id, draft)
+    return {"draft": draft}
 
 
 @router.post("/conversations/{conv_id}/note")
