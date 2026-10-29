@@ -34,6 +34,18 @@ _META_DM = ("messenger", "instagram")
 # after three attempts handed to a person, on every channel she answers.
 _SWEPT = _META_DM + ("whatsapp",)
 
+# What runtime._send_hold_line stamps on the welcome-and-contacts line it
+# sends when a turn fails. That line is not an answer: the customer's message
+# is still waiting, so every "latest message" read here looks past it. Rows
+# sent before the stamp existed are not recognised — they predate the sweep's
+# 23 h window anyway.
+HOLD_LINE_KIND = "hold_line"
+HOLD_LINE_META = {"v": 1, "kind": HOLD_LINE_KIND}
+
+
+def _not_a_hold_line():
+    return func.coalesce(Message.raw_meta["kind"].astext, "") != HOLD_LINE_KIND
+
 
 def _answerable_turn(text: str | None, media_type: str | None, media_url: str | None,
                      meta: dict | None = None):
@@ -76,7 +88,7 @@ async def _unanswered_dms(since, until, limit: int):
     async with AsyncSessionLocal() as db:
         latest = (
             select(Message.conversation_id, func.max(Message.created_at).label("m"))
-            .where(Message.channel.in_(_META_DM))
+            .where(Message.channel.in_(_META_DM), _not_a_hold_line())
             .group_by(Message.conversation_id).subquery()
         )
         q = (
@@ -325,8 +337,21 @@ async def sweep_missed_replies(redis, *, min_age_s: int = 90, max_age_h: int = 2
     regenerated a fully-billed reply every ~5 minutes for up to 23 hours
     (~276 model turns) for ONE undeliverable thread. Three strikes, then the
     thread goes to a human with the reason, which also removes it from the
-    sweep's query for good."""
+    sweep's query for good.
+
+    While the AI account itself is down (out of credit, key rejected, model
+    rejected, the daily ceiling) no turn can succeed on ANY thread, so the
+    sweep stands down instead of burning every waiting customer's three
+    strikes in fifteen minutes and handing them to a person with the wrong
+    reason ("check the page connection"). The first completed turn after the
+    fix clears that state, and the next pass answers what is still waiting."""
     from app.agent.runtime import _run_and_send_meta, _is_paused, escalate_to_human, silenced_since
+    from app.services.agent_health import ai_down
+
+    down = await ai_down(redis)
+    if down:
+        _log.info("missed-reply sweep standing down: the AI account is down (%s)", down)
+        return 0
 
     now = datetime.now(timezone.utc)
     young = now - timedelta(seconds=min_age_s)      # give the normal path its chance
@@ -335,7 +360,7 @@ async def sweep_missed_replies(redis, *, min_age_s: int = 90, max_age_h: int = 2
     async with AsyncSessionLocal() as db:
         latest = (
             select(Message.conversation_id, func.max(Message.created_at).label("m"))
-            .where(Message.channel.in_(_SWEPT))
+            .where(Message.channel.in_(_SWEPT), _not_a_hold_line())
             .group_by(Message.conversation_id).subquery()
         )
         q = (
@@ -399,7 +424,7 @@ async def sweep_missed_replies(redis, *, min_age_s: int = 90, max_age_h: int = 2
             where = ((Message.conversation_id == conv.id) if channel == "whatsapp"
                      else and_(Message.channel == channel, Message.external_id == ext))
             still = (await db2.execute(
-                select(Message.direction).where(where)
+                select(Message.direction).where(where, _not_a_hold_line())
                 .order_by(Message.created_at.desc()).limit(1))).scalar_one_or_none()
             if still != MsgDirection.inbound:
                 continue
@@ -435,17 +460,32 @@ async def sweep_missed_replies(redis, *, min_age_s: int = 90, max_age_h: int = 2
             _log.warning("missed-reply gave up after 3 attempts for %s/%s — "
                          "handed to a human", channel, ext)
             continue
+        went = False
         try:
             if channel == "whatsapp":
                 from app.agent.runtime import _run_and_send
-                went = await _run_and_send(redis, ext, text or "", media)
+                went = await _run_and_send(redis, ext, text or "", media, hold_line=False)
             else:
                 went = await _run_and_send_meta(redis, channel, ext, text or "",
-                                                page_id=page_id, media=media)
+                                                page_id=page_id, media=media,
+                                                hold_line=False)
             if went:
                 sent += 1                       # count only messages that truly went out
         except Exception as exc:
             _log.warning("missed-reply send failed for %s/%s: %s", channel, ext, exc)
+        if not went:
+            down = await ai_down(redis)
+            if down:
+                # The account failed, not this thread: give the strike back
+                # and stop — every other row would fail the same way.
+                try:
+                    if redis is not None:
+                        await redis.decr(f"agent:missed:tries:{msg.id}")
+                except Exception:
+                    pass
+                _log.info("missed-reply sweep stopped mid-pass: the AI account is down (%s)",
+                          down)
+                break
     if sent:
         _log.info("missed-reply sweep answered %d unattended DM(s)", sent)
     return sent

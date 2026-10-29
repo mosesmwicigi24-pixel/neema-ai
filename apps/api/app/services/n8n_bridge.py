@@ -1578,11 +1578,13 @@ async def latest_inbound_message(db, wa_id: str) -> dict | None:
 
 
 async def save_outbound_message(db, redis, wa_id: str, text: str,
-                                waba_msg_id: str | None = None) -> None:
+                                waba_msg_id: str | None = None,
+                                raw_meta: dict | None = None) -> None:
     """Persist an AI outbound message + broadcast it (used by the Tier 2 agent,
     which sends its own reply rather than going through the Tier 1 outbound gate).
     Pass the wamid `_send_waba` returned so a customer's reply-quote of this
-    message can resolve back to the row."""
+    message can resolve back to the row. `raw_meta` says what the row IS when
+    it is not an ordinary reply (the hold line)."""
     wa_id = _normalize_wa_id(wa_id)
     conv = (await db.execute(
         select(Conversation).where(Conversation.wa_id == wa_id)
@@ -1599,7 +1601,7 @@ async def save_outbound_message(db, redis, wa_id: str, text: str,
     db.add(Message(
         wa_id=wa_id, conversation_id=conv.id, person_id=conv.person_id, channel="whatsapp",
         direction=MsgDirection.outbound, sender=MsgSender.ai, text=text,
-        waba_msg_id=waba_msg_id,
+        waba_msg_id=waba_msg_id, raw_meta=raw_meta,
     ))
     await db.commit()
     try:
@@ -1612,7 +1614,8 @@ async def save_outbound_message(db, redis, wa_id: str, text: str,
 
 
 async def save_outbound_channel_message(db, redis, channel: str, external_id: str, text: str,
-                                        reply_to_comment_id: str | None = None) -> None:
+                                        reply_to_comment_id: str | None = None,
+                                        raw_meta: dict | None = None) -> None:
     """Persist an AI outbound reply for a non-WhatsApp channel (Messenger/IG/FB) and
     broadcast it, so it shows in the unified inbox. Keyed on (channel, external_id).
     Pass reply_to_comment_id for a PUBLIC comment reply so the inbox can thread it
@@ -1624,6 +1627,7 @@ async def save_outbound_channel_message(db, redis, channel: str, external_id: st
         person_id=conv.person_id, conversation_id=conv.id,
         direction=MsgDirection.outbound, sender=MsgSender.ai, text=text,
         comment_context=({"reply_to": reply_to_comment_id} if reply_to_comment_id else None),
+        raw_meta=raw_meta,
     ))
     conv.last_message_at = datetime.now(timezone.utc)
     conv.last_message_preview = (text or "")[:100]

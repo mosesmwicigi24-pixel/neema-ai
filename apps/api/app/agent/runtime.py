@@ -2223,7 +2223,14 @@ async def _send_hold_line(redis, channel: str, key: str) -> None:
     Deliberately NO automatic retry of the failed turn: a turn that died
     mid-loop may already have executed tools (a cart add, an order), and
     re-running it would repeat them. The missed-reply sweeper re-engages the
-    thread once the underlying cause clears."""
+    thread once the underlying cause clears.
+
+    For that the row is MARKED (raw_meta kind "hold_line"). Unmarked, it was
+    the thread's newest message, so the sweeper — which looks for a customer
+    message still waiting — read the thread as answered and never came back:
+    of 577 hold lines sent in six out-of-credit outages (2026-08-31 →
+    2026-10-22), 274 threads heard nothing more and only 2 got an answer
+    once credit was restored, though 322 were still young enough to sweep."""
     try:
         if redis is not None:
             try:
@@ -2234,18 +2241,21 @@ async def _send_hold_line(redis, channel: str, key: str) -> None:
                 pass
         from app.database import AsyncSessionLocal
         from app.services import n8n_bridge as svc
+        from app.services.reply_sweeper import HOLD_LINE_META
         text = _hold_line(channel)
         if channel == "whatsapp":
             wamid = await svc._send_waba(key, text)
             async with AsyncSessionLocal() as db:
                 await svc.save_outbound_message(db, redis, key, text,
-                                                waba_msg_id=wamid)
+                                                waba_msg_id=wamid,
+                                                raw_meta=dict(HOLD_LINE_META))
         else:
             from app.services.meta_send import send_to_channel
             await send_to_channel(channel, key, text)
             async with AsyncSessionLocal() as db:
                 await svc.save_outbound_channel_message(db, redis, channel, key,
-                                                        text)
+                                                        text,
+                                                        raw_meta=dict(HOLD_LINE_META))
         try:
             async with AsyncSessionLocal() as db:
                 from app.models.conversation import Conversation
@@ -2295,7 +2305,10 @@ async def _is_echo(db, channel: str, key: str, reply: str,
 
 
 async def _run_and_send(redis, wa_id: str, text: str, media: dict | None = None,
-                        *, deferred: bool = False) -> bool:
+                        *, deferred: bool = False, hold_line: bool = True) -> bool:
+    """`hold_line=False` for a retry (the sweeper): the customer already had
+    their hold line when the live turn failed — a retry that fails again must
+    not send them a second one."""
     from app.database import AsyncSessionLocal
     from app.services import n8n_bridge as svc
     try:
@@ -2341,7 +2354,8 @@ async def _run_and_send(redis, wa_id: str, text: str, media: dict | None = None,
         # the only trace was this log line.
         from app.services.agent_health import record_turn_failure
         await record_turn_failure(redis, wa_id, exc)
-        await _send_hold_line(redis, "whatsapp", wa_id)
+        if hold_line:
+            await _send_hold_line(redis, "whatsapp", wa_id)
         return False
 
 
@@ -2524,9 +2538,11 @@ async def _hear_voice_note(text: str, media: dict | None, *, channel: str = "",
 
 async def _run_and_send_meta(redis, channel: str, external_id: str, text: str,
                              page_id: str | None = None,
-                             media: dict | None = None, *, deferred: bool = False) -> bool:
+                             media: dict | None = None, *, deferred: bool = False,
+                             hold_line: bool = True) -> bool:
     """Generate + send one Meta reply. Returns True only when it actually
-    reached the customer (so the sweep counts real sends, not attempts)."""
+    reached the customer (so the sweep counts real sends, not attempts).
+    `hold_line=False` for a retry, as in `_run_and_send`."""
     from app.database import AsyncSessionLocal
     from app.services.meta_send import send_to_channel, send_typing_on
     from app.services import n8n_bridge as svc
@@ -2592,7 +2608,8 @@ async def _run_and_send_meta(redis, channel: str, external_id: str, text: str,
             _log.exception("tier2 meta turn failed for %s/%s", channel, external_id)
             from app.services.agent_health import record_turn_failure
             await record_turn_failure(redis, external_id, exc)
-            await _send_hold_line(redis, channel, external_id)
+            if hold_line:
+                await _send_hold_line(redis, channel, external_id)
         return False
 
 
