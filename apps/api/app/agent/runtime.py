@@ -1466,7 +1466,10 @@ async def run_turn(db: AsyncSession, redis, wa_id: str, user_text: str, llm: LLM
         # no other country is quoted in KES — the tools' own currency, not a
         # hope that the writer passes currency="KES" — and the thread stays
         # KES afterwards.
-        currency = await _kes_for_swahili(redis, channel, key, user_text or "", currency)
+        # Only for a customer no evidence locates: a Tanzanian on record
+        # writes Swahili too, and stays in their own market.
+        if not loc.get("country_iso"):
+            currency = await _kes_for_swahili(redis, channel, key, user_text or "", currency)
         # The ad they tapped, when there is no post to carry: "that set" in
         # their first message is the product this ad shows.
         ad_headline = (await _ad_headline(db, channel, key)) if is_meta else ""
@@ -1931,6 +1934,7 @@ async def run_turn(db: AsyncSession, redis, wa_id: str, user_text: str, llm: LLM
 
     ctx = ToolContext(db=db, redis=redis, wa_id=key, channel=channel,
                       currency=currency, usd_rate=settings.usd_kes_rate,
+                      market_locked=bool(loc.get("country_iso")),
                       seen_products=(product_sink if product_sink is not None else []),
                       read_only=read_only)
     totals = {"input_tokens": 0, "output_tokens": 0, "cache_read_tokens": 0,
