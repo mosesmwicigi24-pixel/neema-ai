@@ -23,10 +23,15 @@ _log = logging.getLogger("neema.deals")
 
 # Neema's own "I owe you an answer" phrasings — her promise creates the
 # commitment. Conservative on purpose: false positives nag customers.
+# "check" is NOT "check in / check back / check up": "I'll check in with you on
+# the 30th" is the customer's own date (schedule_check_in books it), and read
+# as a promise it sent "checking in as promised" 3 hours later — 61 of 184
+# promise follow-ups in 30 days (owner review, 2026-10-29).
+_CHECK = r"check(?!\s+(?:in|back|up)\b)"
 _PROMISE_RE = re.compile(
-    r"\b(i(?:'| wi)ll (?:check|confirm|find out|enquire|inquire|verify|ask)"
+    rf"\b(i(?:'| wi)ll (?:{_CHECK}|confirm|find out|enquire|inquire|verify|ask)"
     r"(?:[^.!\n]{0,80}?)(?:get back|revert|let you know|update you)?"
-    r"|let me (?:check|confirm|find out|enquire|verify)[^.!\n]{0,80})",
+    rf"|let me (?:{_CHECK}|confirm|find out|enquire|verify)[^.!\n]{{0,80}})",
     re.IGNORECASE)
 
 PROMISE_FOLLOW_UP_HOURS = 3
