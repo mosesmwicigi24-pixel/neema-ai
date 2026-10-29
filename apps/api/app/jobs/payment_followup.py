@@ -300,6 +300,10 @@ async def _handle(redis, group: dict, *, send: bool, write: bool = True) -> dict
         res["sent"] = True
     except Exception as e:
         res["error"] = f"send failed: {str(e)[:160]}"
+        return res
+    from app.services.recovery_results import record_send
+    await record_send("payment_followup", conv,
+                      ref=",".join(str(o.hub_order_id) for o in due if o.hub_order_id))
     return res
 
 

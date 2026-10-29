@@ -3,7 +3,7 @@
 
 import React, { useState, useEffect, useCallback } from "react";
 import { fmtCurrency, fmtDate, timeAgo, formatPhone, displayName } from "@/lib/utils";
-import { apiErrorDetail, conversationsApi, mapConversation, reportsApi, type UnansweredItem } from "@/lib/api";
+import { apiErrorDetail, conversationsApi, mapConversation, reportsApi, type RecoveryResults, type UnansweredItem } from "@/lib/api";
 import type { Conversation, Agent, Order, SharedViewProps } from "@/types";
 
 interface ReportsViewProps extends SharedViewProps {
@@ -12,10 +12,10 @@ interface ReportsViewProps extends SharedViewProps {
 }
 
 type Range = "7d" | "30d" | "90d" | "custom";
-type ReportTab = "overview" | "conversations" | "orders" | "agents" | "unanswered";
+type ReportTab = "overview" | "conversations" | "orders" | "agents" | "unanswered" | "followups";
 const TAB_LABEL: Record<ReportTab, string> = {
     overview: "Overview", conversations: "Conversations", orders: "Orders", agents: "Agents",
-    unanswered: "Never answered",
+    unanswered: "Never answered", followups: "Follow-ups",
 };
 
 function rangeLabel(r: Range) {
@@ -150,6 +150,76 @@ function UnansweredPanel({ onToast }: { onToast: ReportsViewProps["onToast"] }) 
                         <span className="block max-w-[420px] truncate" title={it.said}>{it.said}</span>,
                         `${it.days_waiting} day${it.days_waiting === 1 ? "" : "s"}`,
                     ])}
+                />
+            )}
+        </div>
+    );
+}
+
+// What Neema's own follow-ups achieved. Each message a daily sweep sends is
+// recorded; a send counts as answered when the customer wrote back within 72
+// hours, and as converted when they ordered within 7 days (a payment reminder:
+// when that order was paid). Sends younger than 72 hours are still waiting and
+// kept out of the rates.
+const FOLLOW_UP: Record<RecoveryResults["jobs"][number]["job"], { name: string; what: string; won: string }> = {
+    quote_follow_up:  { name: "After a price",        what: "A price was given and the customer went quiet.", won: "ordered" },
+    cart_recovery:    { name: "Cart left behind",     what: "Items were picked but the order never confirmed (daily, 11:00).", won: "ordered" },
+    payment_followup: { name: "Payment reminder",     what: "An order's payment link went unpaid (daily, 10:00).", won: "paid" },
+    reengage:         { name: "Check-in",             what: "A conversation went cold (daily, 15:00, up to 15 a day).", won: "ordered" },
+};
+
+function pct(v: number | null) {
+    return v === null ? "—" : `${v}%`;
+}
+
+function FollowUpsPanel() {
+    const [days, setDays] = useState(30);
+    const [data, setData] = useState<RecoveryResults | null>(null);
+    const [failed, setFailed] = useState<string | null>(null);
+    useEffect(() => {
+        let alive = true;
+        reportsApi.recovery(days).then((r) => { if (alive) setData(r); })
+            .catch((e) => { if (alive) setFailed(apiErrorDetail(e) || "Couldn't load the follow-up results"); });
+        return () => { alive = false; };
+    }, [days]);
+    return (
+        <div className="bg-white rounded-xl border border-[#cee6b2] shadow-sm overflow-hidden">
+            <div className="px-4 py-3 border-b border-[#e6f3d8] flex flex-wrap items-center justify-between gap-2">
+                <div>
+                    <span className="text-xs font-bold text-[#699a32] uppercase tracking-wider">What the follow-ups achieved</span>
+                    <p className="text-[11px] text-[#78716c] mt-0.5">
+                        Answered = the customer wrote back within 72 hours. Ordered = they placed an order within 7 days;
+                        for payment reminders, the order was paid. Messages under 72 hours old are still waiting and not in the rates.
+                        {data?.tracking_since && <> Daily follow-ups recorded since {fmtDate(data.tracking_since)}.</>}
+                    </p>
+                </div>
+                <select value={days} onChange={(e) => { setData(null); setFailed(null); setDays(Number(e.target.value)); }} aria-label="Period"
+                    className="h-9 px-3 rounded-lg border border-[#cee6b2] text-xs text-[#427425] bg-white">
+                    <option value={7}>Last 7 days</option>
+                    <option value={30}>Last 30 days</option>
+                    <option value={90}>Last 90 days</option>
+                </select>
+            </div>
+            {failed ? (
+                <p className="px-4 py-6 text-sm text-[#b91c1c]">{failed}</p>
+            ) : !data ? (
+                <p className="px-4 py-6 text-sm text-[#699a32]">Loading…</p>
+            ) : (
+                <Table
+                    cols={["Follow-up", "Sent", "Waiting", "Answered", "Ordered / paid"]}
+                    rows={data.jobs.map((j) => {
+                        const f = FOLLOW_UP[j.job];
+                        return [
+                            <span key="name" className="block whitespace-normal min-w-[220px] max-w-[360px]">
+                                <span className="font-semibold text-[#16270c]">{f.name}</span>
+                                <span className="block text-[11px] text-[#78716c]">{f.what}</span>
+                            </span>,
+                            j.sent,
+                            j.waiting,
+                            j.settled ? <span><b>{pct(j.reply_rate)}</b> <span className="text-[#78716c]">({j.replied} of {j.settled})</span></span> : "—",
+                            j.settled ? <span><b>{pct(j.convert_rate)}</b> <span className="text-[#78716c]">({j.converted} {f.won})</span></span> : "—",
+                        ];
+                    })}
                 />
             )}
         </div>
@@ -314,7 +384,7 @@ export function ReportsView({ agents, orders, onToast, isMobile }: ReportsViewPr
 
             {/* Tab nav */}
             <div className="flex gap-1 mb-5 border-b border-[#cee6b2]">
-                {(["overview", "conversations", "orders", "agents", "unanswered"] as ReportTab[]).map((t) => (
+                {(["overview", "conversations", "orders", "agents", "unanswered", "followups"] as ReportTab[]).map((t) => (
                     <button key={t} onClick={() => setTab(t)}
                         className={`px-4 py-2 text-xs font-semibold transition-colors border-b-2 -mb-px ${
                             tab === t
@@ -416,6 +486,9 @@ export function ReportsView({ agents, orders, onToast, isMobile }: ReportsViewPr
 
             {/* ── NEVER ANSWERED ────────────────────────────────────────────── */}
             {tab === "unanswered" && <UnansweredPanel onToast={onToast} />}
+
+            {/* ── FOLLOW-UPS ────────────────────────────────────────────────── */}
+            {tab === "followups" && <FollowUpsPanel />}
 
             {/* ── AGENTS ────────────────────────────────────────────────────── */}
             {tab === "agents" && (

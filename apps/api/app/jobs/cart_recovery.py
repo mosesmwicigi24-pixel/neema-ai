@@ -228,6 +228,9 @@ async def _handle(redis, row: dict, *, send: bool, write: bool = True) -> dict:
         res["sent"] = True
     except Exception as e:
         res["error"] = f"send failed: {str(e)[:160]}"
+        return res
+    from app.services.recovery_results import record_send
+    await record_send("cart_recovery", conv, ref=cart_fingerprint(items))
     return res
 
 
