@@ -29,7 +29,7 @@ def _flat(**kw) -> str:
 def test_style_is_a_named_brevity_contract():
     flat = _flat()
     assert "STYLE — THE BREVITY CONTRACT" in flat
-    assert "1–3 short sentences, roughly 40 words" in flat
+    assert "1–2 short sentences, roughly 20 words" in flat
     # and the precedence ladder points at it, so channel habits can't bury it
     assert "BREVITY CONTRACT (STYLE)" in flat
 
@@ -207,7 +207,7 @@ def test_todays_rules_survive_onto_the_wire_for_every_channel():
     from app.agent.runtime import (_meta_addendum, _web_addendum,
                                    _public_comment_addendum)
     RULES = ("STYLE — THE BREVITY CONTRACT",
-             "1–3 short sentences, roughly 40 words",
+             "1–2 short sentences, roughly 20 words",
              "once means once in ANY wording",
              "LISTS — THE LEAN SHAPE (owner's rule)",
              "each line is then NAME + PRICE and nothing else",

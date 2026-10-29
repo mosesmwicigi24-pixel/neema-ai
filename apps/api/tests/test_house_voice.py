@@ -34,6 +34,7 @@ def test_notes_media_links_and_letters_are_not():
     # into the live house voice and taught "FB_IMG_….jpg" as a reply
     assert not usable_answer("FB_IMG_1784359688861.jpg")
     assert not usable_answer("catalogue.pdf")
+    assert not usable_answer("Purple Dress up..mov")
     assert not usable_answer("")
     assert not usable_answer("word " * 61)          # a letter, not a reply
 
@@ -152,6 +153,65 @@ def test_collect_pairs_matches_the_question_and_skips_notes(monkeypatch):
     assert pairs[0]["a"] == "The roman collar shirt goes for 2500"
     assert pairs[0]["kind"] == "price"
     assert human_wc == [7], "the note leaked into the length statistics"
+    assert pairs[0]["answered"] is False          # nothing came after it
+
+
+def test_a_reply_the_customer_wrote_back_to_is_marked_answered(monkeypatch):
+    from app.models.message import MsgDirection, MsgSender
+    now = datetime.now(timezone.utc)
+
+    def _msg(text, sender, direction, minutes_ago):
+        return types.SimpleNamespace(
+            text=text, sender=sender, direction=direction, media_type=None,
+            conversation_id="c1", created_at=now - timedelta(minutes=minutes_ago))
+
+    human = [_msg("The silver tray is $180. How many do you need?",
+                  MsgSender.human_agent, MsgDirection.outbound, 50)]
+    inbound = [_msg("How much is the silver tray?", MsgSender.user, MsgDirection.inbound, 60),
+               _msg("Two please", MsgSender.user, MsgDirection.inbound, 40)]
+
+    class _Res:
+        def __init__(self, rows):
+            self._rows = rows
+
+        def scalars(self):
+            return types.SimpleNamespace(all=lambda: list(self._rows))
+
+    class _DB:
+        calls = 0
+
+        async def execute(self, *a, **k):
+            _DB.calls += 1
+            return _Res(human if _DB.calls == 1 else [] if _DB.calls == 2 else inbound)
+
+    pairs, _, _ = asyncio.run(stylebook.collect_pairs(_DB()))
+    assert pairs[0]["q"] == "How much is the silver tray?"   # the question, not the reply
+    assert pairs[0]["answered"] is True
+
+
+def test_replies_that_worked_are_chosen_before_newer_ones_that_did_not():
+    pairs = [dict(_pair("price q new", "price a new", "price", 0), answered=False),
+             dict(_pair("price q old", "price a old", "price", 9), answered=True)]
+    assert choose_exemplars(pairs, cap=1)[0]["a"] == "price a old"
+
+
+def test_replies_that_break_a_rule_neema_keeps_are_never_taught():
+    for reply in ("What of discount — I can give you at 195 USD",
+                  "We do not have the wooden one for now",
+                  "we are still waiting for the shipment of the anointing oil",
+                  "Hello welcome to Bethany House my name is Maggie and I am delighted to serve you",
+                  "Hello Bishop, this is Bethany House. We saw your message on Facebook/Messenger."):
+        assert not usable_answer(reply), reply
+    assert not usable_answer("Hello sir kindly allow me send you the catalogue via our other number")
+    assert not usable_answer("Bank Name: I&M Bank Account : 00106090796350 Branch Code: 001")
+    assert usable_answer("The silver tray is available at 180USD, would you like to place an order?")
+
+
+def test_a_pasted_number_or_an_unreadable_line_is_not_a_question():
+    assert not usable_question("062 462 6432")
+    assert not usable_question("Darkbluepleasedresssize16iwanttheklogoatfrunt")
+    assert usable_question("Asante sana")
+    assert usable_question("Location please")
 
 
 # ── the prompt carries the voice ─────────────────────────────────────────────
@@ -340,3 +400,18 @@ def test_refresh_stores_and_drops_the_cache(monkeypatch):
     block = asyncio.run(stylebook.refresh(None, r))
     assert calls["stored"][0] == "house_voice" and "The tray is $70" in block
     assert aps.HOUSE_VOICE_CACHE in r.deleted
+
+
+def test_the_takeover_lessons_are_in_the_prompt():
+    """Owner, 2026-10-30: learned from every reply the team sent in Neema's place."""
+    from app.agent.prompt import build_system_prompt
+    flat = " ".join(build_system_prompt(currency="USD").split())
+    assert "HOW OUR TEAM ANSWERS WHEN THEY TAKE OVER FROM YOU" in flat
+    for rule in ("THE FACT IS THE REPLY", "a check is never the whole reply",
+                 "NOT EVERY MESSAGE ENDS IN A QUESTION", "GREET AS THEY GREETED",
+                 "WARMTH IS A PLACE OR A PERSON, NOT ADJECTIVES",
+                 "A CUSTOMER WHO WAITED", "Never a discount you were not given",
+                 "A MISTAKE IS OWNED IN A FEW WORDS", "never copy those"):
+        assert rule in flat, rule
+    # the team's own size is the target now
+    assert "1–2 short sentences, roughly 20 words" in flat

@@ -50,6 +50,7 @@ MAX_BLOCK_CHARS = 2200    # hard cap on the stored block
 Q_CHARS, A_CHARS = 120, 220
 
 HOUSE_VOICE_KEY = "house_voice"
+ANSWERED_WITHIN = timedelta(hours=24)   # the customer wrote back: the reply worked
 
 # Question buckets, checked in order — first match wins. English + the
 # Swahili/sheng forms customers actually type.
@@ -104,6 +105,20 @@ _DEFLECTIONS = ("will be calling you", "will call you", "we will call",
                 "reach us on", "call us on", "call our")
 
 
+# Replies a person sent that Neema must NOT learn (owner review, 2026-10-30):
+# a discount she is never allowed to give, an absence she is never allowed to
+# speak, the team's own intro templates, and the cross-channel nudge. Real,
+# and often fine from a person — wrong as teaching.
+_OFF_BOOK = ("discount", "i can give you", "we do not have", "we don't have",
+             "we dont have", "not available", "out of stock", "waiting for the shipment",
+             "when restocked", "my name is", "we saw your message on",
+             "you've been transferred", "you're now chatting with",
+             "other number", "other whatsapp", "saluton")
+# An account, phone or till number in an example teaches a FACT, not a voice —
+# bank details answered "Asante sana" in the first outcome-chosen block.
+_LONG_NUMBER = re.compile(r"\d[\d ]{6,}\d")
+
+
 def usable_answer(text: str | None) -> bool:
     """Is this human reply worth learning from? Small, textual, self-contained
     — and it must actually ANSWER, not deflect.
@@ -119,20 +134,29 @@ def usable_answer(text: str | None) -> bool:
         return False
     if any(d in low for d in _DEFLECTIONS):
         return False                       # deflection is anti-teaching
+    if any(d in low for d in _OFF_BOOK):
+        return False                       # a rule Neema keeps, broken
+    if _LONG_NUMBER.search(t):
+        return False                       # an account or phone number is a fact
     if not re.search(r"[A-Za-zÀ-ɏ]", t):
         return False                       # digits or emoji alone teach nothing
     # A media send whose caption is just the filename ("FB_IMG_17843…jpg") is
     # not language — one leaked into the house voice and taught Neema that a
     # filename is an acceptable reply to "do you have pictures?".
-    if re.search(r"\.(jpe?g|png|gif|webp|mp4|3gp|pdf|docx?|xlsx?)\b", t.lower()):
+    if re.search(r"\.(jpe?g|png|gif|webp|heic|mp4|mov|3gp|m4a|ogg|opus|pdf|docx?|xlsx?)\b", t.lower()):
         return False
     n = _words(t)
     return 1 <= n <= 60
 
 
 def usable_question(text: str | None) -> bool:
+    """A question an example can stand on: words, not a phone number pasted
+    on its own or a run-together line nobody could read."""
     t = _clean(text or "")
-    return bool(t) and not t.startswith("[") and _words(t) >= 1
+    if not t or t.startswith("[") or _LONG_NUMBER.search(t):
+        return False
+    words = _WORD.findall(t)
+    return bool(words) and all(len(w) <= 25 for w in words)
 
 
 def _norm(text: str) -> str:
@@ -203,17 +227,26 @@ async def collect_pairs(db) -> tuple[list[dict], list[int], list[int]]:
         if q_msg is None:
             continue
         q, a = _clean(q_msg.text), _clean(reply.text)
+        # Did it WORK? The customer wrote again within a day. Chosen by
+        # outcome, not recency (owner, 2026-10-30): a reply answered within
+        # 15 minutes was written back to 70% of the time, one sent four hours
+        # late 22% — the example must be one the customer took up.
+        answered = any(reply.created_at < m.created_at <= reply.created_at + ANSWERED_WITHIN
+                       for m in inbound_by_conv.get(reply.conversation_id, []))
         pairs.append({"q": q[:Q_CHARS], "a": a[:A_CHARS],
-                      "kind": bucket_of(q), "at": reply.created_at})
+                      "kind": bucket_of(q), "at": reply.created_at,
+                      "answered": answered})
     return pairs, human_wc, ai_wc
 
 
 def choose_exemplars(pairs: list[dict], cap: int = MAX_EXEMPLARS) -> list[dict]:
-    """A spread over question kinds, newest first within each, no duplicate
-    answers — round-robin so one busy bucket can't crowd out the rest."""
+    """A spread over question kinds — the replies the customer WROTE BACK to
+    first, newest first among those, then the rest — no duplicate answers,
+    round-robin so one busy bucket can't crowd out the rest."""
     seen: set[str] = set()
     by_kind: dict[str, list[dict]] = {}
-    for p in pairs:                           # already newest-first
+    # A stable sort keeps newest-first inside each group.
+    for p in sorted(pairs, key=lambda p: not p.get("answered", False)):
         key = _norm(p["a"])
         if not key or key in seen:
             continue
