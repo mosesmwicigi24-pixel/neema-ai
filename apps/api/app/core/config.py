@@ -441,6 +441,15 @@ class Settings(BaseSettings):
     # The model that identifies a POST's product from its photo — once per post,
     # cached, so the strongest read is worth its few cents. Empty = tier2_model.
     tier2_model_vision: str = ""
+    # The photo check (services/photo_check, owner 2026-10-29): every customer
+    # photo is compared with what we sell — AI-made designs, extra embroidery
+    # and anything far from our range go to a person. "shadow" runs and records
+    # every check but changes nothing (the owner's first week, reviewed in
+    # Reports → Photo checks); "live" refers; "off" skips it.
+    photo_check_mode: str = "shadow"
+    # The model that reads a customer photo — once per image, cached. Empty =
+    # tier2_model_vision, then tier2_model.
+    photo_check_model: str = ""
     # ── Call recording + transcription (self-hosted Whisper = zero marginal cost) ──
     # Audio is recorded in the agent's browser (both sides mixed) and uploaded on
     # hangup — free. Transcription runs on OUR box via faster-whisper (no per-call
