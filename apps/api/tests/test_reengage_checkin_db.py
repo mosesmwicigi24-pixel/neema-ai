@@ -21,6 +21,7 @@ from tests.test_recovery_jobs_db import FakeRedis
 
 HANDOFF_WA, CLOSER_WA, TRAYS_WA = "254711100001", "254711100002", "254711100003"
 HUMAN_WA, SW_WA, CART_WA, OLD_WA = "254711100004", "254711100005", "254711100006", "254711100007"
+DECLINE_WA = "254711100008"
 
 
 def run(coro):
@@ -94,6 +95,11 @@ def _seed(maker):
         TRAYS_WA: ("Sipho Ndlovu", [
             ("in", "How much for 5 Aluminium Trays in dollars?", 6),
             ("out", "The 5 Aluminium Trays come to $350 in total 🙏 Shall I place the order?", 5)]),
+        # owner review 2026-10-29: "too expensive" answered with a cheaper
+        # option — then the afternoon check-in chased the no anyway
+        DECLINE_WA: ("John", [
+            ("in", "Amount too expensive", 6),
+            ("out", "Understood — the Aluminium Tray is $70 if that suits better.", 5)]),
         HUMAN_WA: ("Peter", [
             ("in", "Do you have red stoles?", 6),
             ("out", "Yes, the Red Stole is KES 3,500.", 5)]),
@@ -154,6 +160,7 @@ def test_only_quiet_threads_we_answered_are_candidates(re):
     assert reasons[CART_WA] == "cart in progress (cart recovery's)"
     assert reasons[OLD_WA] == "24h window closed"
     assert reasons[TRAYS_WA] is None and reasons[SW_WA] is None
+    assert reasons[DECLINE_WA] == "customer said no"
 
 
 def test_the_three_bad_shapes_end_as_a_proper_check_in_or_a_skip(re):

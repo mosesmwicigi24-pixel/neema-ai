@@ -105,3 +105,46 @@ def test_deal_routes_registered():
     paths = {(r.path, tuple(sorted(r.methods or []))) for r in router.routes}
     assert ("/deals", ("GET",)) in paths
     assert ("/deals/{deal_id}", ("PATCH",)) in paths
+
+
+def test_a_dated_check_in_is_not_a_promise_to_find_out():
+    """Owner review, 2026-10-29: "I'll check in with you on the 30th" sent
+    "checking in as promised" three hours later — 61 of 184 in 30 days."""
+    assert ds.detect_own_promise("I'll check in with you on 21 October about it.") is None
+    assert ds.detect_own_promise("I'll check back with you on the 2nd of November.") is None
+    assert ds.detect_own_promise("Let me check in on Monday.") is None
+    assert ds.detect_own_promise("Let me check with the team and get back to you.")
+    assert ds.detect_own_promise("I'll check on that for you.")
+
+
+def test_a_check_in_for_their_date_queues_no_3_hour_promise(monkeypatch):
+    from app.agent import cart as cartmod
+
+    conv = types.SimpleNamespace(id="conv1", person_id="p1")
+    added, queued = [], []
+
+    class _DB:
+        def add(self, o): added.append(o)
+        async def flush(self): pass
+        async def commit(self): pass
+        async def rollback(self): pass
+
+    async def fake_conv(db, key, channel): return conv
+    async def fake_open(db, conversation_id=None, person_id=None): return None
+    async def fake_cart(db, key, channel="whatsapp"):
+        return {"items": [{"name": "Cassock", "qty": 1, "price": 12000}]}
+    async def fake_upsert(db, deal, *, due_at, kind, reason):
+        queued.append(kind)
+    async def fake_on_turn(*a, **k): return "no quote"
+    monkeypatch.setattr(ds, "_conversation_of", fake_conv)
+    monkeypatch.setattr(ds, "open_deal_for", fake_open)
+    monkeypatch.setattr(cartmod, "get_cart", fake_cart)
+    monkeypatch.setattr("app.services.actions.upsert_follow_up", fake_upsert)
+    monkeypatch.setattr("app.services.quote_followup.on_turn", fake_on_turn)
+
+    asyncio.run(ds.scribe_update(
+        _DB(), "254700000001", "whatsapp",
+        "Thank you — I'll check in with you on the 30th about the collar.",
+        inbound_text="I'll buy next week", tools=[{"tool": "schedule_check_in", "out": {"ok": True}}]))
+    assert "follow_up" not in queued
+    assert not (added[0].blocking or "").startswith("Neema owes the customer")

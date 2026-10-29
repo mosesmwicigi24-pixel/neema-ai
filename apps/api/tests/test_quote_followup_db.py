@@ -395,3 +395,35 @@ def test_switched_off_by_default_plans_nothing(maker, monkeypatch):
     _seed(maker)
     _scribe(maker)
     assert _pending(maker) == []
+
+
+# ── Owner review, 2026-10-29 ─────────────────────────────────────────────────
+
+def test_a_same_priced_item_the_reply_never_named_is_not_the_quote():
+    """A price alone matched any item costing the same: a round collar shirt
+    quoted at KES 4,500 was followed up as a "Bishopric Ring" at KES 4,500."""
+    from app.services import quote_followup as qf
+    tools = [{"tool": "search_catalog", "out": {"currency": "KES", "results": [
+        {"name": "Bishopric Ring", "made_to_order": False, "price": 4500, "currency": "KES"},
+        {"name": "Round Collar Shirt", "made_to_order": False, "price": 4500, "currency": "KES"},
+        {"name": "Cassock Set", "made_to_order": False, "price": 20000, "currency": "KES"}]}}]
+    q = qf.extract_quote(tools, "You mean our Round Collar Shirt, cut for bishops — KES 4,500.")
+    assert q == [{"name": "Round Collar Shirt", "price": 4500, "currency": "KES"}]
+    assert qf.extract_quote(tools, "The Premium skirt suit is KES 20,000.") == []
+    # an alias in brackets or after a slash names it too
+    tools2 = [{"tool": "search_catalog", "out": {"currency": "KES", "results": [
+        {"name": "Tallit (Prayer Shawl) - Medium", "made_to_order": False, "price": 6000, "currency": "KES"},
+        {"name": "Large Prayer Shawl / Tallit", "made_to_order": False, "price": 7500, "currency": "KES"}]}}]
+    q2 = qf.extract_quote(tools2, "The Medium Tallit is KES 6,000 and the Large is KES 7,500.")
+    assert [i["price"] for i in q2] == [6000, 7500]
+
+
+def test_after_the_customer_says_no_a_cheaper_offer_plans_no_follow_up(maker):
+    _seed(maker)
+    _scribe(maker, inbound="thank you i cannot aford the prize")
+    assert _pending(maker) == []
+    _scribe(maker, inbound="Entschuldigung, aber das ist mir leider zu teuer.")
+    assert _pending(maker) == []
+    # still bargaining is not a no
+    _scribe(maker, inbound="Your price is very high, is that the best?")
+    assert len(_pending(maker)) == 1

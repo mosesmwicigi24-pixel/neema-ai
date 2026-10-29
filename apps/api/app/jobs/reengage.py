@@ -400,6 +400,11 @@ async def why_not(db, conv: Conversation, now: datetime) -> tuple[str | None, di
         return "customer never wrote", {}
     if getattr(last_in, "comment_context", None):
         return "comment thread", {}
+    from app.services.declines import customer_declined
+    if customer_declined(last_in.text):
+        # "No", "can't afford", "next time" — Neema answered in the turn; a
+        # check-in on top of it is chasing a no (owner review, 2026-10-29).
+        return "customer said no", {}
     closes = (_aware(last_in.created_at) or now) + timedelta(hours=WINDOW_HOURS - WINDOW_MARGIN_HOURS)
     if closes <= now:
         return "24h window closed", {}

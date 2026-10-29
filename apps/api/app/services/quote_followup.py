@@ -71,13 +71,53 @@ def _positive(v) -> float | None:
     return float(x) if isinstance(x, (int, float)) and x > 0 else None
 
 
+# Words that describe a product rather than name it: a reply that says "gold
+# coated" and "$200" has not named every gold-coated $200 item.
+_DESCRIPTIVE = {
+    "the", "and", "with", "for", "set", "sets", "piece", "pieces", "inch", "inches",
+    "size", "sized", "medium", "large", "small", "mini", "big", "single", "double",
+    "sided", "regular", "premium", "classic", "gold", "golden", "silver", "coated",
+    "plated", "stainless", "steel", "brass", "black", "white", "red", "blue", "purple",
+    "green", "pink", "navy", "maroon", "cream", "royal",
+}
+
+
+def _stem(w: str) -> str:
+    return w[:-1] if len(w) > 3 and w.endswith("s") else w
+
+
+def _words(text: str) -> set[str]:
+    return {_stem(w) for w in re.findall(r"[a-z]+", (text or "").lower())}
+
+
+def names_item(reply: str, name: str) -> bool:
+    """Does the reply NAME this catalogue item? At least half its naming words
+    (descriptive ones aside) must be in the reply — "the collar" names the
+    Clergy Collar — under its main name or any alias
+    in brackets / after a slash ("Tallit (Prayer Shawl)", "Prayer Shawl /
+    Tallit"). Matching by price alone recorded a "Bishopric Ring" for a reply
+    that quoted a round collar shirt at the same KES 4,500, and a "Cassock
+    Set" for skirt suits at $200 (owner review, 2026-10-29)."""
+    said = _words(reply)
+    base = re.sub(r"\([^)]*\)", " ", name)
+    aliases = re.findall(r"\(([^)]*)\)", name)
+    for form in [p for part in [base, *aliases] for p in part.split("/")]:
+        words = [_stem(w) for w in re.findall(r"[a-z]+", form.lower()) if len(w) >= 3]
+        naming = [w for w in words if w not in _DESCRIPTIVE] or words
+        if naming and 2 * sum(w in said for w in naming) >= len(naming):
+            return True
+    return False
+
+
 def extract_quote(tools: list | None, reply: str) -> list[dict]:
     """[{name, price, currency}] — the stock items this turn's reply priced.
 
     Ground truth is the turn's own `search_catalog` results: a row counts only
     when it is a stock item (not made to order), a full match (not a partial
     one the model was told to confirm first), carries a positive price, and
-    that exact figure appears in the reply AS MONEY. Variants count by their
+    that exact figure appears in the reply AS MONEY, and the reply NAMES the
+    item (names_item) — a price alone matches any item that costs the same.
+    Variants count by their
     own price; a played offer by its offer price. Nothing is ever inferred
     from the reply alone — no figure here was not in a tool result."""
     said = _reply_figures(reply)
@@ -100,7 +140,7 @@ def extract_quote(tools: list | None, reply: str) -> list[dict]:
                 continue
             name = " ".join(str(row.get("name") or "").split())[:80]
             ccy = str(row.get("currency") or res.get("currency") or "").upper()
-            if not name or not ccy:
+            if not name or not ccy or not names_item(reply, name):
                 continue
             candidates: list[tuple[str, float | None]] = [(name, _positive(row.get("price")))]
             offer = row.get("offer_available")
@@ -251,6 +291,11 @@ async def on_turn(db, conv, deal, *, quote: list[dict], inbound_text: str,
         await cancel_pending(db, deal, "customer replied")
     if not quote:
         return "no quote"
+    from app.services.declines import customer_declined
+    if customer_declined(inbound_text):
+        # Neema's reply may offer a cheaper item — that is her answer; a
+        # "Shall I reserve it?" four hours later is chasing a no.
+        return "customer declined"
     if not settings.quote_follow_up_enabled:
         return "disabled"
     if conv.intercept_mode != InterceptMode.ai:
