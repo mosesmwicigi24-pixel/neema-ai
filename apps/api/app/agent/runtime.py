@@ -1750,6 +1750,32 @@ async def run_turn(db: AsyncSession, redis, wa_id: str, user_text: str, llm: LLM
         # to_thread: the loader does blocking I/O (local disk, or an HTTPS fetch
         # of a Meta CDN attachment / post thumbnail) — keep the event loop free.
         img_block = await asyncio.to_thread(load_image_block, media.get("url"))
+    # THE PHOTO CHECK (owner, 2026-10-29): is this photo something we sell, or
+    # an AI-made / heavily embroidered design a person must price? Shadow mode
+    # checks and records off the reply path and changes nothing; live mode
+    # waits for the verdict and a "refer" hands the chat to a colleague.
+    _photo_refer = None
+    if img_block and not public_comment and not read_only and not scribe_only \
+            and (settings.photo_check_mode or "off") in ("shadow", "live"):
+        try:
+            from app.services import n8n_bridge as _svc_pc
+            from app.services import photo_check as _pc
+            _pc_catalog = await _svc_pc.catalog_items(db, redis)
+            _pc_caption = (media.get("caption") or "").strip()
+            if settings.photo_check_mode == "live":
+                _chk = await asyncio.wait_for(
+                    _pc.check_photo(redis, img_block, _pc_catalog, _pc_caption), timeout=45)
+                _refer = _chk.get("verdict") == "refer"
+                await _pc.record(_chk, channel=channel, contact=key, media_url=media.get("url"),
+                                 mode="live", acted=_refer)
+                if _refer:
+                    _photo_refer = _chk
+                    turn_notes.append(_pc.REFER_NOTE.format(why=_pc.why(_chk)))
+            else:
+                _pc.run_in_background(redis, img_block, _pc_catalog, _pc_caption,
+                                      channel=channel, contact=key, media_url=media.get("url"))
+        except Exception as exc:
+            _log.info("photo check skipped for %s: %s", key, exc)
     if img_block:
         caption = (media.get("caption") or "").strip()
         # The inbound row is often already at the tail of history — as an
@@ -2085,6 +2111,16 @@ async def run_turn(db: AsyncSession, redis, wa_id: str, user_text: str, llm: LLM
                 allow=_campaign_allow, extra_known=_turn_note)
         except Exception as exc:
             _log.warning("reply gate failed open for %s: %s", key, exc)
+    if _photo_refer is not None and reply:
+        # A referred photo is never priced, whatever the draft says: a money
+        # figure swaps the reply for the plain hand-over line. Then a person
+        # has the chat, with the reason in the Activity log.
+        from app.agent import review as _rv_pc
+        from app.services import photo_check as _pc
+        if _rv_pc.money_figures(reply):
+            reply = _pc.SAFE_LINE["sw" if looks_swahili(user_text or "") else "en"]
+        await escalate_to_human(channel, key, "📷 Photo check: " + _pc.why(_photo_refer),
+                                redis=redis)
     if turn_facts is not None:
         turn_facts.update({"tools": tool_log, "held": list(_held), "review": _gate_outcome})
 

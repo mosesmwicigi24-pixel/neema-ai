@@ -783,6 +783,40 @@ export interface UnansweredItem {
     days_waiting: number;
 }
 
+// The photo check (owner, 2026-10-29): every customer photo compared with what
+// we sell. In shadow mode nothing changes for the customer; the owner marks
+// each result right or wrong here before referrals go live.
+export type PhotoVerdict = "ours" | "close" | "refer" | "not_product" | "unknown";
+
+export interface PhotoCheckItem {
+    id: string;
+    conversation_id: string | null;
+    name: string;
+    channel: string;
+    contact: string;
+    photo_url: string | null;
+    verdict: PhotoVerdict;
+    reasons: string[];
+    product: string | null;
+    product_slug: string | null;
+    match: "same" | "close" | "far" | null;
+    ai_made: "likely" | "possible" | "unlikely" | null;
+    extra_embroidery: boolean | null;
+    mode: "shadow" | "live";
+    acted: boolean;
+    owner_mark: "right" | "wrong" | null;
+    owner_note: string | null;
+    at: string;
+}
+
+export interface PhotoChecks {
+    mode: "shadow" | "live" | "off";
+    days: number;
+    counts: Record<PhotoVerdict, number>;
+    marked: { right: number; wrong: number };
+    items: PhotoCheckItem[];
+}
+
 export interface RecoveryJobResult {
     job: "cart_recovery" | "payment_followup" | "reengage" | "quote_follow_up";
     sent: number;
@@ -805,6 +839,11 @@ export interface RecoveryResults {
 export const reportsApi = {
     /** What each kind of follow-up achieved: sent, answered within 72 h, then ordered / paid. */
     recovery: (days = 30) => get<RecoveryResults>(`/admin/reports/recovery?days=${days}`),
+    photoChecks: (days = 7, verdict = "") =>
+        get<PhotoChecks>(`/admin/reports/photo-checks?days=${days}${verdict ? `&verdict=${verdict}` : ""}`),
+    markPhotoCheck: (id: string, mark: "right" | "wrong" | null, note?: string) =>
+        post<{ ok: boolean; id: string; owner_mark: string | null; owner_note: string | null }>(
+            `/admin/reports/photo-checks/${id}/mark`, note === undefined ? { mark } : { mark, note }),
     unanswered: (minAgeH = 24) =>
         get<{ count: number; min_age_h: number; items: UnansweredItem[] }>(
             `/admin/reports/unanswered?min_age_h=${minAgeH}`),
