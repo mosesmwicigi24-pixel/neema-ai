@@ -121,7 +121,7 @@ final class AppModel: ObservableObject {
         inboxHost.onRefetchAgents = { [weak self] in self?.refetchAgents() }
         inboxHost.onRefetchMe = { [weak self] in self?.refetchMe() }
         forbiddenRefresh = Coalescer(windowMs: Self.FORBIDDEN_WINDOW_MS) { [weak self] in
-            await MainActor.run {
+            await MainActor.run { [weak self] in
                 guard let self = self else { return }
                 self.lastForbiddenRefresh = AppClock.now()
                 self.refetchMe()
