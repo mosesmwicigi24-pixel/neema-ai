@@ -27,7 +27,7 @@ class _FakeDB:
             return SimpleNamespace(scalar_one_or_none=lambda: self._ident)
         raise RuntimeError("orders query — must be swallowed")
 
-    async def get(self, model, pk):
+    async def get(self, model, pk, **kw):
         return self._person
 
     async def commit(self):

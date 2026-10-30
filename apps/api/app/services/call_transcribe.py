@@ -417,8 +417,11 @@ async def _save_call_note(db, wa_id: str, summary: str, *, channel: str = "whats
             _log.info("call note: no customer record for %s %s", channel, wa_id)
             return
         await db.flush()
+        # Re-read as well as lock: `found` is already in this session, and a
+        # plain locked SELECT would hand back its pre-lock state.
         u = (await db.execute(select(User).where(User.id == found.id)
-                              .with_for_update())).scalar_one_or_none() or found
+                              .with_for_update()
+                              .execution_options(populate_existing=True))).scalar_one_or_none() or found
     state = dict(u.state or {})
     noted = [x for x in (state.get(NOTED_KEY) or []) if isinstance(x, str)]
     if call_id and call_id in noted:
