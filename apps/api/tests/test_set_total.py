@@ -437,9 +437,9 @@ def test_the_rules_say_a_set_is_its_total():
     for currency in ("USD", "KES"):
         p = build_system_prompt(country_iso="KE" if currency == "KES" else "", currency=currency)
         assert "A SET IS PRICED AS ITS TOTAL (owner rule, 2026-09-21)" in p
-        assert "it goes for $200, everything\n  included. It comes with the cassock, a stole, a belt" in p
+        assert "it goes for $210, everything\n  included. It comes with the cassock, a stole, a belt" in p
         assert "Separate items merely listed together" in p
-        assert "the cassock alone is\n  $120; the complete set with the stole, belt, shirt and collar is $200" in p
+        assert "the cassock alone is\n  $130; the complete set with the stole, belt, shirt and collar is $210" in p
     add = rt._public_comment_addendum("USD")
     assert "A SET IS PRICED AS ITS TOTAL (owner, 2026-09-21" in add
     assert "Never one piece's price alone under a set post" in add
@@ -451,7 +451,7 @@ def test_the_closing_rules_the_post_exposed():
     'do you do this for …?' is a yes first, in their own words."""
     p = build_system_prompt(currency="USD")
     assert "A PRICE CARRIES ITS SCOPE (owner rule, 2026-09-21)" in p
-    assert "everything included" in p and '"the cassock alone is $120"' in p and '"$10 each"' in p
+    assert "everything included" in p and '"the cassock alone is $130"' in p and '"$10 each"' in p
     assert "IS A YES (owner, 2026-09-21" in p and "Do you\n  do for lay leaders" in p
     assert "Yes Grace, we make this very set for lay\n  leaders too" in p
     assert "never an example item the post never\n  showed" in p

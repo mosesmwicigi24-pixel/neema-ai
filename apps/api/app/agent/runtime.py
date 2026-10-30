@@ -185,14 +185,14 @@ def _public_comment_addendum(currency: str = "USD") -> str:
         "alone.\n"
         "- A SET IS PRICED AS ITS TOTAL (owner, 2026-09-21) and A PRICE CARRIES ITS SCOPE "
         "(owner, 2026-09-21) hold with full force under a post: under a five-piece cassock "
-        "outfit, 'the Cassock is $120' was read as the price of the whole set. "
+        "outfit, 'the Cassock is $130' was read as the price of the whole set. "
         "When the post's product is a SET, or the caption presents several items "
         "as one outfit, the price you give is the WHOLE set's — the hub's own set "
         "row (search_catalog marks it `set`), otherwise every listed item "
         "TOTALLED, items and total in one breath. Never one piece's price alone "
         "under a set post; a figure never stands bare where it could be read two "
-        "ways: 'it goes for $200, everything included', 'the cassock alone is "
-        "$120', '$10 each'. If they ask about one piece, give that piece's own "
+        "ways: 'it goes for $210, everything included', 'the cassock alone is "
+        "$130', '$10 each'. If they ask about one piece, give that piece's own "
         "price AND the set's total.\n"
         "- 'DO YOU DO / MAKE / HAVE THIS FOR …?' IS A YES (owner, 2026-09-21: 'Do "
         "you do for lay leaders' under the cassock set was answered with a "
@@ -4045,7 +4045,7 @@ def _campaign_canned(comment_text: str, kind: str, ask: str, name_tag: str, seed
 # deeply, as the best linguist in business and closing the sales."
 #
 # The line a closer says, in the owner's spoken shape (2026-09-16): name it,
-# then the figure WITH ITS SCOPE in the same breath ("goes for $200,
+# then the figure WITH ITS SCOPE in the same breath ("goes for $210,
 # everything included" — a bare figure under a set is read as one piece's),
 # then what it comes with, the main piece first as "the" and the rest as "a"
 # ("the cassock, a stole, a belt, a straight collar shirt and a 12 inch
