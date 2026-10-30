@@ -1323,8 +1323,13 @@ async def _gate_turn_reply(reply: str, *, user_text: str, transcript: list, tool
             post_caption=post_caption, campaign=campaign)
 
     v1 = await _verdict(reply)
+    _vm = str(getattr(llm, "last_model", "") or getattr(llm, "_model", "") or "")
+
+    async def _record(outcome: str) -> None:
+        await _rv.record_verdict(redis, outcome, channel, kinds=v1.get("kinds") or (),
+                                 model=_vm)
     if v1["ok"]:
-        await _rv.record_verdict(redis, "pass", channel)
+        await _record("pass")
         return reply, [], "pass"
     issues = list(v1["issues"])
     _log.info("%s draft read by the %s for %s: %s", mode, v1["by"], key, "; ".join(issues)[:300])
@@ -1367,7 +1372,7 @@ async def _gate_turn_reply(reply: str, *, user_text: str, transcript: list, tool
     if second:
         v2 = await _verdict(second)
         if v2["ok"]:
-            await _rv.record_verdict(redis, "rewritten", channel)
+            await _record("rewritten")
             return second, [], "rewritten"
         _log.info("%s rewrite read by the %s for %s: %s", mode, v2["by"], key,
                   "; ".join(v2["issues"])[:300])
@@ -1381,12 +1386,12 @@ async def _gate_turn_reply(reply: str, *, user_text: str, transcript: list, tool
         candidates.sort(key=lambda c: c[0])
         _n, best, vb = candidates[0]
         _log.info("%s reply sent with notes for %s: %s", mode, key, "; ".join(vb["soft"])[:300])
-        await _rv.record_verdict(redis, "soft", channel)
+        await _record("soft")
         return best, [], "soft"
     # Both drafts carry a hard finding: nothing unverified goes out.
     hard = list(v1["hard"]) + (list(v2["hard"]) if v2 else [])
     all_issues = issues + (list(v2["issues"]) if v2 else [])
-    await _rv.record_verdict(redis, "held", channel)
+    await _record("held")
     if public_comment:
         return "", all_issues, "held"
     if closer:

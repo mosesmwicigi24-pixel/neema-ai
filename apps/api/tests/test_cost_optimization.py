@@ -115,20 +115,20 @@ def test_run_turn_sends_shared_rules_and_customer_tail_separately():
 
 def test_1h_cache_writes_bill_at_2x():
     from app.core.ai_pricing import estimate_cost_usd
-    # Sonnet 5: $3/MTok input. 10k tokens all written to cache:
+    # Sonnet 5: $2/MTok input. 10k tokens all written to cache:
     assert estimate_cost_usd("claude-sonnet-5", 10_000, 0,
-                             cache_write_tokens=10_000) == 0.0375           # 1.25×
+                             cache_write_tokens=10_000) == 0.025            # 1.25×
     assert estimate_cost_usd("claude-sonnet-5", 10_000, 0,
                              cache_write_tokens=10_000,
-                             cache_write_1h_tokens=10_000) == 0.06          # 2×
+                             cache_write_1h_tokens=10_000) == 0.04          # 2×
     # Mixed write: 6k at 1h + 4k at 5m.
     assert estimate_cost_usd("claude-sonnet-5", 10_000, 0,
                              cache_write_tokens=10_000,
-                             cache_write_1h_tokens=6_000) == 0.051
+                             cache_write_1h_tokens=6_000) == 0.034
     # A 1h figure larger than the total write is clamped, never double-billed.
     assert estimate_cost_usd("claude-sonnet-5", 10_000, 0,
                              cache_write_tokens=10_000,
-                             cache_write_1h_tokens=99_000) == 0.06
+                             cache_write_1h_tokens=99_000) == 0.04
 
 
 def test_turn_totals_carry_the_1h_split():

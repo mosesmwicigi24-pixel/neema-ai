@@ -67,6 +67,20 @@ def _blocks_to_response(content: list[Any]) -> LLMResponse:
                 inp = {}
             tool_calls.append(ToolCall(id=_id, name=name, input=inp))
             assistant_content.append({"type": "tool_use", "id": _id, "name": name, "input": inp})
+        elif btype in ("thinking", "redacted_thinking"):
+            # Passed back UNCHANGED within the turn's tool loop: the newer
+            # models bind a thinking block to the conversation that made it,
+            # and the next call needs it as it was (its signature included).
+            # Never shown to anyone — transcript readers keep to "text".
+            if isinstance(block, dict):
+                assistant_content.append(dict(block))
+            elif btype == "thinking":
+                assistant_content.append({"type": "thinking",
+                                          "thinking": _battr(block, "thinking", "") or "",
+                                          "signature": _battr(block, "signature", "") or ""})
+            else:
+                assistant_content.append({"type": "redacted_thinking",
+                                          "data": _battr(block, "data", "") or ""})
     return LLMResponse(assistant_content=assistant_content, tool_calls=tool_calls,
                        text="".join(text_parts).strip())
 
@@ -137,6 +151,33 @@ def _cache_last_message(messages: list[dict]) -> list[dict]:
     return out
 
 
+def _model_params(model: str) -> dict:
+    """What each model is asked for beyond the common request. The 5.5 models
+    think adaptively by default; their effort is set explicitly: the main
+    model keeps `high` (its own default — the same care as today's replies),
+    the light model `low` (greetings, thanks, the reviewer's line: it skips
+    thinking on simple asks). Older models take nothing extra — Haiku 4.5
+    rejects `effort`."""
+    m = (model or "").lower()
+    if m.startswith("claude-sonnet-5-5"):
+        return {"output_config": {"effort": "high"}}
+    if m.startswith("claude-haiku-5-5"):
+        return {"output_config": {"effort": "low"}}
+    return {}
+
+
+def fallback_model(model: str) -> str | None:
+    """The model a trial model falls back to when it refuses a request or
+    rejects it (settings.model_fallbacks, "new:old,new:old") — a customer is
+    never left unanswered by a model change."""
+    from app.core.config import settings
+    for pair in (getattr(settings, "model_fallbacks", "") or "").split(","):
+        new, _, old = pair.partition(":")
+        if new.strip() and old.strip() and new.strip() == (model or "").strip():
+            return old.strip()
+    return None
+
+
 class AnthropicLLM:
     """Real Claude client (async), with prompt caching + usage capture."""
 
@@ -166,14 +207,38 @@ class AnthropicLLM:
             # tools+rules prefix is READ, not re-written — but the model may
             # only answer in words (the gate's rewrite, 2026-09-26).
             kw["tool_choice"] = {"type": tool_choice}
-        resp = await self._client.messages.create(
-            model=self._model,
-            max_tokens=self._max_tokens,
-            system=sys_param,
-            messages=msgs,
-            tools=tools,
-            **kw,
-        )
+        async def _create(model: str):
+            return await self._client.messages.create(
+                model=model,
+                max_tokens=self._max_tokens,
+                system=sys_param,
+                messages=msgs,
+                tools=tools,
+                **kw,
+                **_model_params(model),
+            )
+        model = self._model
+        fb = fallback_model(model)
+        try:
+            resp = await _create(model)
+        except Exception as exc:
+            from anthropic import BadRequestError
+            if fb is None or not isinstance(exc, BadRequestError):
+                raise
+            import logging
+            logging.getLogger("neema.agent").warning(
+                "%s rejected the request (%s) — answered on %s", model, exc, fb)
+            model, resp = fb, await _create(fb)
+            fb = None
+        if fb is not None and getattr(resp, "stop_reason", "") == "refusal":
+            import logging
+            logging.getLogger("neema.agent").warning(
+                "%s declined (%s) — answered on %s", model,
+                getattr(getattr(resp, "stop_details", None), "category", None), fb)
+            # Meter the declined call too: it was billed.
+            await self._meter(model, resp)
+            model, resp = fb, await _create(fb)
+        self.last_model = model
         r = _blocks_to_response(resp.content)
         r.stop_reason = resp.stop_reason or "end_turn"
         u = resp.usage
@@ -190,10 +255,11 @@ class AnthropicLLM:
             "cache_write_1h_tokens": (getattr(cc, "ephemeral_1h_input_tokens", 0) or 0) if cc else 0,
         }
         # EVERY call is metered here, by purpose (owner, 2026-09-26): the
-        # breaker and /api/health see the whole day, not only the agent's loop.
+        # breaker and /api/health see the whole day, not only the agent's loop
+        # — on the model that actually answered.
         try:
             from app.services import ai_budget
-            await ai_budget.meter(self._model, r.usage, self.purpose)
+            await ai_budget.meter(model, r.usage, self.purpose)
         except Exception:
             pass
         # How long the cached prefixes waited since their last use — whether a
@@ -205,6 +271,20 @@ class AnthropicLLM:
             except Exception:
                 pass
         return r
+
+
+    async def _meter(self, model: str, resp) -> None:
+        u = getattr(resp, "usage", None)
+        try:
+            from app.services import ai_budget
+            await ai_budget.meter(model, {
+                "input_tokens": getattr(u, "input_tokens", 0) or 0,
+                "output_tokens": getattr(u, "output_tokens", 0) or 0,
+                "cache_read_tokens": getattr(u, "cache_read_input_tokens", 0) or 0,
+                "cache_write_tokens": getattr(u, "cache_creation_input_tokens", 0) or 0,
+            }, self.purpose)
+        except Exception:
+            pass
 
 
 class FakeLLM:

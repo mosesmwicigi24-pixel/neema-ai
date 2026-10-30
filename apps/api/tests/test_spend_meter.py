@@ -45,8 +45,8 @@ def test_every_call_is_metered_by_purpose_and_model():
     usage = {"input_tokens": 2000, "cache_read_tokens": 20000, "cache_write_tokens": 3000,
              "cache_write_1h_tokens": 0, "output_tokens": 300}
     usd = asyncio.run(ai_budget.meter("claude-sonnet-5", usage, "whatsapp", redis=r))
-    # 2000 fresh × $3 + 20000 cached × $0.30 + 3000 written × $3.75 + 300 out × $15, per million
-    assert abs(usd - (0.006 + 0.006 + 0.01125 + 0.0045)) < 1e-6
+    # 2000 fresh × $2 + 20000 cached × $0.20 + 3000 written × $2.50 + 300 out × $10, per million
+    assert abs(usd - (0.004 + 0.004 + 0.0075 + 0.003)) < 1e-6
     asyncio.run(ai_budget.meter("claude-haiku-4-5", {"input_tokens": 4000, "output_tokens": 40}, "reviewer", redis=r))
     asyncio.run(ai_budget.meter("claude-sonnet-5", usage, "whatsapp", redis=r))
     total = asyncio.run(ai_budget.spent_today(r))
@@ -66,7 +66,7 @@ def test_every_call_is_metered_by_purpose_and_model():
 
 def test_the_client_meters_itself_and_the_turn_no_longer_meters_twice():
     src = inspect.getsource(llm_mod.AnthropicLLM)
-    assert "await ai_budget.meter(self._model, r.usage, self.purpose)" in src
+    assert "await ai_budget.meter(model, r.usage, self.purpose)" in src
     assert 'purpose: str = "other"' in src
     turn = inspect.getsource(rt.run_turn)
     assert "ai_budget.add_spend(" not in turn                     # the client meters
