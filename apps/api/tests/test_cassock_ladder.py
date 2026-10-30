@@ -66,12 +66,18 @@ def test_the_sets_are_priced_from_the_hub_in_their_money():
     assert "Cope & Cassock Set" in kes and "KES 45,000" in kes
     assert "stole, cincture belt, clergy shirt and collar" in kes
     assert "cope, mitre and pectoral cross" in kes
+    # One question, at the end, asking for the order.
+    assert kes.count("?") == 1 and kes.rstrip().endswith("I'll start your order.")
+    assert kes.index("Cassock Set — KES 19,500") < kes.index("Cope & Cassock Set — KES 45,000")
     usd = ladder.message(CATALOG, _ctx("USD"))
     assert "$200" in usd and "$450" in usd and "KES" not in usd
     zmw = ladder.message(CATALOG, _ctx("ZMW"))
     assert "3,900" in zmw and "9,000" in zmw
+    assert "*Cassock Set — KES 19,500:*" in kes                    # WhatsApp bold
+    plain = ladder.message(CATALOG, _ctx("KES"), bold=False)         # Messenger / Instagram
+    assert "*" not in plain and "Cassock Set — KES 19,500:" in plain
     sw = ladder.message(CATALOG, _ctx("KES"), swahili=True)
-    assert "Pia tuna Cassock Set" in sw and "KES 19,500" in sw
+    assert "seti kamili" in sw and "KES 19,500" in sw and sw.count("?") == 1
     # A missing or unpriced row is no ladder — never one with a gap.
     assert ladder.message([CASSOCK, SET], _ctx()) is None
     assert ladder.message([CASSOCK, SET, dict(COPE, price=0, price_kes=0, prices={})], _ctx()) is None
@@ -88,10 +94,11 @@ def test_once_a_month_per_customer():
 
 
 def test_the_rules_name_the_three_steps_and_one_figure():
-    rules = prompt.build_system_prompt(country_iso="KE", currency="KES")
+    rules = " ".join(prompt.build_system_prompt(country_iso="KE", currency="KES").split())
     assert "THE CASSOCK LADDER" in rules
     assert "Cope & Cassock Set (the Cassock Set" in rules and "pectoral cross" in rules
     assert "never two figures for one garment" in rules
+    assert "End it WITHOUT a question" in rules
 
 
 # ── the second message, sent as its own bubble ──────────────────────────────
@@ -157,10 +164,10 @@ def test_a_turn_with_no_second_sender_gets_it_as_the_last_paragraph(monkeypatch)
     out = asyncio.run(runtime.run_turn(_turn_db(), _Redis(), "254700000001", "how much is a cassock?",
                                        llm(), turn_facts=facts))
     assert out == "Our cassock is KES 13,000, made to measure in your colour."
-    assert "Cassock Set" in facts["follow_up"] and "KES 19,500" in facts["follow_up"]
+    assert "Cassock Set — KES 19,500" in facts["follow_up"]
     out = asyncio.run(runtime.run_turn(_turn_db(), _Redis(), "254700000002", "how much is a cassock?",
                                        llm()))
-    assert out.startswith("Our cassock is KES 13,000") and "\n\nWe also have the Cassock Set" in out
+    assert out.startswith("Our cassock is KES 13,000") and "\n\nYou can also take it as a complete set:" in out
 
 
 def test_one_price_on_every_variant_is_the_product_s_price():

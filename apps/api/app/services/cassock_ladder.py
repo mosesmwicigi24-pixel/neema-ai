@@ -64,7 +64,7 @@ def applies(seen: list[dict], user_text: str, reply: str) -> bool:
     return any(is_single_cassock(r) for r in (seen or []))
 
 
-def message(catalog: list[dict], ctx, *, swahili: bool = False) -> str | None:
+def message(catalog: list[dict], ctx, *, swahili: bool = False, bold: bool = True) -> str | None:
     """The follow-up, priced from the two hub rows in the customer's money.
     None when either row is missing or unpriced — never a ladder with a gap."""
     from app.agent.tools import _fmt_price, _to_display
@@ -84,15 +84,27 @@ def message(catalog: list[dict], ctx, *, swahili: bool = False) -> str | None:
             return None
         out.append(_fmt_price(v, getattr(ctx, "currency", "KES") or "KES"))
     set_price, cope_price = out
+    text = _text(set_price, cope_price, swahili)
+    # *bold* is WhatsApp's; Messenger and Instagram would show the asterisks.
+    return text if bold else text.replace("*", "")
+
+
+def _text(set_price: str, cope_price: str, swahili: bool) -> str:
     if swahili:
-        return (f"Pia tuna Cassock Set — kasoki pamoja na stola, mkanda (cincture belt), shati "
-                f"na kola — kwa {set_price}, na Cope & Cassock Set, inayoongeza kepu (cope), "
-                f"kofia ya askofu (mitre) na msalaba wa kifuani (pectoral cross), kwa "
-                f"{cope_price}. Ungependa kasoki peke yake au mojawapo ya seti hizi?")
-    return (f"We also have the Cassock Set — the cassock with a stole, cincture belt, clergy "
-            f"shirt and collar — at {set_price}, and the Cope & Cassock Set, which adds the "
-            f"cope, mitre and pectoral cross, at {cope_price}. Would you like the cassock "
-            f"alone or one of the sets?")
+        return ("Pia unaweza kuichukua kama seti kamili:\n"
+                f"• *Cassock Set — {set_price}:* kasoki pamoja na stola, mkanda (cincture "
+                "belt), shati la kiaskofu na kola — tayari kwa ibada.\n"
+                f"• *Cope & Cassock Set — {cope_price}:* Cassock Set nzima pamoja na kepu "
+                "(cope), kofia ya askofu (mitre) na msalaba wa kifuani (pectoral cross).\n"
+                "Ungependa ipi — kasoki peke yake, Cassock Set, au Cope & Cassock Set? "
+                "Niambie rangi yako nianze oda yako.")
+    return ("You can also take it as a complete set:\n"
+            f"• *Cassock Set — {set_price}:* the cassock with a stole, cincture belt, clergy "
+            "shirt and collar, ready for service.\n"
+            f"• *Cope & Cassock Set — {cope_price}:* the full Cassock Set plus the cope, mitre "
+            "and pectoral cross.\n"
+            "Which would you like: the cassock alone, the Cassock Set, or the Cope & Cassock "
+            "Set? Tell me your colour and I'll start your order.")
 
 
 async def follow_up(redis, *, channel: str, contact: str, catalog: list[dict], ctx,
@@ -103,7 +115,8 @@ async def follow_up(redis, *, channel: str, contact: str, catalog: list[dict], c
                                                   user_text, reply):
         return None
     from app.agent.voice import looks_swahili
-    text = message(catalog, ctx, swahili=looks_swahili(user_text or ""))
+    text = message(catalog, ctx, swahili=looks_swahili(user_text or ""),
+                   bold=(channel == "whatsapp" and not str(contact).startswith("web_")))
     if not text:
         return None
     if redis is not None:
