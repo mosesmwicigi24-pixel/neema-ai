@@ -17,6 +17,7 @@ from sqlalchemy.orm.attributes import flag_modified
 
 from app.models.order_event import OrderEvent
 from app.models.user import User
+from app.services.state_lock import lock_for_write
 
 _log = logging.getLogger("neema.agent")
 
@@ -74,10 +75,16 @@ async def refresh_lead_signals(db: AsyncSession, wa_id: str) -> None:
             select(OrderEvent).where(OrderEvent.wa_id == wa_id)
         )).scalars().all()
         derived = derive_lead_stage(user, orders)
-        new_state, changed = apply_signals(user.state, derived, user.country)
-        if changed:
-            user.state = new_state
-            flag_modified(user, "state")
+        # Decided on the copy we hold (most turns change nothing, and take no
+        # lock), written on the row as it is now.
+        if apply_signals(user.state, derived, user.country)[1]:
+            user = await lock_for_write(db, user)
+            if user is None:
+                return
+            new_state, changed = apply_signals(user.state, derived, user.country)
+            if changed:
+                user.state = new_state
+                flag_modified(user, "state")
             await db.commit()
     except Exception:
         _log.warning("refresh_lead_signals failed for %s", wa_id, exc_info=False)
