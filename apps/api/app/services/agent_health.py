@@ -34,6 +34,11 @@ _TTL = 3600                      # a rolling hour — matches the self-check cad
 # raises the ceiling.
 ACTIONABLE = ("credit", "auth", "model", "budget", "meta", "whatsapp")
 
+# The subset where NO model turn can succeed, on any thread, until a person
+# acts: the account, the key, the model id, or our own ceiling. A channel
+# credential (meta/whatsapp) still lets the turn compose — only its send dies.
+AI_DOWN = ("credit", "auth", "model", "budget")
+
 
 def classify(exc_or_text) -> str:
     """Bucket a turn failure by what it demands of a human.
@@ -139,6 +144,14 @@ async def read_turn_failures(redis) -> dict:
         return out
     except Exception:
         return {}
+
+
+async def ai_down(redis) -> str | None:
+    """The AI_DOWN kind of the last failure this hour — None when replies can
+    be composed. Cleared by the next completed turn (record_turn_success), or
+    by the rolling hour running out. Fails open: no redis → None."""
+    kind = (await read_turn_failures(redis)).get("kind")
+    return kind if kind in AI_DOWN else None
 
 
 _HUMAN = {

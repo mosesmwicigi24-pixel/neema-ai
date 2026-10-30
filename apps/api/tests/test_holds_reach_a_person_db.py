@@ -261,7 +261,7 @@ def _sweeper_rig(rig, monkeypatch):
     from app.services import reply_sweeper as sw
     attempts = []
 
-    async def failing_send(redis, channel, ext, text, page_id=None, media=None):
+    async def failing_send(redis, channel, ext, text, page_id=None, media=None, **kw):
         attempts.append(text)
         return False                              # delivery keeps failing
 
