@@ -139,7 +139,7 @@ def test_the_prompt_teaches_official_swahili():
                    '"tunahitaji vipimo vyako"', '"Nikusaidie vipi leo?"',
                    'No butler openers ("Vema", "Hakika", "Bila shaka")',
                    '"Tunasafirisha kote duniani kwa DHL."',
-                   '"Tafadhali weka oda yako — tuambie rangi na idadi unayohitaji. Unaihitaji lini?"',
+                   '"Tafadhali weka oda yako — ungependa rangi gani?"',
                    'Never "Upo wapi?"', "msalaba wa kifuani (pectoral cross)"):
         assert phrase in p, phrase
     # Swahili is still theirs to start — the language rule stands above it

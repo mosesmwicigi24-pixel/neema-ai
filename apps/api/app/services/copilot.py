@@ -61,6 +61,8 @@ async def _human_held(redis, key: str, channel: str, text: str) -> None:
                 external_id=(None if channel == "whatsapp" else key),
                 read_only=True)).strip()
         if draft and redis is not None:
+            from app.services.conversation import remember_draft
+            await remember_draft(redis, conv.id, draft)
             await redis.publish(f"ws:channel:{conv.id}", json.dumps({
                 "type": "ai_draft_ready", "conversationId": str(conv.id),
                 "draft": draft}))

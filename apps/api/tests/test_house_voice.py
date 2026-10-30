@@ -34,6 +34,7 @@ def test_notes_media_links_and_letters_are_not():
     # into the live house voice and taught "FB_IMG_….jpg" as a reply
     assert not usable_answer("FB_IMG_1784359688861.jpg")
     assert not usable_answer("catalogue.pdf")
+    assert not usable_answer("Purple Dress up..mov")
     assert not usable_answer("")
     assert not usable_answer("word " * 61)          # a letter, not a reply
 
@@ -152,6 +153,65 @@ def test_collect_pairs_matches_the_question_and_skips_notes(monkeypatch):
     assert pairs[0]["a"] == "The roman collar shirt goes for 2500"
     assert pairs[0]["kind"] == "price"
     assert human_wc == [7], "the note leaked into the length statistics"
+    assert pairs[0]["answered"] is False          # nothing came after it
+
+
+def test_a_reply_the_customer_wrote_back_to_is_marked_answered(monkeypatch):
+    from app.models.message import MsgDirection, MsgSender
+    now = datetime.now(timezone.utc)
+
+    def _msg(text, sender, direction, minutes_ago):
+        return types.SimpleNamespace(
+            text=text, sender=sender, direction=direction, media_type=None,
+            conversation_id="c1", created_at=now - timedelta(minutes=minutes_ago))
+
+    human = [_msg("The silver tray is $180. How many do you need?",
+                  MsgSender.human_agent, MsgDirection.outbound, 50)]
+    inbound = [_msg("How much is the silver tray?", MsgSender.user, MsgDirection.inbound, 60),
+               _msg("Two please", MsgSender.user, MsgDirection.inbound, 40)]
+
+    class _Res:
+        def __init__(self, rows):
+            self._rows = rows
+
+        def scalars(self):
+            return types.SimpleNamespace(all=lambda: list(self._rows))
+
+    class _DB:
+        calls = 0
+
+        async def execute(self, *a, **k):
+            _DB.calls += 1
+            return _Res(human if _DB.calls == 1 else [] if _DB.calls == 2 else inbound)
+
+    pairs, _, _ = asyncio.run(stylebook.collect_pairs(_DB()))
+    assert pairs[0]["q"] == "How much is the silver tray?"   # the question, not the reply
+    assert pairs[0]["answered"] is True
+
+
+def test_replies_that_worked_are_chosen_before_newer_ones_that_did_not():
+    pairs = [dict(_pair("price q new", "price a new", "price", 0), answered=False),
+             dict(_pair("price q old", "price a old", "price", 9), answered=True)]
+    assert choose_exemplars(pairs, cap=1)[0]["a"] == "price a old"
+
+
+def test_replies_that_break_a_rule_neema_keeps_are_never_taught():
+    for reply in ("What of discount — I can give you at 195 USD",
+                  "We do not have the wooden one for now",
+                  "we are still waiting for the shipment of the anointing oil",
+                  "Hello welcome to Bethany House my name is Maggie and I am delighted to serve you",
+                  "Hello Bishop, this is Bethany House. We saw your message on Facebook/Messenger."):
+        assert not usable_answer(reply), reply
+    assert not usable_answer("Hello sir kindly allow me send you the catalogue via our other number")
+    assert not usable_answer("Bank Name: I&M Bank Account : 00106090796350 Branch Code: 001")
+    assert usable_answer("The silver tray is available at 180USD, would you like to place an order?")
+
+
+def test_a_pasted_number_or_an_unreadable_line_is_not_a_question():
+    assert not usable_question("062 462 6432")
+    assert not usable_question("Darkbluepleasedresssize16iwanttheklogoatfrunt")
+    assert usable_question("Asante sana")
+    assert usable_question("Location please")
 
 
 # ── the prompt carries the voice ─────────────────────────────────────────────
@@ -340,3 +400,76 @@ def test_refresh_stores_and_drops_the_cache(monkeypatch):
     block = asyncio.run(stylebook.refresh(None, r))
     assert calls["stored"][0] == "house_voice" and "The tray is $70" in block
     assert aps.HOUSE_VOICE_CACHE in r.deleted
+
+
+def test_the_takeover_lessons_are_in_the_prompt():
+    """Owner, 2026-10-30: learned from every reply the team sent in Neema's place."""
+    from app.agent.prompt import build_system_prompt
+    flat = " ".join(build_system_prompt(currency="USD").split())
+    assert "HOW OUR TEAM ANSWERS WHEN THEY TAKE OVER FROM YOU" in flat
+    for rule in ("THE FACT IS THE REPLY", "a check is never the whole reply",
+                 "NOT EVERY MESSAGE ENDS IN A QUESTION", "GREET AS THEY GREETED",
+                 "WARMTH IS A PLACE OR A PERSON, NOT ADJECTIVES",
+                 "A CUSTOMER WHO WAITED", "Never a discount you were not given",
+                 "A MISTAKE IS OWNED IN A FEW WORDS", "never copy those"):
+        assert rule in flat, rule
+    # the team's own size is the target now
+    assert "1–2 short sentences, roughly 20 words" in flat
+
+
+# ── Neema's own drafts are not the team's voice (owner, 2026-10-30) ──────────
+
+class _Redis:
+    def __init__(self):
+        self.d = {}
+
+    async def set(self, k, v, ex=None):
+        self.d[k] = v
+
+    async def get(self, k):
+        return self.d.get(k)
+
+    async def delete(self, k):
+        self.d.pop(k, None)
+
+
+def test_a_draft_sent_word_for_word_is_marked_unchanged_and_used_once():
+    from app.services.conversation import remember_draft, _draft_origin
+    r = _Redis()
+    asyncio.run(remember_draft(r, "c1", "The silver tray is $180. How many do you need?"))
+    assert asyncio.run(_draft_origin(r, "c1", "The silver tray is $180.  How many do you need?")) \
+        == "unchanged"                                   # whitespace is not an edit
+    assert asyncio.run(_draft_origin(r, "c1", "anything typed next")) is None
+
+
+def test_an_edited_draft_is_marked_edited():
+    from app.services.conversation import remember_draft, _draft_origin
+    r = _Redis()
+    asyncio.run(remember_draft(r, "c1", "The silver tray is $180 — it holds 40 cups."))
+    assert asyncio.run(_draft_origin(r, "c1", "The silver tray is 180USD")) == "edited"
+
+
+def test_no_redis_or_no_draft_marks_nothing():
+    from app.services.conversation import _draft_origin
+    assert asyncio.run(_draft_origin(None, "c1", "hi")) is None
+    assert asyncio.run(_draft_origin(_Redis(), "c1", "hi")) is None
+
+
+def test_every_draft_path_remembers_what_it_offered():
+    import inspect
+    from app.routers import admin
+    from app.services import copilot, conversation
+    assert "remember_draft(request.app.state.redis, conv.id, draft)" in inspect.getsource(admin.generate_draft)
+    assert "remember_draft(redis, conv.id, draft)" in inspect.getsource(copilot._human_held)
+    src = inspect.getsource(conversation.send_agent_reply)
+    assert 'raw_meta=({"from_ai_draft": origin} if origin else None)' in src
+
+
+def test_neemas_own_words_never_become_the_house_voice():
+    from app.tools.stylebook import is_neemas_own
+    def m(text, meta=None):
+        return types.SimpleNamespace(text=text, raw_meta=meta)
+    assert is_neemas_own(m("The tray is $180.", {"from_ai_draft": "unchanged"}))
+    assert is_neemas_own(m("Amen, Pastor — blessings to you too."))     # her long dash
+    assert not is_neemas_own(m("The tray is 180USD", {"from_ai_draft": "edited"}))
+    assert not is_neemas_own(m("moi avenue sonalux building 7th floor room 18"))
