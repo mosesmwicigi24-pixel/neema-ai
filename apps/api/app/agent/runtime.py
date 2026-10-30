@@ -2121,6 +2121,26 @@ async def run_turn(db: AsyncSession, redis, wa_id: str, user_text: str, llm: LLM
             reply = _pc.SAFE_LINE["sw" if looks_swahili(user_text or "") else "en"]
         await escalate_to_human(channel, key, "📷 Photo check: " + _pc.why(_photo_refer),
                                 redis=redis)
+    # THE CASSOCK LADDER (owner, 2026-10-30): a cassock priced alone, then the
+    # two sets in a second message, priced from the hub rows. A sender that
+    # can send two messages takes it from turn_facts; anyone else gets it as
+    # the reply's last paragraph.
+    if reply and _photo_refer is None and not read_only and not scribe_only \
+            and not public_comment:
+        try:
+            from app.services import cassock_ladder
+            from app.services import n8n_bridge as _svc_lad
+            _ladder = await cassock_ladder.follow_up(
+                redis, channel=channel, contact=key,
+                catalog=await _svc_lad.catalog_items(db, redis), ctx=ctx,
+                user_text=user_text or "", reply=reply)
+            if _ladder:
+                if turn_facts is not None:
+                    turn_facts["follow_up"] = _ladder
+                else:
+                    reply = reply.rstrip() + "\n\n" + _ladder
+        except Exception as exc:
+            _log.info("cassock ladder skipped for %s: %s", key, exc)
     if turn_facts is not None:
         turn_facts.update({"tools": tool_log, "held": list(_held), "review": _gate_outcome})
 
@@ -2334,6 +2354,11 @@ async def _is_echo(db, channel: str, key: str, reply: str,
     return " ".join((last or "").lower().split()) == t
 
 
+# A second message (the cassock ladder) goes this long after the reply, so it
+# lands as its own bubble, in order.
+FOLLOW_UP_DELAY_S = 1.5
+
+
 async def _run_and_send(redis, wa_id: str, text: str, media: dict | None = None,
                         *, deferred: bool = False) -> bool:
     from app.database import AsyncSessionLocal
@@ -2360,6 +2385,13 @@ async def _run_and_send(redis, wa_id: str, text: str, media: dict | None = None,
         wamid = await svc._send_waba(wa_id, reply)
         async with AsyncSessionLocal() as db2:
             await svc.save_outbound_message(db2, redis, wa_id, reply, waba_msg_id=wamid)
+        if facts.get("follow_up"):
+            # Its own message, a beat after the reply (the cassock ladder).
+            await asyncio.sleep(FOLLOW_UP_DELAY_S)
+            wamid2 = await svc._send_waba(wa_id, facts["follow_up"])
+            async with AsyncSessionLocal() as db2b:
+                await svc.save_outbound_message(db2b, redis, wa_id, facts["follow_up"],
+                                                waba_msg_id=wamid2)
         await mark_closer_answered(redis, "whatsapp", wa_id, text)
         _log.info("tier2 replied to %s (%d chars)", wa_id, len(reply))
         # She answered — so whatever a person was told to go and fix is fixed.
@@ -2602,6 +2634,12 @@ async def _run_and_send_meta(redis, channel: str, external_id: str, text: str,
         await send_to_channel(channel, external_id, reply, page_id=page_id)
         async with AsyncSessionLocal() as db2:
             await svc.save_outbound_channel_message(db2, redis, channel, external_id, reply)
+        if facts.get("follow_up"):
+            await asyncio.sleep(FOLLOW_UP_DELAY_S)
+            await send_to_channel(channel, external_id, facts["follow_up"], page_id=page_id)
+            async with AsyncSessionLocal() as db2b:
+                await svc.save_outbound_channel_message(db2b, redis, channel, external_id,
+                                                        facts["follow_up"])
         await mark_closer_answered(redis, channel, external_id, text)
         _log.info("tier2 replied on %s to %s (%d chars)", channel, external_id, len(reply))
         from app.services.agent_health import record_turn_success

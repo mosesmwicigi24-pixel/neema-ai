@@ -450,6 +450,11 @@ class Settings(BaseSettings):
     # The model that reads a customer photo — once per image, cached. Empty =
     # tier2_model_vision, then tier2_model.
     photo_check_model: str = ""
+    # The cassock ladder (owner, 2026-10-30): a cassock priced alone is followed
+    # by a second message with the Cassock Set and the Cope & Cassock Set, each
+    # at its hub price (services/cassock_ladder). The two hub rows, by slug.
+    cassock_ladder: bool = True
+    cassock_ladder_slugs: str = "cassock-set,cope-complete-set"
     # ── Call recording + transcription (self-hosted Whisper = zero marginal cost) ──
     # Audio is recorded in the agent's browser (both sides mixed) and uploaded on
     # hangup — free. Transcription runs on OUR box via faster-whisper (no per-call
