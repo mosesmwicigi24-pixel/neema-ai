@@ -181,6 +181,18 @@ def _apply_variant_pricing(prod: dict) -> None:
     kes = [v["price_kes"] for v in vs if v.get("price_kes") is not None]
     usd = [v["price_usd"] for v in vs if v.get("price_usd") is not None]
     default = next((v for v in vs if v.get("is_default")), vs[0] if vs else None)
+    # Every variant at ONE price that differs from the product's own: the
+    # variant price is what an order is charged (the cart takes the variant
+    # row), so it is the product's price too. The Red Apostolic Cassock read
+    # KES 21,000 / $210 on the product and KES 16,400 / $170 on all 35
+    # variants, and a customer was told "$210", then "$170 for that variant"
+    # (owner, 2026-10-30).
+    if kes and len(set(kes)) == 1 and prod.get("price_kes") not in (None, kes[0]) and default:
+        _log.info("hub product %s: base KES %s ≠ every variant's KES %s — quoting the variant price",
+                  prod.get("slug"), prod.get("price_kes"), kes[0])
+        prod["price_kes"] = prod["price"] = kes[0]
+        prod["price_usd"] = usd[0] if usd and len(set(usd)) == 1 else default.get("price_usd")
+        prod["prices"] = dict(default.get("prices") or {}) or prod.get("prices")
     if default:
         if not prod.get("price_kes"):
             prod["price_kes"] = default.get("price_kes")

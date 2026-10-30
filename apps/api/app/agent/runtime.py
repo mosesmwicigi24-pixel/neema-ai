@@ -185,14 +185,14 @@ def _public_comment_addendum(currency: str = "USD") -> str:
         "alone.\n"
         "- A SET IS PRICED AS ITS TOTAL (owner, 2026-09-21) and A PRICE CARRIES ITS SCOPE "
         "(owner, 2026-09-21) hold with full force under a post: under a five-piece cassock "
-        "outfit, 'the Cassock is $120' was read as the price of the whole set. "
+        "outfit, 'the Cassock is $130' was read as the price of the whole set. "
         "When the post's product is a SET, or the caption presents several items "
         "as one outfit, the price you give is the WHOLE set's — the hub's own set "
         "row (search_catalog marks it `set`), otherwise every listed item "
         "TOTALLED, items and total in one breath. Never one piece's price alone "
         "under a set post; a figure never stands bare where it could be read two "
-        "ways: 'it goes for $200, everything included', 'the cassock alone is "
-        "$120', '$10 each'. If they ask about one piece, give that piece's own "
+        "ways: 'it goes for $210, everything included', 'the cassock alone is "
+        "$130', '$10 each'. If they ask about one piece, give that piece's own "
         "price AND the set's total.\n"
         "- 'DO YOU DO / MAKE / HAVE THIS FOR …?' IS A YES (owner, 2026-09-21: 'Do "
         "you do for lay leaders' under the cassock set was answered with a "
@@ -2121,6 +2121,26 @@ async def run_turn(db: AsyncSession, redis, wa_id: str, user_text: str, llm: LLM
             reply = _pc.SAFE_LINE["sw" if looks_swahili(user_text or "") else "en"]
         await escalate_to_human(channel, key, "📷 Photo check: " + _pc.why(_photo_refer),
                                 redis=redis)
+    # THE CASSOCK LADDER (owner, 2026-10-30): a cassock priced alone, then the
+    # two sets in a second message, priced from the hub rows. A sender that
+    # can send two messages takes it from turn_facts; anyone else gets it as
+    # the reply's last paragraph.
+    if reply and _photo_refer is None and not read_only and not scribe_only \
+            and not public_comment:
+        try:
+            from app.services import cassock_ladder
+            from app.services import n8n_bridge as _svc_lad
+            _ladder = await cassock_ladder.follow_up(
+                redis, channel=channel, contact=key,
+                catalog=await _svc_lad.catalog_items(db, redis), ctx=ctx,
+                user_text=user_text or "", reply=reply)
+            if _ladder:
+                if turn_facts is not None:
+                    turn_facts["follow_up"] = _ladder
+                else:
+                    reply = reply.rstrip() + "\n\n" + _ladder
+        except Exception as exc:
+            _log.info("cassock ladder skipped for %s: %s", key, exc)
     if turn_facts is not None:
         turn_facts.update({"tools": tool_log, "held": list(_held), "review": _gate_outcome})
 
@@ -2344,6 +2364,11 @@ async def _is_echo(db, channel: str, key: str, reply: str,
     return " ".join((last or "").lower().split()) == t
 
 
+# A second message (the cassock ladder) goes this long after the reply, so it
+# lands as its own bubble, in order.
+FOLLOW_UP_DELAY_S = 1.5
+
+
 async def _run_and_send(redis, wa_id: str, text: str, media: dict | None = None,
                         *, deferred: bool = False, hold_line: bool = True) -> bool:
     """`hold_line=False` for a retry (the sweeper): the customer already had
@@ -2373,6 +2398,13 @@ async def _run_and_send(redis, wa_id: str, text: str, media: dict | None = None,
         wamid = await svc._send_waba(wa_id, reply)
         async with AsyncSessionLocal() as db2:
             await svc.save_outbound_message(db2, redis, wa_id, reply, waba_msg_id=wamid)
+        if facts.get("follow_up"):
+            # Its own message, a beat after the reply (the cassock ladder).
+            await asyncio.sleep(FOLLOW_UP_DELAY_S)
+            wamid2 = await svc._send_waba(wa_id, facts["follow_up"])
+            async with AsyncSessionLocal() as db2b:
+                await svc.save_outbound_message(db2b, redis, wa_id, facts["follow_up"],
+                                                waba_msg_id=wamid2)
         await mark_closer_answered(redis, "whatsapp", wa_id, text)
         _log.info("tier2 replied to %s (%d chars)", wa_id, len(reply))
         # She answered — so whatever a person was told to go and fix is fixed.
@@ -2618,6 +2650,12 @@ async def _run_and_send_meta(redis, channel: str, external_id: str, text: str,
         await send_to_channel(channel, external_id, reply, page_id=page_id)
         async with AsyncSessionLocal() as db2:
             await svc.save_outbound_channel_message(db2, redis, channel, external_id, reply)
+        if facts.get("follow_up"):
+            await asyncio.sleep(FOLLOW_UP_DELAY_S)
+            await send_to_channel(channel, external_id, facts["follow_up"], page_id=page_id)
+            async with AsyncSessionLocal() as db2b:
+                await svc.save_outbound_channel_message(db2b, redis, channel, external_id,
+                                                        facts["follow_up"])
         await mark_closer_answered(redis, channel, external_id, text)
         _log.info("tier2 replied on %s to %s (%d chars)", channel, external_id, len(reply))
         from app.services.agent_health import record_turn_success
@@ -4024,7 +4062,7 @@ def _campaign_canned(comment_text: str, kind: str, ask: str, name_tag: str, seed
 # deeply, as the best linguist in business and closing the sales."
 #
 # The line a closer says, in the owner's spoken shape (2026-09-16): name it,
-# then the figure WITH ITS SCOPE in the same breath ("goes for $200,
+# then the figure WITH ITS SCOPE in the same breath ("goes for $210,
 # everything included" — a bare figure under a set is read as one piece's),
 # then what it comes with, the main piece first as "the" and the rest as "a"
 # ("the cassock, a stole, a belt, a straight collar shirt and a 12 inch
