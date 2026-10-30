@@ -14,7 +14,7 @@ struct NeemaApp: App {
                 .environment(\.neema, app.dark ? NeemaColors.dark : NeemaColors.light)
                 .preferredColorScheme(app.session == nil ? .dark : (app.dark ? .dark : .light))
                 .onOpenURL { url in app.open(url) }
-                .onChange(of: scenePhase) { phase in app.setForeground(phase == .active) }
+                .onChange(of: scenePhase) { _, phase in app.setForeground(phase == .active) }
                 .onAppear {
                     app.setForeground(scenePhase == .active)
                     // `-neema-open <key>` with `-neema-canned`: a deep link at launch, as a notification tap or

@@ -98,8 +98,8 @@ struct OrdersBody: View {
                         .padding(gutter)
                     }
                     .refreshable { await pullToRefresh() }
-                    .onChange(of: ui.pendingScroll) { p in applyPendingScroll(p, paginated, proxy) }
-                    .onChange(of: orders.count) { _ in applyPendingScroll(ui.pendingScroll, paginated, proxy) }
+                    .onChange(of: ui.pendingScroll) { _, p in applyPendingScroll(p, paginated, proxy) }
+                    .onChange(of: orders.count) { applyPendingScroll(ui.pendingScroll, paginated, proxy) }
                 }
                 // ── Order detail, beside the list on a wide tablet ─────────────
                 if twoPane, let o = selected {
@@ -137,10 +137,10 @@ struct OrdersBody: View {
             vm.life.shown.update(true)
         }
         .onDisappear { vm.life.shown.update(false) }
-        .onChange(of: ui) { _ in persist() }
+        .onChange(of: ui) { persist() }
         // The row vanished under a refetch — nothing left to show. (Not before
         // the first read: an order restored after a reclaim waits for it.)
-        .onChange(of: orders) { list in
+        .onChange(of: orders) { _, list in
             if let id = ui.selectedId, !list.contains(where: { $0.id == id }), model.loaded { vm.select(nil) }
         }
     }

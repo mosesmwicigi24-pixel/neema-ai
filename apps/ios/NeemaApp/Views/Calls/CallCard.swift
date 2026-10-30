@@ -126,7 +126,7 @@ private struct CallMicHostBody: View {
     @EnvironmentObject private var app: AppModel
     var body: some View {
         Color.clear.frame(width: 0, height: 0)
-            .onChange(of: model.micRequest) { asked in
+            .onChange(of: model.micRequest) { _, asked in
                 guard asked else { return }
                 // getUserMedia's prompt: a call is waiting for the microphone.
                 ask()
@@ -136,7 +136,7 @@ private struct CallMicHostBody: View {
 
     private func ask() {
         let calls = app.calls
-        AVAudioSession.sharedInstance().requestRecordPermission { granted in
+        AVAudioApplication.requestRecordPermission { granted in
             Task { @MainActor in calls.onMicResult(granted) }
         }
     }

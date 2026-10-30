@@ -103,7 +103,7 @@ final class AppModel: ObservableObject {
         calls = CallManager(
             api: NeemaCallApi(container.api), events: container.socket.events, connected: container.socket.connected, foreground: container.foreground,
             signedIn: { sessions.current != nil }, media: makeCallMedia(), ringer: ringer, audio: SessionCallAudio(),
-            micGranted: { AVAudioSession.sharedInstance().recordPermission == .granted },
+            micGranted: { AVAudioApplication.shared.recordPermission == .granted },
             outboxDir: FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first.map { $0.appendingPathComponent("call-recordings") }
                 ?? FileManager.default.temporaryDirectory.appendingPathComponent("call-recordings"),
             myAgentId: { sessions.current?.agentId }, myAgentName: { sessions.current?.name }
@@ -131,7 +131,7 @@ final class AppModel: ObservableObject {
         calls.canManageSettings = { [weak self] in self?.access.can(Perms.MANAGE_SETTINGS) ?? false }
         // The system call UI's Answer / Decline (CallKit) come back as the softphone's own actions.
         if let kit = ringer as? CallKitRinger {
-            kit.onAction = { [weak self] action, id in Task { @MainActor in self?.calls.handleAction(action, id: id) } }
+            kit.onAction = { [weak self] action, id in Task { @MainActor [weak self] in self?.calls.handleAction(action, id: id) } }
         }
         calls.start()
         // An error caught at the edge (a WebRTC callback, a background task) is written down and sent on.
@@ -145,52 +145,52 @@ final class AppModel: ObservableObject {
 
     private func subscribe() {
         subs.append(container.sessionStore.session.observe { [weak self] s in
-            Task { @MainActor in self?.sessionChanged(s) }
+            Task { @MainActor [weak self] in self?.sessionChanged(s) }
         })
         subs.append(container.http.sessionExpired.observe { [weak self] in
-            Task { @MainActor in self?.sessionExpired = true }
+            Task { @MainActor [weak self] in self?.sessionExpired = true }
         })
         subs.append(container.http.forbidden.observe { [weak self] _ in
-            Task { @MainActor in self?.onForbidden() }
+            Task { @MainActor [weak self] in self?.onForbidden() }
         })
         subs.append(container.socket.connected.observe { [weak self] up in
-            Task { @MainActor in self?.connected = up }
+            Task { @MainActor [weak self] in self?.connected = up }
         })
         subs.append(container.online.observe { [weak self] up in
-            Task { @MainActor in self?.online = up }
+            Task { @MainActor [weak self] in self?.online = up }
         })
         // Every notification frame toasts "title: body" as it lands in the bell (page.tsx showToast; the
         // inbox and the orders feed refetch themselves from the same frames).
         subs.append(notifications.incoming.observe { [weak self] n in
-            Task { @MainActor in self?.toast("\(n.title): \(n.body)", .info) }
+            Task { @MainActor [weak self] in self?.toast("\(n.title): \(n.body)", .info) }
         })
         subs.append(toasts.current.observe { [weak self] t in
-            Task { @MainActor in self?.toast = t }
+            Task { @MainActor [weak self] in self?.toast = t }
         })
         // The inbox keeps the shell's badge fresh, and consumes the open-conversation request.
         subs.append(inboxHost.inboxSummary.observe { [weak self] s in
-            Task { @MainActor in self?.inboxHuman = s?.human ?? 0 }
+            Task { @MainActor [weak self] in self?.inboxHuman = s?.human ?? 0 }
         })
         subs.append(inboxHost.openConvKey.observe { [weak self] k in
-            Task { @MainActor in
+            Task { @MainActor [weak self] in
                 guard let self = self else { return }
                 if self.openConvKey != k { self.openConvKey = k }
             }
         })
         // The calls screen consumes the focus request; the deep link sets it.
         subs.append(inboxHost.callsFocusKey.observe { [weak self] k in
-            Task { @MainActor in
+            Task { @MainActor [weak self] in
                 guard let self = self else { return }
                 if self.callsFocusKey != k { self.callsFocusKey = k }
             }
         })
         // The bell's count.
         subs.append(notifications.items.observe { [weak self] list in
-            Task { @MainActor in self?.unreadBell = list.filter { !$0.read }.count }
+            Task { @MainActor [weak self] in self?.unreadBell = list.filter { !$0.read }.count }
         })
         // The orders feed keeps the nav's pending badge fresh.
         subs.append(ordersFeed.orders.observe { [weak self] _ in
-            Task { @MainActor in
+            Task { @MainActor [weak self] in
                 guard let self = self else { return }
                 self.pendingOrders = self.ordersFeed.pendingOrders
             }

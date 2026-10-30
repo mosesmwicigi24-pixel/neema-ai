@@ -125,10 +125,10 @@ struct InboxBody: View {
         // The shell hides its bars while a thread owns the phone screen.
         .onAppear { app.immersive = phoneThread; autoSelect() }
         .onDisappear { app.immersive = false }
-        .onChange(of: phoneThread) { app.immersive = $0 }
-        .onChange(of: wide) { _ in autoSelect() }
-        .onChange(of: model.rows.isEmpty) { _ in autoSelect() }
-        .onChange(of: model.thread.activeId) { id in
+        .onChange(of: phoneThread) { app.immersive = $1 }
+        .onChange(of: wide) { autoSelect() }
+        .onChange(of: model.rows.isEmpty) { autoSelect() }
+        .onChange(of: model.thread.activeId) { _, id in
             if id.isEmpty { autoSelect(); return }
             if askFor != nil && askFor != id { askFor = nil }
             if answerFor != nil && answerFor != id { answerFor = nil }
@@ -137,8 +137,8 @@ struct InboxBody: View {
         // Rotating or resizing into room for the docked pane: the slide-over one
         // closes (the docked one shows it) — never the panel twice. The activity
         // log that was open over the thread stays open, docked.
-        .onChange(of: roomy) { r in if r && wide { customerSheet = false } }
-        .onChange(of: panes.activityDocks) { docks in
+        .onChange(of: roomy) { _, r in if r && wide { customerSheet = false } }
+        .onChange(of: panes.activityDocks) { _, docks in
             if docks && activitySheet { activitySheet = false; vm.setActivityOpen(true) }
         }
         .sheet(item: sheetBinding) { which in sheetContent(which) }

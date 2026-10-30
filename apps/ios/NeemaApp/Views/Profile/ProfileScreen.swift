@@ -56,11 +56,11 @@ struct ProfileBody: View {
                 vm.reconcile(a.isAvailable)
             }
         }
-        .onChange(of: agent?.id) { _ in if let a = agent { vm.fillForm(a) } }
-        .onChange(of: agent?.isAvailable) { v in vm.reconcile(v) }
-        .onChange(of: ui.form) { _ in savedUi = vm.saveUi() ?? "" }
+        .onChange(of: agent?.id) { if let a = agent { vm.fillForm(a) } }
+        .onChange(of: agent?.isAvailable) { _, v in vm.reconcile(v) }
+        .onChange(of: ui.form) { savedUi = vm.saveUi() ?? "" }
         // A save that succeeded folds its form away here — also when the screen that started it has been replaced.
-        .onChange(of: model.closed) { closed in
+        .onChange(of: model.closed) { _, closed in
             if closed?.name == "edit" { editMode = false } else if closed?.name == "password" { changingPassword = false }
         }
         .alert("Sign out?", isPresented: $confirmSignOut) {

@@ -35,8 +35,8 @@ struct DashboardShell: View {
             app.restoreToast(savedToast)
             savedNav = app.savedNav
         }
-        .onChange(of: app.nav) { _ in savedNav = app.savedNav }
-        .onChange(of: app.toast) { _ in savedToast = app.savedToast }
+        .onChange(of: app.nav) { savedNav = app.savedNav }
+        .onChange(of: app.toast) { savedToast = app.savedToast }
         // Esc on a hardware keyboard closes what is open (Shortcuts.swift `escapeIsBack`); a button
         // with a shortcut fires wherever focus is, which `onKeyPress` would not.
         .background(KeyButton(.escape, modifiers: []) { app.escapeBack() })
@@ -396,7 +396,7 @@ struct WideShell: View {
         }
         .animation(.easeInOut(duration: 0.2), value: app.toast?.id)
         .onAppear { applyDefault() }
-        .onChange(of: mode) { _ in applyDefault() }
+        .onChange(of: mode) { applyDefault() }
     }
 
     /// Windows under 1200 pt open on the icon rail so the view keeps its width; the choice holds until the mode changes.
@@ -430,8 +430,8 @@ private struct CallDockBody<Content: View>: View {
         content(docked)
             // Anticipatory, docked only: once a call connects while the agent is in
             // the inbox or the call log, that customer's chat opens beside it (once per call).
-            .onChange(of: model.state.phase) { _ in openChatBesideCall(docked) }
-            .onChange(of: docked) { d in openChatBesideCall(d) }
+            .onChange(of: model.state.phase) { openChatBesideCall(docked) }
+            .onChange(of: docked) { _, d in openChatBesideCall(d) }
     }
     private func openChatBesideCall(_ docked: Bool) {
         let s = model.state
@@ -823,7 +823,7 @@ struct AvatarView: View {
     /// and a person glyph for an unnamed contact whose "name" is only a phone number.
     private var disc: some View {
         // Common.kt: a blank name or one that is really a number / id gets the glyph (`isPhoneLike` is the core's).
-        let phoneLike = (name ?? "").trimmingCharacters(in: .whitespaces).isEmpty || isPhoneLike(name)
+        let phoneLike = name.trimmingCharacters(in: .whitespaces).isEmpty || isPhoneLike(name)
         return Circle()
             .fill(c.isDark ? Color(hex: 0x0F1424) : Color(hex: 0xF5F6F3))
             .overlay(Circle().stroke(c.isDark ? Color(hex: 0x1F367A) : Color(hex: 0xDDE8D5)))
