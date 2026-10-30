@@ -23,22 +23,35 @@ _KEY = "agent_memory"
 _MAX_FACTS = 20
 
 
-async def _load_user(db: AsyncSession, wa_id: str) -> User | None:
-    return (await db.execute(select(User).where(User.wa_id == wa_id))).scalar_one_or_none()
+async def _load_user(db: AsyncSession, wa_id: str, *, lock: bool = False) -> User | None:
+    stmt = select(User).where(User.wa_id == wa_id)
+    if lock:
+        stmt = stmt.with_for_update().execution_options(populate_existing=True)
+    return (await db.execute(stmt)).scalar_one_or_none()
 
 
-async def _load_store(db: AsyncSession, key: str, channel: str = "whatsapp"):
+async def _load_store(db: AsyncSession, key: str, channel: str = "whatsapp",
+                      *, lock: bool = False):
     """The ORM object whose JSONB `state` owns this customer's memory:
     the User for WhatsApp, the identity's Person for Meta channels.
-    Returns None when the contact doesn't resolve (memory then no-ops)."""
+    Returns None when the contact doesn't resolve (memory then no-ops).
+
+    `lock=True` is for a writer. `state` is one document with many owners
+    (crm_notes, call_note_ids, the cart…) rewritten whole, so the row stays
+    locked until the caller commits AND is re-read: sessions run
+    expire_on_commit=False, so a row this session already holds would otherwise
+    keep its old state, lock or no lock."""
     if channel == "whatsapp":
-        return await _load_user(db, key)
+        return await _load_user(db, key, lock=lock)
     ident = (await db.execute(
         select(Identity).where(Identity.channel == channel,
                                Identity.external_id == key)
     )).scalar_one_or_none()
     if ident is None:
         return None
+    if lock:
+        return await db.get(Person, ident.person_id, with_for_update=True,
+                            populate_existing=True)
     return await db.get(Person, ident.person_id)
 
 
@@ -65,7 +78,7 @@ async def get_memory(db: AsyncSession, wa_id: str, channel: str = "whatsapp") ->
 
 
 async def add_fact(db: AsyncSession, wa_id: str, fact: str, channel: str = "whatsapp") -> list[str]:
-    store = await _load_store(db, wa_id, channel)
+    store = await _load_store(db, wa_id, channel, lock=True)
     if store is None:
         return []
     state = dict(store.state or {})
