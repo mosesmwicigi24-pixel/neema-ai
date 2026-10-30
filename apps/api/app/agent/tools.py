@@ -51,6 +51,14 @@ class ToolContext:
     # copilot draft and its scribe pass are shown one shared list so they read
     # one cache entry; what each may actually do is decided here, at the call.
     allowed_tools: frozenset | None = None
+    # The server PLACED this customer (a WhatsApp number's prefix, an IP-located
+    # web visitor, a social identity's evidence chain): their market currency is
+    # decided, and a search_catalog `currency` argument cannot move it. Live
+    # misses (2026-10-29): South African numbers searched in ZMW ("ZMW 2,600",
+    # then "it's in US dollars — $130" to the same man), Tanzanian numbers in
+    # KES because they wrote Swahili. Only their own words move a placed
+    # customer — capture_contact naming a town in a hub-priced market.
+    market_locked: bool = False
 
 
 def _channel_label(ctx: "ToolContext") -> str:
@@ -142,7 +150,7 @@ TOOLS: list[dict] = [
             "properties": {
                 "query": {"type": "string", "description": "What the customer is looking for, e.g. 'cassock', 'communion cups', 'anointing oil'"},
                 "currency": {"type": "string", "enum": ["KES", "USD", "ZMW"],
-                             "description": "Override the display currency the moment evidence places the customer: 'KES' when they say they are in Kenya, name a Kenyan town or church, write in Swahili, or ask for shillings (our home prices); 'ZMW' when they say they are in Zambia (our own Kwacha prices). Leave unset otherwise — one currency at a time, never two."},
+                             "description": "Override the display currency the moment evidence places a customer we could NOT place: 'KES' when they say they are in Kenya, name a Kenyan town or church, write in Swahili, or ask for shillings (our home prices); 'ZMW' when they say they are in Zambia (our own Kwacha prices). Leave unset otherwise — one currency at a time, never two. Ignored when their number or record already sets their currency."},
             },
             "required": ["query"],
         },
@@ -617,15 +625,69 @@ def _search_tokens(query: str) -> set:
     return _search_words(query)
 
 
+# A price the model copies into an item ("Pectoral Cross, $25") restates the row
+# it already found; it is not a variant.
+_ITEM_PRICE = re.compile(
+    r"[$€£]\s*\d[\d,.]*|\b(?:usd|kes|ksh|zmw)\s*\d[\d,.]*"
+    r"|\b\d[\d,.]*\s*(?:usd|kes|ksh|zmw|dollars?|shillings?|bob)\b", re.IGNORECASE)
+
+
+def _stock_rows_named(item: str, catalog: list) -> list:
+    """The catalogue rows an availability question names IN FULL, when every one
+    of them is a STOCK piece (not made to order) — [] otherwise.
+
+    Every row is sold as available (sourcing gaps are flagged at order time,
+    never to the customer), so "let me confirm the Aluminium Tray with the
+    team" asks a question the catalogue already answered — and the team's
+    answer often never came (owner review, 2026-10-29: a Zambian church left
+    waiting on a tray we sell every week). Narrow on purpose — a wrong "it's
+    available" is worse than a needless check:
+      · every word of the item must be the row's own (a colour, a size,
+        "urgently", "as in their photo", "packed separately" keeps the check);
+      · the item must NAME the row — more than half of its name's words
+        ("golden communion cups" names no chalice, "bibles" no NIV Bible);
+      · a word we cannot read (another script: "Об'єм … для Chalice Cup")
+        keeps it — it may be the real question;
+      · a made-to-order row keeps it: the team looks for a READY piece."""
+    text = _ITEM_PRICE.sub(" ", _canonical(item or "")).lower()
+    if any(ch.isalpha() and not ch.isascii() for ch in _vernacular.fold(text)):
+        return []
+
+    def _named(words: set) -> set:
+        return {w for w in words if not w.isdigit()}
+
+    for q in dict.fromkeys((text, _vernacular.to_hub(text))):
+        toks = _named(_search_tokens(q))
+        if not toks:
+            continue
+        rows = []
+        for p in catalog:
+            name_words = _named(_search_words(p.get("name") or ""))
+            if not name_words:
+                continue
+            # Name and category only: an alias ("tray with cups") let "golden
+            # communion cups" read as the Golden Communion Tray.
+            words = name_words | _search_words(p.get("category") or "")
+            if toks.issubset(words) and 2 * len(toks & name_words) > len(name_words):
+                rows.append(p)
+        if rows:
+            return [] if any(p.get("is_producible") for p in rows) else rows
+    return []
+
+
 async def _search_catalog(args: dict, ctx: ToolContext) -> dict:
     # A customer can tell us where they are mid-conversation ("Kenyan money plz")
     # — the model then re-fetches with currency="KES"/"USD" instead of being
     # trapped by the channel default (Meta defaults to USD).
     cur = (args.get("currency") or "").upper()
+    held_currency = None
     if cur in ("KES", "USD", "ZMW") and cur != ctx.currency:
-        # The whole turn switches — the cart, the quotation and the order that
-        # follow in the same turn used to keep the channel's default currency.
-        ctx.currency = cur
+        if ctx.market_locked:
+            held_currency = cur
+        else:
+            # The whole turn switches — the cart, the quotation and the order that
+            # follow in the same turn used to keep the channel's default currency.
+            ctx.currency = cur
     # The owner's "same item, many names" table first (core/synonyms): a
     # "pendant" or a "cross and chain" searches as the hub's Pectoral Cross.
     query = _canonical(args.get("query") or "").lower().strip()
@@ -994,6 +1056,11 @@ async def _search_catalog(args: dict, ctx: ToolContext) -> dict:
         await demand.record(ctx.db, query, kind="no_match", channel=_channel_label(ctx),
                             wa_id=ctx.wa_id, person_id=pid)
     out = {"count": len(results), "currency": ctx.currency, "results": results}
+    if held_currency:
+        out["currency_note"] = (
+            f"This customer's currency is {ctx.currency} — set by their number or "
+            f"their record, not a guess — so these prices are in {ctx.currency}. "
+            f"Quote {ctx.currency} only; never {held_currency}.")
     if family_note:
         out["range"] = family_note
     if spelled and results:
@@ -1869,12 +1936,16 @@ async def _capture_contact(args: dict, ctx: ToolContext) -> dict:
         # "Kenya money" case: the moment their location resolves to Kenya, this
         # very turn switches to the Kenyan market — the next search_catalog call
         # returns real KES catalogue prices (never a USD conversion).
-        from app.core.countries import iso_from_text
-        if iso_from_text(location) == "KE" and ctx.currency != "KES":
-            ctx.currency = "KES"
-            out["currency_now"] = "KES"
-            out["note"] = ("Customer is in Kenya — re-run search_catalog and quote "
-                           "the real KES catalogue prices; do NOT convert from USD.")
+        # Zambia the same way: their own words outrank a number's prefix (a
+        # South African number living in Lusaka is quoted in Kwacha).
+        from app.core.countries import iso_from_text, market_currency
+        _said = market_currency(iso_from_text(location))
+        if _said in ("KES", "ZMW") and ctx.currency != _said:
+            ctx.currency = _said
+            out["currency_now"] = _said
+            _where = "Kenya" if _said == "KES" else "Zambia"
+            out["note"] = (f"Customer is in {_where} — re-run search_catalog and quote "
+                           f"the real {_said} catalogue prices; do NOT convert from USD.")
 
     if phone:
         from app.core.countries import iso_from_text
@@ -2082,6 +2153,21 @@ async def _check_availability(args: dict, ctx: ToolContext) -> dict:
     item = str(args.get("item") or "").strip()
     if not item:
         return {"error": "name the item to confirm"}
+    try:
+        stocked = _stock_rows_named(item, await svc.catalog_items(ctx.db, ctx.redis))
+    except Exception:
+        _log.info("availability: catalogue unreadable — asking the team", exc_info=True)
+        stocked = []
+    if stocked:
+        return {"ok": True, "item": item, "team_asked": False, "availability": "available",
+                "rows": [{"name": p.get("name"), "currency": ctx.currency,
+                          "price": _to_display(p.get("price"), ctx, p.get("price_usd"),
+                                               prices=p.get("prices"))}
+                         for p in stocked[:3]],
+                "note": "This is a catalogue item and it is AVAILABLE — no team check "
+                        "needed, none was raised. Tell them plainly it's available and "
+                        "take the order now; never say you are confirming or checking "
+                        "with the team."}
     if ctx.read_only:
         return {"ok": True, "item": item}
 

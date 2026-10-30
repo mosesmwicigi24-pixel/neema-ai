@@ -3,7 +3,8 @@
 
 import React, { useState, useEffect, useCallback } from "react";
 import { fmtCurrency, fmtDate, timeAgo, formatPhone, displayName } from "@/lib/utils";
-import { apiErrorDetail, conversationsApi, mapConversation, reportsApi, type RecoveryResults, type UnansweredItem } from "@/lib/api";
+import { apiErrorDetail, conversationsApi, mapConversation, reportsApi, type PhotoCheckItem, type PhotoChecks, type PhotoVerdict, type RecoveryResults, type UnansweredItem } from "@/lib/api";
+import { mediaSrc } from "@/lib/callCard";
 import type { Conversation, Agent, Order, SharedViewProps } from "@/types";
 
 interface ReportsViewProps extends SharedViewProps {
@@ -12,11 +13,12 @@ interface ReportsViewProps extends SharedViewProps {
 }
 
 type Range = "7d" | "30d" | "90d" | "custom";
-type ReportTab = "overview" | "conversations" | "orders" | "agents" | "unanswered" | "followups";
+type ReportTab = "overview" | "conversations" | "orders" | "agents" | "unanswered" | "followups" | "photos";
 const TAB_LABEL: Record<ReportTab, string> = {
     overview: "Overview", conversations: "Conversations", orders: "Orders", agents: "Agents",
-    unanswered: "Never answered", followups: "Follow-ups",
+    unanswered: "Never answered", followups: "Follow-ups", photos: "Photo checks",
 };
+const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000/api";
 
 function rangeLabel(r: Range) {
     return { "7d": "Last 7 days", "30d": "Last 30 days", "90d": "Last 90 days", custom: "Custom range" }[r];
@@ -151,6 +153,170 @@ function UnansweredPanel({ onToast }: { onToast: ReportsViewProps["onToast"] }) 
                         `${it.days_waiting} day${it.days_waiting === 1 ? "" : "s"}`,
                     ])}
                 />
+            )}
+        </div>
+    );
+}
+
+// Every customer photo the photo check judged (owner, 2026-10-29): is it
+// something we sell, or an AI-made / extra-embroidery design a person must
+// price? In shadow mode nothing changes for the customer — the owner marks
+// each result right or wrong here, and those marks set how strict it is
+// before referrals go live.
+const VERDICT: Record<PhotoVerdict, { label: string; tone: string; what: string }> = {
+    refer:       { label: "Refer to a person", tone: "bg-[#fef2f2] text-[#b91c1c] border-[#fecaca]", what: "Extra embroidery, a design to make, far from our range, or AI-made with nothing like it" },
+    ours:        { label: "Our product",       tone: "bg-[#ecfdf5] text-[#047857] border-[#a7f3d0]", what: "Neema answers as usual" },
+    close:       { label: "Close to ours",     tone: "bg-[#f0f9ff] text-[#0369a1] border-[#bae6fd]", what: "Our product in another colour or size — Neema answers" },
+    not_product: { label: "Not a product",     tone: "bg-[#f5f5f4] text-[#57534e] border-[#e7e5e4]", what: "A receipt, a person, a document…" },
+    unknown:     { label: "Not checked",       tone: "bg-[#f5f5f4] text-[#78716c] border-[#e7e5e4]", what: "The check could not run" },
+};
+const VERDICT_ORDER: PhotoVerdict[] = ["refer", "ours", "close", "not_product", "unknown"];
+
+function PhotoCheckCard({ item, onMark }: {
+    item: PhotoCheckItem;
+    onMark: (item: PhotoCheckItem, mark: "right" | "wrong" | null, note?: string) => Promise<void>;
+}) {
+    const v = VERDICT[item.verdict] ?? VERDICT.unknown;
+    const src = mediaSrc(item.photo_url, API_BASE);
+    const [note, setNote] = useState(item.owner_note ?? "");
+    const [busy, setBusy] = useState(false);
+    const mark = async (m: "right" | "wrong" | null) => {
+        setBusy(true);
+        try { await onMark(item, m, m === "wrong" ? note : undefined); } finally { setBusy(false); }
+    };
+    return (
+        <div className="bg-white rounded-xl border border-[#cee6b2] shadow-sm overflow-hidden flex flex-col">
+            <div className="aspect-[4/3] bg-[#f6faf1] flex items-center justify-center overflow-hidden">
+                {src
+                    ? <a href={src} target="_blank" rel="noreferrer" className="w-full h-full">
+                        <img src={src} alt="Customer photo" loading="lazy" className="w-full h-full object-cover" />
+                      </a>
+                    : <span className="text-xs text-[#9ccd65]">Photo no longer available</span>}
+            </div>
+            <div className="p-3 flex flex-col gap-2 flex-1">
+                <div className="flex items-center justify-between gap-2">
+                    <span className={`text-[11px] font-semibold px-2 py-0.5 rounded-full border ${v.tone}`}>{v.label}</span>
+                    <span className="text-[11px] text-[#78716c]" title={fmtDate(item.at)}>{timeAgo(item.at)}</span>
+                </div>
+                <p className="text-xs font-semibold text-[#1c1917] truncate">
+                    {displayName(item.name, item.contact)} <span className="font-normal text-[#78716c] capitalize">· {item.channel}</span>
+                </p>
+                {item.product && <p className="text-[11px] text-[#427425]">Closest: {item.product}</p>}
+                <ul className="text-[11px] text-[#44403c] list-disc pl-4 space-y-0.5">
+                    {item.reasons.map((r, i) => <li key={i}>{r}</li>)}
+                </ul>
+                {item.ai_made === "likely" && (
+                    <span className="self-start text-[10px] font-semibold px-1.5 py-0.5 rounded bg-[#faf5ff] text-[#7e22ce]">Looks AI-made</span>
+                )}
+                {item.acted && <span className="text-[10px] text-[#b91c1c]">Handed to a person</span>}
+                <div className="mt-auto pt-2 border-t border-[#e6f3d8] flex flex-col gap-1.5">
+                    {item.owner_mark === "wrong" || item.owner_mark === null ? (
+                        <input value={note} onChange={(e) => setNote(e.target.value)} maxLength={1000}
+                            placeholder="If wrong, what should it be? (optional)"
+                            className="h-8 px-2 rounded-md border border-[#cee6b2] text-[11px] focus:outline-none focus:border-[#589b31]" />
+                    ) : null}
+                    <div className="flex gap-1.5">
+                        <button disabled={busy} onClick={() => mark(item.owner_mark === "right" ? null : "right")}
+                            className={`flex-1 h-8 rounded-md text-[11px] font-semibold border disabled:opacity-50 ${item.owner_mark === "right" ? "bg-[#589b31] text-white border-[#589b31]" : "bg-white text-[#427425] border-[#cee6b2] hover:bg-[#f6faf1]"}`}>
+                            {item.owner_mark === "right" ? "✓ Right" : "Right"}
+                        </button>
+                        <button disabled={busy} onClick={() => mark(item.owner_mark === "wrong" && note === (item.owner_note ?? "") ? null : "wrong")}
+                            className={`flex-1 h-8 rounded-md text-[11px] font-semibold border disabled:opacity-50 ${item.owner_mark === "wrong" ? "bg-[#b91c1c] text-white border-[#b91c1c]" : "bg-white text-[#b91c1c] border-[#fecaca] hover:bg-[#fef2f2]"}`}>
+                            {item.owner_mark === "wrong" ? "✗ Wrong" : "Wrong"}
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    );
+}
+
+function PhotoChecksPanel({ onToast }: { onToast: ReportsViewProps["onToast"] }) {
+    const [data, setData] = useState<PhotoChecks | null>(null);
+    const [failed, setFailed] = useState<string | null>(null);
+    const [filter, setFilter] = useState<PhotoVerdict | "">("");
+    const [days, setDays] = useState(7);
+    useEffect(() => {
+        let alive = true;
+        reportsApi.photoChecks(days).then((r) => { if (alive) setData(r); })
+            .catch((e) => { if (alive) setFailed(apiErrorDetail(e) || "Couldn't load the photo checks"); });
+        return () => { alive = false; };
+    }, [days]);
+    const onMark = useCallback(async (item: PhotoCheckItem, mark: "right" | "wrong" | null, note?: string) => {
+        try {
+            const r = await reportsApi.markPhotoCheck(item.id, mark, note);
+            setData((d) => {
+                if (!d) return d;
+                const before = item.owner_mark;
+                const marked = { ...d.marked };
+                if (before) marked[before] -= 1;
+                if (mark) marked[mark] += 1;
+                return {
+                    ...d, marked,
+                    items: d.items.map((x) => x.id === item.id
+                        ? { ...x, owner_mark: r.owner_mark as PhotoCheckItem["owner_mark"], owner_note: r.owner_note }
+                        : x),
+                };
+            });
+        } catch (e) {
+            onToast(apiErrorDetail(e) || "Couldn't save the mark", "error");
+        }
+    }, [onToast]);
+    const items = (data?.items ?? []).filter((i) => !filter || i.verdict === filter);
+    const total = data ? VERDICT_ORDER.reduce((n, v) => n + (data.counts[v] ?? 0), 0) : 0;
+    return (
+        <div className="flex flex-col gap-4">
+            <div className="bg-white rounded-xl border border-[#cee6b2] shadow-sm px-4 py-3 flex flex-wrap items-start justify-between gap-3">
+                <div className="max-w-[640px]">
+                    <div className="flex items-center gap-2">
+                        <span className="text-xs font-bold text-[#699a32] uppercase tracking-wider">Photo checks</span>
+                        {data && (
+                            <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${data.mode === "live" ? "bg-[#fef2f2] text-[#b91c1c]" : data.mode === "shadow" ? "bg-[#fffbeb] text-[#b45309]" : "bg-[#f5f5f4] text-[#57534e]"}`}>
+                                {data.mode === "live" ? "Live — referring" : data.mode === "shadow" ? "Shadow — recording only" : "Off"}
+                            </span>
+                        )}
+                    </div>
+                    <p className="text-[11px] text-[#78716c] mt-1">
+                        Every photo a customer sends is compared with what we sell. Extra embroidery, a design or logo to make,
+                        anything far from our range, or an AI-made image with nothing like it in our catalogue is for a person.
+                        {data?.mode === "shadow" && " In shadow mode nothing changes for the customer: mark each result right or wrong, and the marks set how strict it is before referrals go live."}
+                    </p>
+                </div>
+                <div className="flex items-center gap-2">
+                    {data && <span className="text-[11px] text-[#427425]">Marked: {data.marked.right} right · {data.marked.wrong} wrong</span>}
+                    <select value={days} onChange={(e) => { setData(null); setFailed(null); setDays(Number(e.target.value)); }}
+                        className="h-8 px-2 rounded-md border border-[#cee6b2] text-xs bg-white">
+                        <option value={1}>Last day</option>
+                        <option value={7}>Last 7 days</option>
+                        <option value={30}>Last 30 days</option>
+                        <option value={90}>Last 90 days</option>
+                    </select>
+                </div>
+            </div>
+            {data && (
+                <div className="flex flex-wrap gap-1.5">
+                    <button onClick={() => setFilter("")}
+                        className={`h-8 px-3 rounded-full text-xs font-semibold border ${filter === "" ? "bg-[#427425] text-white border-[#427425]" : "bg-white text-[#427425] border-[#cee6b2]"}`}>
+                        All · {total}
+                    </button>
+                    {VERDICT_ORDER.filter((v) => (data.counts[v] ?? 0) > 0 || v === "refer").map((v) => (
+                        <button key={v} onClick={() => setFilter(v)} title={VERDICT[v].what}
+                            className={`h-8 px-3 rounded-full text-xs font-semibold border ${filter === v ? "bg-[#427425] text-white border-[#427425]" : "bg-white text-[#427425] border-[#cee6b2]"}`}>
+                            {VERDICT[v].label} · {data.counts[v] ?? 0}
+                        </button>
+                    ))}
+                </div>
+            )}
+            {failed ? (
+                <p className="px-4 py-6 text-sm text-[#b91c1c]">{failed}</p>
+            ) : !data ? (
+                <p className="px-4 py-6 text-sm text-[#699a32]">Loading…</p>
+            ) : !items.length ? (
+                <p className="px-4 py-6 text-sm text-[#78716c]">No customer photos checked in this period yet.</p>
+            ) : (
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
+                    {items.slice(0, 200).map((it) => <PhotoCheckCard key={it.id} item={it} onMark={onMark} />)}
+                </div>
             )}
         </div>
     );
@@ -384,7 +550,7 @@ export function ReportsView({ agents, orders, onToast, isMobile }: ReportsViewPr
 
             {/* Tab nav */}
             <div className="flex gap-1 mb-5 border-b border-[#cee6b2]">
-                {(["overview", "conversations", "orders", "agents", "unanswered", "followups"] as ReportTab[]).map((t) => (
+                {(["overview", "conversations", "orders", "agents", "unanswered", "followups", "photos"] as ReportTab[]).map((t) => (
                     <button key={t} onClick={() => setTab(t)}
                         className={`px-4 py-2 text-xs font-semibold transition-colors border-b-2 -mb-px ${
                             tab === t
@@ -486,6 +652,7 @@ export function ReportsView({ agents, orders, onToast, isMobile }: ReportsViewPr
 
             {/* ── NEVER ANSWERED ────────────────────────────────────────────── */}
             {tab === "unanswered" && <UnansweredPanel onToast={onToast} />}
+            {tab === "photos" && <PhotoChecksPanel onToast={onToast} />}
 
             {/* ── FOLLOW-UPS ────────────────────────────────────────────────── */}
             {tab === "followups" && <FollowUpsPanel />}

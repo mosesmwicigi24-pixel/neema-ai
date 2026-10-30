@@ -352,6 +352,99 @@ async def report_unanswered(
     return {"count": len(items), "min_age_h": min_age_h, "items": items}
 
 
+_PHOTO_VERDICTS = ("ours", "close", "refer", "not_product", "unknown")
+
+
+@router.get("/reports/photo-checks")
+async def report_photo_checks(
+    days: int = 7,
+    verdict: str = "",
+    db: AsyncSession = Depends(get_db),
+    agent: Agent = Depends(get_current_agent),
+):
+    """Every customer photo the photo check judged (owner, 2026-10-29), newest
+    first: what it decided, why, and the owner's mark. In shadow mode this is
+    the list the owner marks right / wrong before referrals go live."""
+    from datetime import datetime, timedelta, timezone
+    from app.core.config import settings
+    from app.core.permissions import require_permission
+    from app.models.photo_check import PhotoCheck
+    await require_permission(db, agent, "view_reports", "You need reports access to see this list")
+    days = max(1, min(int(days or 7), 90))
+    since = datetime.now(timezone.utc) - timedelta(days=days)
+    q = (select(PhotoCheck, Message.media_url, Person.display_name)
+         .outerjoin(Message, Message.id == PhotoCheck.message_id)
+         .outerjoin(Conversation, Conversation.id == PhotoCheck.conversation_id)
+         .outerjoin(Person, Person.id == Conversation.person_id)
+         .where(PhotoCheck.created_at >= since))
+    if verdict in _PHOTO_VERDICTS:
+        q = q.where(PhotoCheck.verdict == verdict)
+    rows = (await db.execute(q.order_by(PhotoCheck.created_at.desc()).limit(500))).all()
+    counts = {v: 0 for v in _PHOTO_VERDICTS}
+    for v, n in (await db.execute(
+            select(PhotoCheck.verdict, func.count()).where(PhotoCheck.created_at >= since)
+            .group_by(PhotoCheck.verdict))).all():
+        counts[v] = n
+    marked = dict((await db.execute(
+        select(PhotoCheck.owner_mark, func.count()).where(
+            PhotoCheck.created_at >= since, PhotoCheck.owner_mark.isnot(None))
+        .group_by(PhotoCheck.owner_mark))).all())
+    items = []
+    for pc, msg_url, person_name in rows:
+        at = pc.created_at if pc.created_at.tzinfo else pc.created_at.replace(tzinfo=timezone.utc)
+        items.append({
+            "id": str(pc.id),
+            "conversation_id": str(pc.conversation_id) if pc.conversation_id else None,
+            "name": person_name or "",
+            "channel": pc.channel,
+            "contact": pc.contact,
+            "photo_url": sign_media_url(msg_url or pc.media_url),
+            "verdict": pc.verdict,
+            "reasons": list(pc.reasons or []),
+            "product": pc.product,
+            "product_slug": pc.product_slug,
+            "match": pc.match,
+            "ai_made": pc.ai_made,
+            "extra_embroidery": pc.extra_embroidery,
+            "mode": pc.mode,
+            "acted": bool(pc.acted),
+            "owner_mark": pc.owner_mark,
+            "owner_note": pc.owner_note,
+            "at": at.isoformat(),
+        })
+    return {"mode": (settings.photo_check_mode or "off"), "days": days, "counts": counts,
+            "marked": {"right": marked.get("right", 0), "wrong": marked.get("wrong", 0)},
+            "items": items}
+
+
+@router.post("/reports/photo-checks/{check_id}/mark")
+async def mark_photo_check(
+    check_id: UUID,
+    body: dict,
+    db: AsyncSession = Depends(get_db),
+    agent: Agent = Depends(get_current_agent),
+):
+    """The owner's mark on one check: "right", "wrong", or null to clear it,
+    with an optional note ("this is our Ornate Chasuble")."""
+    from datetime import datetime, timezone
+    from app.core.permissions import require_permission
+    from app.models.photo_check import PhotoCheck
+    await require_permission(db, agent, "view_reports", "You need reports access to mark this")
+    mark = body.get("mark")
+    if mark not in ("right", "wrong", None):
+        raise HTTPException(status_code=422, detail="mark must be right, wrong or null")
+    pc = await db.get(PhotoCheck, check_id)
+    if pc is None:
+        raise HTTPException(status_code=404, detail="Photo check not found")
+    pc.owner_mark = mark
+    if "note" in body:
+        pc.owner_note = (str(body.get("note") or "").strip()[:1000]) or None
+    pc.marked_by = agent.id if mark else None
+    pc.marked_at = datetime.now(timezone.utc) if mark else None
+    await db.commit()
+    return {"ok": True, "id": str(pc.id), "owner_mark": pc.owner_mark, "owner_note": pc.owner_note}
+
+
 @router.get("/conversations/summary")
 async def conversations_summary(
     db: AsyncSession = Depends(get_db),
