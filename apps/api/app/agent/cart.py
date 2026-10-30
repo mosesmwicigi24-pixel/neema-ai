@@ -18,6 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.person import Person, Identity
 from app.models.user import User
+from app.services.state_lock import lock_for_write
 
 _KEY = "agent_cart"
 
@@ -54,14 +55,20 @@ async def _load_store(db: AsyncSession, key: str, channel: str = "whatsapp"):
         # adoption genuinely once.
         if not read_cart(person.state).get("items") and read_cart(user.state).get("items"):
             from sqlalchemy.orm.attributes import flag_modified
-            state = dict(person.state or {})
-            state[_KEY] = read_cart(user.state)
-            person.state = state
-            flag_modified(person, "state")
-            u_state = dict(user.state or {})
-            u_state.pop(_KEY, None)
-            user.state = u_state
-            flag_modified(user, "state")
+            # Both rows, user first — and the test again on what is really
+            # there now, so two readers don't both move it.
+            user = await lock_for_write(db, user)
+            person = await lock_for_write(db, person)
+            if user and person and not read_cart(person.state).get("items") \
+                    and read_cart(user.state).get("items"):
+                state = dict(person.state or {})
+                state[_KEY] = read_cart(user.state)
+                person.state = state
+                flag_modified(person, "state")
+                u_state = dict(user.state or {})
+                u_state.pop(_KEY, None)
+                user.state = u_state
+                flag_modified(user, "state")
             await db.commit()
         return person
     ident = (await db.execute(
@@ -104,7 +111,7 @@ async def get_cart(db: AsyncSession, wa_id: str, channel: str = "whatsapp") -> d
 
 async def save_cart(db: AsyncSession, wa_id: str, cart: dict,
                     channel: str = "whatsapp") -> dict:
-    store = await _load_store(db, wa_id, channel)
+    store = await lock_for_write(db, await _load_store(db, wa_id, channel))
     if store is None:
         return cart
     state = dict(store.state or {})
