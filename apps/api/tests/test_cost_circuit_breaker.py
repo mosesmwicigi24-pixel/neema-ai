@@ -214,11 +214,12 @@ def test_every_metered_turn_feeds_the_day_counter():
                                 {"input_tokens": 1000, "output_tokens": 100,
                                  "cache_read_tokens": 9000, "cache_write_tokens": 0,
                                  "cache_write_1h_tokens": 0}, "whatsapp", redis=r))
-    # 1000 fresh @ $3/M + 9000 cache-read @ $0.30/M + 100 out @ $15/M
-    assert r.kv[_day_key()] == pytest.approx(0.0072)
+    # 1000 fresh @ $2/M + 9000 cache-read @ $0.20/M + 100 out @ $10/M —
+    # Sonnet 5's standard price (the $3/$15 rise never happened)
+    assert r.kv[_day_key()] == pytest.approx(0.0048)
     import inspect
     assert "ai_budget.add_spend(" not in inspect.getsource(runtime.run_turn)
-    assert "await ai_budget.meter(self._model, r.usage, self.purpose)" in inspect.getsource(AnthropicLLM)
+    assert "await ai_budget.meter(model, r.usage, self.purpose)" in inspect.getsource(AnthropicLLM)
 
 
 def test_comment_labeler_skips_the_model_under_stop(monkeypatch):
@@ -241,7 +242,8 @@ def test_an_unknown_model_bills_at_sonnet_class_rates():
     from app.core.ai_pricing import estimate_cost_usd
     unknown = estimate_cost_usd("claude-totally-new-9", 1_000_000, 1_000_000)
     sonnet = estimate_cost_usd("claude-sonnet-5", 1_000_000, 1_000_000)
-    assert unknown >= sonnet == pytest.approx(18.0)
+    assert unknown >= sonnet == pytest.approx(12.0)
+    assert unknown == pytest.approx(18.0)          # the unknown still bills HIGH
 
 
 # ── the sweeper's three strikes ──────────────────────────────────────────────

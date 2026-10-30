@@ -1352,7 +1352,12 @@ async def review_reply(comment: str, answer: str, seen: list, *,
     if v is not None and v["ok"] and not findings:
         by = "reviewer"
     issues = hard + soft
-    return {"ok": not issues, "issues": issues, "hard": hard, "soft": soft, "by": by or "rules"}
+    # WHICH checks fired (owner, 2026-10-30: half the replies were rewritten
+    # — find out why and fix the cause, so the first draft is right).
+    kinds = sorted({str(f.get("kind") or "rule") for f in findings}
+                   | ({"reviewer"} if v is not None and not v["ok"] else set()))
+    return {"ok": not issues, "issues": issues, "hard": hard, "soft": soft, "by": by or "rules",
+            "kinds": kinds}
 
 
 def review_notes(issues: list[str]) -> str:
@@ -1442,9 +1447,12 @@ def _day_key() -> str:
     return "review:" + datetime.now(timezone.utc).strftime("%Y-%m-%d")
 
 
-async def record_verdict(redis, outcome: str, channel: str = "") -> None:
+async def record_verdict(redis, outcome: str, channel: str = "", *,
+                         kinds: list[str] | tuple = (), model: str = "") -> None:
     """pass / rewritten / soft (sent with notes) / held, per UTC day (kept
-    three days), best-effort."""
+    three days), best-effort — with which checks the first draft failed
+    (`kind:<kind>`) and the model that wrote it (`model:<model>:<outcome>`),
+    so a model trial is judged on the same gate as the model it replaces."""
     if redis is None or outcome not in ("pass", "rewritten", "soft", "held"):
         return
     try:
@@ -1452,9 +1460,34 @@ async def record_verdict(redis, outcome: str, channel: str = "") -> None:
         await redis.hincrby(key, outcome, 1)
         if channel:
             await redis.hincrby(key, f"{outcome}:{channel}", 1)
+        for k in kinds or ():
+            await redis.hincrby(key, f"kind:{k}", 1)
+        if model:
+            await redis.hincrby(key, f"model:{model}:{outcome}", 1)
         await redis.expire(key, 3 * 24 * 3600)
     except Exception:
         pass
+
+
+def verdict_view(tally: dict) -> dict:
+    """The health block: the day's outcomes, the checks behind the rewrites
+    (most first), and each model's outcomes with its first-draft pass rate."""
+    out = {"passed": tally.get("pass", 0), "rewritten": tally.get("rewritten", 0),
+           "soft": tally.get("soft", 0), "held": tally.get("held", 0)}
+    kinds = {k[5:]: v for k, v in tally.items() if k.startswith("kind:")}
+    if kinds:
+        out["findings"] = dict(sorted(kinds.items(), key=lambda kv: -kv[1]))
+    models: dict = {}
+    for k, v in tally.items():
+        if k.startswith("model:"):
+            name, _, outcome = k[6:].rpartition(":")
+            models.setdefault(name, {})[outcome] = v
+    for name, m in models.items():
+        n = sum(m.get(o, 0) for o in ("pass", "rewritten", "soft", "held"))
+        m["first_draft_pass_pct"] = round(100.0 * m.get("pass", 0) / n, 1) if n else None
+    if models:
+        out["by_model"] = models
+    return out
 
 
 async def held_recently(redis, channel: str, key: str, hours: int = 6) -> bool:

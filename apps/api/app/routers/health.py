@@ -59,12 +59,8 @@ async def health(request: Request):
     # THE GATE BEFORE POSTING (owner, 2026-09-25): what the reviewer did today
     # — replies passed, rewritten once, held back for a colleague.
     try:
-        from app.agent.review import read_verdicts
-        tally = await read_verdicts(getattr(request.app.state, "redis", None))
-        out["review"] = {"passed": tally.get("pass", 0),
-                         "rewritten": tally.get("rewritten", 0),
-                         "soft": tally.get("soft", 0),
-                         "held": tally.get("held", 0)}
+        from app.agent.review import read_verdicts, verdict_view
+        out["review"] = verdict_view(await read_verdicts(getattr(request.app.state, "redis", None)))
     except Exception:
         pass
     # WHERE THE MONEY WENT (owner, 2026-09-26): today's spend against the

@@ -197,14 +197,14 @@ def test_double_verification_reads_every_draft_twice_and_merges(monkeypatch):
     v = asyncio.run(rv.review_reply(GOLD_ASK, draft, [GOLDEN], post_product="Silver Communion Tray"))
     assert v == {"ok": False, "issues": ["the reply says 40 cups but the row says nothing about capacity"],
                  "hard": [], "soft": ["the reply says 40 cups but the row says nothing about capacity"],
-                 "by": "reviewer"}
+                 "by": "reviewer", "kinds": ["reviewer"]}
     sent = llm.calls[-1]
     assert "Golden Communion Tray — USD 220" in sent and GOLD_ASK in sent and draft in sent
     assert "The post is about: Silver Communion Tray" in sent
     assert "verdict=<pass|fail>" in sent and "communion CUPS" in sent
     llm.text = "verdict=pass | issues=-"
     assert asyncio.run(rv.review_reply(GOLD_ASK, draft, [GOLDEN])) == {
-        "ok": True, "issues": [], "hard": [], "soft": [], "by": "reviewer"}
+        "ok": True, "issues": [], "hard": [], "soft": [], "by": "reviewer", "kinds": []}
 
 
 def test_the_reviewer_is_switchable_and_a_model_outage_leaves_the_rules_verdict(monkeypatch):
@@ -212,7 +212,7 @@ def test_the_reviewer_is_switchable_and_a_model_outage_leaves_the_rules_verdict(
     monkeypatch.setattr(settings, "comment_reply_review", False, raising=False)
     monkeypatch.setattr(rt, "build_llm", lambda model=None, **kw: (_ for _ in ()).throw(AssertionError("no model")))
     assert asyncio.run(rv.review_reply(GOLD_ASK, draft, [GOLDEN])) == {
-        "ok": True, "issues": [], "hard": [], "soft": [], "by": "rules"}
+        "ok": True, "issues": [], "hard": [], "soft": [], "by": "rules", "kinds": []}
     monkeypatch.setattr(settings, "comment_reply_review", True, raising=False)
 
     class _Down:
@@ -220,7 +220,7 @@ def test_the_reviewer_is_switchable_and_a_model_outage_leaves_the_rules_verdict(
             raise RuntimeError("model down")
     monkeypatch.setattr(rt, "build_llm", lambda model=None, **kw: _Down())
     assert asyncio.run(rv.review_reply(GOLD_ASK, draft, [GOLDEN])) == {
-        "ok": True, "issues": [], "hard": [], "soft": [], "by": "rules"}
+        "ok": True, "issues": [], "hard": [], "soft": [], "by": "rules", "kinds": []}
     # a rule failure still stands with the model down — and it is hard
     v = asyncio.run(rv.review_reply("how much is the gold tray?", "It is $175.", [GOLDEN]))
     assert v["ok"] is False and v["hard"] and not v["soft"]
@@ -277,7 +277,7 @@ def _wire(monkeypatch, verdicts, facts_rows=None):
     async def fake_flag(db, channel, key, issues, draft, redis=None):
         flags.append((channel, key, list(issues), draft))
 
-    async def fake_tally(redis, outcome, channel=""):
+    async def fake_tally(redis, outcome, channel="", **kw):
         tally.append((outcome, channel))
     monkeypatch.setattr(rv, "review_reply", fake_review)
     monkeypatch.setattr(rv, "record_verdict", fake_tally)
@@ -579,7 +579,7 @@ def test_the_reviewer_reads_the_conversation_and_the_tools_in_a_private_chat(mon
     v = asyncio.run(rv.review_reply("Size L", "Which colour would you like?", [], transcript=transcript,
                                     tool_results=log, mode="dm"))
     assert v == {"ok": False, "issues": ["re-asks the colour they gave"], "hard": [],
-                 "soft": ["re-asks the colour they gave"], "by": "reviewer"}
+                 "soft": ["re-asks the colour they gave"], "by": "reviewer", "kinds": ["reviewer"]}
     sent = llm.calls[-1]
     assert "a reply in a private chat" in sent and "4. CONTRADICTS THE CONVERSATION" in sent
     assert "6. WRONG LANGUAGE" in sent and "Customer: I want the cassock in red" in sent
@@ -596,7 +596,7 @@ def test_the_private_chat_reviewer_has_its_own_switch(monkeypatch):
     monkeypatch.setattr(settings, "reply_review", False, raising=False)
     monkeypatch.setattr(rt, "build_llm", lambda model=None, **kw: (_ for _ in ()).throw(AssertionError("no model")))
     v = asyncio.run(rv.review_reply("hi", "Hello! How can I help?", [], mode="dm"))
-    assert v == {"ok": True, "issues": [], "hard": [], "soft": [], "by": "rules"}
+    assert v == {"ok": True, "issues": [], "hard": [], "soft": [], "by": "rules", "kinds": []}
     assert settings.reply_review is True or True
     assert "reply_review: bool = True" in inspect.getsource(type(settings))
 
@@ -628,7 +628,8 @@ def test_the_days_tally_reaches_the_health_endpoint():
     assert asyncio.run(rv.read_verdicts(None)) == {}
     from app.routers import health as h
     src = inspect.getsource(h.health)
-    assert 'out["review"] = {"passed": tally.get("pass", 0),' in src
+    assert 'out["review"] = verdict_view(await read_verdicts(' in src
+    assert rv.verdict_view(t)["passed"] == 2
 
 
 # ── the canned path: "gold trays" does not name the silver tray ─────────────

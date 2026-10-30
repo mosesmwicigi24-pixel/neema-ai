@@ -381,11 +381,22 @@ class Settings(BaseSettings):
     # ── The agent (tool-calling; the only brain since n8n's Tier 1 retired —
     # the tier2_ prefix is the historical name, kept to spare a box-.env rename) ──
     anthropic_api_key: str = ""
-    tier2_model: str = "claude-sonnet-5"
-    tier2_model_light: str = "claude-haiku-4-5"  # cheap model for trivial turns (per-turn routing)
+    # The 5.5 generation (owner, 2026-10-30: "go ahead with all"): Sonnet 5.5
+    # at Sonnet 5's price with cache reads at half, Haiku 5.5 at a tenth of
+    # Haiku 4.5's. A trial: a refused or rejected request is answered on the
+    # previous model (model_fallbacks), and /api/health's review block shows
+    # each model's pass rate. To go back, set these two to claude-sonnet-5 /
+    # claude-haiku-4-5.
+    tier2_model: str = "claude-sonnet-5-5"
+    tier2_model_light: str = "claude-haiku-5-5"  # cheap model for trivial turns (per-turn routing)
+    model_fallbacks: str = "claude-sonnet-5-5:claude-sonnet-5,claude-haiku-5-5:claude-haiku-4-5"
     tier2_model_routing: bool = True  # route trivial turns to tier2_model_light; False = always tier2_model
     tier2_max_iterations: int = 8    # max tool-call loops per turn (runaway guard)
-    tier2_max_tokens: int = 1024
+    # Room for the 5.5 models' thinking AS WELL AS the reply — thinking counts
+    # toward max_tokens even when its text isn't returned, and 1024 could cut
+    # a considered reply short. A ceiling, not a target: replies stay as short
+    # as the rules make them.
+    tier2_max_tokens: int = 4096
     tier2_prompt_cache: bool = True  # cache the system+tools+conversation prefix (~90% cheaper input)
     # THE GATE BEFORE POSTING (owner, 2026-09-25): every public comment reply is
     # verified before it posts — the rules always (figures are the hub's, the

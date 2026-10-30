@@ -17,12 +17,21 @@ _PRICES: dict[str, tuple[float, float, float]] = {
     "gpt-4o":         (2.50, 1.25, 10.00),
     "gpt-4o-mini":    (0.15, 0.075, 0.60),
     "gpt-5-mini":     (0.25, 0.025, 2.00),
-    # Claude (Tier 2 agent). cached = cache-READ rate (~0.1x input); cache
-    # WRITES bill at 1.25x input, handled via cache_write_tokens below. Standard
-    # (non-intro) rates so telemetry never under-reports once intro pricing ends.
-    "claude-sonnet-5":  (3.00, 0.30, 15.00),
-    "claude-haiku-4-5": (1.00, 0.10, 5.00),
-    "claude-opus-4-8":  (5.00, 0.50, 25.00),
+    # Claude (Tier 2 agent). cached = cache-READ rate; cache WRITES bill at
+    # 1.25x input (5-minute) / 2x input (1-hour), via cache_write_tokens below.
+    # Anthropic's published standard rates (pricing page, read 2026-10-30):
+    # Sonnet 5's $2/$10 launch price became the standard price — the
+    # $3/$15 rise scheduled for 2026-09-01 never happened. This table had
+    # kept $3/$15, so the meter read ~1.5x the real spend and the $40
+    # economy rung moved customers to the light model at ~$27 of real
+    # spend (owner, 2026-10-30: keep her intelligence; fix the meter).
+    "claude-sonnet-5":   (2.00, 0.20, 10.00),
+    "claude-sonnet-5-5": (2.00, 0.10, 10.00),   # cache reads 0.05x on 5.5
+    "claude-haiku-4-5":  (1.00, 0.10, 5.00),
+    "claude-haiku-5-5":  (0.10, 0.01, 0.50),    # prompts up to 100K tokens
+    "claude-opus-5":     (5.00, 0.50, 25.00),
+    "claude-opus-5-5":   (4.00, 0.20, 20.00),
+    "claude-opus-4-8":   (5.00, 0.50, 25.00),
     # audio (billed per-token on these models; speech-to-text is billed per
     # audio minute — services/transcribe.PRICE_PER_MIN meters it directly)
     "whisper-1":      (0.0, 0.0, 0.0),
