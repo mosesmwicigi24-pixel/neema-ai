@@ -125,7 +125,6 @@ struct LeadsBody: View {
         let board = LeadsRules.buildBoard(leads, filtered: filtered, stages: ui.stages)
         // Never loaded: no counts or totals — zeros would be a claim.
         let unknown = leads.isEmpty && (ui.loading || ui.loadError != nil)
-        let selected = selectedLead
         TimelineView(.periodic(from: .now, by: 60)) { ctx in
             let now = Int64(ctx.date.timeIntervalSince1970 * 1000)
             VStack(spacing: 0) {
@@ -146,7 +145,7 @@ struct LeadsBody: View {
             vm.life.shown.update(true)
         }
         .onDisappear { vm.life.shown.update(false) }
-        .onChange(of: ui) { u in
+        .onChange(of: ui) { _, u in
             savedUi = JSONValue.object(vm.saveUi()).text
             // Gone from the board (deleted, merged). Not before the first read: a
             // lead restored after the app was reclaimed waits for the board to load.

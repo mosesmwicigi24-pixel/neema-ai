@@ -31,7 +31,7 @@ in the background to receive calls."*
    - Package name: `ke.co.bethanyhouse.neema`
    - Click **Register app**, then **Download google-services.json**. You don't
      need to add it to the code; four values from it are enough (next step).
-3. **Give the four app values to the build.** Add them in GitHub → the
+3. **Give the four app values to the build.** *Done 2026-10-30:* project `neema-6037c`, built into `apps/android/app/build.gradle.kts` as defaults (the secrets below still override). Kept for a future project change: Add them in GitHub → the
    repository → Settings → Secrets and variables → **Actions** → New repository
    secret. Or send them to Claude to commit; none of them is secret, since
    every installed APK carries them.
@@ -53,6 +53,11 @@ in the background to receive calls."*
    - Never commit this file or paste it in chat.
 5. **Build and install** the new APKs (CI does it on the next merge), and sign
    in on each phone once.
+
+Optional hardening: in Google Cloud console → APIs & Services → Credentials,
+restrict the Android API key (`AIza…`) to the Android app
+`ke.co.bethanyhouse.neema` with the signing key's SHA-1 (development key:
+`keytool -list -v -keystore apps/android/keystore/dev.jks -storepass neema-dev`).
 
 ## Checking it
 

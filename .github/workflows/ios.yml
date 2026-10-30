@@ -80,6 +80,16 @@ jobs:
             -skipPackagePluginValidation CODE_SIGNING_ALLOWED=NO \
             build test 2>&1 | tee xcodebuild.log | grep -E "error:|warning: unreachable|\*\* |Test Suite|Test Case.*(passed|failed)|Executed" || true
           grep -q "\*\* TEST SUCCEEDED \*\*" xcodebuild.log
+      # The app's own Swift warnings (owner, 2026-10-30: "clean up the 72 iOS
+      # warnings"): counted on every run, each listed once, so a new one shows.
+      - name: Swift warnings
+        if: always()
+        working-directory: apps/ios
+        run: |
+          grep -E "NeemaApp/.*: warning: " xcodebuild.log | sed -E 's#^.*/apps/ios/##' | sort -u > warnings.txt || true
+          n=$(wc -l < warnings.txt | tr -d ' ')
+          cat warnings.txt
+          echo "::notice title=Swift warnings in NeemaApp::$n"
       - name: Upload the build log
         if: always()
         uses: actions/upload-artifact@v4
@@ -154,5 +164,5 @@ jobs:
         run: |
           gh release create "ios-v${VERSION}-${GITHUB_RUN_NUMBER}" "build/$IPA" \
             --title "Neema iOS ${VERSION} (build ${GITHUB_RUN_NUMBER})" \
-            --notes "iPhone (iOS 16 or later, iPhone 17 included): \`$IPA\` is unsigned. Install it with Sideloadly (Windows or Mac) signed with your Apple ID — docs/ios/RELEASE.md §4b. With a free Apple ID it runs for 7 days, then install it again. Built from ${GITHUB_SHA::7}." \
+            --notes "iPhone (iOS 17 or later, iPhone 17 included): \`$IPA\` is unsigned. Install it with Sideloadly (Windows or Mac) signed with your Apple ID — docs/ios/RELEASE.md §4b. With a free Apple ID it runs for 7 days, then install it again. Built from ${GITHUB_SHA::7}." \
             --target "$GITHUB_SHA"

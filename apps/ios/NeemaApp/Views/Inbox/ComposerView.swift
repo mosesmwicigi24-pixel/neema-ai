@@ -426,7 +426,7 @@ private struct AttachButton: View {
         }
         .accessibilityLabel("Attach images or files (up to 5 MB each for images)")
         .photosPicker(isPresented: $showPhotos, selection: $photos, maxSelectionCount: 10, matching: .any(of: [.images, .videos]))
-        .onChange(of: photos) { items in
+        .onChange(of: photos) { _, items in
             guard !items.isEmpty else { return }
             photos = []
             Task { await addPhotos(items) }

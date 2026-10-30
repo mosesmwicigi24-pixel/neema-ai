@@ -11,7 +11,7 @@ for the owner to run. Statuses use the parity matrix's vocabulary.
 |---|---|---|---|
 | Bundle identifier | `apps/ios/project.yml` | `ke.co.bethanyhouse.neema` (tests `….tests`, UI tests `….uitests`) | verified (CI builds it) |
 | Display name | `project.yml` → `Info.plist` | Neema | verified |
-| Deployment target | `project.yml` | iOS 16.0; iPhone and iPad (`TARGETED_DEVICE_FAMILY` 1,2), no Mac Catalyst | verified |
+| Deployment target | `project.yml` | iOS 17.0 (iPhone XS / XR and later; raised from 16.0 on 2026-10-30 for the iOS 17 `onChange` and `AVAudioApplication` APIs); iPhone and iPad (`TARGETED_DEVICE_FAMILY` 1,2), no Mac Catalyst | verified |
 | Configurations | XcodeGen's defaults | Debug (the simulator job: `build test`) and Release (the archive job: `-O`, whole-module) | verified — both built on CI since cycle 10 |
 | Orientations | `Info.plist` | phone: portrait + both landscapes; iPad: all four | verified (declared) |
 | Background modes | `Info.plist` | `audio`, `voip`, `remote-notification` — a call that is up when the app leaves the screen; the pushes the backend does not send yet (§25 of the matrix) | declared |
@@ -100,7 +100,7 @@ Every change to the iOS app on `main` publishes a GitHub Release
 (the same Release build CI archives; also the `neema-ios-ipa` artifact of
 each iOS workflow run). It is unsigned: Apple lets an iPhone install only an
 app signed for it, so a sideloading tool signs it with your own Apple ID.
-Works for any iPhone on iOS 16 or later — iPhone 17 included.
+Works for any iPhone on iOS 17 or later — iPhone 17 included.
 
 What you need: a Windows PC or a Mac, the iPhone and its cable, and an Apple
 ID (a free one is fine; better a separate one than your main account).

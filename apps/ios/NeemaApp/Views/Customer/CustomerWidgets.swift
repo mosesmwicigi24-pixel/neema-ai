@@ -260,7 +260,7 @@ struct EditableField: View {
             .padding(.vertical, 4)
             CrmHairline()
         }
-        .onChange(of: restore) { r in
+        .onChange(of: restore) { _, r in
             if let r = r { draft = r; editing = true; focused = true; onRestored() }
         }
         .onAppear { if let r = restore { draft = r; editing = true; onRestored() } }
