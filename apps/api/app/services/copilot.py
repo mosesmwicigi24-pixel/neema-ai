@@ -107,6 +107,40 @@ def schedule_briefing(redis, conv_id) -> None:
 # finds the previous one to supersede — a thread keeps exactly one.
 BRIEF_HEADING = "🤝 Handoff briefing"
 
+# KEY POINTS ONLY (owner, 2026-11-03: the briefing was "too big … I just need
+# key points … highly summarised, just to help someone understand what is
+# happening"). Five labelled lines at most; the chat itself is right below it.
+BRIEF_ASK = (
+    "[HANDOFF BRIEFING — a colleague is taking this conversation over. Write FOR "
+    "THEM, not the customer. KEY POINTS ONLY: at most 5 lines, each under 15 "
+    "words, no headings, no bold, no repeating what the chat already shows. Use "
+    "exactly these labels, skipping any with nothing to say:\n"
+    "Stage: <cart / order / payment state>\n"
+    "Wants: <the items, colour, size, total>\n"
+    "Open: <what is still unresolved>\n"
+    "Avoid: <only what must not be said or repeated>\n"
+    "Say: <one opening line for the colleague>]")
+BRIEF_LABELS = ("Stage", "Wants", "Open", "Avoid", "Say")
+BRIEF_MAX_LINES = 5
+BRIEF_LINE_WORDS = 22
+
+
+def tight_briefing(text: str) -> str:
+    """The model's briefing held to the key-points shape, whatever it wrote:
+    markdown stripped, the labelled lines first, at most BRIEF_MAX_LINES of
+    at most BRIEF_LINE_WORDS words. '' when nothing usable is left."""
+    import re as _re
+    from app.services.call_transcribe import clip_words
+    lines = []
+    for raw in (text or "").splitlines():
+        t = _re.sub(r"[*_#`>]+", "", raw).strip(" -•\t")
+        if not t or t.lower().startswith(("handoff briefing", "briefing")):
+            continue
+        lines.append(t)
+    labelled = [t for t in lines if t.split(":", 1)[0].strip().title() in BRIEF_LABELS]
+    picked = labelled or lines
+    return "\n".join(clip_words(t, BRIEF_LINE_WORDS) for t in picked[:BRIEF_MAX_LINES])
+
 
 async def _briefing(redis, conv_id) -> None:
     from app.database import AsyncSessionLocal
@@ -156,15 +190,11 @@ async def _briefing(redis, conv_id) -> None:
             key = conv.wa_id if conv.channel == "whatsapp" else conv.external_id
             brief = (await runtime.run_turn(
                 db, redis, wa_id=key,
-                user_text=("[HANDOFF BRIEFING — a human colleague is taking this "
-                           "conversation over. Write FOR THEM, not the customer: "
-                           "1-2 lines on where the sale stands, what's already "
-                           "settled (items/colour/size/total), what's still open, "
-                           "anything to avoid, and ONE suggested opening line. "
-                           "Short bullets.]"),
+                user_text=BRIEF_ASK,
                 llm=runtime.build_llm(purpose="copilot"), channel=conv.channel,
                 external_id=(None if conv.channel == "whatsapp" else conv.external_id),
                 read_only=True)).strip()
+            brief = tight_briefing(brief)
             if not brief:
                 return
             # The new note SUPERSEDES the old ones: a briefing is a snapshot of
