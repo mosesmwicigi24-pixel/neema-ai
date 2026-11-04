@@ -109,20 +109,20 @@ BRIEF_HEADING = "🤝 Handoff briefing"
 
 # KEY POINTS ONLY (owner, 2026-11-03: the briefing was "too big … I just need
 # key points … highly summarised, just to help someone understand what is
-# happening"). Five labelled lines at most; the chat itself is right below it.
+# happening"; 2026-11-04: "more precise and brief"). Four short labelled lines
+# at most; the chat itself is right below it.
 BRIEF_ASK = (
     "[HANDOFF BRIEFING — a colleague is taking this conversation over. Write FOR "
-    "THEM, not the customer. KEY POINTS ONLY: at most 5 lines, each under 15 "
-    "words, no headings, no bold, no repeating what the chat already shows. Use "
-    "exactly these labels, skipping any with nothing to say:\n"
-    "Stage: <cart / order / payment state>\n"
-    "Wants: <the items, colour, size, total>\n"
-    "Open: <what is still unresolved>\n"
-    "Avoid: <only what must not be said or repeated>\n"
+    "THEM, not the customer. PRECISE AND BRIEF: at most 4 lines, each at most "
+    "12 words, facts only, no headings, no bold, nothing the chat already "
+    "shows. Use exactly these labels:\n"
+    "Status: <the items, total, and cart / order / payment state>\n"
+    "Next: <what the colleague must do or settle now>\n"
+    "Avoid: <ONLY if something must not be said or repeated — else skip this line>\n"
     "Say: <one opening line for the colleague>]")
-BRIEF_LABELS = ("Stage", "Wants", "Open", "Avoid", "Say")
-BRIEF_MAX_LINES = 5
-BRIEF_LINE_WORDS = 22
+BRIEF_LABELS = ("Status", "Next", "Avoid", "Say")
+BRIEF_MAX_LINES = 4
+BRIEF_LINE_WORDS = 14
 
 
 def tight_briefing(text: str) -> str:
