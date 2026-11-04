@@ -24,9 +24,9 @@ def can_override(agent) -> bool:
 
 
 def held_by_other(conv, agent) -> bool:
-    return (conv.intercept_mode == InterceptMode.human
-            and conv.assigned_agent_id is not None
-            and str(conv.assigned_agent_id) != str(agent.id))
+    held = getattr(conv, "assigned_agent_id", None)
+    return (getattr(conv, "intercept_mode", None) == InterceptMode.human
+            and held is not None and str(held) != str(agent.id))
 
 
 async def _takeover_if_needed(db, conv_id, conv, agent, redis) -> None:
