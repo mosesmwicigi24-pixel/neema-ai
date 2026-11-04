@@ -180,6 +180,9 @@ MIGRATION_STATEMENTS = [
     # A voice note's transcription outcome (alembic 36ed77bde344 adds them
     # too; same reason as raw_meta — a missing column fails every thread read).
     "ALTER TABLE messages ADD COLUMN IF NOT EXISTS transcript_status VARCHAR(40)",
+    # When a thread was last opened (alembic d7f9b1c3e5a7 adds it too; every
+    # inbox read uses it, so a missing column must never fail the list).
+    "ALTER TABLE conversations ADD COLUMN IF NOT EXISTS read_at TIMESTAMPTZ",
     "ALTER TABLE messages ADD COLUMN IF NOT EXISTS transcript_lang VARCHAR(12)",
     # calls.transcript_status names its failure reason (failed:provider_timeout
     # is 23 chars) — widen only when still narrower, so a restart never takes

@@ -617,6 +617,43 @@ class ConversationsViewModel(val dash: DashboardViewModel) : ViewModel() {
         }
     }
 
+    // ═══════════════════════════ Reading ═══════════════════════════
+
+    /**
+     * This chat was opened (or written into while open): its share of every
+     * badge drops now, the server keeps it read, then its count is taken.
+     * [before] is the row as it was before its unread was zeroed.
+     */
+    fun markRead(id: String, before: Conversation? = _inbox.value.cache[id]) {
+        if (before != null && before.unread > 0) {
+            val rowStillUnread = before.personId != null && _inbox.value.cache.values.any {
+                it.id != id && it.personId == before.personId && it.unread > 0
+            }
+            val ch = before.channel
+            fun Map<String, Int>.dec(key: String, by: Int) = this + (key to ((this[key] ?: 0) - by).coerceAtLeast(0))
+            val s = _inbox.value.summary
+            if (s != null) {
+                val next = s.copy(
+                    unread = if (rowStillUnread) s.unread else (s.unread - 1).coerceAtLeast(0),
+                    unreadMessages = s.unreadMessages.dec("all", before.unread).dec(ch, before.unread),
+                    unreadChats = s.unreadChats?.let { m -> if (rowStillUnread) m.dec(ch, 1) else m.dec("all", 1).dec(ch, 1) },
+                )
+                _inbox.update { it.copy(summary = next) }; dash.inboxSummary.value = next
+            }
+        }
+        viewModelScope.launch {
+            runCatching { inboxApi.markRead(id) }.onSuccess {
+                val seq = firstSeq
+                runCatching { api.conversations.summary() }.onSuccess { s ->
+                    // Never over a newer refresh's badges.
+                    if (seq == firstSeq) { _inbox.update { it.copy(summary = s) }; dash.inboxSummary.value = s }
+                }
+            }
+        }
+    }
+
+    private var readJob: kotlinx.coroutines.Job? = null
+
     // ═══════════════════════════ Opening threads ═══════════════════════════
 
     fun activeConv(): Conversation? = _inbox.value.cache[_thread.value.activeId]
@@ -628,6 +665,9 @@ class ConversationsViewModel(val dash: DashboardViewModel) : ViewModel() {
             _thread.update { it.copy(unreadSnapshot = it.unreadSnapshot + (id to conv.unread)) }
             patchRow(id) { it.copy(unread = 0) }
         }
+        // Opening a chat READS it, for the whole team (owner, 2026-11-04). The
+        // tablet's own first-row auto-open is not someone opening it.
+        if (openThread) markRead(id, conv)
         val prev = _thread.value.activeId
         val changed = prev != id
         // Each customer keeps their own composer: what was typed for one person
@@ -1035,6 +1075,13 @@ class ConversationsViewModel(val dash: DashboardViewModel) : ViewModel() {
         // The row moves NOW; the refetch then confirms it (same values, no flicker).
         patchLive(convId, type, e)
         val active = _thread.value.activeId
+        // The customer wrote into the chat open on screen: read as it arrives.
+        if (convId == active && _thread.value.threadOpen && (type == "new_message" || type == "message")
+            && wsMessageOf(e)?.inbound == true) {
+            patchRow(convId) { it.copy(unread = 0) }
+            readJob?.cancel()
+            readJob = viewModelScope.launch { delay(READ_WHILE_OPEN_MS); markRead(convId, null) }
+        }
         if (convId != active) {
             // A cached thread that isn't open would reappear uncleared for a moment.
             if (type == "history_cleared" && convId in _thread.value.messages) setMsgs(convId) { emptyList() }
@@ -1143,13 +1190,15 @@ class ConversationsViewModel(val dash: DashboardViewModel) : ViewModel() {
                 )
             }
             "history_cleared" -> cur.copy(lastMessagePreview = null, unread = 0)
+            // Someone opened it (here or on another screen): read for everyone.
+            "conversation_read" -> cur.copy(unread = 0)
             else -> return
         }
         if (next == cur) return
         _inbox.update { s ->
             // A thread just written to is on page one of an unsearched list; a
             // search waits for the server to say whether it still matches.
-            val show = type != "intercept_changed" && type != "history_cleared" &&
+            val show = type != "intercept_changed" && type != "history_cleared" && type != "conversation_read" &&
                 s.orderKey == filterKeyOf(s.filters) && s.filters.q.isBlank() && convId !in s.orderIds
             s.copy(cache = s.cache + (convId to next), orderIds = if (show) listOf(convId) + s.orderIds else s.orderIds)
         }
@@ -2211,7 +2260,9 @@ class ConversationsViewModel(val dash: DashboardViewModel) : ViewModel() {
         val CALL_FRAMES = setOf("incoming_call", "call_answered", "call_ended", "call_update")
         const val CALL_REFRESH_MS = 700L
         /** Conversation frames that move a row or a badge. */
-        val MOVING_FRAMES = setOf("new_message", "message", "intercept_changed", "history_cleared")
+        val MOVING_FRAMES = setOf("new_message", "message", "intercept_changed", "history_cleared", "conversation_read")
+        /** How long a message must sit in the open chat before it is reported read. */
+        const val READ_WHILE_OPEN_MS = 1_200L
         const val MAX_IMAGE = 5 * MB
         const val MAX_VIDEO = 150 * MB
         const val MAX_AUDIO = 16 * MB

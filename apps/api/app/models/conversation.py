@@ -44,6 +44,10 @@ class Conversation(Base):
     intercept_since     : Mapped[datetime | None]  = mapped_column(DateTime(timezone=True), nullable=True)
     last_message_at     : Mapped[datetime | None]  = mapped_column(DateTime(timezone=True), nullable=True)
     last_message_preview: Mapped[str | None]      = mapped_column(Text, nullable=True)
+    # When someone last OPENED the thread (POST /conversations/{id}/read): an
+    # inbound message before it is read, even before anyone replies (owner,
+    # 2026-11-04: "when someone opens a chat, the counter should remove it").
+    read_at             : Mapped[datetime | None]  = mapped_column(DateTime(timezone=True), nullable=True)
     status              : Mapped[ConvStatus]      = mapped_column(PgEnum(ConvStatus), default=ConvStatus.open)
     created_at          : Mapped[datetime]        = mapped_column(DateTime(timezone=True), default=datetime.utcnow)
     updated_at          : Mapped[datetime]        = mapped_column(DateTime(timezone=True), default=datetime.utcnow, onupdate=datetime.utcnow)

@@ -114,3 +114,59 @@ def test_the_never_answered_list_is_neemas_real_asks_only(env, world):
     assert csv.status_code == 200 and csv.headers["content-type"].startswith("text/csv")
     assert "attachment" in csv.headers["content-disposition"]
     assert "paid for my shirt" in csv.text and "Kisumu" not in csv.text
+
+
+def _inbound(env, cid, wa, text="Are you there?", secs=-5):
+    from app.models.message import Message, MsgDirection, MsgSender
+
+    async def go():
+        async with env.maker() as db:
+            db.add(Message(channel="whatsapp", wa_id=wa, external_id=wa, conversation_id=cid,
+                           direction=MsgDirection.inbound, sender=MsgSender.user, text=text,
+                           created_at=datetime.now(timezone.utc) + timedelta(seconds=secs)))
+            await db.commit()
+    asyncio.run(go())
+
+
+def test_opening_a_chat_reads_it_and_the_chips_count_chats(env, world):
+    """Owner, 2026-11-04: "When someone opens a chat, the counter should remove
+    [it]. If there are 5 chats that are not open, it should say 5." """
+    a = _thread(env, "254700000111", "human")
+    b = _thread(env, "254700000112", "human")
+    _inbound(env, a, "254700000111", "hello?")
+    _inbound(env, a, "254700000111", "anyone?")             # a: 3 unread messages, still ONE chat
+
+    s = env.client.get("/api/admin/conversations/summary", headers=_as(world["ann"])).json()
+    assert s["unread"] == 2
+    assert s["unread_chats"] == {"all": 2, "whatsapp": 2}
+    assert s["unread_messages"]["whatsapp"] == 4             # the old units, kept for older apps
+
+    r = env.client.post(f"/api/admin/conversations/{a}/read", headers=_as(world["ann"]))
+    assert r.status_code == 200 and r.json()["ok"] is True
+    # Read for the whole team: Ben's counter drops too.
+    s = env.client.get("/api/admin/conversations/summary", headers=_as(world["ben"])).json()
+    assert s["unread"] == 1 and s["unread_chats"]["all"] == 1
+    row = env.client.get(f"/api/admin/conversations/{a}", headers=_as(world["ben"])).json()
+    assert row["unread"] == 0
+    unread = env.client.get("/api/admin/conversations?tab=unread&limit=50", headers=_as(world["ben"])).json()
+    assert {c["id"] for c in unread["items"]} == {b}
+    assert r.json()["was_unread"] is True
+    reads = lambda: [m for c, m in env.redis.published if c == "ws:channel:agents:all"  # noqa: E731
+                     and m.get("type") == "conversation_read"]
+    assert len(reads()) == 1
+    # Opening it again changes nothing, so nobody else is told.
+    again = env.client.post(f"/api/admin/conversations/{a}/read", headers=_as(world["ben"]))
+    assert again.json()["was_unread"] is False and len(reads()) == 1
+
+    # The customer writes again: unread again, counting only what came after.
+    _inbound(env, a, "254700000111", "One more question", secs=1)
+    row = env.client.get(f"/api/admin/conversations/{a}", headers=_as(world["ben"])).json()
+    assert row["unread"] == 1
+    assert env.client.get("/api/admin/conversations/summary",
+                          headers=_as(world["ben"])).json()["unread_chats"]["all"] == 2
+
+
+def test_reading_an_unknown_chat_is_a_404(env, world):
+    import uuid
+    assert env.client.post(f"/api/admin/conversations/{uuid.uuid4()}/read",
+                           headers=_as(world["ann"])).status_code == 404

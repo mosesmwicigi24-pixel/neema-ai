@@ -1607,6 +1607,13 @@ export function ConversationsView({
             event.type === "new_message" &&
             event.conversationId === activeConvId
         ) {
+            // The customer wrote into the chat that is open on screen: it is
+            // being read as it arrives, so it never counts as unread.
+            if (inbox && (event.direction === "inbound" || event.sender === "user" || event.sender === "customer")) {
+                if (readTimer.current) clearTimeout(readTimer.current);
+                const id = activeConvId;
+                readTimer.current = setTimeout(() => inbox.markRead(id), 1200);
+            }
             const msg: Message = {
                 id: event.id ?? crypto.randomUUID(),
                 type: "message",
@@ -1785,16 +1792,21 @@ export function ConversationsView({
         }
     });
 
+    const readTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+    useEffect(() => () => { if (readTimer.current) clearTimeout(readTimer.current); }, []);
+
     const handleSelectConv = (id: string) => {
         // Snapshot the unread count before clearing it so we can show the divider
         const conv = conversations.find((c) => c.id === id);
         if (conv && conv.unread > 0) {
             setUnreadSnapshot((prev) => ({ ...prev, [id]: conv.unread }));
-            // Optimistically clear the unread badge locally
-            setConversations((prev) =>
-                prev.map((c) => (c.id === id ? { ...c, unread: 0 } : c)),
-            );
         }
+        // Opening a chat READS it, for the whole team: its row and its share
+        // of every badge drop now, and the server keeps it read (owner,
+        // 2026-11-04). Without the inbox hook, clear the row locally.
+        if (inbox) inbox.markRead(id);
+        else if (conv && conv.unread > 0)
+            setConversations((prev) => prev.map((c) => (c.id === id ? { ...c, unread: 0 } : c)));
         setNoChat(null);
         setActiveConvId(id);
         loadMessages(id);
@@ -2288,23 +2300,21 @@ export function ConversationsView({
     // these (especially the O(n log n) Date-allocating sort) inline made the
     // names list stutter while scrolling.
     // Badges are counted by the SERVER over every conversation. Counted here,
-    // over a paged list, they would be counts of one page. Same units as ever:
-    // the chips sum unread MESSAGES; the Unread tab counts conversations.
+    // over a paged list, they would be counts of one page. The chips and the
+    // Unread tab count unread CHATS (inbox rows), not messages.
     const summary = inbox?.summary ?? null;
     const channelCounts = useMemo(() => CHANNEL_TABS.reduce<Record<string, number>>(
         (acc, tab) => {
-            if (summary) {
-                acc[tab.id] = summary.unread_messages[tab.id] ?? 0;
+            // Unread CHATS, not messages (owner, 2026-11-04: "if there are 5
+            // chats that are not open, it should say 5").
+            if (summary?.unread_chats) {
+                acc[tab.id] = summary.unread_chats[tab.id] ?? 0;
                 return acc;
             }
-            acc[tab.id] =
-                tab.id === "all"
-                    ? conversations
-                          .filter((c) => c.unread > 0)
-                          .reduce((s, c) => s + (c.unread ?? 0), 0)
-                    : conversations
-                          .filter((c) => c.channel === tab.id && c.unread > 0)
-                          .reduce((s, c) => s + (c.unread ?? 0), 0);
+            const unread = conversations.filter((c) => c.unread > 0 && (tab.id === "all" || c.channel === tab.id));
+            acc[tab.id] = tab.id === "all"
+                ? new Set(unread.map((c) => c.person_id || c.id)).size
+                : unread.length;
             return acc;
         },
         {},

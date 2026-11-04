@@ -537,11 +537,12 @@ async def conversations_summary(
     paged, that is a count of one page — so they come from here instead, in
     the same units as before:
 
-      unread              conversations with an unread message (Unread tab)
+      unread              inbox ROWS with an unread message (Unread tab)
+      unread_chats        the same, overall and per channel — the chips
+                          (owner, 2026-11-04: "5 chats not opened → 5")
       human / yours       human-held; human-held by me (Human, Yours, "N live")
       unread_messages     unread MESSAGE totals, overall and per channel —
-                          the channel chips have always summed messages, not
-                          conversations, and still do
+                          what older apps' chips still show
       tags                every tag in use, not just those on loaded rows
     """
     from sqlalchemy import or_
@@ -549,7 +550,21 @@ async def conversations_summary(
     from app.models.user import User
 
     unread_ids = _unread_conv_ids().subquery()
-    unread_n = (await db.execute(select(func.count()).select_from(unread_ids))).scalar() or 0
+
+    # Unread CHATS per channel — what the channel chips show (owner,
+    # 2026-11-04: "if there are 5 chats that are not open, it should say 5").
+    # "all" counts inbox ROWS: a person's WhatsApp and Messenger threads are
+    # one row there, so one chat.
+    from sqlalchemy import String, cast
+    row_key = func.coalesce(cast(Conversation.person_id, String), cast(Conversation.id, String))
+    chat_rows = (await db.execute(
+        select(Conversation.channel, func.count(func.distinct(row_key)))
+        .where(Conversation.id.in_(select(unread_ids.c.conversation_id)))
+        .group_by(Conversation.channel))).all()
+    chats_by_channel = {ch: int(n) for ch, n in chat_rows if ch}
+    chats_all = (await db.execute(
+        select(func.count(func.distinct(row_key)))
+        .where(Conversation.id.in_(select(unread_ids.c.conversation_id))))).scalar() or 0
 
     human_n, yours_n = (await db.execute(select(
         func.count().filter(Conversation.intercept_mode == InterceptMode.human),
@@ -574,7 +589,7 @@ async def conversations_summary(
         .where(_PERSON_HELD)
         .outerjoin(last_out, last_out.c.cid == Message.conversation_id)
         .where(Message.direction == "inbound")
-        .where(or_(last_out.c.last_out.is_(None), Message.created_at > last_out.c.last_out))
+        .where(_after_seen(last_out.c.last_out))
         .group_by(Conversation.channel)
     )).all()
     by_channel = {ch: int(n) for ch, n in per_channel if ch}
@@ -589,12 +604,44 @@ async def conversations_summary(
     )).scalars().all()
 
     return {
-        "unread":          int(unread_n),
+        # The Unread tab counts inbox ROWS, like the chips ("5 chats → 5").
+        "unread":          int(chats_all),
         "human":           int(human_n),
         "yours":           int(yours_n),
         "unread_messages": {"all": sum(by_channel.values()), **by_channel},
+        "unread_chats":    {"all": int(chats_all), **chats_by_channel},
         "tags":            sorted({t for t in tag_rows if t}, key=str.lower),
     }
+
+
+@router.post("/conversations/{conv_id}/read")
+async def mark_conversation_read(conv_id: UUID, request: Request,
+                                 db: AsyncSession = Depends(get_db),
+                                 agent: Agent = Depends(get_current_agent)):
+    """Someone opened this thread: what it holds now is read, for the whole
+    team (owner, 2026-11-04: "when someone opens a chat, the counter should
+    remove it"). A message that arrives later is unread again. The other
+    signed-in screens refetch their badges on the live event."""
+    from datetime import datetime, timezone
+    conv = await db.get(Conversation, conv_id)
+    if conv is None:
+        raise HTTPException(status_code=404, detail="conversation not found")
+    was_unread = bool((await db.execute(
+        _unread_conv_ids().where(Message.conversation_id == conv.id).limit(1))).first())
+    conv.read_at = datetime.now(timezone.utc)
+    await db.commit()
+    redis = getattr(request.app.state, "redis", None)
+    # Only a read that changed a count is news to the other screens.
+    if redis is not None and was_unread:
+        try:
+            from app.services.n8n_bridge import _broadcast
+            await _broadcast(redis, "agents:all", {
+                "event": "inbox_read", "type": "conversation_read",
+                "conversationId": str(conv.id), "by": agent.name,
+            })
+        except Exception as exc:
+            _log.warning("read broadcast failed for %s: %s", conv_id, exc)
+    return {"ok": True, "read_at": conv.read_at.isoformat(), "was_unread": was_unread}
 
 
 @router.get("/conversations/{conv_id}")
@@ -733,6 +780,14 @@ async def _inbox_page(db: AsyncSession, *, limit: int, cursor: str | None, condi
 _PERSON_HELD = Conversation.intercept_mode != InterceptMode.ai
 
 
+def _after_seen(last_out_col):
+    """An inbound message is unread when it came after BOTH our last reply and
+    the last time someone opened the thread (owner, 2026-11-04: "when someone
+    opens a chat, the counter should remove it"). GREATEST skips NULLs."""
+    seen = func.greatest(last_out_col, Conversation.read_at)
+    return seen.is_(None) | (Message.created_at > seen)
+
+
 def _unread_conv_ids():
     """Conversations with an inbound message after our last reply (staff notes
     don't count as a reply) — the row builder's own definition of unread, so a
@@ -765,7 +820,7 @@ def _unread_conv_ids():
         # phantom "unread conversation" the inbox could never show.
         .where(Message.conversation_id.isnot(None))
         .where(Message.direction == "inbound")
-        .where(or_(last_out.c.last_out.is_(None), Message.created_at > last_out.c.last_out))
+        .where(_after_seen(last_out.c.last_out))
         .group_by(Message.conversation_id)
     )
 
@@ -994,10 +1049,7 @@ async def _conversation_rows(
         .join(Conversation, Conversation.id == Message.conversation_id)
         .where(_PERSON_HELD)
         .where(Message.direction == "inbound")
-        .where(
-            last_outbound_sub.c.last_out_at.is_(None)
-            | (Message.created_at > last_outbound_sub.c.last_out_at)
-        )
+        .where(_after_seen(last_outbound_sub.c.last_out_at))
         .group_by(Message.conversation_id)
     )
     unread_map: dict[str, int] = {}

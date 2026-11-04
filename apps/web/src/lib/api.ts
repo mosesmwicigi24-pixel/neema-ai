@@ -445,6 +445,9 @@ export const conversationsApi = {
         post<ApiConversation>(`/admin/conversations/${id}/transfer`, {
             agent_id: agentId,
         }),
+    // Someone opened this chat: what it holds now is read, for the whole team.
+    markRead: (id: string) =>
+        post<{ ok: boolean }>(`/admin/conversations/${id}/read`, {}),
     // Ask the colleague holding a chat to hand it over; they accept or keep it.
     askHandover: (id: string) =>
         post<{ ok: boolean; already?: boolean }>(`/admin/conversations/${id}/handover-request`, {}),
@@ -1329,8 +1332,11 @@ export interface InboxSummary {
     human: number;
     /** human-held by me (Yours tab) */
     yours: number;
-    /** unread MESSAGE totals — overall under "all", then per channel (the chips) */
+    /** unread MESSAGE totals — overall under "all", then per channel (older apps' chips) */
     unread_messages: Record<string, number>;
+    /** unread CHATS — inbox rows under "all", then per channel (the chips:
+     *  "5 chats not opened → 5"). Absent from an older server. */
+    unread_chats?: Record<string, number>;
     /** every tag in use, not just those on loaded rows */
     tags: string[];
 }
