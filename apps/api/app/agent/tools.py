@@ -25,6 +25,7 @@ from app.models.order_event import OrderEvent
 from app.models.user import User
 from app.services import n8n_bridge as svc
 from app.services.market import users_for_person
+from app.services.state_lock import lock_for_write
 from app.agent import cart as cartmod
 from app.agent import memory as memorymod
 
@@ -1782,7 +1783,8 @@ async def _save_profile_fields(db, person_id, role: str | None = None,
     from app.models.person import Person
     if person_id is None or (role is None and organization is None):
         return None
-    p = await db.get(Person, person_id)
+    # The lock lasts until the caller's commit (this doesn't commit itself).
+    p = await lock_for_write(db, await db.get(Person, person_id))
     if p is None:
         return None
     st = dict(p.state or {})
@@ -1914,6 +1916,7 @@ async def _capture_contact(args: dict, ctx: ToolContext) -> dict:
     if location and person is not None:
         from sqlalchemy.orm.attributes import flag_modified
         from app.core.countries import iso_from_text as _iso_txt, name_for_iso, flag_url_for
+        person = await lock_for_write(ctx.db, person)
         state = dict(person.state or {})
         state["location"] = location[:200]
         loc_iso = _iso_txt(location)
@@ -2024,6 +2027,7 @@ async def _capture_contact(args: dict, ctx: ToolContext) -> dict:
             if loc.get("country_iso"):
                 if person is not None:
                     from sqlalchemy.orm.attributes import flag_modified as _fm
+                    person = await lock_for_write(ctx.db, person)
                     st = dict(person.state or {})
                     st.update({"country_iso": loc["country_iso"],
                                "country": loc["country"], "flag_url": loc["flag_url"]})
@@ -2064,7 +2068,8 @@ def _norm_source(s: str) -> str:
 async def _set_lead_source(args: dict, ctx: ToolContext) -> dict:
     from sqlalchemy.orm.attributes import flag_modified
     source = _norm_source(args.get("source", ""))
-    user = (await ctx.db.execute(select(User).where(User.wa_id == ctx.wa_id))).scalar_one_or_none()
+    user = await lock_for_write(ctx.db, (await ctx.db.execute(
+        select(User).where(User.wa_id == ctx.wa_id))).scalar_one_or_none())
     if user is None:
         return {"ok": False}
     state = dict(user.state or {})
@@ -2074,6 +2079,7 @@ async def _set_lead_source(args: dict, ctx: ToolContext) -> dict:
     # via the CRM panel.
     existing = state.get("lead_source")
     if existing:
+        await ctx.db.commit()       # lets go of the row: the turn returns to the model
         return {"ok": True, "lead_source": existing,
                 "note": "origin already recorded — kept the first touch"}
     state["lead_source"] = source
@@ -2088,7 +2094,8 @@ async def _add_tags(args: dict, ctx: ToolContext) -> dict:
     new_tags = [str(t).strip() for t in (args.get("tags") or []) if str(t).strip()][:10]
     if not new_tags:
         return {"error": "tags is required"}
-    user = (await ctx.db.execute(select(User).where(User.wa_id == ctx.wa_id))).scalar_one_or_none()
+    user = await lock_for_write(ctx.db, (await ctx.db.execute(
+        select(User).where(User.wa_id == ctx.wa_id))).scalar_one_or_none())
     if user is None:
         return {"ok": False}
     state = dict(user.state or {})

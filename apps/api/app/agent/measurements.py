@@ -26,6 +26,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 # ONE definition of where a customer's durable state lives (person-first, with the
 # WhatsApp user row as the fallback + one-time adoption). Reused, never re-derived.
 from app.agent.cart import _load_store
+from app.services.state_lock import lock_for_write
 
 _KEY = "measurements"
 _META = ("_updated_at", "_source")
@@ -64,7 +65,7 @@ async def save_measurements(db: AsyncSession, key: str, fields: dict,
     if not clean:
         return await get_measurements(db, key, channel)
 
-    store = await _load_store(db, key, channel)
+    store = await lock_for_write(db, await _load_store(db, key, channel))
     if store is None:
         return {}
     current = read_measurements(getattr(store, "state", None))
