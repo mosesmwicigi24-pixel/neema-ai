@@ -98,10 +98,11 @@ class InboxPermissionsTest {
         }
     }
 
-    private enum class Kind { Admin, Handler, None }
+    private enum class Kind { Super, Admin, Handler, None }
 
     private fun kindOf(p: Persona) = when (p) {
-        Persona.Superuser, Persona.Admin -> Kind.Admin
+        Persona.Superuser -> Kind.Super
+        Persona.Admin -> Kind.Admin
         Persona.Agent, Persona.Sales, Persona.Viewer, Persona.Override, Persona.EmptyOverride -> Kind.Handler
         Persona.Readonly, Persona.ReadonlyReplier, Persona.Supervisor -> Kind.None
     }
@@ -112,12 +113,20 @@ class InboxPermissionsTest {
      * c6 = human, held by Grace · h = human, unclaimed (auto-escalated).
      */
     private val expected: Map<Kind, Map<String, Set<String>>> = mapOf(
+        // Held by Grace (c6): only the super admin takes it over; an admin asks
+        // like everyone else (owner, 2026-11-04).
+        Kind.Super to mapOf(
+            "c1" to setOf("release", "pause", "transfer", "note", "clear", "composer"),
+            "c2" to setOf("intercept", "pause", "transfer", "note", "clear"),
+            "c3" to setOf("resume", "transfer", "note", "clear"),
+            "c6" to setOf("takeOver", "release", "pause", "transfer", "note", "clear", "composer"),
+            "h" to setOf("pickUp", "release", "pause", "transfer", "note", "clear", "composer"),
+        ),
         Kind.Admin to mapOf(
             "c1" to setOf("release", "pause", "transfer", "note", "clear", "composer"),
             "c2" to setOf("intercept", "pause", "transfer", "note", "clear"),
             "c3" to setOf("resume", "transfer", "note", "clear"),
-            // Held by Grace: the super admin / admin takes it over (owner, 2026-11-04).
-            "c6" to setOf("takeOver", "release", "pause", "transfer", "note", "clear", "composer"),
+            "c6" to setOf("note", "clear", "locked"),
             "h" to setOf("pickUp", "release", "pause", "transfer", "note", "clear", "composer"),
         ),
         Kind.Handler to mapOf(

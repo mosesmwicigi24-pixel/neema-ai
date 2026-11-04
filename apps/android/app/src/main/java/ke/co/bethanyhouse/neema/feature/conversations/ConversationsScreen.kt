@@ -353,7 +353,7 @@ internal fun inboxPermsOf(dash: DashboardViewModel): InboxPerms {
 
 internal fun inboxPermsOf(role: String?, superuser: Boolean, me: String?): InboxPerms {
     val isAdmin = superuser || role == "admin"
-    return InboxPerms(me = me, isAdminOrSuper = isAdmin, canHandle = isAdmin || role == "agent")
+    return InboxPerms(me = me, isAdminOrSuper = isAdmin, canHandle = isAdmin || role == "agent", isSuper = superuser)
 }
 
 @Composable
@@ -468,7 +468,7 @@ private fun ThreadPane(
         // Reply box — when the agent owns the conversation, or is admin/superuser.
         if (can.composer) {
             HorizontalDivider(color = hairline())
-            // Someone else holds it: the super admin / admin may still reply, and sending takes it over.
+            // Someone else holds it: the super admin may still reply, and sending takes it over.
             if (can.takeOver) Text(
                 "🔓 ${conv.assignedAgentName ?: "Another agent"} has this chat — sending takes it over (noted in the timeline).",
                 fontSize = 12.sp, color = Palette.Sage400, modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 8.dp),
@@ -488,7 +488,7 @@ private fun ThreadPane(
                         append("Handled by ")
                         pushStyle(androidx.compose.ui.text.SpanStyle(fontWeight = FontWeight.Bold, color = if (dark) Palette.MossNight else Palette.Moss600))
                         append(conv.assignedAgentName ?: "another agent"); pop()
-                        append(" — ask them to release or transfer it to you")
+                        append(" — ask them to release it, or ask the super admin to take it over")
                     },
                     fontSize = 12.sp, color = Palette.Sage400,
                 )

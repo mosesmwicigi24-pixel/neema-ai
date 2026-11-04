@@ -599,6 +599,8 @@ data class InboxPerms(
     val me: String?,
     val isAdminOrSuper: Boolean,
     val canHandle: Boolean,
+    /** The super admin: the only one who may act on a chat someone else holds (owner, 2026-11-04). */
+    val isSuper: Boolean = false,
 )
 
 /**
@@ -629,26 +631,30 @@ internal fun threadControls(conv: Conversation, perms: InboxPerms): ThreadContro
     // isOwner: this agent intercepted it; ownedByOther: a different agent holds it.
     val isOwner = conv.assignedAgentId != null && conv.assignedAgentId == perms.me
     val ownedByOther = mode == "human" && conv.assignedAgentId != null && conv.assignedAgentId != perms.me
-    // canActOnThisConv — Pause / Resume / Transfer: owner, admin, or nobody human holds it.
-    val canAct = perms.canHandle && (isOwner || perms.isAdminOrSuper || mode != "human")
+    // Only the super admin acts on a chat someone else holds; everyone else —
+    // admins included — asks the holder to release it, or asks the super admin.
+    // An admin keeps every power on chats nobody holds.
+    val adminHere = perms.isSuper || (perms.isAdminOrSuper && !ownedByOther)
+    // canActOnThisConv — Pause / Resume / Transfer: owner, admin here, or nobody human holds it.
+    val canAct = perms.canHandle && (isOwner || adminHere || mode != "human")
     return ThreadControls(
         // Any agent can intercept an AI conversation — whoever picks it up owns it.
         intercept = mode == "ai" && perms.canHandle,
         // Auto-escalated (media) but unclaimed: first one to tap gets it.
         pickUp = mode == "human" && conv.assignedAgentId == null && perms.canHandle,
         // The super admin is never locked out of a chat someone never released.
-        takeOver = ownedByOther && perms.isAdminOrSuper,
+        takeOver = ownedByOther && perms.isSuper,
         // Owner-restricted: only the intercepting agent or admin can release.
-        release = mode == "human" && (isOwner || perms.isAdminOrSuper),
+        release = mode == "human" && (isOwner || adminHere),
         pause = mode != "paused" && canAct,
         resume = mode == "paused" && canAct,
         transfer = canAct,
         note = perms.canHandle,
         // Admin/superuser only — and the server (DELETE /messages) refuses anyone else.
         clearHistory = perms.isAdminOrSuper,
-        composer = mode == "human" && (isOwner || perms.isAdminOrSuper),
-        // Regular agents see who holds it; admins never see the lock.
-        locked = ownedByOther && !perms.isAdminOrSuper,
+        composer = mode == "human" && (isOwner || adminHere),
+        // Everyone but the super admin sees who holds it.
+        locked = ownedByOther && !perms.isSuper,
     )
 }
 

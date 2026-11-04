@@ -1484,15 +1484,22 @@ export function ConversationsView({
         !!activeConv.assigned_agent_id &&
         activeConv.assigned_agent_id !== currentAgentId;
 
+    // Only the SUPER ADMIN may act on a chat someone else holds (take over,
+    // reply, release, pause, transfer). Everyone else — admins included —
+    // asks the holder to release it, or asks the super admin (owner,
+    // 2026-11-04). An admin keeps every power on chats nobody holds.
+    const canOverride = isSuperuser;
+    const adminHere = isSuperuser || (isAdminOrSuper && !convOwnedByOther);
+
     // canActOnThisConv: can perform Pause/Resume/Transfer.
     // True when agent has permissions AND (owns the conv, OR is admin/super,
     // OR the conv isn't currently human-intercepted by someone else).
     const canCompose = !!activeConv && activeConv.intercept_mode === "human" &&
-        (activeConv.assigned_agent_id === currentAgentId || isAdminOrSuper);
+        (activeConv.assigned_agent_id === currentAgentId || adminHere);
     useEffect(() => { canComposeRef.current = canCompose; }, [canCompose]);
     const canActOnThisConv =
         canHandleConversations &&
-        (isOwner || isAdminOrSuper || activeConv?.intercept_mode !== "human");
+        (isOwner || adminHere || activeConv?.intercept_mode !== "human");
 
     // ── Scroll to bottom only when new messages arrive ────────────────────────
     // …and only when the reader is at the bottom already (or just sent one):
@@ -1815,7 +1822,7 @@ export function ConversationsView({
                 : "Conversation claimed — you now control replies");
         } catch (err: any) {
             if (err?.message?.includes("409")) {
-                onToast("Already claimed by another agent", "error");
+                onToast("Someone else has this chat — ask them to release it, or ask the super admin", "error");
             } else {
                 onToast("Failed to claim conversation", "error");
             }
@@ -1847,7 +1854,7 @@ export function ConversationsView({
             onToast("Paused — Neema holds all replies until you resume");
         } catch (err: any) {
             if (err?.message?.includes("409")) {
-                onToast("Handled by another agent — they must pause it", "error");
+                onToast("Someone else has this chat — ask them to release it, or ask the super admin", "error");
             } else {
                 onToast("Failed to pause", "error");
             }
@@ -3281,11 +3288,11 @@ export function ConversationsView({
                                     )}
 
                                 {/* ── Take over ──
-                                    The super admin (or an admin) is never locked out:
+                                    The super admin — only the super admin — is never locked out:
                                     a chat someone else holds — and never released —
                                     moves to them, noted in the timeline and told to
                                     the team (owner, 2026-11-04). */}
-                                {convOwnedByOther && isAdminOrSuper && (
+                                {convOwnedByOther && canOverride && (
                                     <Btn
                                         small
                                         disabled={!!convBusy}
@@ -3299,7 +3306,7 @@ export function ConversationsView({
                                 {/* ── Release ──
                                     Owner-restricted: only the intercepting agent or admin/super can release. */}
                                 {activeConv.intercept_mode === "human" &&
-                                    (isOwner || isAdminOrSuper) && (
+                                    (isOwner || adminHere) && (
                                         <Btn
                                             key="release"
                                             small
@@ -3315,8 +3322,8 @@ export function ConversationsView({
 
                                 {/* ── Locked badge ──
                                     Regular agents see this when another agent owns the conv.
-                                    Admin/superuser never see this badge. */}
-                                {convOwnedByOther && !isAdminOrSuper && (
+                                    Only the super admin never sees it. */}
+                                {convOwnedByOther && !canOverride && (
                                     <span
                                         className="text-xs px-2 py-1 rounded-md bg-stone-100 text-stone-400 cursor-not-allowed"
                                         title={`Handled by ${activeConv.assigned_agent_name ?? "another agent"} — they must release or transfer it first`}
@@ -4229,7 +4236,7 @@ export function ConversationsView({
                         {/* Reply box — shown when agent owns the conv, or is admin/superuser (canCompose) */}
                         {activeConv.intercept_mode === "human" &&
                             (activeConv.assigned_agent_id === currentAgentId ||
-                                isAdminOrSuper) && (
+                                adminHere) && (
                                 <div
                                     className="px-3 sm:px-4 pt-2.5 bg-white/95 backdrop-blur-sm relative z-30"
                                     style={{
@@ -4247,8 +4254,8 @@ export function ConversationsView({
                                         willChange: "transform",
                                     }}
                                 >
-                                    {/* Someone else holds this chat: the super admin / admin
-                                        may still reply, and sending takes it over. */}
+                                    {/* Someone else holds this chat: the super admin may
+                                        still reply, and sending takes it over. */}
                                     {convOwnedByOther && (
                                         <p className="mb-2 text-xs" style={{ color: "#8a9e80" }}>
                                             🔓 {activeConv.assigned_agent_name ?? "Another agent"} has this chat — sending takes it over (noted in the timeline).
@@ -4680,7 +4687,7 @@ export function ConversationsView({
                         {activeConv.intercept_mode === "human" &&
                         activeConv.assigned_agent_id &&
                         activeConv.assigned_agent_id !== currentAgentId &&
-                        !isAdminOrSuper ? (
+                        !canOverride ? (
                             <div className="px-4 py-4 flex items-center justify-center gap-2" style={{ borderTop: "1px solid #edf0ea", backgroundColor: "#fafbf8" }}>
                                 <span className="text-base">🔒</span>
                                 <p className="text-xs" style={{ color: "#8a9e80" }}>
@@ -4689,7 +4696,7 @@ export function ConversationsView({
                                         {activeConv.assigned_agent_name ??
                                             "another agent"}
                                     </strong>{" "}
-                                    — ask them to release or transfer it to you
+                                    — ask them to release it, or ask the super admin to take it over
                                 </p>
                             </div>
                         ) : null}

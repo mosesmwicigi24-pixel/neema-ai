@@ -131,10 +131,13 @@ def test_pausing_anothers_live_conversation_is_refused_for_regular_agents():
     with pytest.raises(HTTPException) as e:
         asyncio.run(pause_conversation(db, "c1", _agent("a2", "Sam")))
     assert e.value.status_code == 409
-    # …but an admin can
+    # …and so is an admin (owner, 2026-11-04: the override is the super
+    # admin's alone) — but the super admin can
     conv2 = _conv(mode=InterceptMode.human, assigned="owner-9")
-    db2 = _FakeDB(conv2)
-    asyncio.run(pause_conversation(db2, "c1", _agent("adm", "Admin", role="admin")))
+    db2 = _FakeDB(conv2, agents={"owner-9": _agent("owner-9", "Grace")})
+    with pytest.raises(HTTPException):
+        asyncio.run(pause_conversation(db2, "c1", _agent("adm", "Admin", role="admin")))
+    asyncio.run(pause_conversation(db2, "c1", _agent("su", "Super", su=True)))
     assert conv2.intercept_mode == InterceptMode.paused
 
 

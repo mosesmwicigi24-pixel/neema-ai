@@ -4,9 +4,13 @@ by someone else … but to note that the super admin has picked up that
 conversation because sometimes if someone has not released that conversation
 we are stuck."
 
-Taking over moves the chat to the super admin (or an admin), writes "… took
-over from Evelyn" in the timeline and tells the team. A regular agent is still
-held off a colleague's chat.
+Owner, the same day: "The takeover … is for only super admin. But other
+people who are not super admin should request the other person to release or
+the super admin to override."
+
+Taking over moves the chat to the super admin, writes "… took over from
+Evelyn" in the timeline and tells the team. Everyone else — admins included —
+is held off a colleague's chat and told to ask the holder or the super admin.
 """
 import asyncio
 import types
@@ -102,11 +106,44 @@ def test_the_super_admin_takes_over_a_chat_someone_else_holds_and_it_is_noted(br
     assert live["takenFrom"] == "Evelyn" and live["assignedAgentId"] == "boss"
 
 
-def test_an_admin_may_take_over_too():
+ADMIN = _agent("ad", "Grace", role="admin")
+
+
+def test_an_admin_is_not_the_super_admin_and_must_ask():
     conv = _conv()
     db = _FakeDB(conv, agents={"evelyn": EVELYN})
-    asyncio.run(cs.intercept_conversation(db, "c1", _agent("ad", "Grace", role="admin")))
-    assert conv.assigned_agent_id == "ad"
+    with pytest.raises(HTTPException) as e:
+        asyncio.run(cs.intercept_conversation(db, "c1", ADMIN))
+    assert e.value.status_code == 409
+    assert e.value.detail == ("Evelyn has this chat. Ask them to release it, "
+                              "or ask the super admin to take it over.")
+    assert conv.assigned_agent_id == "evelyn"
+
+
+@pytest.mark.parametrize("who", [ADMIN, _agent("sam", "Sam")])
+def test_nobody_but_the_super_admin_releases_or_hands_on_someone_elses_chat(who):
+    for act in (lambda db: cs.release_conversation(db, "c1", who),
+                lambda db: cs.pause_conversation(db, "c1", who),
+                lambda db: cs.transfer_conversation(db, "c1", who, "sam")):
+        conv = _conv()
+        db = _FakeDB(conv, agents={"evelyn": EVELYN})
+        with pytest.raises(HTTPException) as e:
+            asyncio.run(act(db))
+        assert e.value.status_code == 409 and "super admin" in e.value.detail
+        assert conv.assigned_agent_id == "evelyn" and conv.intercept_mode == InterceptMode.human
+
+
+def test_the_super_admin_can_release_evelyns_chat_back_to_neema(broadcasts):
+    conv = _conv()
+    db = _FakeDB(conv, agents={"evelyn": EVELYN})
+    asyncio.run(cs.release_conversation(db, "c1", SUPER, _Redis()))
+    assert conv.intercept_mode == InterceptMode.ai and conv.assigned_agent_id is None
+
+
+def test_the_holder_still_releases_their_own_chat():
+    conv = _conv()
+    asyncio.run(cs.release_conversation(_FakeDB(conv), "c1", EVELYN))
+    assert conv.intercept_mode == InterceptMode.ai
 
 
 def test_a_regular_agent_is_still_held_off_a_colleagues_chat():
@@ -145,19 +182,24 @@ def test_the_super_admin_replying_in_evelyns_chat_takes_it_over_first(monkeypatc
     assert [r.note for r in _rows(db)] == ["Took over from Evelyn"]
 
 
-def test_a_regular_agent_replying_in_evelyns_chat_is_refused():
+@pytest.mark.parametrize("who", [ADMIN, _agent("sam", "Sam")])
+def test_anyone_else_replying_or_sending_a_photo_in_evelyns_chat_is_refused(who):
     conv = _conv()
     db = _FakeDB(conv, agents={"evelyn": EVELYN})
     with pytest.raises(HTTPException) as e:
-        asyncio.run(cs.send_agent_reply(db, "c1", _agent("sam", "Sam"), "hi"))
+        asyncio.run(cs.send_agent_reply(db, "c1", who, "hi"))
     assert e.value.status_code == 409
+    with pytest.raises(HTTPException) as e:
+        asyncio.run(cs.send_agent_media(db, "c1", who, "https://x/y.jpg", "image", None, None))
+    assert e.value.status_code == 409
+    assert conv.assigned_agent_id == "evelyn"
 
 
-def test_who_may_override():
-    assert cs.can_override(SUPER) and cs.can_override(_agent("x", "X", role="admin"))
-    assert not cs.can_override(EVELYN)
+def test_only_the_super_admin_may_override():
     from app.models.agent import AgentRole
-    assert cs.can_override(_agent("y", "Y", role=AgentRole.admin))
+    assert cs.can_override(SUPER)
+    assert not cs.can_override(EVELYN)
+    assert not cs.can_override(ADMIN) and not cs.can_override(_agent("y", "Y", role=AgentRole.admin))
 
 
 def test_the_timeline_says_who_took_over_from_whom():
