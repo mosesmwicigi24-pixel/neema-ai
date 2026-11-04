@@ -89,7 +89,7 @@ struct SettingsBody: View {
             vm.life.shown.update(true)
         }
         .onDisappear { vm.life.shown.update(false) }
-        .onChange(of: model.ui) { _ in savedUi = vm.saveUi() }
+        .onChange(of: model.ui) { savedUi = vm.saveUi() }
     }
 
     private func pullToRefresh() async {

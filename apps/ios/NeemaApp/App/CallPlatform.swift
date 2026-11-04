@@ -38,7 +38,13 @@ final class SessionCallAudio: CallAudio, @unchecked Sendable {
 
     func enter(route: AudioRoute) {
         let session = AVAudioSession.sharedInstance()
+        // Xcode 26 renamed .allowBluetooth (hands-free calling profile) to
+        // .allowBluetoothHFP; CI's Xcode 16 knows only the old name.
+        #if compiler(>=6.2)
+        try? session.setCategory(.playAndRecord, mode: .voiceChat, options: [.allowBluetoothHFP, .allowBluetoothA2DP])
+        #else
         try? session.setCategory(.playAndRecord, mode: .voiceChat, options: [.allowBluetooth, .allowBluetoothA2DP])
+        #endif
         try? session.setActive(true, options: [])
         select(route: route)
     }

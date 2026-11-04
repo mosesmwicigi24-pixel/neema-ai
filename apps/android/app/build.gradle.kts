@@ -31,12 +31,15 @@ android {
         // (core/notify/Push.kt). The four values from the Firebase console's
         // google-services.json (none of them secret — every installed APK carries
         // them); from gradle properties or the environment (CI: repository
-        // secrets). Empty = push off: calls ring only while the app is running.
-        fun fcm(name: String) = (project.findProperty(name) as String?) ?: System.getenv(name) ?: ""
-        buildConfigField("String", "FCM_PROJECT_ID", "\"${fcm("NEEMA_FCM_PROJECT_ID")}\"")
-        buildConfigField("String", "FCM_APP_ID", "\"${fcm("NEEMA_FCM_APP_ID")}\"")
-        buildConfigField("String", "FCM_API_KEY", "\"${fcm("NEEMA_FCM_API_KEY")}\"")
-        buildConfigField("String", "FCM_SENDER_ID", "\"${fcm("NEEMA_FCM_SENDER_ID")}\"")
+        // secrets) to override; else the Neema Firebase project below (owner's
+        // google-services.json, 2026-10-30 — Firebase project "neema-6037c").
+        // Blank values = push off: calls ring only while the app is running.
+        fun fcm(name: String, default: String) =
+            ((project.findProperty(name) as String?) ?: System.getenv(name))?.takeIf { it.isNotBlank() } ?: default
+        buildConfigField("String", "FCM_PROJECT_ID", "\"${fcm("NEEMA_FCM_PROJECT_ID", "neema-6037c")}\"")
+        buildConfigField("String", "FCM_APP_ID", "\"${fcm("NEEMA_FCM_APP_ID", "1:819628107829:android:35e4f05e0fe9753d80e97c")}\"")
+        buildConfigField("String", "FCM_API_KEY", "\"${fcm("NEEMA_FCM_API_KEY", "AIzaSyCYNTzx5KQclxY6ejzL9XaM55aRBnmfgyg")}\"")
+        buildConfigField("String", "FCM_SENDER_ID", "\"${fcm("NEEMA_FCM_SENDER_ID", "819628107829")}\"")
     }
 
     signingConfigs {

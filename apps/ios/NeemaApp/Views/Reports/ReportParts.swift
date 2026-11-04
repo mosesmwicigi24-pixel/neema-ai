@@ -92,7 +92,7 @@ struct MiniBar: View {
             .frame(height: 72)
             AxisLabels(labels: data.map { $0.label }, fontSize: 9, color: { _ in c.muted })
         }
-        .onChange(of: data) { _ in picked = nil }
+        .onChange(of: data) { picked = nil }
     }
 }
 

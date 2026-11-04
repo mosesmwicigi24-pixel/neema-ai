@@ -102,7 +102,7 @@ executed and results, remaining parity gaps, blockers, next cycle.
   sidebar), `ToastView`, `ConnectivityBanner`, placeholders per view,
   `NeemaTheme` tokens and fonts (Manrope, DM Mono bundled) — **unverified**
   until the macOS CI job compiles it; see "Blockers".
-- XcodeGen `project.yml` (iOS 16 deployment, usage strings, `neema://`
+- XcodeGen `project.yml` (iOS 17 deployment — 16 until 2026-10-30, usage strings, `neema://`
   scheme, background modes audio/voip/remote-notification, fonts),
   `NeemaAppTests` (smoke tests), `.github/workflows/ios.yml` (Linux core job
   in the `swift:6.2` container; macOS job: XcodeGen → xcodebuild build+test

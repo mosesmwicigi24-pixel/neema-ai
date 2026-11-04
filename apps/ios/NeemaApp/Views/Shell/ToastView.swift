@@ -65,7 +65,7 @@ struct ConnectivityBanner: View {
         }
         .animation(.easeInOut(duration: 0.2), value: app.online)
         .animation(.easeInOut(duration: 0.2), value: backOnline)
-        .onChange(of: app.online) { up in
+        .onChange(of: app.online) { _, up in
             if !up { wasOffline = true; backOnline = false; return }
             guard wasOffline else { return }
             wasOffline = false

@@ -149,16 +149,16 @@ struct TeamBody: View {
             vm.life.shown.update(true)
         }
         .onDisappear { vm.life.shown.update(false) }
-        .onChange(of: ui.forms) { _ in savedUi = vm.saveUi() }
+        .onChange(of: ui.forms) { savedUi = vm.saveUi() }
         // A save that succeeded closes its dialog here — also when the sheet that started it has been replaced.
-        .onChange(of: model.closed) { closed in
+        .onChange(of: model.closed) { _, closed in
             if let d = TeamDialog(key: dialogKey), let name = closed?.name, d.closeName == name { dialogKey = "" }
         }
         // The row a dialog is about has gone (removed by someone else): the dialog goes with it.
-        .onChange(of: agents) { list in
+        .onChange(of: agents) { _, list in
             if let d = TeamDialog(key: dialogKey), let id = d.agentId, !list.contains(where: { $0.id == id }) { dialogKey = "" }
         }
-        .onChange(of: ui.roles) { roles in
+        .onChange(of: ui.roles) { _, roles in
             if let d = TeamDialog(key: dialogKey), let id = d.roleId, !roles.contains(where: { $0.id == id }) { dialogKey = "" }
         }
     }

@@ -78,7 +78,7 @@ struct ReportsBody: View {
             if ui.exportInterrupted { vm.interruptionShown() }
         }
         .onDisappear { vm.life.shown.update(false) }
-        .onChange(of: ui) { u in
+        .onChange(of: ui) { _, u in
             savedUi = vm.saveUi()
             if u.exportInterrupted { vm.interruptionShown() }
         }

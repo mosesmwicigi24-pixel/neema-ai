@@ -150,7 +150,7 @@ struct ImageBubble: View {
                     .foregroundColor(inbound ? (c.isDark ? c.text : Palette.forestText) : Color.white.opacity(0.9))
             }
         }
-        .onChange(of: src) { _ in url = ""; broken = false }
+        .onChange(of: src) { url = ""; broken = false }
     }
 }
 
@@ -249,15 +249,19 @@ final class AudioClip: ObservableObject {
             try? AVAudioSession.sharedInstance().setCategory(.playback, mode: .spokenAudio)
             try? AVAudioSession.sharedInstance().setActive(true)
             ticker = p.addPeriodicTimeObserver(forInterval: CMTime(seconds: 0.25, preferredTimescale: 600), queue: .main) { [weak self] t in
-                guard let self = self else { return }
-                self.position = t.seconds
-                let d = item.duration.seconds
-                if d.isFinite && d > 0 { self.duration = d }
-                if item.status == .failed { self.failed = true; self.playing = false }
+                MainActor.assumeIsolated {   // queue: .main — say so to the compiler
+                    guard let self = self else { return }
+                    self.position = t.seconds
+                    let d = item.duration.seconds
+                    if d.isFinite && d > 0 { self.duration = d }
+                    if item.status == .failed { self.failed = true; self.playing = false }
+                }
             }
             endObserver = NotificationCenter.default.addObserver(forName: .AVPlayerItemDidPlayToEndTime, object: item, queue: .main) { [weak self] _ in
-                guard let self = self else { return }
-                self.player?.pause(); self.player?.seek(to: .zero); self.position = 0; self.playing = false
+                MainActor.assumeIsolated {   // queue: .main — say so to the compiler
+                    guard let self = self else { return }
+                    self.player?.pause(); self.player?.seek(to: .zero); self.position = 0; self.playing = false
+                }
             }
         }
         guard let p = player else { return }

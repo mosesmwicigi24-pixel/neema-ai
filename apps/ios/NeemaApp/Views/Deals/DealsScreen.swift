@@ -110,7 +110,7 @@ struct DealsBody: View {
             vm.life.shown.update(true)
         }
         .onDisappear { vm.life.shown.update(false) }
-        .onChange(of: ui) { _ in savedUi = JSONValue.object(vm.saveUi()).text }
+        .onChange(of: ui) { savedUi = JSONValue.object(vm.saveUi()).text }
     }
 
     // ── Pieces ────────────────────────────────────────────────────────────────

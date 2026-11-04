@@ -76,7 +76,7 @@ private struct CallsScreenBody: View {
             .frame(maxWidth: .infinity, alignment: .center)
             .padding(.horizontal, sidePad)
             .frame(width: width, height: g.size.height)
-            .onChange(of: pick) { p in
+            .onChange(of: pick) { _, p in
                 if p.select != model.selected?.id { vm.select(p.select.flatMap { id in shown?.first { $0.id == id } }) }
                 autoPicked = p.autoPicked ?? ""
             }
@@ -89,13 +89,13 @@ private struct CallsScreenBody: View {
             consumeFocus()
         }
         .onDisappear { vm.life.shown.update(false) }
-        .onChange(of: model.followUpsOnly) { _ in savedUi = vm.saveUi() }
-        .onChange(of: model.channelFilter) { _ in savedUi = vm.saveUi() }
-        .onChange(of: model.selected) { _ in savedUi = vm.saveUi() }
-        .onChange(of: app.callsFocusKey) { _ in consumeFocus() }
-        .onChange(of: model.list == nil) { _ in consumeFocus() }
+        .onChange(of: model.followUpsOnly) { savedUi = vm.saveUi() }
+        .onChange(of: model.channelFilter) { savedUi = vm.saveUi() }
+        .onChange(of: model.selected) { savedUi = vm.saveUi() }
+        .onChange(of: app.callsFocusKey) { consumeFocus() }
+        .onChange(of: model.list == nil) { consumeFocus() }
         // Re-check on return from the system settings page.
-        .onChange(of: scenePhase) { p in if p == .active { refreshReadiness() } }
+        .onChange(of: scenePhase) { _, p in if p == .active { refreshReadiness() } }
     }
 
     private func consumeFocus() {
@@ -121,7 +121,7 @@ struct CallReadiness: Equatable {
     static func of() async -> CallReadiness {
         let s = await UNUserNotificationCenter.current().notificationSettings()
         let notifs = s.authorizationStatus == .authorized || s.authorizationStatus == .provisional || s.authorizationStatus == .ephemeral
-        let mic = AVAudioSession.sharedInstance().recordPermission != .denied
+        let mic = AVAudioApplication.shared.recordPermission != .denied
         return CallReadiness(missing: !notifs ? .notifications : (!mic ? .microphone : nil))
     }
 
@@ -624,16 +624,20 @@ private final class RecordingPlayback: ObservableObject {
             try? AVAudioSession.sharedInstance().setCategory(.playback, mode: .spokenAudio)
             try? AVAudioSession.sharedInstance().setActive(true)
             ticker = pl.addPeriodicTimeObserver(forInterval: CMTime(seconds: 0.25, preferredTimescale: 600), queue: .main) { [weak self] t in
-                guard let self = self else { return }
-                self.pos = t.seconds.isFinite ? t.seconds : 0
-                let d = item.duration.seconds
-                if d.isFinite && d > 0 { self.dur = d }
-                self.buffering = pl.timeControlStatus == .waitingToPlayAtSpecifiedRate
-                if item.status == .failed { self.failed = true; self.playing = false }
+                MainActor.assumeIsolated {   // queue: .main — say so to the compiler
+                    guard let self = self else { return }
+                    self.pos = t.seconds.isFinite ? t.seconds : 0
+                    let d = item.duration.seconds
+                    if d.isFinite && d > 0 { self.dur = d }
+                    self.buffering = pl.timeControlStatus == .waitingToPlayAtSpecifiedRate
+                    if item.status == .failed { self.failed = true; self.playing = false }
+                }
             }
             endObserver = NotificationCenter.default.addObserver(forName: .AVPlayerItemDidPlayToEndTime, object: item, queue: .main) { [weak self] _ in
-                guard let self = self else { return }
-                self.player?.pause(); self.player?.seek(to: .zero); self.pos = 0; self.playing = false
+                MainActor.assumeIsolated {   // queue: .main — say so to the compiler
+                    guard let self = self else { return }
+                    self.player?.pause(); self.player?.seek(to: .zero); self.pos = 0; self.playing = false
+                }
             }
             if pos > 0 { pl.seek(to: CMTime(seconds: pos, preferredTimescale: 600)) }
         }

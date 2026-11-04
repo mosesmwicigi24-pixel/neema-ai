@@ -5,7 +5,7 @@ name: Neema
 options:
   bundleIdPrefix: ke.co.bethanyhouse
   deploymentTarget:
-    iOS: "16.0"
+    iOS: "17.0"
   createIntermediateGroups: true
   xcodeVersion: "16.0"
 settings:

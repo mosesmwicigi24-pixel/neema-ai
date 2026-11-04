@@ -103,7 +103,7 @@ private struct CustomerPanelBody: View {
         .onAppear { vm.sync(conversation); vm.onShown() }
         .onDisappear { vm.onHidden() }
         // The web reloads the profile when the thread's row changes (new message, rename).
-        .onChange(of: conversation) { vm.sync($0) }
+        .onChange(of: conversation) { vm.sync($1) }
     }
 }
 

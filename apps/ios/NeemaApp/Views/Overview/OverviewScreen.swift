@@ -348,7 +348,7 @@ struct RevenueChart: View {
                     .frame(maxWidth: .infinity).padding(.top, 8)
             }
         }
-        .onChange(of: bars) { _ in picked = nil }
+        .onChange(of: bars) { picked = nil }
     }
 }
 

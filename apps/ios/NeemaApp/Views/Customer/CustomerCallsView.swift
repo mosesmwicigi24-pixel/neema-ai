@@ -54,7 +54,7 @@ struct CallsSection: View {
             }
             .onAppear { vm.loadCalls(); vm.loadPermission(); vm.watchCalls() }
             // Messenger calling switched on / off: the permission shown is the app the Call button uses.
-            .onChange(of: onMessenger) { _ in vm.loadPermission() }
+            .onChange(of: onMessenger) { vm.loadPermission() }
         }
     }
 }
