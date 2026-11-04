@@ -40,6 +40,8 @@ export interface Conversation {
     last_message_at: string;
     assigned_agent_id: string | null;
     assigned_agent_name?: string | null;
+    /** An open "please hand this chat over" ask (services/handover.py). */
+    handover_request?: HandoverRequest | null;
     unread: number;
     unread_count: number;
     contact_name: string | null;
@@ -296,4 +298,12 @@ export interface OpenChatRequest {
 export interface SharedViewProps {
     onToast: (msg: string, type?: ToastType) => void;
     isMobile: boolean;
+}
+/** Someone asked the colleague holding a chat to hand it over (owner, 2026-11-04). */
+export interface HandoverRequest {
+    id: string;
+    from_agent_id: string;
+    from_agent_name: string;
+    holder_agent_id: string | null;
+    at: string | null;
 }

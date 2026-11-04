@@ -204,6 +204,12 @@ class NeemaApi(val http: NeemaHttp) {
         suspend fun pause(id: String): JsonObject = http.post("/admin/conversations/$id/pause", JsonObject(emptyMap()))
         suspend fun transfer(id: String, agentId: String): JsonObject =
             http.post("/admin/conversations/$id/transfer", buildJsonObject { put("agent_id", agentId) })
+        // Ask the colleague holding a chat to hand it over; they accept or keep it.
+        suspend fun askHandover(id: String): JsonObject = http.post("/admin/conversations/$id/handover-request", JsonObject(emptyMap()))
+        suspend fun acceptHandover(id: String, requestId: String): JsonObject =
+            http.post("/admin/conversations/$id/handover-request/accept", buildJsonObject { put("request_id", requestId) })
+        suspend fun declineHandover(id: String, requestId: String): JsonObject =
+            http.post("/admin/conversations/$id/handover-request/decline", buildJsonObject { put("request_id", requestId) })
 
         suspend fun sendReply(
             id: String, text: String, replyTo: String? = null,

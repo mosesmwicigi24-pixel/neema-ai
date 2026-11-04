@@ -624,6 +624,10 @@ internal data class ThreadControls(
     val composer: Boolean,
     /** The 🔒 header badge and the "Handled by …" banner. */
     val locked: Boolean,
+    /** Locked out, but may ask the holder to hand it over (owner, 2026-11-04). */
+    val askHandover: Boolean = false,
+    /** A colleague asked for this chat: the holder (or the super admin) hands it over or keeps it. */
+    val answerHandover: Boolean = false,
 )
 
 internal fun threadControls(conv: Conversation, perms: InboxPerms): ThreadControls {
@@ -655,6 +659,8 @@ internal fun threadControls(conv: Conversation, perms: InboxPerms): ThreadContro
         composer = mode == "human" && (isOwner || adminHere),
         // Everyone but the super admin sees who holds it.
         locked = ownedByOther && !perms.isSuper,
+        askHandover = ownedByOther && !perms.isSuper && perms.canHandle,
+        answerHandover = mode == "human" && conv.handoverRequest != null && (isOwner || perms.isSuper),
     )
 }
 

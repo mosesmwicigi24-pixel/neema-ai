@@ -32,6 +32,8 @@ data class Conversation(
     @SerialName("lead_stage") val leadStage: String? = null,
     @SerialName("assigned_agent_id") val assignedAgentId: String? = null,
     @SerialName("assigned_agent_name") val assignedAgentName: String? = null,
+    /** An open "please hand this chat over" ask (services/handover.py). */
+    @SerialName("handover_request") val handoverRequest: HandoverRequest? = null,
     @SerialName("intercept_since") val interceptSince: String? = null,
     @SerialName("last_message_at") val lastMessageAt: String? = null,
     @SerialName("last_message_preview") val lastMessagePreview: String? = null,
@@ -57,6 +59,16 @@ data class Conversation(
     /** Sort key: when did this thread last move. */
     val recency: String get() = lastMessageAt ?: createdAt ?: ""
 }
+
+/** Someone asked the colleague holding a chat to hand it over (owner, 2026-11-04). */
+@Serializable
+data class HandoverRequest(
+    val id: String,
+    @SerialName("from_agent_id") val fromAgentId: String,
+    @SerialName("from_agent_name") val fromAgentName: String = "A colleague",
+    @SerialName("holder_agent_id") val holderAgentId: String? = null,
+    val at: String? = null,
+)
 
 @Serializable
 data class ConversationPage(
