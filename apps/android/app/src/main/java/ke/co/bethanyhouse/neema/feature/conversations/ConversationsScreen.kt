@@ -468,6 +468,25 @@ private fun ThreadPane(
         // Reply box — when the agent owns the conversation, or is admin/superuser.
         if (can.composer) {
             HorizontalDivider(color = hairline())
+            // A colleague asked for this chat: hand it over or keep it.
+            conv.handoverRequest?.takeIf { can.answerHandover }?.let { req ->
+                val busyNow = thread.busyFor(conv.id)
+                Row(
+                    Modifier.fillMaxWidth().padding(start = 12.dp, end = 12.dp, top = 8.dp)
+                        .clip(RoundedCornerShape(12.dp)).background(Color(0xFFFFF7E6))
+                        .border(1.dp, Color(0xFFF5D08A), RoundedCornerShape(12.dp))
+                        .padding(horizontal = 12.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text("🤝 ${req.fromAgentName} asks for this chat.", fontSize = 12.sp, color = Color(0xFF8A5A00), modifier = Modifier.weight(1f))
+                    Spacer(Modifier.width(8.dp))
+                    WebBtn("Hand over", BtnVariant.Primary, onClick = { vm.answerHandover(conv.id, req, give = true) },
+                        enabled = busyNow.isEmpty(), busy = busyNow == "handover-yes")
+                    Spacer(Modifier.width(6.dp))
+                    WebBtn("Keep", BtnVariant.Secondary, onClick = { vm.answerHandover(conv.id, req, give = false) },
+                        enabled = busyNow.isEmpty(), busy = busyNow == "handover-no")
+                }
+            }
             // Someone else holds it: the super admin may still reply, and sending takes it over.
             if (can.takeOver) Text(
                 "🔓 ${conv.assignedAgentName ?: "Another agent"} has this chat — sending takes it over (noted in the timeline).",
@@ -478,8 +497,11 @@ private fun ThreadPane(
             // Lock banner
             val dark = Neema.colors.isDark
             HorizontalDivider(color = hairline())
-            Row(
+            Column(
                 Modifier.fillMaxWidth().background(if (dark) Neema.colors.bg2 else Palette.SageBanner).padding(16.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+            Row(
                 horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically,
             ) {
                 Text("🔒", fontSize = 16.sp); Spacer(Modifier.width(8.dp))
@@ -492,6 +514,23 @@ private fun ThreadPane(
                     },
                     fontSize = 12.sp, color = Palette.Sage400,
                 )
+            }
+            // Ask the holder to hand it over (they hand it over or keep it).
+            if (can.askHandover) {
+                Spacer(Modifier.height(10.dp))
+                val req = conv.handoverRequest
+                when {
+                    req != null && req.fromAgentId == perms.me ->
+                        Text("🤝 Asked — waiting for their answer", fontSize = 12.sp, color = Palette.Sage400)
+                    req != null ->
+                        Text("🤝 ${req.fromAgentName} has asked already", fontSize = 12.sp, color = Palette.Sage400)
+                    else -> {
+                        val busyNow = thread.busyFor(conv.id)
+                        WebBtn("Ask to hand over", BtnVariant.Secondary, onClick = { vm.askHandover(conv.id) },
+                            lead = "🤝", enabled = busyNow.isEmpty(), busy = busyNow == "handover")
+                    }
+                }
+            }
             }
         }
     }

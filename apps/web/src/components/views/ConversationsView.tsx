@@ -1809,7 +1809,7 @@ export function ConversationsView({
     // API twice (each duplicate used to journal a second timeline row and
     // re-notify the whole team; the server is idempotent now too, belt AND
     // braces).
-    const [convBusy, setConvBusy] = useState<"" | "intercept" | "release" | "pause">("");
+    const [convBusy, setConvBusy] = useState<"" | "intercept" | "release" | "pause" | "handover" | "handover-yes" | "handover-no">("");
 
     const intercept = async (convId: string) => {
         if (convBusy) return;
@@ -1826,6 +1826,38 @@ export function ConversationsView({
             } else {
                 onToast("Failed to claim conversation", "error");
             }
+        } finally {
+            setConvBusy("");
+        }
+    };
+
+    // Ask the colleague holding this chat to hand it over (they accept or keep it).
+    const askHandover = async (convId: string) => {
+        if (convBusy) return;
+        setConvBusy("handover");
+        try {
+            const out = await conversationsApi.askHandover(convId);
+            refetchConversations?.();
+            onToast(out?.already ? "You've already asked — waiting for their answer"
+                                 : "Asked — they'll be told to hand it over or keep it");
+        } catch (err: any) {
+            onToast(String(err?.message ?? "").replace(/^.*?:\s*/, "") || "Couldn't send the request", "error");
+        } finally {
+            setConvBusy("");
+        }
+    };
+
+    const answerHandover = async (convId: string, requestId: string, give: boolean) => {
+        if (convBusy) return;
+        setConvBusy(give ? "handover-yes" : "handover-no");
+        try {
+            await (give ? conversationsApi.acceptHandover(convId, requestId)
+                        : conversationsApi.declineHandover(convId, requestId));
+            refetchConversations?.();
+            loadMessages(convId, true);
+            onToast(give ? "Handed over" : "You're keeping this chat — they've been told");
+        } catch (err: any) {
+            onToast(String(err?.message ?? "").replace(/^.*?:\s*/, "") || "Couldn't answer the request", "error");
         } finally {
             setConvBusy("");
         }
@@ -4254,6 +4286,25 @@ export function ConversationsView({
                                         willChange: "transform",
                                     }}
                                 >
+                                    {/* A colleague asked for this chat: the holder (or the
+                                        super admin) hands it over or keeps it. */}
+                                    {activeConv.handover_request &&
+                                        (isOwner || canOverride) && (
+                                        <div className="mb-2 flex flex-wrap items-center gap-2 px-3 py-2 rounded-xl"
+                                             style={{ background: "#fff7e6", border: "1px solid #f5d08a" }}>
+                                            <span className="text-xs flex-1" style={{ color: "#8a5a00" }}>
+                                                🤝 <strong>{activeConv.handover_request.from_agent_name}</strong> asks for this chat.
+                                            </span>
+                                            <Btn small variant="primary" disabled={!!convBusy}
+                                                 onClick={() => answerHandover(activeConv.id, activeConv.handover_request!.id, true)}>
+                                                Hand over
+                                            </Btn>
+                                            <Btn small variant="secondary" disabled={!!convBusy}
+                                                 onClick={() => answerHandover(activeConv.id, activeConv.handover_request!.id, false)}>
+                                                Keep
+                                            </Btn>
+                                        </div>
+                                    )}
                                     {/* Someone else holds this chat: the super admin may
                                         still reply, and sending takes it over. */}
                                     {convOwnedByOther && (
@@ -4698,6 +4749,19 @@ export function ConversationsView({
                                     </strong>{" "}
                                     — ask them to release it, or ask the super admin to take it over
                                 </p>
+                                {canHandleConversations && (() => {
+                                    const req = activeConv.handover_request;
+                                    if (req && req.from_agent_id === currentAgentId)
+                                        return <span className="text-xs ml-2" style={{ color: "#8a9e80" }}>· 🤝 Asked — waiting for their answer</span>;
+                                    if (req)
+                                        return <span className="text-xs ml-2" style={{ color: "#8a9e80" }}>· 🤝 {req.from_agent_name} has asked already</span>;
+                                    return (
+                                        <Btn small variant="secondary" disabled={!!convBusy}
+                                             onClick={() => askHandover(activeConv.id)}>
+                                            {convBusy === "handover" ? <span className="inline-block w-3 h-3 border-2 border-current border-t-transparent rounded-full animate-spin" /> : "🤝"} Ask to hand over
+                                        </Btn>
+                                    );
+                                })()}
                             </div>
                         ) : null}
                     </>

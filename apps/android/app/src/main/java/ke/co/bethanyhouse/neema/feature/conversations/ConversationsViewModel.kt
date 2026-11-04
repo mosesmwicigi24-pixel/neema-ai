@@ -17,6 +17,7 @@ import ke.co.bethanyhouse.neema.core.model.ActivityEvent
 import ke.co.bethanyhouse.neema.core.model.Conversation
 import ke.co.bethanyhouse.neema.core.model.ConversationPage
 import ke.co.bethanyhouse.neema.core.model.ConversationWindow
+import ke.co.bethanyhouse.neema.core.model.HandoverRequest
 import ke.co.bethanyhouse.neema.core.model.InboxSummary
 import ke.co.bethanyhouse.neema.core.net.ApiException
 import ke.co.bethanyhouse.neema.core.net.NeemaJson
@@ -1237,6 +1238,24 @@ class ConversationsViewModel(val dash: DashboardViewModel) : ViewModel() {
             id, "You took over from ${from ?: "the agent"} — the team has been told", "Failed to take over", "Couldn't take it over — only the super admin can",
             done = { it.interceptMode == "human" && it.assignedAgentId == me },
         ) { inboxApi.intercept(id) }
+    }
+
+    /** Ask the colleague holding this chat to hand it over (they hand it over or keep it). */
+    fun askHandover(id: String) = busy(id, "handover") {
+        val me = myId
+        control(
+            id, "Asked — they'll be told to hand it over or keep it", "Couldn't send the request", null,
+            done = { it.handoverRequest?.fromAgentId == me },
+        ) { inboxApi.askHandover(id) }
+    }
+
+    /** The holder (or the super admin) answers a colleague's ask. */
+    fun answerHandover(id: String, req: HandoverRequest, give: Boolean) = busy(id, if (give) "handover-yes" else "handover-no") {
+        control(
+            id, if (give) "Handed over to ${req.fromAgentName}" else "You're keeping this chat — ${req.fromAgentName} has been told",
+            "Couldn't answer the request", null,
+            done = { if (give) it.assignedAgentId == req.fromAgentId else it.handoverRequest == null },
+        ) { if (give) inboxApi.acceptHandover(id, req.id) else inboxApi.declineHandover(id, req.id) }
     }
 
     fun release(id: String) = busy(id, "release") {

@@ -1036,6 +1036,15 @@ async def _conversation_rows(
     # every poll.
     country_map = {str(c.id): _list_country(c) for c in conversations}
 
+    # An open "please hand this chat over" request (services/handover): the
+    # holder sees Hand over / Keep, the person who asked sees it is pending.
+    try:
+        from app.services.handover import open_requests
+        handover_map = await open_requests(db, conversations)
+    except Exception as exc:
+        _log.warning("handover requests unavailable: %s", exc)
+        handover_map = {}
+
     # ── Build response, sorted by true latest-message timestamp desc ──────────
     def sort_key(c: Conversation):
         entry = preview_map.get(str(c.id))
@@ -1081,6 +1090,7 @@ async def _conversation_rows(
                                         wa_orders.get(c.wa_id, 0) if c.wa_id else 0),
             "lead_stage":           _stage_for(c),
             "tags":                 (user_map[c.wa_id].state or {}).get("tags", []) if c.wa_id in user_map else [],
+            "handover_request":     handover_map.get(str(c.id)),
         }
         for c in conversations
     ]
@@ -1252,6 +1262,19 @@ async def get_thread(
             ),
             "agent_name":   agent_name,
         })
+
+    # ── 4a. Hand-over asks and answers (services/handover) ────────────────────
+    try:
+        from app.services.handover import timeline_events
+        for h in await timeline_events(db, conv_id):
+            thread.append({
+                "id": h["id"], "type": "system_event", "direction": "outbound",
+                "sender": "ai", "text": h["label"],
+                "created_at": h["at"].isoformat() if h["at"] else None,
+                "event_kind": "transfer", "event_reason": None, "agent_name": h["agent"],
+            })
+    except Exception as exc:
+        _log.warning("thread handover items failed for %s: %s", conv_id, exc)
 
     # ── 4b. Calls with this customer, inline where they happened ──────────────
     # A call is part of the conversation: the agent coming back from one (or
@@ -1883,6 +1906,39 @@ async def transfer(conv_id: str, request: Request, body: dict, db: AsyncSession 
     if not agent_id:
         raise HTTPException(status_code=422, detail="agentId or agent_id required")
     return await transfer_conversation(db, conv_id, agent, agent_id, request.app.state.redis)
+
+
+# ── Ask the holder to hand a chat over (services/handover) ────────────────────
+
+@router.post("/conversations/{conv_id}/handover-request")
+async def ask_handover(conv_id: str, request: Request, db: AsyncSession = Depends(get_db),
+                       agent: Agent = Depends(get_current_agent)):
+    """Ask the colleague holding this chat to hand it over to me."""
+    from app.core.permissions import require_permission
+    from app.services import handover
+    await require_permission(db, agent, "intercept_release",
+                             "Your role doesn't handle conversations")
+    return await handover.ask(db, conv_id, agent, request.app.state.redis)
+
+
+@router.post("/conversations/{conv_id}/handover-request/accept")
+async def accept_handover(conv_id: str, request: Request, body: dict | None = None,
+                          db: AsyncSession = Depends(get_db),
+                          agent: Agent = Depends(get_current_agent)):
+    """The holder (or the super admin) hands the chat to the person who asked."""
+    from app.services import handover
+    return await handover.accept(db, conv_id, agent, (body or {}).get("request_id"),
+                                 request.app.state.redis)
+
+
+@router.post("/conversations/{conv_id}/handover-request/decline")
+async def decline_handover(conv_id: str, request: Request, body: dict | None = None,
+                           db: AsyncSession = Depends(get_db),
+                           agent: Agent = Depends(get_current_agent)):
+    """The holder keeps the chat; the person who asked is told."""
+    from app.services import handover
+    return await handover.decline(db, conv_id, agent, (body or {}).get("request_id"),
+                                  request.app.state.redis)
 
 
 # ── Media upload + send ───────────────────────────────────────────────────────

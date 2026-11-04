@@ -275,6 +275,7 @@ export interface ApiConversation {
     lead_stage?: string | null;
     assigned_agent_id: string | null;
     assigned_agent_name?: string | null;
+    handover_request?: import("@/types").HandoverRequest | null;
     intercept_since: string | null;
     last_message_at: string | null;
     last_message_preview: string | null;
@@ -444,6 +445,13 @@ export const conversationsApi = {
         post<ApiConversation>(`/admin/conversations/${id}/transfer`, {
             agent_id: agentId,
         }),
+    // Ask the colleague holding a chat to hand it over; they accept or keep it.
+    askHandover: (id: string) =>
+        post<{ ok: boolean; already?: boolean }>(`/admin/conversations/${id}/handover-request`, {}),
+    acceptHandover: (id: string, requestId: string) =>
+        post<{ ok: boolean }>(`/admin/conversations/${id}/handover-request/accept`, { request_id: requestId }),
+    declineHandover: (id: string, requestId: string) =>
+        post<{ ok: boolean }>(`/admin/conversations/${id}/handover-request/decline`, { request_id: requestId }),
     // client_msg_id: one id per message — a repeated POST (double click, a
     // retry after a lost answer) returns the first send's result instead of
     // messaging the customer twice.
@@ -1345,6 +1353,7 @@ export function mapConversation(c: ApiConversation): Conversation {
         last_message_at: c.last_message_at ?? c.created_at,
         assigned_agent_id: c.assigned_agent_id,
         assigned_agent_name: c.assigned_agent_name ?? null,
+        handover_request: c.handover_request ?? null,
         unread: c.unread ?? 0,
         unread_count: c.unread ?? 0,
         country_iso: c.country_iso,
