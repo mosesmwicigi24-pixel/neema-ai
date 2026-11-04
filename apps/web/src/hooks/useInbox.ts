@@ -34,6 +34,7 @@ import {
     type InboxSummary,
 } from "@/lib/api";
 import type { Conversation } from "@/types";
+import { useWs } from "@/lib/websocket";
 
 const PAGE = 50;
 const POLL_MS = 60_000;
@@ -94,6 +95,9 @@ export interface Inbox {
     /** The open thread: kept fresh on every refresh even when it is not on
      *  page one, or taking it over would leave its row saying "AI". */
     watch: (id: string | null) => void;
+    /** This chat was opened: zero its row and its share of every badge now,
+     *  tell the server, then take the server's count. */
+    markRead: (id: string) => void;
 }
 
 export function useInbox(enabled: boolean, agentId: string | null): Inbox {
@@ -279,6 +283,63 @@ export function useInbox(enabled: boolean, agentId: string | null): Inbox {
 
     const watch = useCallback((id: string | null) => { watchedRef.current = id || null; }, []);
 
+    // ── Read on open (owner, 2026-11-04: "when someone opens a chat, the
+    //    counter should remove it … if there are 5 chats not opened, say 5") ──
+    const cacheRef = useRef(cache);
+    cacheRef.current = cache;
+    const refreshSummary = useCallback(() => {
+        conversationsApi.summary().then(setSummary).catch(() => { /* keep the last */ });
+    }, []);
+    const markRead = useCallback((id: string) => {
+        const all = cacheRef.current;
+        const conv = all.get(id);
+        if (conv && (conv.unread ?? 0) > 0) {
+            const ch = conv.channel || "whatsapp";
+            const n = conv.unread ?? 0;
+            // The person's row stays unread while another of their threads is.
+            const rowStillUnread = !!conv.person_id && [...all.values()].some(
+                (c) => c.id !== id && c.person_id === conv.person_id && (c.unread ?? 0) > 0);
+            const dec = (m: Record<string, number> | undefined, key: string, by: number) =>
+                m ? { ...m, [key]: Math.max(0, (m[key] ?? 0) - by) } : m;
+            setSummary((s) => s && {
+                ...s,
+                unread: rowStillUnread ? s.unread : Math.max(0, s.unread - 1),
+                unread_messages: dec(dec(s.unread_messages, "all", n)!, ch, n)!,
+                unread_chats: rowStillUnread
+                    ? dec(s.unread_chats, ch, 1)
+                    : dec(dec(s.unread_chats, "all", 1), ch, 1),
+            });
+            setCache((prev) => {
+                const next = new Map(prev);
+                next.set(id, { ...conv, unread: 0, unread_count: 0 });
+                return next;
+            });
+        }
+        conversationsApi.markRead(id).then(refreshSummary).catch(() => { /* the next refresh corrects it */ });
+    }, [refreshSummary]);
+
+    // A colleague opened a chat on another screen: their read is ours too.
+    const ws = useWs();
+    useEffect(() => {
+        if (!ws || !enabled) return;
+        let t: ReturnType<typeof setTimeout> | null = null;
+        const on = (e: { type?: string; conversationId?: string }) => {
+            if (e?.type !== "conversation_read" || !e.conversationId) return;
+            const id = e.conversationId;
+            setCache((prev) => {
+                const c = prev.get(id);
+                if (!c || !(c.unread ?? 0)) return prev;
+                const next = new Map(prev);
+                next.set(id, { ...c, unread: 0, unread_count: 0 });
+                return next;
+            });
+            if (t) clearTimeout(t);
+            t = setTimeout(refreshSummary, 400);
+        };
+        ws.on("event", on);
+        return () => { ws.off("event", on); if (t) clearTimeout(t); };
+    }, [ws, enabled, refreshSummary]);
+
     const conversations = useMemo(() => [...cache.values()].sort(byRecency), [cache]);
     const visibleIds = useMemo(
         () => new Set(order.key === filterKey ? order.ids : []),
@@ -288,6 +349,6 @@ export function useInbox(enabled: boolean, agentId: string | null): Inbox {
     return {
         conversations, visibleIds, filters, setFilters, summary,
         loading, loadingMore, hasMore, freshLoaded,
-        refresh, loadMore, setConversations, reveal, watch,
+        refresh, loadMore, setConversations, reveal, watch, markRead,
     };
 }

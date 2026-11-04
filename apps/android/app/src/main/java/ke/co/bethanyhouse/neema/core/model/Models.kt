@@ -82,6 +82,9 @@ data class InboxSummary(
     val human: Int = 0,
     val yours: Int = 0,
     @SerialName("unread_messages") val unreadMessages: Map<String, Int> = emptyMap(),
+    /** Unread CHATS — inbox rows under "all", then per channel (the chips; owner,
+     *  2026-11-04: "if there are 5 chats that are not open, it should say 5"). Null from an older server. */
+    @SerialName("unread_chats") val unreadChats: Map<String, Int>? = null,
     @Serializable(with = LenientStringListSerializer::class)
     val tags: List<String> = emptyList(),
 )

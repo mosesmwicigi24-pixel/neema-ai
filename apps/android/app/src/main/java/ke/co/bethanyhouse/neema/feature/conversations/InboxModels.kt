@@ -467,6 +467,8 @@ class InboxApi(private val http: NeemaHttp) {
     suspend fun transfer(id: String, agentId: String) {
         http.raw("POST", "/admin/conversations/$id/transfer", http.jsonBody(buildJsonObject { put("agent_id", agentId) }))
     }
+    /** Someone opened this chat: what it holds now is read, for the whole team. */
+    suspend fun markRead(id: String) { http.raw("POST", "/admin/conversations/$id/read", http.jsonBody(JsonObject(emptyMap()))) }
     /** Ask the colleague holding a chat to hand it over; they accept or keep it (services/handover.py). */
     suspend fun askHandover(id: String) { http.raw("POST", "/admin/conversations/$id/handover-request", http.jsonBody(JsonObject(emptyMap()))) }
     suspend fun acceptHandover(id: String, requestId: String) {

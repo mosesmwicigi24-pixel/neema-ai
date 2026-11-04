@@ -190,7 +190,8 @@ internal fun ConversationList(
                 CHANNEL_TABS.forEach { (id, label, short) ->
                     val active = f.channel == id
                     val accent = if (id == "all") ALL_TAB_ACCENT else channelStyle(id).color
-                    val count = summary?.unreadMessages?.get(id) ?: fallback?.channels?.get(id) ?: 0
+                    // Unread CHATS (an older server: its message totals).
+                    val count = (summary?.unreadChats ?: summary?.unreadMessages)?.get(id) ?: fallback?.channels?.get(id) ?: 0
                     Box(Modifier.weight(1f)) {
                         Column(
                             Modifier.fillMaxWidth().heightIn(min = 40.dp).clip(RoundedCornerShape(8.dp))
@@ -333,17 +334,20 @@ private class LocalBadges(val unread: Int, val human: Int, val yours: Int, val t
 private fun localBadges(all: Collection<ke.co.bethanyhouse.neema.core.model.Conversation>, me: String?): LocalBadges {
     var unread = 0; var human = 0; var yours = 0
     val tags = java.util.TreeSet<String>()
-    // The chips sum unread MESSAGES; the Unread tab counts conversations.
+    // The chips count unread CHATS ("5 chats not opened → 5"); "all" counts a
+    // person's threads as one row, as the inbox shows them.
     val channels = HashMap<String, Int>()
+    val rows = HashSet<String>()
     for (c in all) {
         if (c.unread > 0) {
             unread++
-            channels["all"] = (channels["all"] ?: 0) + c.unread
-            channels[c.channel] = (channels[c.channel] ?: 0) + c.unread
+            rows += c.personId ?: c.id
+            channels[c.channel] = (channels[c.channel] ?: 0) + 1
         }
         if (c.interceptMode == "human") { human++; if (c.assignedAgentId == me) yours++ }
         tags += c.tags
     }
+    channels["all"] = rows.size
     return LocalBadges(unread, human, yours, tags.toList(), channels)
 }
 
