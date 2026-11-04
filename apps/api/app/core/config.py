@@ -389,6 +389,11 @@ class Settings(BaseSettings):
     # claude-haiku-4-5.
     tier2_model: str = "claude-sonnet-5-5"
     tier2_model_light: str = "claude-haiku-5-5"  # cheap model for trivial turns (per-turn routing)
+    # The ANSWER CHECKER's models, apart from the writer's (owner, 2026-11-04:
+    # put the checker back so the 5.5 trial is judged on the writer alone).
+    # Money turns are read by the main reviewer, the rest by the light one.
+    review_model_main: str = "claude-sonnet-5"
+    review_model_light: str = "claude-haiku-4-5"
     model_fallbacks: str = "claude-sonnet-5-5:claude-sonnet-5,claude-haiku-5-5:claude-haiku-4-5"
     tier2_model_routing: bool = True  # route trivial turns to tier2_model_light; False = always tier2_model
     tier2_max_iterations: int = 8    # max tool-call loops per turn (runaway guard)
@@ -429,6 +434,16 @@ class Settings(BaseSettings):
     # The slow lane: a cooled thread's chat is collected and answered together,
     # once, every this many minutes (0 = no lane: silence until they ask).
     cooling_defer_minutes: int = 15
+    # THE CONVERSATION BUDGET + BOT SHIELD (agent/conversation_budget, owner
+    # 2026-11-04): replies follow PROGRESS toward the order, not buying words.
+    # A contact's day: base replies + per_step for every step of progress;
+    # a bot score from the thread (replies within seconds, echoes, auto-reply
+    # or AI text, a flood, the same text from many contacts). "shadow" records
+    # what it WOULD do (Reports → Pacing) and changes nothing; "off" skips.
+    pacing_budget_mode: str = "shadow"
+    pacing_budget_base: int = 15
+    pacing_budget_per_step: int = 10
+    pacing_bot_threshold: int = 3
     # A person commenting many times under one post: this many full model
     # replies a day; beyond it, a bare price ask still gets the free priced
     # line on an identified post and anything else the warm canned line.

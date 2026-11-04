@@ -445,6 +445,86 @@ async def mark_photo_check(
     return {"ok": True, "id": str(pc.id), "owner_mark": pc.owner_mark, "owner_note": pc.owner_note}
 
 
+@router.get("/reports/pacing")
+async def report_pacing(
+    days: int = 7,
+    decision: str = "",
+    db: AsyncSession = Depends(get_db),
+    agent: Agent = Depends(get_current_agent),
+):
+    """What the conversation budget and the bot shield WOULD have done
+    (owner, 2026-11-04), newest first — record-only until the owner has
+    marked the list right or wrong."""
+    from datetime import datetime, timedelta, timezone
+    from app.agent.conversation_budget import DECISIONS
+    from app.core.config import settings
+    from app.core.permissions import require_permission
+    from app.models.pacing_event import PacingEvent
+    await require_permission(db, agent, "view_reports", "You need reports access to see this list")
+    days = max(1, min(int(days or 7), 90))
+    since = datetime.now(timezone.utc) - timedelta(days=days)
+    q = (select(PacingEvent, Person.display_name)
+         .outerjoin(Conversation, Conversation.id == PacingEvent.conversation_id)
+         .outerjoin(Person, Person.id == Conversation.person_id)
+         .where(PacingEvent.created_at >= since))
+    if decision in DECISIONS:
+        q = q.where(PacingEvent.decision == decision)
+    rows = (await db.execute(q.order_by(PacingEvent.created_at.desc()).limit(500))).all()
+    counts = {d: 0 for d in DECISIONS}
+    for d, n in (await db.execute(
+            select(PacingEvent.decision, func.count()).where(PacingEvent.created_at >= since)
+            .group_by(PacingEvent.decision))).all():
+        counts[d] = n
+    marked = dict((await db.execute(
+        select(PacingEvent.owner_mark, func.count()).where(
+            PacingEvent.created_at >= since, PacingEvent.owner_mark.isnot(None))
+        .group_by(PacingEvent.owner_mark))).all())
+    items = []
+    for ev, person_name in rows:
+        at = ev.created_at if ev.created_at.tzinfo else ev.created_at.replace(tzinfo=timezone.utc)
+        items.append({
+            "id": str(ev.id),
+            "conversation_id": str(ev.conversation_id) if ev.conversation_id else None,
+            "name": person_name or "", "channel": ev.channel, "contact": ev.contact,
+            "decision": ev.decision, "label": DECISIONS.get(ev.decision, ev.decision),
+            "reasons": list(ev.reasons or []),
+            "turns": ev.turns, "progress": ev.progress, "budget": ev.budget,
+            "bot_score": ev.bot_score, "mode": ev.mode,
+            "owner_mark": ev.owner_mark, "owner_note": ev.owner_note, "at": at.isoformat(),
+        })
+    return {"mode": (settings.pacing_budget_mode or "off"), "days": days, "counts": counts,
+            "labels": DECISIONS,
+            "marked": {"right": marked.get("right", 0), "wrong": marked.get("wrong", 0)},
+            "items": items}
+
+
+@router.post("/reports/pacing/{event_id}/mark")
+async def mark_pacing_event(
+    event_id: UUID,
+    body: dict,
+    db: AsyncSession = Depends(get_db),
+    agent: Agent = Depends(get_current_agent),
+):
+    """The owner's mark on one pacing decision: "right", "wrong" or null."""
+    from datetime import datetime, timezone
+    from app.core.permissions import require_permission
+    from app.models.pacing_event import PacingEvent
+    await require_permission(db, agent, "view_reports", "You need reports access to mark this")
+    mark = body.get("mark")
+    if mark not in ("right", "wrong", None):
+        raise HTTPException(status_code=422, detail="mark must be right, wrong or null")
+    ev = await db.get(PacingEvent, event_id)
+    if ev is None:
+        raise HTTPException(status_code=404, detail="Pacing event not found")
+    ev.owner_mark = mark
+    if "note" in body:
+        ev.owner_note = (str(body.get("note") or "").strip()[:1000]) or None
+    ev.marked_by = agent.id if mark else None
+    ev.marked_at = datetime.now(timezone.utc) if mark else None
+    await db.commit()
+    return {"ok": True, "id": str(ev.id), "owner_mark": ev.owner_mark, "owner_note": ev.owner_note}
+
+
 @router.get("/conversations/summary")
 async def conversations_summary(
     db: AsyncSession = Depends(get_db),

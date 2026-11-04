@@ -585,11 +585,13 @@ def test_the_reviewer_reads_the_conversation_and_the_tools_in_a_private_chat(mon
     assert "6. WRONG LANGUAGE" in sent and "Customer: I want the cassock in red" in sent
     assert '- update_cart: {"total": 13000}' in sent
     assert "The post is about" not in sent
-    assert chosen == [settings.tier2_model_light]
-    # money and order turns are reviewed by the main model
+    assert chosen == [settings.review_model_light]
+    # money and order turns are reviewed by the main reviewer — the checker's
+    # own models, unchanged when the writer's model changes (owner, 2026-11-04)
     llm.text = "verdict=pass | issues=-"
     asyncio.run(rv.review_reply("I have paid the deposit", "Received, thank you!", [], mode="dm"))
-    assert chosen[-1] == settings.tier2_model
+    assert chosen[-1] == settings.review_model_main
+    assert (settings.review_model_main, settings.review_model_light) == ("claude-sonnet-5", "claude-haiku-4-5")
 
 
 def test_the_private_chat_reviewer_has_its_own_switch(monkeypatch):

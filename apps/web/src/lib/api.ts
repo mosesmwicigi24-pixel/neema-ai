@@ -817,6 +817,36 @@ export interface PhotoChecks {
     items: PhotoCheckItem[];
 }
 
+// The conversation budget and bot shield (owner, 2026-11-04): what pacing
+// WOULD do, record-only, for the owner to mark right or wrong.
+export interface PacingItem {
+    id: string;
+    conversation_id: string | null;
+    name: string;
+    channel: string;
+    contact: string;
+    decision: string;
+    label: string;
+    reasons: string[];
+    turns: number | null;
+    progress: number | null;
+    budget: number | null;
+    bot_score: number | null;
+    mode: string;
+    owner_mark: "right" | "wrong" | null;
+    owner_note: string | null;
+    at: string;
+}
+
+export interface PacingReport {
+    mode: string;
+    days: number;
+    counts: Record<string, number>;
+    labels: Record<string, string>;
+    marked: { right: number; wrong: number };
+    items: PacingItem[];
+}
+
 export interface RecoveryJobResult {
     job: "cart_recovery" | "payment_followup" | "reengage" | "quote_follow_up";
     sent: number;
@@ -839,6 +869,11 @@ export interface RecoveryResults {
 export const reportsApi = {
     /** What each kind of follow-up achieved: sent, answered within 72 h, then ordered / paid. */
     recovery: (days = 30) => get<RecoveryResults>(`/admin/reports/recovery?days=${days}`),
+    pacing: (days = 7, decision = "") =>
+        get<PacingReport>(`/admin/reports/pacing?days=${days}${decision ? `&decision=${decision}` : ""}`),
+    markPacing: (id: string, mark: "right" | "wrong" | null, note?: string) =>
+        post<{ ok: boolean; id: string; owner_mark: string | null; owner_note: string | null }>(
+            `/admin/reports/pacing/${id}/mark`, note === undefined ? { mark } : { mark, note }),
     photoChecks: (days = 7, verdict = "") =>
         get<PhotoChecks>(`/admin/reports/photo-checks?days=${days}${verdict ? `&verdict=${verdict}` : ""}`),
     markPhotoCheck: (id: string, mark: "right" | "wrong" | null, note?: string) =>

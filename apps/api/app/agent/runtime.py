@@ -2146,6 +2146,18 @@ async def run_turn(db: AsyncSession, redis, wa_id: str, user_text: str, llm: LLM
                     reply = reply.rstrip() + "\n\n" + _ladder
         except Exception as exc:
             _log.info("cassock ladder skipped for %s: %s", key, exc)
+    # THE CONVERSATION BUDGET + BOT SHIELD (owner, 2026-11-04) — record-only:
+    # counts the turn, measures its progress toward the order and records
+    # what pacing WOULD do (Reports → Pacing). The reply is not touched.
+    if reply and not read_only and not scribe_only:
+        try:
+            from app.agent import conversation_budget as _cb
+            await _cb.assess(redis, db, channel=channel, key=key, user_text=user_text or "",
+                             reply=reply, tool_log=tool_log, seen_products=ctx.seen_products,
+                             public_comment=public_comment, post_id=comment_post_id,
+                             closer=is_closer(user_text or ""))
+        except Exception as exc:
+            _log.info("conversation budget skipped for %s: %s", key, exc)
     if turn_facts is not None:
         turn_facts.update({"tools": tool_log, "held": list(_held), "review": _gate_outcome})
 
