@@ -49,20 +49,21 @@ def test_the_brief_asks_for_key_points_only():
     assert "action_items" not in p and "commitments" not in p      # no longer asked for
 
 
-def test_the_handoff_briefing_is_five_labelled_lines():
+def test_the_handoff_briefing_is_four_short_labelled_lines():
+    """Owner, 2026-11-04: can the internal note be more precise and brief?"""
     sprawl = """**Handoff briefing for the colleague taking over Sue (Canada):**
 - **Where the sale stands:** Nothing is in the cart and nothing has been ordered.
-Stage: nothing in cart, no order yet
-Wants: gold Chalice Cup with Paten Set without the thurible, plus clear glass cups with a cross, several purple and gold bishop robes and a personalised Bible
-Open: price of the set without the thurible; whether gold small cups exist
-Avoid: quoting $650 as the price without the thurible
-Say: Hello Sue, this is Priscilla from Bethany House — confirming the set price for you now.
+Status: gold Chalice Cup with Paten Set without the thurible, plus clear glass cups with a cross; nothing ordered yet
+Next: confirm the price without the thurible and send both photos on the other number today
+Avoid: saying $650 is the price without the thurible
+Say: Hi Sue, Priscilla here from Bethany House — confirming your set price now.
 - Please also note the time-zone mistake and the robot question."""
     out = copilot.tight_briefing(sprawl)
     lines = out.splitlines()
-    assert [ln.split(":")[0] for ln in lines] == ["Stage", "Wants", "Open", "Avoid", "Say"]
+    assert [ln.split(":")[0] for ln in lines] == ["Status", "Next", "Avoid", "Say"]
     assert all(len(ln.split()) <= copilot.BRIEF_LINE_WORDS + 1 for ln in lines)
     assert "**" not in out and "Handoff briefing" not in out
+    assert len(out.split()) <= 4 * (copilot.BRIEF_LINE_WORDS + 1)
 
 
 def test_an_unlabelled_briefing_still_comes_out_short():
@@ -74,6 +75,7 @@ def test_an_unlabelled_briefing_still_comes_out_short():
 
 
 def test_the_briefing_ask_names_the_shape():
-    assert "KEY POINTS ONLY" in copilot.BRIEF_ASK and "at most 5 lines" in copilot.BRIEF_ASK
+    assert "PRECISE AND BRIEF" in copilot.BRIEF_ASK and "at most 4 lines" in copilot.BRIEF_ASK
+    assert "at most 12 words" in copilot.BRIEF_ASK
     for label in copilot.BRIEF_LABELS:
         assert f"{label}:" in copilot.BRIEF_ASK
