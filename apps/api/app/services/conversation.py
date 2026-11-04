@@ -279,40 +279,10 @@ async def transfer_conversation(
     db.add(log)
     await db.commit()
 
-    if target_agent:
-        notification = (
-            f"🔄 You've been transferred to *{target_agent.name}*, "
-            f"who will continue assisting you. "
-            f"One moment please! 😊"
-        )
-        try:
-            wamid = await send_to_channel(conv.channel or "whatsapp", conv.external_id or conv.wa_id, notification)
-            msg = Message(
-                wa_id=conv.wa_id,
-                external_id=conv.external_id,
-                conversation_id=conv.id,
-                person_id=conv.person_id,
-                channel=conv.channel or "whatsapp",
-                direction=MsgDirection.outbound,
-                sender=MsgSender.human_agent,
-                text=notification,
-                agent_id=agent.id,
-                waba_msg_id=wamid,
-            )
-            db.add(msg)
-            conv.last_message_at = datetime.now(timezone.utc)
-            conv.last_message_preview = notification[:100]
-            await db.commit()
-
-            if redis:
-                await _broadcast(redis, str(conv.id), {
-                    "type": "new_message",
-                    "conversationId": str(conv.id),
-                    "sender": "human_agent",
-                    "text": notification,
-                })
-        except Exception:
-            pass
+    # The customer is NOT told about a transfer (owner, 2026-11-04: "the
+    # customer should not know you have been transferred, unless the person
+    # serving the customer finds it worth noting"). The team sees it in the
+    # timeline; the new person says so themselves if it helps.
 
     if redis:
         await _broadcast(redis, str(conv.id), {

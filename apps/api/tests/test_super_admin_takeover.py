@@ -207,3 +207,24 @@ def test_the_timeline_says_who_took_over_from_whom():
     from app.routers import admin
     src = inspect.getsource(admin)
     assert src.count('took over from {e.note[len(TAKEOVER_PREFIX):]}') == 2
+
+
+def test_a_transfer_tells_the_customer_nothing(monkeypatch):
+    """Owner, 2026-11-04: "the customer should not know you have been
+    transferred, unless the person serving the customer finds it worth noting"."""
+    sent = []
+
+    async def _send(*a, **k):
+        sent.append(a)
+        return "wamid.x"
+    monkeypatch.setattr(cs, "send_to_channel", _send)
+    conv, sam = _conv(), _agent("sam", "Sam")
+    db = _FakeDB(conv, agents={"evelyn": EVELYN})
+    answers = iter([conv, sam])                     # the chat, then the new holder
+
+    async def _execute(*a, **k):
+        return _Res(next(answers))
+    db.execute = _execute
+    out = asyncio.run(cs.transfer_conversation(db, "c1", EVELYN, "sam"))
+    assert out["ok"] and conv.assigned_agent_id == "sam"
+    assert sent == [] and not [r for r in db.added if r.__class__.__name__ == "Message"]
