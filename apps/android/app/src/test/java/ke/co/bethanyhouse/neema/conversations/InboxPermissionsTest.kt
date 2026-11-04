@@ -91,17 +91,18 @@ class InboxPermissionsTest {
     private fun shown(dash: DashboardViewModel, c: Conversation): Set<String> {
         val t = threadControls(c, inboxPermsOf(dash))
         return buildSet {
-            if (t.intercept) add("intercept"); if (t.pickUp) add("pickUp"); if (t.release) add("release")
+            if (t.intercept) add("intercept"); if (t.pickUp) add("pickUp"); if (t.takeOver) add("takeOver"); if (t.release) add("release")
             if (t.pause) add("pause"); if (t.resume) add("resume"); if (t.transfer) add("transfer")
             if (t.note) add("note"); if (t.clearHistory) add("clear"); if (t.composer) add("composer")
             if (t.locked) add("locked")
         }
     }
 
-    private enum class Kind { Admin, Handler, None }
+    private enum class Kind { Super, Admin, Handler, None }
 
     private fun kindOf(p: Persona) = when (p) {
-        Persona.Superuser, Persona.Admin -> Kind.Admin
+        Persona.Superuser -> Kind.Super
+        Persona.Admin -> Kind.Admin
         Persona.Agent, Persona.Sales, Persona.Viewer, Persona.Override, Persona.EmptyOverride -> Kind.Handler
         Persona.Readonly, Persona.ReadonlyReplier, Persona.Supervisor -> Kind.None
     }
@@ -112,11 +113,20 @@ class InboxPermissionsTest {
      * c6 = human, held by Grace · h = human, unclaimed (auto-escalated).
      */
     private val expected: Map<Kind, Map<String, Set<String>>> = mapOf(
+        // Held by Grace (c6): only the super admin takes it over; an admin asks
+        // like everyone else (owner, 2026-11-04).
+        Kind.Super to mapOf(
+            "c1" to setOf("release", "pause", "transfer", "note", "clear", "composer"),
+            "c2" to setOf("intercept", "pause", "transfer", "note", "clear"),
+            "c3" to setOf("resume", "transfer", "note", "clear"),
+            "c6" to setOf("takeOver", "release", "pause", "transfer", "note", "clear", "composer"),
+            "h" to setOf("pickUp", "release", "pause", "transfer", "note", "clear", "composer"),
+        ),
         Kind.Admin to mapOf(
             "c1" to setOf("release", "pause", "transfer", "note", "clear", "composer"),
             "c2" to setOf("intercept", "pause", "transfer", "note", "clear"),
             "c3" to setOf("resume", "transfer", "note", "clear"),
-            "c6" to setOf("release", "pause", "transfer", "note", "clear", "composer"),
+            "c6" to setOf("note", "clear", "locked"),
             "h" to setOf("pickUp", "release", "pause", "transfer", "note", "clear", "composer"),
         ),
         Kind.Handler to mapOf(

@@ -251,8 +251,10 @@ class ConversationsScreenshotTest {
 
     private fun persona(p: InboxPersonaFixtures.Persona) = screen(role = p.role, superuser = p.superuser) { InboxPersonaFixtures.install(this, p) }
 
-    /** An admin on Grace's thread: every control, the reply box, no lock. */
+    /** An admin on Grace's thread: locked like everyone but the super admin (note and clear only). */
     @Test fun persona_admin_heldByAnotherAgent() = persona(InboxPersonaFixtures.Persona.Admin).settle().apply { vm.select("c6") }.snap()
+    /** Only the super admin may take over a chat someone else holds (owner, 2026-11-04). */
+    @Test fun persona_superuser_heldByAnotherAgent_canTakeOver() = persona(InboxPersonaFixtures.Persona.Superuser).settle().apply { vm.select("c6") }.snap()
 
     /** Readonly on an AI thread: no Intercept, no Pause, no Transfer, no note — the thread reads only. */
     @Test fun persona_readonly_aiThread() = persona(InboxPersonaFixtures.Persona.Readonly).settle().apply { vm.select("c2") }.snap()

@@ -1230,6 +1230,15 @@ class ConversationsViewModel(val dash: DashboardViewModel) : ViewModel() {
         ) { inboxApi.intercept(id) }
     }
 
+    /** The super admin takes over a chat someone else holds (the server notes it and tells the team). */
+    fun takeOver(id: String, from: String?) = busy(id, "intercept") {
+        val me = myId
+        control(
+            id, "You took over from ${from ?: "the agent"} — the team has been told", "Failed to take over", "Couldn't take it over — only the super admin can",
+            done = { it.interceptMode == "human" && it.assignedAgentId == me },
+        ) { inboxApi.intercept(id) }
+    }
+
     fun release(id: String) = busy(id, "release") {
         control(id, "Conversation released back to Neema", "Failed to release", null, done = { it.interceptMode == "ai" }) { inboxApi.release(id) }
     }

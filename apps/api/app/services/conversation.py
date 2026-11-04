@@ -9,6 +9,49 @@ from app.services.n8n_bridge import _send_waba, _broadcast
 from app.services.meta_send import send_to_channel, META_CHANNELS
 
 
+# ── Super-admin override ─────────────────────────────────────────────────────
+# A chat someone picked up and never released used to stay stuck with them.
+# The SUPER ADMIN — and only the super admin — may attend to any chat: taking
+# it over moves it to them, says so in the timeline ("… took over from
+# Evelyn") and tells the team. Everyone else, admins included, asks the holder
+# to release it or asks the super admin (owner, 2026-11-04).
+TAKEOVER_PREFIX = "Took over from "
+
+
+def can_override(agent) -> bool:
+    """May act on a chat another person holds: the super admin only."""
+    return bool(getattr(agent, "is_superuser", False))
+
+
+def _held_detail(owner_name: str) -> str:
+    return (f"{owner_name} has this chat. Ask them to release it, "
+            f"or ask the super admin to take it over.")
+
+
+async def _refuse_if_held_by_other(db, conv, agent) -> None:
+    """A chat someone else holds is theirs until they release it or the super
+    admin takes it over."""
+    if held_by_other(conv, agent) and not can_override(agent):
+        owner = await db.get(Agent, conv.assigned_agent_id)
+        from fastapi import HTTPException
+        raise HTTPException(status_code=409,
+                            detail=_held_detail(owner.name if owner else "Another agent"))
+
+
+def held_by_other(conv, agent) -> bool:
+    held = getattr(conv, "assigned_agent_id", None)
+    return (getattr(conv, "intercept_mode", None) == InterceptMode.human
+            and held is not None and str(held) != str(agent.id))
+
+
+async def _takeover_if_needed(db, conv_id, conv, agent, redis) -> None:
+    """Before the super admin sends into a chat someone else holds, it
+    becomes theirs — with the note and the notification — so the reply is
+    never anonymous and the old holder's lock gives way."""
+    if held_by_other(conv, agent) and can_override(agent):
+        await intercept_conversation(db, conv_id, agent, redis)
+
+
 async def intercept_conversation(
     db: AsyncSession,
     conv_id: str,
@@ -21,21 +64,18 @@ async def intercept_conversation(
         from fastapi import HTTPException
         raise HTTPException(status_code=404, detail="Conversation not found")
 
-    # ── Ownership lock ────────────────────────────────────────────────────────
-    if (
-        conv.intercept_mode == InterceptMode.human
-        and conv.assigned_agent_id is not None
-        and conv.assigned_agent_id != agent.id
-        and not agent.is_superuser
-        and agent.role != "admin"
-    ):
+    # ── Ownership lock (only the super admin may take it over) ───────────────
+    taken_from = None
+    if held_by_other(conv, agent):
         owner = await db.get(Agent, conv.assigned_agent_id)
         owner_name = owner.name if owner else "another agent"
-        from fastapi import HTTPException
-        raise HTTPException(
-            status_code=409,
-            detail=f"Already handled by {owner_name}. They must release or transfer it first.",
-        )
+        if not can_override(agent):
+            from fastapi import HTTPException
+            raise HTTPException(
+                status_code=409,
+                detail=_held_detail(owner_name),
+            )
+        taken_from = owner_name
 
     # Idempotent for the OWNER: re-clicking Intercept (a double-tap, a retry
     # after a slow network) must not write a duplicate "picked up" timeline
@@ -58,7 +98,9 @@ async def intercept_conversation(
         conversation_id=conv.id,
         agent_id=agent.id,
         action=InterceptAction.intercept,
-        note=agent.name,  # store agent name for the timeline label
+        # The agent's name for the timeline label — or, on a takeover, whom it
+        # was taken from ("Took over from Evelyn").
+        note=(TAKEOVER_PREFIX + taken_from) if taken_from else agent.name,
     )
     db.add(log)
     await db.commit()
@@ -68,7 +110,7 @@ async def intercept_conversation(
             await redis.delete(f"context:{conv.wa_id}")
         except Exception:
             pass
-        await _broadcast(redis, str(conv.id), {
+        event = {
             "type":              "intercept_changed",
             "conversationId":    str(conv.id),
             "mode":              "human",
@@ -76,16 +118,23 @@ async def intercept_conversation(
             "assignedAgentName": agent.name,
             "eventKind":         "intercept",
             "eventAgentName":    agent.name,
-        })
+        }
+        if taken_from:
+            event["takenFrom"] = taken_from
+        await _broadcast(redis, str(conv.id), event)
         await _broadcast(redis, "agents:all", {
             "event":          "notification",
             "type":           "intercept",
-            "title":          f"🙋 {agent.name} picked up",
+            "title":          (f"🙋 {agent.name} took over from {taken_from}" if taken_from
+                               else f"🙋 {agent.name} picked up"),
             "body":           f"Conversation with {conv.wa_id} is now being handled by {agent.name}",
             "conversationId": str(conv.id),
         })
 
-    return {"ok": True, "mode": "human", "assigned_to": str(agent.id)}
+    out = {"ok": True, "mode": "human", "assigned_to": str(agent.id)}
+    if taken_from:
+        out["taken_over_from"] = taken_from
+    return out
 
 
 async def pause_conversation(
@@ -105,22 +154,9 @@ async def pause_conversation(
         from fastapi import HTTPException
         raise HTTPException(status_code=404, detail="Conversation not found")
 
-    # Same ownership lock as intercept: another agent's live conversation
-    # can't be paused out from under them by a non-admin.
-    if (
-        conv.intercept_mode == InterceptMode.human
-        and conv.assigned_agent_id is not None
-        and conv.assigned_agent_id != agent.id
-        and not agent.is_superuser
-        and agent.role != "admin"
-    ):
-        owner = await db.get(Agent, conv.assigned_agent_id)
-        owner_name = owner.name if owner else "another agent"
-        from fastapi import HTTPException
-        raise HTTPException(
-            status_code=409,
-            detail=f"Handled by {owner_name} — they must pause or release it.",
-        )
+    # Same ownership lock as intercept: another person's live conversation
+    # can't be paused out from under them — except by the super admin.
+    await _refuse_if_held_by_other(db, conv, agent)
 
     if conv.intercept_mode == InterceptMode.paused:
         return {"id": str(conv.id), "intercept_mode": "paused", "already": True}
@@ -169,6 +205,10 @@ async def release_conversation(
     if conv.intercept_mode == InterceptMode.ai:
         return {"id": str(conv.id), "intercept_mode": "ai",
                 "assigned_agent_id": None, "already": True}
+
+    # Releasing someone else's chat is the super admin's override; anyone else
+    # asks the holder (the dashboard only ever offered it to them).
+    await _refuse_if_held_by_other(db, conv, agent)
 
     conv.intercept_mode    = InterceptMode.ai
     conv.assigned_agent_id = None
@@ -224,6 +264,9 @@ async def transfer_conversation(
         select(Agent).where(Agent.id == target_agent_id)
     )
     target_agent = target_result.scalar_one_or_none()
+
+    # Handing on someone else's chat is the super admin's override too.
+    await _refuse_if_held_by_other(db, conv, agent)
 
     conv.assigned_agent_id = target_agent_id
     log = Intercept(
@@ -627,19 +670,10 @@ async def send_agent_reply(
                                   Message.conversation_id == conv.id))).scalar_one_or_none()
 
     # ── Ownership lock ────────────────────────────────────────────────────────
-    if (
-        conv.intercept_mode == InterceptMode.human
-        and conv.assigned_agent_id is not None
-        and conv.assigned_agent_id != agent.id
-        and not agent.is_superuser
-    ):
-        owner = await db.get(Agent, conv.assigned_agent_id)
-        owner_name = owner.name if owner else "another agent"
-        from fastapi import HTTPException
-        raise HTTPException(
-            status_code=409,
-            detail=f"Conversation is handled by {owner_name}.",
-        )
+    # Only the holder may reply — or the super admin, whose reply takes the
+    # chat over first (noted in the timeline, the team told).
+    await _refuse_if_held_by_other(db, conv, agent)
+    await _takeover_if_needed(db, conv_id, conv, agent, redis)
 
     # One send per request id. A client that retries after a lost answer, or
     # a double tap, sends the same client_msg_id: the second request gets the
@@ -884,6 +918,10 @@ async def send_agent_media(
         from fastapi import HTTPException
         raise HTTPException(status_code=400,
                             detail="SMS is receive-only — Neema cannot send SMS.")
+    # Photos follow the same rule as text: the holder, or the super admin
+    # (whose send takes the chat over first).
+    await _refuse_if_held_by_other(db, conv, agent)
+    await _takeover_if_needed(db, conv_id, conv, agent, redis)
     if channel in META_CHANNELS:
         # Messenger / Instagram / Facebook DM — send via the Meta Send API
         # (attachment by URL), acting as the page that owns this contact.
