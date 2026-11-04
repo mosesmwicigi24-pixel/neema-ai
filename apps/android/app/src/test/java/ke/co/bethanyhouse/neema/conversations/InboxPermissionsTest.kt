@@ -91,7 +91,7 @@ class InboxPermissionsTest {
     private fun shown(dash: DashboardViewModel, c: Conversation): Set<String> {
         val t = threadControls(c, inboxPermsOf(dash))
         return buildSet {
-            if (t.intercept) add("intercept"); if (t.pickUp) add("pickUp"); if (t.release) add("release")
+            if (t.intercept) add("intercept"); if (t.pickUp) add("pickUp"); if (t.takeOver) add("takeOver"); if (t.release) add("release")
             if (t.pause) add("pause"); if (t.resume) add("resume"); if (t.transfer) add("transfer")
             if (t.note) add("note"); if (t.clearHistory) add("clear"); if (t.composer) add("composer")
             if (t.locked) add("locked")
@@ -116,7 +116,8 @@ class InboxPermissionsTest {
             "c1" to setOf("release", "pause", "transfer", "note", "clear", "composer"),
             "c2" to setOf("intercept", "pause", "transfer", "note", "clear"),
             "c3" to setOf("resume", "transfer", "note", "clear"),
-            "c6" to setOf("release", "pause", "transfer", "note", "clear", "composer"),
+            // Held by Grace: the super admin / admin takes it over (owner, 2026-11-04).
+            "c6" to setOf("takeOver", "release", "pause", "transfer", "note", "clear", "composer"),
             "h" to setOf("pickUp", "release", "pause", "transfer", "note", "clear", "composer"),
         ),
         Kind.Handler to mapOf(

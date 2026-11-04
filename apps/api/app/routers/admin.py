@@ -22,6 +22,7 @@ from app.schemas.conversation import ConversationListItem, InterceptRequest
 from app.services.conversation import (
     intercept_conversation, release_conversation,
     transfer_conversation, send_agent_reply, approve_draft, send_agent_media,
+    TAKEOVER_PREFIX,
 )
 from app.services import translate as translate_svc
 from app.services.inbound_kinds import public_meta
@@ -1199,7 +1200,10 @@ async def get_thread(
         agent_name = agent_name_map.get(str(e.agent_id)) if e.agent_id else None
 
         label = ACTION_LABEL.get(e.action, e.action)
-        if e.action == InterceptAction.intercept and agent_name:
+        if (e.action == InterceptAction.intercept and agent_name
+                and (e.note or "").startswith(TAKEOVER_PREFIX)):
+            label = f"{agent_name} took over from {e.note[len(TAKEOVER_PREFIX):]}"
+        elif e.action == InterceptAction.intercept and agent_name:
             label = f"Picked up by {agent_name}"
         elif e.action == InterceptAction.release and agent_name:
             label = f"Released to Neema by {agent_name}"
@@ -1383,7 +1387,10 @@ async def get_conversation_activity(
     for e in icpts:
         who = name_map.get(str(e.agent_id)) if e.agent_id else None
         label = ACTION_LABEL.get(e.action, str(e.action))
-        if e.action == InterceptAction.intercept and who:
+        if (e.action == InterceptAction.intercept and who
+                and (e.note or "").startswith(TAKEOVER_PREFIX)):
+            label = f"{who} took over from {e.note[len(TAKEOVER_PREFIX):]}"
+        elif e.action == InterceptAction.intercept and who:
             label = f"Picked up by {who}"
         elif e.action == InterceptAction.release and who:
             label = f"Released to Neema by {who}"

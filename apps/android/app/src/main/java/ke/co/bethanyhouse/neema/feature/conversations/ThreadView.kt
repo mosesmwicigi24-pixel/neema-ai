@@ -610,6 +610,8 @@ data class InboxPerms(
 internal data class ThreadControls(
     val intercept: Boolean,
     val pickUp: Boolean,
+    /** Super admin / admin on a chat someone else holds: take it over (noted, the team told). */
+    val takeOver: Boolean,
     val release: Boolean,
     val pause: Boolean,
     val resume: Boolean,
@@ -634,6 +636,8 @@ internal fun threadControls(conv: Conversation, perms: InboxPerms): ThreadContro
         intercept = mode == "ai" && perms.canHandle,
         // Auto-escalated (media) but unclaimed: first one to tap gets it.
         pickUp = mode == "human" && conv.assignedAgentId == null && perms.canHandle,
+        // The super admin is never locked out of a chat someone never released.
+        takeOver = ownedByOther && perms.isAdminOrSuper,
         // Owner-restricted: only the intercepting agent or admin can release.
         release = mode == "human" && (isOwner || perms.isAdminOrSuper),
         pause = mode != "paused" && canAct,

@@ -1808,9 +1808,11 @@ export function ConversationsView({
         if (convBusy) return;
         setConvBusy("intercept");
         try {
-            await conversationsApi.intercept(convId);
+            const out = (await conversationsApi.intercept(convId)) as { taken_over_from?: string };
             refetchConversations?.();
-            onToast("Conversation claimed — you now control replies");
+            onToast(out?.taken_over_from
+                ? `You took over from ${out.taken_over_from} — the team has been told`
+                : "Conversation claimed — you now control replies");
         } catch (err: any) {
             if (err?.message?.includes("409")) {
                 onToast("Already claimed by another agent", "error");
@@ -3278,6 +3280,22 @@ export function ConversationsView({
                                         </Btn>
                                     )}
 
+                                {/* ── Take over ──
+                                    The super admin (or an admin) is never locked out:
+                                    a chat someone else holds — and never released —
+                                    moves to them, noted in the timeline and told to
+                                    the team (owner, 2026-11-04). */}
+                                {convOwnedByOther && isAdminOrSuper && (
+                                    <Btn
+                                        small
+                                        disabled={!!convBusy}
+                                        onClick={() => intercept(activeConv.id)}
+                                        variant="primary"
+                                    >
+                                        {convBusy === "intercept" ? <span className="inline-block w-3 h-3 border-2 border-current border-t-transparent rounded-full animate-spin" /> : "🙋"} Take over
+                                    </Btn>
+                                )}
+
                                 {/* ── Release ──
                                     Owner-restricted: only the intercepting agent or admin/super can release. */}
                                 {activeConv.intercept_mode === "human" &&
@@ -4229,6 +4247,13 @@ export function ConversationsView({
                                         willChange: "transform",
                                     }}
                                 >
+                                    {/* Someone else holds this chat: the super admin / admin
+                                        may still reply, and sending takes it over. */}
+                                    {convOwnedByOther && (
+                                        <p className="mb-2 text-xs" style={{ color: "#8a9e80" }}>
+                                            🔓 {activeConv.assigned_agent_name ?? "Another agent"} has this chat — sending takes it over (noted in the timeline).
+                                        </p>
+                                    )}
                                     {/* ── AI Draft pill — shown when a draft exists but panel is collapsed */}
                                     {draftVisible && !draftExpanded && (
                                         <button

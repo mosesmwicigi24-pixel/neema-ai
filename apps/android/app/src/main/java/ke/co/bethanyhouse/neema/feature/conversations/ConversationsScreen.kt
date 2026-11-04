@@ -385,6 +385,7 @@ private fun ThreadPane(
     val actions = buildList {
         if (can.intercept) add(HeaderAction("Intercept", "⚡", "intercept", primary = true) { vm.intercept(conv.id) })
         if (can.pickUp) add(HeaderAction("Pick up", "🙋", "intercept", primary = true) { vm.intercept(conv.id) })
+        if (can.takeOver) add(HeaderAction("Take over", "🙋", "intercept", primary = true) { vm.takeOver(conv.id, conv.assignedAgentName) })
         if (can.release) add(HeaderAction("Release", "↩", "release", pin = none { it.pin }) { vm.release(conv.id) })
         if (can.pause) add(HeaderAction("Pause", "⏸", "pause") { vm.pause(conv.id) })
         if (can.resume) add(HeaderAction("Resume", "▶", "release", primary = true, pin = none { it.pin }) { vm.release(conv.id) })
@@ -467,6 +468,11 @@ private fun ThreadPane(
         // Reply box — when the agent owns the conversation, or is admin/superuser.
         if (can.composer) {
             HorizontalDivider(color = hairline())
+            // Someone else holds it: the super admin / admin may still reply, and sending takes it over.
+            if (can.takeOver) Text(
+                "🔓 ${conv.assignedAgentName ?: "Another agent"} has this chat — sending takes it over (noted in the timeline).",
+                fontSize = 12.sp, color = Palette.Sage400, modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 8.dp),
+            )
             Box(Modifier.heightIn(max = composerMax)) { Composer(vm, composer, thread.window, humanMode = true, threadLang = threadLang, txOn = txOn) }
         } else if (can.locked) {
             // Lock banner
