@@ -467,6 +467,14 @@ class InboxApi(private val http: NeemaHttp) {
     suspend fun transfer(id: String, agentId: String) {
         http.raw("POST", "/admin/conversations/$id/transfer", http.jsonBody(buildJsonObject { put("agent_id", agentId) }))
     }
+    /** Ask the colleague holding a chat to hand it over; they accept or keep it (services/handover.py). */
+    suspend fun askHandover(id: String) { http.raw("POST", "/admin/conversations/$id/handover-request", http.jsonBody(JsonObject(emptyMap()))) }
+    suspend fun acceptHandover(id: String, requestId: String) {
+        http.raw("POST", "/admin/conversations/$id/handover-request/accept", http.jsonBody(buildJsonObject { put("request_id", requestId) }))
+    }
+    suspend fun declineHandover(id: String, requestId: String) {
+        http.raw("POST", "/admin/conversations/$id/handover-request/decline", http.jsonBody(buildJsonObject { put("request_id", requestId) }))
+    }
 
     /**
      * POST /reply. The server answers 200 {ok:false, error} when DELIVERY
