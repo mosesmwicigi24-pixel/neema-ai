@@ -63,6 +63,15 @@ async def health(request: Request):
         out["review"] = verdict_view(await read_verdicts(getattr(request.app.state, "redis", None)))
     except Exception:
         pass
+    # THE CONVERSATION BUDGET (owner, 2026-11-04): what it WOULD have done
+    # today, record-only.
+    try:
+        from app.agent.conversation_budget import read_tally
+        from app.core.config import settings as _s
+        out["pacing_budget"] = {"mode": _s.pacing_budget_mode,
+                                **await read_tally(getattr(request.app.state, "redis", None))}
+    except Exception:
+        pass
     # WHERE THE MONEY WENT (owner, 2026-09-26): today's spend against the
     # rungs, by purpose and by model — every model call is metered.
     try:

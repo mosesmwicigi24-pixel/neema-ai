@@ -1205,9 +1205,11 @@ def conversation_text(transcript: list | None, limit: int = 8) -> str:
 
 
 def _reviewer_model(comment: str, answer: str) -> str:
+    """The checker's own models (review_model_main / _light), so a change of
+    the writer's model is judged by an unchanged checker."""
     if _MONEY_TURN_RE.search((comment or "") + " " + (answer or "")):
-        return settings.tier2_model
-    return settings.tier2_model_light
+        return getattr(settings, "review_model_main", "") or settings.tier2_model
+    return getattr(settings, "review_model_light", "") or settings.tier2_model_light
 
 
 async def reviewer_verdict(comment: str, answer: str, seen: list, *,

@@ -3,7 +3,7 @@
 
 import React, { useState, useEffect, useCallback } from "react";
 import { fmtCurrency, fmtDate, timeAgo, formatPhone, displayName } from "@/lib/utils";
-import { apiErrorDetail, conversationsApi, mapConversation, reportsApi, type PhotoCheckItem, type PhotoChecks, type PhotoVerdict, type RecoveryResults, type UnansweredItem } from "@/lib/api";
+import { apiErrorDetail, conversationsApi, mapConversation, reportsApi, type PacingItem, type PacingReport, type PhotoCheckItem, type PhotoChecks, type PhotoVerdict, type RecoveryResults, type UnansweredItem } from "@/lib/api";
 import { mediaSrc } from "@/lib/callCard";
 import type { Conversation, Agent, Order, SharedViewProps } from "@/types";
 
@@ -13,10 +13,10 @@ interface ReportsViewProps extends SharedViewProps {
 }
 
 type Range = "7d" | "30d" | "90d" | "custom";
-type ReportTab = "overview" | "conversations" | "orders" | "agents" | "unanswered" | "followups" | "photos";
+type ReportTab = "overview" | "conversations" | "orders" | "agents" | "unanswered" | "followups" | "photos" | "pacing";
 const TAB_LABEL: Record<ReportTab, string> = {
     overview: "Overview", conversations: "Conversations", orders: "Orders", agents: "Agents",
-    unanswered: "Never answered", followups: "Follow-ups", photos: "Photo checks",
+    unanswered: "Never answered", followups: "Follow-ups", photos: "Photo checks", pacing: "Pacing",
 };
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000/api";
 
@@ -322,6 +322,105 @@ function PhotoChecksPanel({ onToast }: { onToast: ReportsViewProps["onToast"] })
     );
 }
 
+// What the conversation budget and the bot shield WOULD have done (owner,
+// 2026-11-04). Record-only: nothing changes for the customer; the owner marks
+// each decision right or wrong, and those marks tune it before it goes live.
+const PACING_TONE: Record<string, string> = {
+    bot: "bg-[#fef2f2] text-[#b91c1c] border-[#fecaca]",
+    spam: "bg-[#fef2f2] text-[#b91c1c] border-[#fecaca]",
+    pause: "bg-[#fffbeb] text-[#b45309] border-[#fde68a]",
+    shorten: "bg-[#f0f9ff] text-[#0369a1] border-[#bae6fd]",
+    repeat_price: "bg-[#f0f9ff] text-[#0369a1] border-[#bae6fd]",
+    move_to_dm: "bg-[#f0f9ff] text-[#0369a1] border-[#bae6fd]",
+    alert: "bg-[#ecfdf5] text-[#047857] border-[#a7f3d0]",
+};
+
+function PacingPanel({ onToast }: { onToast: ReportsViewProps["onToast"] }) {
+    const [data, setData] = useState<PacingReport | null>(null);
+    const [failed, setFailed] = useState<string | null>(null);
+    const [filter, setFilter] = useState("");
+    useEffect(() => {
+        let alive = true;
+        reportsApi.pacing(7).then((r) => { if (alive) setData(r); })
+            .catch((e) => { if (alive) setFailed(apiErrorDetail(e) || "Couldn't load the pacing list"); });
+        return () => { alive = false; };
+    }, []);
+    const mark = useCallback(async (item: PacingItem, m: "right" | "wrong" | null) => {
+        try {
+            const r = await reportsApi.markPacing(item.id, m);
+            setData((d) => {
+                if (!d) return d;
+                const marked = { ...d.marked };
+                if (item.owner_mark) marked[item.owner_mark] -= 1;
+                if (m) marked[m] += 1;
+                return { ...d, marked, items: d.items.map((x) => x.id === item.id
+                    ? { ...x, owner_mark: r.owner_mark as PacingItem["owner_mark"] } : x) };
+            });
+        } catch (e) {
+            onToast(apiErrorDetail(e) || "Couldn't save the mark", "error");
+        }
+    }, [onToast]);
+    const items = (data?.items ?? []).filter((i) => !filter || i.decision === filter);
+    return (
+        <div className="bg-white rounded-xl border border-[#cee6b2] shadow-sm overflow-hidden">
+            <div className="px-4 py-3 border-b border-[#e6f3d8] flex flex-wrap items-start justify-between gap-2">
+                <div className="max-w-[640px]">
+                    <div className="flex items-center gap-2">
+                        <span className="text-xs font-bold text-[#699a32] uppercase tracking-wider">Pacing</span>
+                        {data && <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-[#fffbeb] text-[#b45309]">
+                            {data.mode === "shadow" ? "Record-only" : data.mode}</span>}
+                    </div>
+                    <p className="text-[11px] text-[#78716c] mt-1">
+                        What Neema would do with endless chats and bots. Replies follow progress toward an order
+                        (15 a day, +10 for each step), never buying words. Nothing changes for the customer yet:
+                        mark each one right or wrong.
+                    </p>
+                </div>
+                {data && <span className="text-[11px] text-[#427425]">Marked: {data.marked.right} right · {data.marked.wrong} wrong</span>}
+            </div>
+            {data && (
+                <div className="px-4 py-2 flex flex-wrap gap-1.5 border-b border-[#e6f3d8]">
+                    <button onClick={() => setFilter("")}
+                        className={`h-7 px-3 rounded-full text-[11px] font-semibold border ${filter === "" ? "bg-[#427425] text-white border-[#427425]" : "bg-white text-[#427425] border-[#cee6b2]"}`}>
+                        All · {Object.values(data.counts).reduce((a, b) => a + b, 0)}
+                    </button>
+                    {Object.entries(data.labels).filter(([k]) => (data.counts[k] ?? 0) > 0).map(([k, label]) => (
+                        <button key={k} onClick={() => setFilter(k)}
+                            className={`h-7 px-3 rounded-full text-[11px] font-semibold border ${filter === k ? "bg-[#427425] text-white border-[#427425]" : "bg-white text-[#427425] border-[#cee6b2]"}`}>
+                            {label} · {data.counts[k]}
+                        </button>
+                    ))}
+                </div>
+            )}
+            {failed ? (
+                <p className="px-4 py-6 text-sm text-[#b91c1c]">{failed}</p>
+            ) : !data ? (
+                <p className="px-4 py-6 text-sm text-[#699a32]">Loading…</p>
+            ) : !items.length ? (
+                <p className="px-4 py-6 text-sm text-[#78716c]">Nothing would have been paced in this period.</p>
+            ) : (
+                <Table
+                    cols={["Customer", "Would", "Why", "Replies / budget", "When", "Mark"]}
+                    emptyText="Nothing would have been paced."
+                    rows={items.slice(0, 300).map((it) => [
+                        <span key="n">{displayName(it.name, it.contact)} <span className="text-[#78716c] capitalize">· {it.channel}</span></span>,
+                        <span key="d" className={`text-[11px] font-semibold px-2 py-0.5 rounded-full border ${PACING_TONE[it.decision] ?? ""}`}>{it.label}</span>,
+                        <span key="w" className="block max-w-[360px] text-[11px] text-[#44403c]">{it.reasons.join("; ")}</span>,
+                        <span key="b">{it.turns ?? "—"} / {it.budget ?? "—"}{it.bot_score ? ` · bot ${it.bot_score}` : ""}</span>,
+                        <span key="t" title={fmtDate(it.at)}>{timeAgo(it.at)}</span>,
+                        <span key="m" className="flex gap-1">
+                            <button onClick={() => mark(it, it.owner_mark === "right" ? null : "right")}
+                                className={`h-7 px-2 rounded-md text-[11px] font-semibold border ${it.owner_mark === "right" ? "bg-[#589b31] text-white border-[#589b31]" : "bg-white text-[#427425] border-[#cee6b2]"}`}>Right</button>
+                            <button onClick={() => mark(it, it.owner_mark === "wrong" ? null : "wrong")}
+                                className={`h-7 px-2 rounded-md text-[11px] font-semibold border ${it.owner_mark === "wrong" ? "bg-[#b91c1c] text-white border-[#b91c1c]" : "bg-white text-[#b91c1c] border-[#fecaca]"}`}>Wrong</button>
+                        </span>,
+                    ])}
+                />
+            )}
+        </div>
+    );
+}
+
 // What Neema's own follow-ups achieved. Each message a daily sweep sends is
 // recorded; a send counts as answered when the customer wrote back within 72
 // hours, and as converted when they ordered within 7 days (a payment reminder:
@@ -550,7 +649,7 @@ export function ReportsView({ agents, orders, onToast, isMobile }: ReportsViewPr
 
             {/* Tab nav */}
             <div className="flex gap-1 mb-5 border-b border-[#cee6b2]">
-                {(["overview", "conversations", "orders", "agents", "unanswered", "followups", "photos"] as ReportTab[]).map((t) => (
+                {(["overview", "conversations", "orders", "agents", "unanswered", "followups", "photos", "pacing"] as ReportTab[]).map((t) => (
                     <button key={t} onClick={() => setTab(t)}
                         className={`px-4 py-2 text-xs font-semibold transition-colors border-b-2 -mb-px ${
                             tab === t
@@ -653,6 +752,7 @@ export function ReportsView({ agents, orders, onToast, isMobile }: ReportsViewPr
             {/* ── NEVER ANSWERED ────────────────────────────────────────────── */}
             {tab === "unanswered" && <UnansweredPanel onToast={onToast} />}
             {tab === "photos" && <PhotoChecksPanel onToast={onToast} />}
+            {tab === "pacing" && <PacingPanel onToast={onToast} />}
 
             {/* ── FOLLOW-UPS ────────────────────────────────────────────────── */}
             {tab === "followups" && <FollowUpsPanel />}
