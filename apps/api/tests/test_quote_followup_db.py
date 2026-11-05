@@ -216,7 +216,7 @@ def _process(maker, monkeypatch, initiative=True):
     monkeypatch.setattr(settings, "agent_initiative", initiative)
     sent = []
 
-    async def fake_send(db, redis, conv, text):
+    async def fake_send(db, redis, conv, text, action=None):
         sent.append(text)
 
     async def no_llm(*a, **k):

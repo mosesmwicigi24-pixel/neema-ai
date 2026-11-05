@@ -378,7 +378,7 @@ def test_capture_schedules_agent_reply_only_when_enabled(monkeypatch):
         return _FakeConv()
 
     async def fake_sched(redis, channel, external_id, text, dedup_id=None, page_id=None,
-                         media=None):
+                         media=None, **_kw):
         calls.append((channel, external_id, text, dedup_id, media))
 
     monkeypatch.setattr("app.services.identity.resolve_or_create_person", fake_person)

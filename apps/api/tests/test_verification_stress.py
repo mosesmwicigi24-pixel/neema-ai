@@ -422,7 +422,7 @@ def test_messengers_like_sticker_schedules_a_silent_turn(monkeypatch):
     async def fake_conv(db, channel, external_id, **kw):
         return tmw._FakeConv()
 
-    async def fake_sched(redis, channel, external_id, text, dedup_id=None, page_id=None, media=None):
+    async def fake_sched(redis, channel, external_id, text, dedup_id=None, page_id=None, media=None, **_kw):
         calls.append((external_id, text, media))
     monkeypatch.setattr("app.services.identity.resolve_or_create_person", fake_person)
     monkeypatch.setattr("app.services.channel.get_or_create_conversation", fake_conv)
