@@ -3028,6 +3028,8 @@ async def _schedule_check_in(args: dict, ctx: ToolContext) -> dict:
         existing.reason = label
         existing.status = "planned"
         existing.draft = None
+        existing.dedupe_key = f"check_in:{about}"
+        existing.source = getattr(existing, "source", None) or "tool"
         await ctx.db.commit()
         moved = was is not None and abs((was - due).total_seconds()) > 3600
         return {"ok": True, "check_in_on": due.strftime("%d %b %Y"), "about": about,
@@ -3038,7 +3040,8 @@ async def _schedule_check_in(args: dict, ctx: ToolContext) -> dict:
                          + " — confirm that day to them in one short line; do not promise "
                            "it as if new, and do not book again")}
     ctx.db.add(AgentAction(deal_id=None, conversation_id=conv.id, due_at=due,
-                           kind=kind, reason=label))
+                           kind=kind, reason=label, dedupe_key=f"check_in:{about}",
+                           source="tool"))
     await ctx.db.commit()
     return {"ok": True, "check_in_on": due.strftime("%d %b %Y"), "about": about,
             "already_booked": False,

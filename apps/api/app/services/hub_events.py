@@ -426,7 +426,8 @@ async def _plan_fit_check(db, redis, conv, event: dict) -> None:
     db.add(AgentAction(
         deal_id=None, conversation_id=conv.id,
         due_at=datetime.now(timezone.utc) + timedelta(days=FIT_CHECK_DAYS),
-        kind="fit_check",
+        kind="fit_check", source="hub",
+        dedupe_key=f"care:{number or _recipient_of(conv)}"[:80],
         reason=(f"Order {number} was delivered {FIT_CHECK_DAYS} days ago — ask "
                 "warmly whether it fits and serves well, and offer our free "
                 "adjustment if anything needs it. Care, not selling.")))

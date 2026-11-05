@@ -479,18 +479,6 @@ def test_sheng_and_swahili_buyers_are_read_as_buyers():
         assert cl.buying_signal(t), t
 
 
-def test_reengage_leaves_a_paced_or_paused_thread_alone():
-    import app.jobs.reengage as rj
-    conv = types.SimpleNamespace(channel="messenger", wa_id=None, external_id="P1", id="c1")
-    msg = types.SimpleNamespace(id="m1", text="hmm so anyway", direction=None)
-    r = _R()
-    asyncio.run(cl.cool(r, "messenger", "P1"))
-    row = {"conv": conv, "to": "P1", "last_in": msg}
-    out = asyncio.run(rj._handle(r, row, send=False))
-    assert out["skipped"] == "left alone (paced / paused)"
-    r2 = _R()
-    r2.store["agent:pause:messenger:P1"] = "1"
-    assert asyncio.run(rj._handle(r2, row, send=False))["skipped"] == "left alone (paced / paused)"
 
 
 def test_the_prompt_closes_when_they_ask_to_pay_and_serves_gift_buyers():

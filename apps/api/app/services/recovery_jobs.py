@@ -1,20 +1,21 @@
-"""The three recovery sweeps, on a daily timer — each off until the owner says.
+"""The recovery PLANNERS, on a daily timer — each off until the owner says.
 
-cart_recovery (carts left before checkout), payment_followup (orders whose
-payment link went unpaid) and reengage (customers left waiting on a reply)
-were manual-only and had sent nothing in 7–14+ days. This runs each one
-once a day at a Nairobi working hour, leader-locked so one worker of the
-fleet runs it, ONLY when its own switch is on:
+cart_recovery (carts left before checkout) and payment_followup (orders whose
+payment link went unpaid) run once a day at a Nairobi working hour,
+leader-locked so one worker of the fleet runs it, ONLY when its own switch is
+on. Since Stage 2 (audit, 2026-11-05) they PLAN rows on the initiative queue
+(agent_actions) and the one dispatcher, services/actions.process_due, decides
+and sends — one voice, one set of rules, one message per customer. The
+15:00 re-engage sweep is retired: its one legitimate case (a quiet thread
+after a quote) is the quote follow-up, planned by the scribe.
 
     RECOVERY_PAYMENT_ENABLED   payment_followup  10:00 Nairobi
     RECOVERY_CART_ENABLED      cart_recovery     11:00 Nairobi
-    RECOVERY_REENGAGE_ENABLED  reengage          15:00 Nairobi
-    RECOVERY_JOBS_DRY_RUN      compose, never send (each run still logged)
+    RECOVERY_JOBS_DRY_RUN      compose previews, plan nothing (each run still logged)
 
-All default OFF. Each job keeps its own guards unchanged (24 h window only,
-quiet hours, AI-mode threads only, one nudge per basket / order / message
-per 7–14 days, the hub re-checked live before any payment reminder); the
-timer adds none and removes none.
+All default OFF. Each planner keeps its own selection guards (24 h window,
+AI-mode threads only, one nudge per basket / order per 7–14 days, the hub
+re-checked live before a payment reminder is planned AND again when sent).
 
 Every run writes one log line and a small Redis history (started, finished,
 mode, candidates, sent, skipped, errors) shown on /api/health — counts only,
@@ -39,7 +40,6 @@ _log = logging.getLogger("neema.recovery")
 JOBS: dict[str, tuple[str, int]] = {
     "payment_followup": ("recovery_payment_enabled", 10),
     "cart_recovery": ("recovery_cart_enabled", 11),
-    "reengage": ("recovery_reengage_enabled", 15),
 }
 TICK_SECONDS = 300
 LOCK_KEY = "recoveryjobs:tick"
@@ -70,8 +70,6 @@ async def _module_run(job: str, *, send: bool, redis, max_drafts: int | None = N
         from app.jobs import cart_recovery as m
     elif job == "payment_followup":
         from app.jobs import payment_followup as m
-    elif job == "reengage":
-        from app.jobs import reengage as m
     else:
         raise ValueError(f"unknown recovery job {job!r}")
     return await m.run(send=send, redis=redis, max_drafts=max_drafts)

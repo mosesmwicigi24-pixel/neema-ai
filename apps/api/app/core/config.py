@@ -193,16 +193,18 @@ class Settings(BaseSettings):
     # AGENT_INITIATIVE is on and the gate passes). False = plan none.
     # OFF until the owner has seen sample follow-ups (2026-10-10).
     quote_follow_up_enabled: bool = False
+    # The dispatcher's contextual rules (services/actions.decide — audit, 2026-11-05):
+    # "customer wrote since this was planned", "a colleague replied since", "one
+    # unprompted sales message a day". shadow = log what WOULD be held and send
+    # anyway (the comparison week); enforce = hold. The Stage 1 rules (opt-out,
+    # open team check, one message per tick, template purposes) always apply.
+    outreach_mode: str = "shadow"
     # Recovery sweeps on a daily Nairobi-hour timer (services/recovery_jobs.py).
     # Each OFF until the owner has seen a sample (GET /api/admin/recovery/preview
     # or `python -m app.services.recovery_jobs --preview`). DRY_RUN composes a
     # few and sends nothing, still logging each run.
     recovery_cart_enabled: bool = False
     recovery_payment_enabled: bool = False
-    recovery_reengage_enabled: bool = False
-    # Re-engage sends at most this many check-ins per run (owner, 2026-10-10:
-    # 15 a day to start; the rest wait for the next run).
-    recovery_reengage_daily_limit: int = 15
     recovery_jobs_dry_run: bool = False
     # Copilot mode (plan C): in human-held threads Neema briefs on handoff,
     # drafts every reply for one-tap send, keeps the CRM scribe running, and

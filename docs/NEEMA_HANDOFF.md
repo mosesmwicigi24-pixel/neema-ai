@@ -790,7 +790,7 @@ variants — hub doesn't expose variant lists yet; agent captures via remember).
    urgent.
 
 ## Unconfirmed / verify
-- Did the **re-engage `--send`** sweep (`python -m app.jobs.reengage --send`) complete?
+- Did the recovery planners run (`python -m app.services.recovery_jobs --preview`) and the dispatcher send what they planned? (The 15:00 re-engage sweep was retired on 2026-11-05.)
 - Is the **Messenger DM** reply (not just comments) working end-to-end in prod?
 
 ## Key files
@@ -799,6 +799,6 @@ variants — hub doesn't expose variant lists yet; agent captures via remember).
 - Meta: `app/routers/meta_webhook.py`, `app/services/meta_send.py`
 - Identity: `app/services/{identity,merge,reconcile}.py`, `app/models/person.py`
 - WhatsApp pipeline: `app/routers/whatsapp_webhook.py`, `app/services/wa_native.py`, `app/services/messaging.py`; hub pushes: `app/routers/hub_bridge.py`
-- Jobs: `app/jobs/reengage.py`
+- Jobs: `app/jobs/cart_recovery.py`, `app/jobs/payment_followup.py` (planners); `app/services/actions.py` (the dispatcher)
 - Inbox API: `app/routers/admin.py` (`/conversations`)
 - Web inbox: `apps/web/src/components/views/ConversationsView.tsx`, `ui/Avatar.tsx`

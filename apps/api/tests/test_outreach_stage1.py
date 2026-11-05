@@ -151,7 +151,7 @@ def test_planned_action_with_unknown_outcome_parks_for_a_person(monkeypatch):
     monkeypatch.setattr(act, "_repeats_earlier", not_repeat)
     async def not_opted(db, redis, c): return False
     monkeypatch.setattr("app.services.intent.opted_out", not_opted)
-    async def unknown(db, redis, c, text, action=None): raise SendOutcomeUnknown("ReadTimeout")
+    async def unknown(db, redis, c, text, action=None, **kw): raise SendOutcomeUnknown("ReadTimeout")
     monkeypatch.setattr(act, "_send", unknown)
     n = asyncio.run(act.process_due(_DB(), None, now=now))
     assert n == 0
@@ -427,7 +427,7 @@ def _scheduler(monkeypatch, actions_list, conv, deal, *, opted=False):
     async def opted_out(db, redis, c): return opted
     monkeypatch.setattr("app.services.intent.opted_out", opted_out)
     sent = []
-    async def send(db, redis, c, text, action=None): sent.append((getattr(action, "kind", None), text))
+    async def send(db, redis, c, text, action=None, **kw): sent.append((getattr(action, "kind", None), text))
     monkeypatch.setattr(act, "_send", send)
     return act, _DB(), sent
 
@@ -636,13 +636,16 @@ def test_opt_out_is_durable_on_the_person_and_read_back(monkeypatch):
 
 
 def test_every_unprompted_sender_checks_the_opt_out_and_stamps_its_rows():
-    from app.jobs import cart_recovery, payment_followup, reengage
+    from app.jobs import cart_recovery, payment_followup
     from app.services import actions, hub_events
     for mod, fn in ((cart_recovery, cart_recovery._handle), (payment_followup, payment_followup._handle),
-                    (reengage, reengage._handle), (hub_events, hub_events._celebrate)):
+                    (hub_events, hub_events._celebrate)):
         src = inspect.getsource(fn)
         assert "opted_out(" in src, mod.__name__
-        assert "stamp(" in src or "_stamp" in src, mod.__name__
+    # the planners file rows (the dispatcher stamps); the hub celebration stamps its own
+    assert "actions.plan(" in inspect.getsource(cart_recovery._handle)
+    assert "actions.plan(" in inspect.getsource(payment_followup._handle)
+    assert "_stamp" in inspect.getsource(hub_events._celebrate)
     assert "opted_out(db, redis, conv)" in inspect.getsource(actions.process_due)
     assert "ol.stamp(" in inspect.getsource(actions._send)
 

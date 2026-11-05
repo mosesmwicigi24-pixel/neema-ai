@@ -45,8 +45,11 @@ _HOLD_RE = re.compile(r"\s*\[needs approval: [^\]]*\]")
 # versus care about their own order. One customer, one routine message per
 # tick; a promise or a care message is deferred rather than merged.
 ROUTINE_KINDS = frozenset({"follow_up", "customer_promise", "quote_follow_up",
-                           "check_in", "replenishment"})
-CARE_KINDS = frozenset({"fit_check"})
+                           "buying_follow_up", "check_in", "replenishment"})
+CARE_KINDS = frozenset({"fit_check", "payment_reminder"})
+# Rows whose text was composed in code when they were planned (figures never
+# drift): sent as their draft, never re-composed by the model.
+CODE_COMPOSED_KINDS = frozenset({"quote_follow_up", "payment_reminder"})
 
 
 def message_class(action) -> str:
@@ -87,27 +90,124 @@ def hold_reason(reason: str | None) -> str | None:
     return found[-1] if found else None
 
 
-async def upsert_follow_up(db, deal, *, due_at: datetime, kind: str,
-                           reason: str) -> None:
-    """One open planned action per deal — a newer promise reschedules it
-    instead of stacking nags."""
+OPEN_STATUSES = ("planned", "needs_approval", "sending")
+_ORDER_IN_REASON_RE = re.compile(r"\b(?:order|#)\s*#?([A-Z]{1,6}-?\d{1,8}|\d{3,10})\b", re.IGNORECASE)
+
+
+def dedupe_key_for(kind: str, *, deal_id=None, conversation_id=None, reason: str | None = None,
+                   reference: str | None = None) -> str:
+    """The commitment's identity — what makes two planned rows THE SAME
+    matter (audit, 2026-11-05). Mirrored in alembic e8a1c3d5f7b9's backfill.
+
+    One buying decision per deal (a quote nudge and a cart nudge are the same
+    moment), one promise per deal, one check-in per purpose, one care check
+    per order, one payment reminder per set of orders. Distinct orders,
+    purposes and deals stay distinct rows."""
+    base = str(deal_id or conversation_id or "")
+    r = reason or ""
+    if kind in ("quote_follow_up", "buying_follow_up"):
+        return f"buying:{base}"
+    if kind == "follow_up":
+        return f"promise:{base}"
+    if kind == "customer_promise":
+        return f"customer_promise:{base}"
+    if kind == "check_in":
+        return "check_in:delivery" if r.startswith("Delivery check-in") else "check_in:purchase_decision"
+    if kind == "replenishment":
+        return "check_in:supplies" if r.startswith("Supplies check-in") else "check_in:purchase_decision"
+    if kind == "fit_check":
+        m = _ORDER_IN_REASON_RE.search(r)
+        return f"care:{reference or (m.group(1) if m else base)}"
+    if kind == "payment_reminder":
+        return f"payment:{reference or base}"
+    return f"{kind}:{reference or base}"[:80]
+
+
+async def open_row(db, conversation_id, dedupe_key: str):
     from app.models.agent_action import AgentAction
-    row = (await db.execute(select(AgentAction).where(
-        AgentAction.deal_id == deal.id,
-        AgentAction.status.in_(("planned", "needs_approval"))
-    ).limit(1))).scalar_one_or_none()
-    if row is None:
-        db.add(AgentAction(deal_id=deal.id, conversation_id=deal.conversation_id,
-                           due_at=due_at, kind=kind, reason=reason[:500]))
-    else:
-        # A quote follow-up's draft is the quote's own text — never carried
-        # into the promise follow-up that replaces it.
-        if row.kind == "quote_follow_up":
-            row.draft = None
-        row.due_at = due_at
+    return (await db.execute(select(AgentAction).where(
+        AgentAction.conversation_id == conversation_id,
+        AgentAction.dedupe_key == dedupe_key,
+        AgentAction.status.in_(OPEN_STATUSES)).limit(1))).scalar_one_or_none()
+
+
+async def plan(db, *, conversation_id, kind: str, due_at: datetime, reason: str, source: str,
+               deal_id=None, draft: str | None = None, reference: str | None = None,
+               dedupe_key: str | None = None, move: bool = True):
+    """File — or refresh — the ONE open row for this commitment. Returns
+    (row, created). A row already being sent is left alone (returned, not
+    changed). Two workers planning the same matter at once: the unique index
+    rejects the second insert, which then updates the first. Commits."""
+    from sqlalchemy.exc import IntegrityError
+    from app.models.agent_action import AgentAction
+    key = (dedupe_key or dedupe_key_for(kind, deal_id=deal_id, conversation_id=conversation_id,
+                                        reason=reason, reference=reference))[:80]
+
+    def _refresh(row):
+        if row.status == "sending":
+            return row
+        if move:
+            row.due_at = due_at
         row.kind = kind
         row.reason = reason[:500]
+        row.source = source
+        if draft is not None or row.kind != kind:
+            row.draft = draft
         row.status = "planned"
+        return row
+
+    existing = await open_row(db, conversation_id, key)
+    if existing is not None:
+        _refresh(existing)
+        await db.commit()
+        return existing, False
+    row = AgentAction(deal_id=deal_id, conversation_id=conversation_id, due_at=due_at,
+                      kind=kind, reason=reason[:500], draft=draft, source=source,
+                      dedupe_key=key)
+    db.add(row)
+    try:
+        await db.commit()
+        return row, True
+    except IntegrityError:
+        await db.rollback()
+        existing = await open_row(db, conversation_id, key)
+        if existing is None:
+            raise
+        _refresh(existing)
+        await db.commit()
+        return existing, False
+
+
+async def upsert_follow_up(db, deal, *, due_at: datetime, kind: str,
+                           reason: str) -> None:
+    """One open scribe row per deal — a newer promise reschedules or replaces
+    the older one instead of stacking nags. The replaced row is vetoed with
+    the reason, so the record shows what superseded what."""
+    from app.models.agent_action import AgentAction
+    key = dedupe_key_for(kind, deal_id=deal.id, reason=reason)
+    rows = (await db.execute(select(AgentAction).where(
+        AgentAction.deal_id == deal.id,
+        AgentAction.status.in_(("planned", "needs_approval"))))).scalars().all()
+    same = next((r for r in rows if (r.dedupe_key or dedupe_key_for(
+        r.kind, deal_id=deal.id, reason=r.reason)) == key), None)
+    for r in rows:
+        if r is not same and r.kind in ("follow_up", "customer_promise", "quote_follow_up",
+                                        "buying_follow_up"):
+            r.status = "vetoed"
+            r.reason = f"{r.reason or ''} [superseded by a newer {kind}]"[:1000]
+    if same is None:
+        db.add(AgentAction(deal_id=deal.id, conversation_id=deal.conversation_id,
+                           due_at=due_at, kind=kind, reason=reason[:500],
+                           dedupe_key=key, source="scribe"))
+    else:
+        if same.kind == "quote_follow_up":
+            same.draft = None
+        same.due_at = due_at
+        same.kind = kind
+        same.reason = reason[:500]
+        same.status = "planned"
+        same.dedupe_key = key
+        same.source = same.source or "scribe"
 
 
 async def withdraw_routine(db, conversation_id, *, why: str) -> int:
@@ -192,6 +292,81 @@ async def _contact_name(db, conv) -> str | None:
     except Exception:
         pass
     return None
+
+
+# ── The contextual decision (Stage 2, audit §6) ─────────────────────────────
+# One question before any unprompted message: would an attentive Bethany
+# House representative send THIS, NOW? The rules here read the conversation's
+# own facts. They are shadow-able (settings.outreach_mode) for the comparison
+# week; the Stage 1 safety rules above them are not.
+
+def _aware(dt):
+    if dt is not None and dt.tzinfo is None:
+        return dt.replace(tzinfo=timezone.utc)
+    return dt
+
+
+async def _latest_turns(db, conv):
+    """(newest customer message at, newest colleague message at)."""
+    from app.models.message import Message, MsgDirection, MsgSender
+    last_in = (await db.execute(select(sa_func.max(Message.created_at)).where(
+        Message.conversation_id == conv.id, Message.direction == MsgDirection.inbound))).scalar()
+    last_human = (await db.execute(select(sa_func.max(Message.created_at)).where(
+        Message.conversation_id == conv.id, Message.direction == MsgDirection.outbound,
+        Message.sender == MsgSender.human_agent,
+        Message.media_type.is_(None) | (Message.media_type != "note")))).scalar()
+    return _aware(last_in), _aware(last_human)
+
+
+async def _routine_sent_today(db, conv, now: datetime) -> int:
+    """Unprompted SALES messages this customer already received today
+    (Nairobi day), read from the origin stamp on the rows."""
+    from app.models.message import Message, MsgDirection
+    nbo = now + timedelta(hours=3)
+    day_start = nbo.replace(hour=0, minute=0, second=0, microsecond=0) - timedelta(hours=3)
+    n = (await db.execute(select(sa_func.count()).select_from(Message).where(
+        Message.conversation_id == conv.id, Message.direction == MsgDirection.outbound,
+        Message.created_at >= day_start,
+        Message.raw_meta["kind"].astext == "outreach",
+        Message.raw_meta["class"].astext == "routine"))).scalar()
+    return int(n or 0)
+
+
+async def decide(db, conv, action, *, now: datetime) -> tuple[str, str]:
+    """('go' | 'suppress' | 'defer', why) for a due row that passed the
+    safety rules. Only unprompted SALES messages (class routine) are judged
+    here: a kept promise and care about an order have their own reasons to
+    exist, and a reply the customer is owed never comes through this loop."""
+    if message_class(action) != "routine":
+        return "go", ""
+    created = _aware(getattr(action, "created_at", None))
+    try:
+        last_in, last_human = await _latest_turns(db, conv)
+    except Exception as exc:
+        _log.info("decide: turns unreadable for %s: %s", getattr(conv, "id", "?"), exc)
+        return "go", ""
+    if created is not None and last_in is not None and last_in > created:
+        return "suppress", "the customer wrote after this was planned — the live reply answered them"
+    if created is not None and last_human is not None and last_human > created:
+        return "suppress", "a colleague replied after this was planned"
+    try:
+        if await _routine_sent_today(db, conv, now) >= 1:
+            return "defer", "one unprompted sales message a day"
+    except Exception as exc:
+        _log.info("decide: today's count unreadable for %s: %s", getattr(conv, "id", "?"), exc)
+    return "go", ""
+
+
+async def _shadow_count(redis, verdict: str) -> None:
+    """The comparison week's tally, read by the 08:00 standup."""
+    if redis is None:
+        return
+    try:
+        key = "outreach:shadow:" + (datetime.now(timezone.utc) + timedelta(hours=3)).strftime("%Y%m%d")
+        await redis.hincrby(key, verdict, 1)
+        await redis.expire(key, 14 * 86400)
+    except Exception:
+        pass
 
 
 async def _send_followup_template(db, redis, conv, action, purpose: str | None = None) -> bool:
@@ -313,7 +488,7 @@ async def _repeats_earlier(db, conv, text: str, *, look_back: int = 6,
     return False
 
 
-async def _send(db, redis, conv, text: str, action=None) -> None:
+async def _send(db, redis, conv, text: str, action=None, shadow: list | None = None) -> None:
     """Deliver, then record. Raises only when delivery failed: once the
     message is out, a failure to record it is logged, never raised — a raise
     there would put the action back in the queue and send it twice. An
@@ -323,7 +498,12 @@ async def _send(db, redis, conv, text: str, action=None) -> None:
     from app.services import outreach_log as ol
     recipient = conv.wa_id if conv.channel == "whatsapp" else conv.external_id
     meta = ol.stamp("actions", message_class(action) if action is not None else ol.ROUTINE,
-                    action_id=getattr(action, "id", None), kind=getattr(action, "kind", None))
+                    action_id=getattr(action, "id", None), kind=getattr(action, "kind", None),
+                    reference=(getattr(action, "dedupe_key", None) or None))
+    if shadow:
+        meta["shadow"] = list(shadow)          # what enforce mode would have done
+    if getattr(action, "source", None):
+        meta["planner"] = action.source
     if conv.channel == "whatsapp":
         try:
             wamid = await svc._send_waba(recipient, text)
@@ -467,10 +647,15 @@ async def process_due(db, redis, *, now: datetime | None = None, limit: int = 10
     await _recover_interrupted(db, now)
     if is_quiet_hours(now):
         return 0
-    rows = (await db.execute(select(AgentAction).where(
+    rows = list((await db.execute(select(AgentAction).where(
         AgentAction.status == "planned",
         AgentAction.due_at <= now,
-    ).order_by(AgentAction.due_at).limit(limit))).scalars().all()
+    ).order_by(AgentAction.due_at).limit(limit))).scalars().all())
+    # A kept promise or care about an order goes before a sales nudge: when
+    # one customer has both due, the one message this tick is the promise.
+    from app.services import outreach_log as _ol_order
+    rows.sort(key=lambda a: (1 if message_class(a) == _ol_order.ROUTINE else 0,
+                             getattr(a, "due_at", now) or now))
 
     done = 0
     spoken_to: set = set()          # conversations that got a message this tick
@@ -592,6 +777,46 @@ async def process_due(db, redis, *, now: datetime | None = None, limit: int = 10
                                      reason=f"{action.reason or ''} [{stale}]")
                         _log.info("quote follow-up %s withdrawn: %s", action.id, stale)
                     continue
+            # A payment reminder never chases money that has landed: the hub is
+            # re-read live at send time; an unconfirmable status waits a day.
+            if getattr(action, "kind", None) == "payment_reminder":
+                from app.jobs import payment_followup as _pay
+                verdict = await _pay.live_verdict(redis, action)
+                if verdict == "paid":
+                    if await claim(db, action, ("planned",), "vetoed"):
+                        await finish(db, action, "vetoed",
+                                     reason=f"{action.reason or ''} [paid — nothing to remind]")
+                    ol.decision("actions", conv.channel, who, "suppress", "order paid",
+                                kind="payment_reminder", action=getattr(action, "id", None))
+                    continue
+                if verdict == "unknown":
+                    from app.services.hub_events import next_morning_utc
+                    action.due_at = next_morning_utc(now)
+                    await db.commit()
+                    ol.decision("actions", conv.channel, who, "defer",
+                                "hub status unconfirmable — not chasing on a guess",
+                                kind="payment_reminder", action=getattr(action, "id", None))
+                    continue
+            # The contextual decision (shadow or enforce).
+            shadow_flags: list[str] = []
+            verdict, why = await decide(db, conv, action, now=now)
+            if verdict != "go":
+                if settings.outreach_mode == "enforce":
+                    if verdict == "suppress":
+                        if await claim(db, action, ("planned",), "vetoed"):
+                            await finish(db, action, "vetoed", reason=f"{action.reason or ''} [{why}]")
+                    else:
+                        from app.services.hub_events import next_morning_utc
+                        action.due_at = next_morning_utc(now)
+                        await db.commit()
+                    ol.decision("actions", conv.channel, who, verdict, why,
+                                kind=getattr(action, "kind", None), action=getattr(action, "id", None))
+                    await _shadow_count(redis, f"enforced_{verdict}")
+                    continue
+                shadow_flags.append(f"{verdict}: {why}")
+                ol.decision("actions", conv.channel, who, f"shadow-{verdict}", why,
+                            kind=getattr(action, "kind", None), action=getattr(action, "id", None))
+                await _shadow_count(redis, verdict)
             gate = await needs_approval(db, deal, conv, in_window)
             # Fit-checks (~6 days after delivery) and customer-agreed
             # replenishment check-ins ("check with me in two weeks") come due
@@ -655,9 +880,11 @@ async def process_due(db, redis, *, now: datetime | None = None, limit: int = 10
                 # Flag off: leave it planned, visible — the trust-building mode.
                 continue
 
-            # A quote follow-up sends the text composed from the quote itself —
-            # its figures can't drift; everything else is composed now.
-            text = ((action.draft or "").strip() if is_quote else
+            # A quote follow-up or a payment reminder sends the text composed in
+            # code when it was planned — its figures can't drift; everything
+            # else is composed now, into the open conversation.
+            code_composed = getattr(action, "kind", None) in CODE_COMPOSED_KINDS
+            text = ((action.draft or "").strip() if code_composed else
                     await _compose_follow_up(db, redis, conv, action.reason or "follow up"))
             if not text:
                 action.status = "failed"
@@ -665,7 +892,7 @@ async def process_due(db, redis, *, now: datetime | None = None, limit: int = 10
                 continue
             # Never nudge someone with a message they've already had. If the
             # composer only managed to echo an earlier line, a human rewords it.
-            repeats = (await _repeats_earlier(db, conv, text, exact_only=True) if is_quote
+            repeats = (await _repeats_earlier(db, conv, text, exact_only=True) if code_composed
                        else await _repeats_earlier(db, conv, text))
             if repeats:
                 if not await claim(db, action, ("planned",), "needs_approval"):
@@ -685,7 +912,7 @@ async def process_due(db, redis, *, now: datetime | None = None, limit: int = 10
                 _log.info("planned action %s changed while composing — not sent", action.id)
                 continue
             try:
-                await _send(db, redis, conv, text, action)
+                await _send(db, redis, conv, text, action, shadow=shadow_flags)
             except SendOutcomeUnknown as exc:
                 # Meta may have delivered it: the row is recorded as unknown
                 # and a person decides — never an automatic resend.
@@ -703,6 +930,14 @@ async def process_due(db, redis, *, now: datetime | None = None, limit: int = 10
                 raise
             await finish(db, action, "sent", draft=text)
             spoken_to.add(conv.id)
+            # The recovery reports keep counting what the planners started.
+            if getattr(action, "source", None) in ("cart_recovery", "payment_followup"):
+                try:
+                    from app.services.recovery_results import record_send
+                    await record_send(action.source, conv,
+                                      ref=(getattr(action, "dedupe_key", "") or "").split(":", 1)[-1])
+                except Exception:
+                    pass
             ol.decision("actions", conv.channel, who, "send", "planned action sent",
                         kind=getattr(action, "kind", None), action=getattr(action, "id", None), cls=message_class(action))
             done += 1

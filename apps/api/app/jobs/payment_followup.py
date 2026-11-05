@@ -1,5 +1,11 @@
 """Payment follow-up: the order is placed, the link was sent, nobody ever chases.
 
+Stage 2 (audit, 2026-11-05): this sweep PLANS one `payment_reminder` per
+customer (identity `payment:<hub order ids>`, draft composed here so the link
+and figures never drift) and the dispatcher (services/actions.process_due)
+sends it after re-reading the hub live — never a reminder for money that
+has landed, never a guess when the hub cannot say.
+
 An order that reaches a payment link is the closest thing to money in the system —
 the customer already said yes. When the payment doesn't land, today nothing
 happens at all. This sweep finds those orders and sends ONE gentle reminder with
@@ -246,13 +252,9 @@ async def _handle(redis, group: dict, *, send: bool, write: bool = True) -> dict
     """One customer: ONE message covering every order of theirs still due a
     reminder. The guard stays PER ORDER — a live send claims each order's
     key, a dry run only reads it — and an order already reminded drops out."""
-    from app.services import messaging as svc
-    from app.services import outreach_log as _ol
-    from app.services.meta_send import send_to_channel
     from app.models.user import User
 
     conv, to = group["conv"], group["to"]
-    is_wa = (conv.channel or "whatsapp") == "whatsapp"
     due: list[OrderEvent] = []
     for order in group["orders"]:
         if redis is not None:
@@ -297,26 +299,49 @@ async def _handle(redis, group: dict, *, send: bool, write: bool = True) -> dict
     if not send:
         return res
 
+    # Plan, don't send: one row per set of orders; the dispatcher re-checks
+    # the hub live and speaks.
     try:
-        _meta = _ol.stamp("payment_followup", _ol.TRANSACTIONAL, reference=res.get("order"))
-        if is_wa:
-            wamid = await svc._send_waba(to, text)
-            async with AsyncSessionLocal() as db2:
-                await svc.save_outbound_message(db2, redis, to, text, waba_msg_id=wamid,
-                                                raw_meta=_meta)
-        else:
-            await send_to_channel(conv.channel, to, text)
-            async with AsyncSessionLocal() as db2:
-                await svc.save_outbound_channel_message(db2, redis, conv.channel, to, text,
-                                                        raw_meta=_meta)
-        res["sent"] = True
+        from app.services import actions
+        from app.services.hub_events import is_quiet_hours, next_morning_utc
+        ids = ",".join(str(o.hub_order_id) for o in due if o.hub_order_id)
+        numbers = ", ".join(str(o.hub_order_number or o.hub_order_id) for o in due)
+        async with AsyncSessionLocal() as db:
+            now = datetime.now(timezone.utc)
+            row, _created = await actions.plan(
+                db, conversation_id=conv.id, kind="payment_reminder",
+                due_at=(next_morning_utc(now) if is_quiet_hours(now) else now),
+                reason=(f"Unpaid order{'s' if len(due) > 1 else ''} {numbers}: the payment "
+                        "link was sent and nothing has landed — one gentle reminder with "
+                        "the same link"),
+                source="payment_followup", draft=text, reference=ids)
+        res["sent"] = True                          # planned — the dispatcher sends
+        res["planned"] = str(row.id)
     except Exception as e:
-        res["error"] = f"send failed: {str(e)[:160]}"
-        return res
-    from app.services.recovery_results import record_send
-    await record_send("payment_followup", conv,
-                      ref=",".join(str(o.hub_order_id) for o in due if o.hub_order_id))
+        res["error"] = f"plan failed: {str(e)[:160]}"
     return res
+
+
+async def live_verdict(redis, action) -> str:
+    """At send time: 'paid' when every order in the reminder is settled on
+    the hub (nothing to remind), 'unknown' when the hub cannot say for one of
+    them (we say nothing on a guess), else 'unpaid'."""
+    key = getattr(action, "dedupe_key", "") or ""
+    ids = [i for i in key.split(":", 1)[-1].split(",") if i.strip().isdigit()] if key.startswith("payment:") else []
+    if not ids:
+        return "unpaid"
+    from app.core import hub_client
+    paid = 0
+    for oid in ids:
+        try:
+            live = await hub_client.fetch_order_status(int(oid), redis)
+        except Exception:
+            live = None
+        if live is None:
+            return "unknown"
+        if is_paid(live.get("payment_status")):
+            paid += 1
+    return "paid" if paid == len(ids) else "unpaid"
 
 
 async def run(send: bool, ignore_quiet_hours: bool = False, *, redis=None,
@@ -331,7 +356,7 @@ async def run(send: bool, ignore_quiet_hours: bool = False, *, redis=None,
         rows = await find_unpaid(db, redis)
     groups = group_by_customer(rows)
 
-    mode = "LIVE SEND" if send else "DRY RUN (no messages sent)"
+    mode = "LIVE (plans the reminders; the dispatcher sends)" if send else "DRY RUN (no messages sent)"
     _log.info("── payment follow-up · %s ───────────────────────────", mode)
     _log.info("%d unpaid order(s) for %d customer(s) confirmed live with the hub "
               "(>%dh old, inside %dh, AI mode)", len(rows), len(groups), GRACE_HOURS, WINDOW_HOURS)
