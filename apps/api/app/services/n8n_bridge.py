@@ -21,10 +21,7 @@ from app.models.message import Message, MsgDirection, MsgSender
 from app.models.user import User
 from app.models.order_event import OrderEvent
 from app.models.customer_history import CustomerHistory
-from app.models.session import Session
-from app.models.intercept import Intercept, InterceptAction
 from app.core.config import settings
-from app.schemas.n8n import OutboundDto
 
 
 # ── Shared timestamp helpers ──────────────────────────────
@@ -135,145 +132,6 @@ async def provision_user(
 
     await db.flush()
     return user
-
-
-# ── Intercept Gate ────────────────────────────────────────
-
-async def outbound_gate(db: AsyncSession, redis, body: OutboundDto) -> dict:
-    """
-    Core logic: AI mode sends immediately; human mode holds the reply.
-
-    Idempotency guard: the n8n workflow has both the audio gate
-    (Outbound Gate API1 send Audio) and the text gate (Outbound Gate API)
-    connecting to the same downstream If node. When a customer sends audio,
-    n8n calls this endpoint twice — once with is_audio_reply=True (audio gate)
-    and once with is_audio_reply=False (text gate, which fires even though the
-    audio branch was taken, because If fires once per incoming connection).
-
-    The guard matches on ai_reply text within a 30-second window regardless of
-    media_type, so the audio row saved by the first call is found by the second
-    call even though the second has is_audio=False and would otherwise miss the
-    audio row (which has media_type='audio', not NULL).
-    """
-    from sqlalchemy import and_
-    body.wa_id = _normalize_wa_id(body.wa_id)
-
-    result = await db.execute(
-        select(Conversation).where(Conversation.wa_id == body.wa_id)
-    )
-    conv = result.scalar_one_or_none()
-    if not conv:
-        conv = Conversation(wa_id=body.wa_id)
-        db.add(conv)
-        await db.flush()
-    # Identity spine (additive): ensure this conversation is bound to a person.
-    if conv.person_id is None:
-        from app.services.identity import resolve_person_id_for_wa_id
-        conv.person_id = await resolve_person_id_for_wa_id(
-            db, body.wa_id, source="whatsapp_outbound")
-    if conv.channel is None:
-        conv.channel = "whatsapp"
-
-    # ── Human intercept OR pause: hold the reply ─────────────────────────────
-    # (paused used to slip through here — the Meta webhook and the sweeper
-    # already held for it, but WhatsApp kept replying. One gate, all modes.)
-    if conv.intercept_mode != InterceptMode.ai:
-        intercept = Intercept(
-            conversation_id=conv.id,
-            agent_id=conv.assigned_agent_id,
-            action=InterceptAction.intercept,
-            ai_reply_held=body.ai_reply,
-        )
-        db.add(intercept)
-        await _broadcast(redis, str(conv.id), {
-            "type": "ai_draft_ready",
-            "conversationId": str(conv.id),
-            "waId": body.wa_id,
-            "draft": body.ai_reply,
-        })
-        return {"action": "hold"}
-
-    # ── Idempotency guard ─────────────────────────────────────────────────────
-    # Match on (wa_id + outbound direction + same text + within 30s).
-    # Intentionally does NOT filter on media_type so that a prior audio row
-    # (media_type='audio') is found by the follow-up text-gate call
-    # (is_audio=False), preventing a duplicate plain-text bubble.
-    cutoff = datetime.now(timezone.utc) - timedelta(seconds=30)
-    existing = await db.execute(
-        select(Message).where(
-            and_(
-                Message.wa_id == body.wa_id,
-                Message.direction == MsgDirection.outbound,
-                Message.text == body.ai_reply,
-                Message.created_at >= cutoff,
-            )
-        )
-    )
-    if existing.scalar_one_or_none():
-        return {"action": "send"}
-
-    # ── Send to WhatsApp ──────────────────────────────────────────────────────
-    # Keep the wamid Graph returns: it's what a customer's reply-quote carries
-    # back as context.message_id, so the row must remember it to be quotable.
-    is_audio = body.is_audio_reply and bool(body.audio_url)
-    wamid: str | None = None
-    if is_audio:
-        wamid = await _send_waba_audio(body.wa_id, body.audio_url)
-        # Send the full text reply alongside audio only when cart content is present.
-        # cart_text being non-empty is the signal (set by the n8n workflow only when
-        # full_cart / items_added is non-empty). We send ai_reply — the complete
-        # formatted message with the bullet-point order summary — rather than
-        # cart_text alone, so the customer receives the full readable context.
-        # Audio-only replies (greetings, questions, clarifications) have cart_text=""
-        # and get no accompanying text message.
-        if body.cart_text:
-            # WhatsApp does not guarantee delivery order based solely on API call order.
-            # The audio message is queued on WhatsApp's infrastructure and can be
-            # overtaken by the text if it is sent immediately. A short delay gives
-            # WhatsApp enough time to process and deliver the audio first so the
-            # customer always hears the voice note before reading the order summary.
-            import asyncio
-            await asyncio.sleep(2)
-            await _send_waba(body.wa_id, body.ai_reply)
-    else:
-        wamid = await _send_waba(body.wa_id, body.ai_reply)
-
-    # ── Save exactly ONE outbound Message row ─────────────────────────────────
-    msg = Message(
-        wa_id=body.wa_id,
-        conversation_id=conv.id,
-        person_id=conv.person_id,
-        channel="whatsapp",
-        direction=MsgDirection.outbound,
-        sender=MsgSender.ai,
-        text=body.ai_reply,
-        media_type="audio" if is_audio else None,
-        media_url=body.audio_url if is_audio else None,
-        media_caption=body.cart_text if (is_audio and body.cart_text) else None,
-        waba_msg_id=wamid,
-    )
-    db.add(msg)
-
-    conv.last_message_at      = datetime.now(timezone.utc)
-    conv.last_message_preview = (body.ai_reply or "")[:100]
-
-    await db.commit()
-    await db.refresh(msg)
-
-    ws_payload: dict = {
-        "type":           "new_message",
-        "id":             str(msg.id),
-        "conversationId": str(conv.id),
-        "sender":         "ai",
-        "text":           body.ai_reply,
-    }
-    if is_audio:
-        ws_payload["mediaType"]    = "audio"
-        ws_payload["mediaUrl"]     = body.audio_url
-        ws_payload["mediaCaption"] = body.cart_text or None
-
-    await _broadcast(redis, str(conv.id), ws_payload)
-    return {"action": "send"}
 
 
 def _wamid_of(resp) -> str | None:
@@ -518,97 +376,6 @@ async def log_agent_usage(db: AsyncSession, wa_id: str, model: str, totals: dict
     return {"ok": True, "cost_usd": cost}
 
 
-async def log_usage(db: AsyncSession, body) -> dict:
-    """Persist one LLM call's token usage + estimated cost."""
-    from app.models.ai_usage import AiUsage
-    from app.core.ai_pricing import estimate_cost_usd
-
-    cost = estimate_cost_usd(
-        body.model, body.prompt_tokens, body.completion_tokens, body.cached_tokens
-    )
-    db.add(AiUsage(
-        wa_id=_normalize_wa_id(body.wa_id) if body.wa_id else None,
-        workflow=body.workflow,
-        node=body.node,
-        model=body.model,
-        prompt_tokens=body.prompt_tokens,
-        completion_tokens=body.completion_tokens,
-        cached_tokens=body.cached_tokens,
-        cost_usd=cost,
-    ))
-    await db.commit()
-    return {"ok": True, "cost_usd": cost}
-
-
-async def route_message(db: AsyncSession, redis, body) -> dict:
-    """Decide how much intelligence THIS message deserves — server-side, no
-    LLM tokens spent. Returns a decision n8n branches on:
-
-      path: "skip" | "cheap" | "full"
-      duplicate: WhatsApp re-delivered the same message id → don't answer twice
-      intent_hint: greeting | ack | media | question
-      canned_reply: a ready reply for greetings/acks (n8n may send as-is)
-      cooldown_active / cooldown_seconds: the AI has answered a lot very
-        recently — hold or hand to a human so a runaway loop can't rack up calls
-    """
-    wa_id = _normalize_wa_id(body.wa_id)
-    text = (body.text or "").strip()
-    decision = {
-        "wa_id": wa_id, "path": "full", "duplicate": False,
-        "intent_hint": "question", "canned_reply": None,
-        "cooldown_active": False, "cooldown_seconds": 0,
-    }
-
-    # 1. Idempotency — a WhatsApp retry with the same id must not re-invoke GPT.
-    if body.msg_id:
-        seen_key = f"seen_msg:{body.msg_id}"
-        try:
-            if await redis.get(seen_key):
-                decision["duplicate"] = True
-                decision["path"] = "skip"
-                return decision
-            await redis.setex(seen_key, 6 * 3600, "1")
-        except Exception:
-            pass  # dedupe is best-effort; never block a real message
-
-    # 2. Media always needs its own (vision/transcription) path.
-    if body.media_type and body.media_type not in ("text", ""):
-        decision["intent_hint"] = "media"
-        return decision  # path stays "full"; media sub-workflows handle it
-
-    # 3. Cool-off: count AI replies sent to this conversation in the last 60s.
-    #    Beyond the threshold, tell n8n to hold — the "no time to cool off" fix.
-    try:
-        conv_res = await db.execute(select(Conversation).where(Conversation.wa_id == wa_id))
-        conv = conv_res.scalar_one_or_none()
-        if conv:
-            since = datetime.now(timezone.utc) - timedelta(seconds=60)
-            recent_ai = await db.execute(
-                select(Message).where(
-                    Message.conversation_id == conv.id,
-                    Message.direction == MsgDirection.outbound,
-                    Message.created_at >= since,
-                )
-            )
-            n_recent = len(recent_ai.scalars().all())
-            if n_recent >= 6:  # >6 AI replies in a minute = runaway loop
-                decision["cooldown_active"] = True
-                decision["cooldown_seconds"] = 60
-    except Exception:
-        pass
-
-    # 4. Cheap-path classification (rule-based, high precision).
-    if _GREETING_RE.match(text):
-        decision.update(
-            path="cheap", intent_hint="greeting",
-            canned_reply="Hello and welcome to Bethany House! 🙏 How may I help you today?",
-        )
-    elif _ACK_RE.match(text):
-        decision.update(path="cheap", intent_hint="ack", canned_reply="")
-
-    return decision
-
-
 async def ai_cost_summary(db: AsyncSession, days: int = 30) -> dict:
     """Aggregate token spend for the admin cost view."""
     from app.models.ai_usage import AiUsage
@@ -671,259 +438,6 @@ async def catalog_items(db: AsyncSession, redis) -> list[dict]:
         "price": float(i.price), "unit": str(i.unit or ""),
         "description": str(i.description or ""), "aliases": i.aliases or [], "in_stock": i.in_stock,
     } for i in res.scalars().all()]
-
-
-async def get_profile(db: AsyncSession, redis, wa_id: str) -> dict:
-    """One-call context bundle for the AI pipeline.
-
-    Replaces the fragile n8n 'Customer Profile & Session Setup' assembly
-    (RunQuery -> Bundle -> a chain of 'combine' merges that collapsed to 0
-    items whenever a branch was empty, silently halting the agent before it
-    ever replied). This is server-authoritative and ALWAYS returns a usable
-    object: identity + resolved country, the recent message window in the
-    shape n8n's 'Compose context' expects, session state/cart, and the live
-    catalogue — everything the AI needs, in one robust payload.
-    """
-    from app.core.countries import resolve_country
-    from app.models.catalog import Catalog
-
-    wa_id = _normalize_wa_id(wa_id)
-    user = await provision_user(db, wa_id)   # find-or-create + country enrichment
-    await db.commit()
-    await db.refresh(user)
-
-    ctx = await get_context(db, redis, wa_id)
-
-    # Recent messages, oldest->newest, in the bundled shape the pipeline reads.
-    res = await db.execute(
-        select(Message)
-        .where(Message.wa_id == wa_id)
-        .order_by(Message.created_at.desc())
-        .limit(20)
-    )
-    rows = list(reversed(res.scalars().all()))
-    messages = [{
-        "id":        str(m.id),
-        "wa_id":     wa_id,
-        "name":      user.name or "",
-        "direction": m.direction.value if hasattr(m.direction, "value") else str(m.direction or "inbound"),
-        "sender":    m.sender.value if hasattr(m.sender, "value") else str(m.sender or "user"),
-        "text":      m.text or "",
-        "media_type": m.media_type or "",
-        "mediaType": m.media_type or "",
-        "media_url": m.media_url or "",
-        "mediaUrl":  m.media_url or "",
-        "ts_ms":     m.ts_ms or (int(m.created_at.timestamp() * 1000) if m.created_at else 0),
-        "tsMs":      m.ts_ms or (int(m.created_at.timestamp() * 1000) if m.created_at else 0),
-        "tsIso":     m.created_at.isoformat() if m.created_at else "",
-        "created_at": m.created_at.isoformat() if m.created_at else "",
-        "createdAt": m.created_at.isoformat() if m.created_at else "",
-    } for m in rows]
-
-    loc = resolve_country(wa_id)
-    facts = {
-        "name": user.name or "", "email": user.email, "phone": user.phone or wa_id,
-        "location": user.location, "country": user.country, "country_iso": user.country_iso,
-    }
-    state = ctx.get("state") or {"active": "active", "cart": {"items": [], "subtotal": 0}}
-    cart = state.get("cart") if isinstance(state.get("cart"), dict) else {"items": [], "subtotal": 0}
-
-    catalog = await catalog_items(db, redis)
-
-    last_in  = next((m["text"] for m in reversed(messages) if m["direction"] == "inbound"), "")
-    last_out = next((m["text"] for m in reversed(messages) if m["direction"] == "outbound"), "")
-
-    # ── Loop C: the customer's live hub order (answers "where's my order?") ────
-    open_order = await _hub_open_order(db, redis, wa_id)
-
-    # ── Cost governor: should this turn spend the expensive model? ────────────
-    # n8n gates the Conversation-Intelligence sub-workflow on `should_run_ai`.
-    # This is the "give the AI time to cool off" fix + skip replies nobody needs.
-    now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
-    recent_ai_replies = sum(
-        1 for m in messages
-        if m["direction"] == "outbound" and (now_ms - (m["tsMs"] or 0)) <= 60_000
-    )
-    li = (last_in or "").strip()
-    is_ack = bool(_ACK_RE.match(li)) and not _GREETING_RE.match(li)
-    should_run_ai, route_reason = True, "full"
-    if recent_ai_replies >= 6:
-        should_run_ai, route_reason = False, "cooldown"   # runaway loop → hold
-    elif is_ack:
-        should_run_ai, route_reason = False, "ack"         # "ok"/"thanks" → no reply needed
-
-    return {
-        "wa_id": wa_id,
-        "should_run_ai": should_run_ai,
-        "route_reason": route_reason,
-        "name": user.name or "",
-        "phone": user.phone or wa_id,
-        "email": user.email,
-        "location": user.location,
-        "country": user.country,
-        "countryName": user.country,
-        "countryIso": user.country_iso,
-        "countryCode": loc.get("code"),
-        "flag_url": user.flag_url,
-        "user": facts,
-        "userFacts": facts,
-        "messages": messages,
-        "history": {
-            "last10Messages": messages[-10:],
-            "lastInbound": last_in,
-            "lastOutbound": last_out,
-        },
-        "state": state,
-        "cart": cart,
-        "last_text": ctx.get("last_text"),
-        "last_direction": ctx.get("last_direction"),
-        "last_message_ts": ctx.get("last_message_ts"),
-        "last_message_at": ctx.get("last_message_at"),
-        "intercept_mode": ctx.get("intercept_mode"),
-        "catalog": catalog,
-        "openOrder": open_order,
-        "mergeKey": 1,
-    }
-
-
-async def _hub_open_order(db: AsyncSession, redis, wa_id: str) -> dict | None:
-    """The customer's most recent hub-pushed order + its LIVE status, so the AI
-    can answer order questions from the hub (Loop C). None if they have none."""
-    if not settings.hub_api_token:
-        return None
-    row = (await db.execute(
-        select(OrderEvent)
-        .where(OrderEvent.wa_id == wa_id, OrderEvent.hub_order_id.isnot(None))
-        .order_by(OrderEvent.created_at.desc())
-        .limit(1)
-    )).scalar_one_or_none()
-    if row is None:
-        return None
-
-    info = {
-        "order_id": row.hub_order_id,
-        "order_number": row.hub_order_number,
-        "payment_url": row.hub_payment_url,
-        "currency": row.hub_currency,
-        "total": float(row.hub_total) if row.hub_total is not None else None,
-    }
-    try:
-        from app.core import hub_client
-        live = await hub_client.fetch_order_status(row.hub_order_id, redis)
-        if live:
-            info.update({
-                "status": live.get("status"),
-                "payment_status": live.get("payment_status"),
-                "fulfillment_status": live.get("fulfillment_status"),
-            })
-    except Exception:
-        pass  # fall back to the stored snapshot — never break the profile
-    return info
-
-
-async def get_context(db: AsyncSession, redis, wa_id: str) -> dict:
-    wa_id = _normalize_wa_id(wa_id)
-    cache_key = f"context:{wa_id}"
-    cached = await redis.get(cache_key)
-    if cached:
-        return json.loads(cached)
-
-    result = await db.execute(select(User).where(User.wa_id == wa_id))
-    user = result.scalar_one_or_none()
-
-    last_message_at: datetime | None = user.last_message_at if user else None
-    last_message_ts: int | None = (
-        int(last_message_at.astimezone(timezone.utc).timestamp() * 1000)
-        if last_message_at else None
-    )
-    last_message_at_iso: str | None = (
-        last_message_at.astimezone(timezone.utc).isoformat()
-        if last_message_at else None
-    )
-
-    # ── Intercept / handover context ──────────────────────────────────────────
-    conv_result = await db.execute(
-        select(Conversation).where(Conversation.wa_id == wa_id)
-    )
-    conv = conv_result.scalar_one_or_none()
-
-    recent_intercept = None
-    intercept_mode   = "ai"
-
-    if conv:
-        intercept_mode = conv.intercept_mode.value if conv.intercept_mode else "ai"
-
-        intercept_result = await db.execute(
-            select(Intercept)
-            .where(Intercept.conversation_id == conv.id)
-            .order_by(Intercept.created_at.desc())
-            .limit(1)
-        )
-        last_intercept = intercept_result.scalar_one_or_none()
-        if last_intercept:
-            recent_intercept = {
-                "action":   last_intercept.action.value,
-                "agent_id": str(last_intercept.agent_id) if last_intercept.agent_id else None,
-                "at":       last_intercept.created_at.isoformat() if last_intercept.created_at else None,
-            }
-
-    default_state = {"active": "active", "cart": {"items": [], "subtotal": 0}}
-
-    ctx = {
-        "wa_id":           wa_id,
-        "state":           (user.state if (user and user.state) else default_state),
-        "last_text":       user.last_text      if user else "",
-        "last_direction":  user.last_direction if user else "inbound",
-        "last_message_ts": last_message_ts,
-        "last_message_at": last_message_at_iso,
-        "intercept_mode":   intercept_mode,
-        "recent_intercept": recent_intercept,
-    }
-
-    try:
-        await redis.setex(cache_key, 3600, json.dumps(ctx))
-    except Exception:
-        pass  # Cache failure is non-fatal; always return the dict
-
-    return ctx
-
-# ── Get User ──────────────────────────────────────────────
-
-async def get_user(db: AsyncSession, wa_id: str) -> dict:
-    wa_id = _normalize_wa_id(wa_id)
-    result = await db.execute(select(User).where(User.wa_id == wa_id))
-    user = result.scalar_one_or_none()
-    if not user:
-        return {"found": False, "wa_id": wa_id}
-    return {
-        "found": True,
-        "id": str(user.id),
-        "wa_id": user.wa_id,
-        "phone": user.phone,
-        "name": user.name,
-        "last_text": user.last_text,
-        "last_direction": user.last_direction,
-        "state": user.state,
-    }
-
-
-# ── Upsert User ───────────────────────────────────────────
-
-async def upsert_user(db: AsyncSession, body) -> dict:
-    # Find-or-create + server-side enrichment (name capture + country). This
-    # fixes the long-standing bug where the old ON CONFLICT clause dropped the
-    # WhatsApp profile name for returning customers and never set the country.
-    user = await provision_user(
-        db,
-        body.wa_id,
-        name=body.name,
-        last_text=body.last_text,
-        last_direction=body.last_direction,
-    )
-    if body.state:
-        user.state = body.state
-    await db.commit()
-    return {"id": str(user.id), "wa_id": user.wa_id}
 
 
 # ── Upsert Message ────────────────────────────────────────
@@ -1030,17 +544,11 @@ async def upsert_message(db: AsyncSession, redis, body, *, message_id=None,
     db.add(msg)
 
     # ── Selective auto-escalation for inbound media ───────────────────────────
-    # Audio voice notes are handled end-to-end by the AI (transcribed by Whisper,
-    # replied to with TTS audio). They must NOT escalate to human mode.
-    #
-    # Images are now also handled end-to-end by the AI via GPT-4o analysis
-    # (Product Image Recognition sub-workflow). The analysis is stored in
-    # media_caption and fed back into Neema as the "user message". Escalation
-    # for images is driven explicitly by n8n via POST /api/n8n/escalate only
-    # when the AI flags that the item cannot be identified from the catalog.
-    #
-    # Only video and document messages still require a human agent to review,
-    # so those continue to auto-escalate.
+    # Voice notes are transcribed in-process (services/voice_notes) and answered
+    # by the AI; images are read natively by Claude vision inside run_turn (the
+    # photo check, services/photo_check, decides when a person must price one).
+    # Neither escalates here. Only video and document messages still need a
+    # human to review, so those auto-escalate.
     escalated = False
     is_ai_handled_media = (
         media_type == "audio"
@@ -1186,199 +694,10 @@ async def upsert_message(db: AsyncSession, redis, body, *, message_id=None,
         result["media_caption"] = media_caption
     return [result]
 
-# ── Patch Message ─────────────────────────────────────────
-
-async def patch_message(db: AsyncSession, docid: str, body) -> dict:
-    """
-    Patches an inbound message doc with its transcription/corrected text.
-
-    The n8n 'patch inbound and outbound' node calls this with:
-      - inbound_text  → corrected transcription for the inbound message
-      - outbound_text → the AI reply text (NOT applied here — the outbound
-                        Message row is already created by outbound_gate(), so
-                        applying outbound_text here would overwrite the inbound
-                        message's text field, causing a duplicate to appear in
-                        the agent UI)
-      - direction     → NOT applied; direction is set at insert time and must
-                        never be changed by a patch, otherwise an inbound message
-                        silently becomes outbound and renders on the wrong side.
-
-    Only inbound_text updates are accepted. Everything else is a no-op.
-    """
-    from sqlalchemy import and_
-
-    # ── Locate the message by UUID or by wa_id_tsMs composite key ────────────
-    try:
-        import uuid
-        uuid.UUID(docid)
-        result = await db.execute(
-            select(Message).where(Message.id == docid)
-        )
-    except ValueError:
-        # docid format: "{wa_id}_{ts_ms}" — strip '+' from wa_id so the lookup
-        # matches the normalised form used when the message was inserted.
-        parts = docid.rsplit("_", 1)
-        if len(parts) == 2:
-            wa_id = _normalize_wa_id(parts[0])
-            ts_ms = parts[1]
-            result = await db.execute(
-                select(Message).where(
-                    and_(
-                        Message.wa_id == wa_id,
-                        Message.ts_ms == int(ts_ms),
-                    )
-                )
-            )
-        else:
-            return {"ok": False, "error": f"Invalid docid format: {docid}"}
-
-    msg = result.scalar_one_or_none()
-    if not msg:
-        # Silently skip — the inbound message may not have been upserted yet
-        # (e.g. audio path where Upsert inbound audio message runs in parallel).
-        return {"ok": True, "skipped": True, "docid": docid}
-
-    # ── Only update inbound_text ──────────────────────────────────────────────
-    # outbound_text is intentionally ignored: the outbound reply is already
-    # stored as its own Message row by outbound_gate(). Applying it here would
-    # overwrite the inbound message's text field, making it render on the
-    # wrong side of the thread and appear as a duplicate of the outbound reply.
-    #
-    # direction is intentionally ignored: it is set at insert time and must
-    # never be mutated post-hoc or inbound messages flip to the outbound side.
-    if body.inbound_text is not None:
-        msg.text = body.inbound_text
-
-    await db.commit()
-    return {"ok": True, "message_id": str(msg.id)}
-
-# ── Touch Session ─────────────────────────────────────────
-
-async def touch_session(db: AsyncSession, body) -> list:
-    from app.models.session import Session as SessionModel
-
-    def parse_dt(val):
-        if not val:
-            return None
-        if isinstance(val, datetime):
-            return val
-        return datetime.fromisoformat(val.replace("Z", "+00:00"))
-
-    session_id = body.session_id or f"{body.wa_id}_{int(datetime.now(timezone.utc).timestamp())}"
-
-    stmt = pg_insert(SessionModel).values(
-        id=session_id,
-        wa_id=body.wa_id,
-        turns=body.turns,
-        start_ts=parse_dt(body.start_ts),
-        last_ts=parse_dt(body.last_ts),
-    ).on_conflict_do_update(
-        index_elements=["id"],
-        set_={
-            "turns": body.turns,
-            "last_ts": parse_dt(body.last_ts),
-        },
-    )
-    await db.execute(stmt)
-    await db.commit()
-
-    # Re-fetch the persisted row so timestamps reflect actual DB values
-    result = await db.execute(select(SessionModel).where(SessionModel.id == session_id))
-    row = result.scalar_one()
-
-    now_precise = _fmt_precise(datetime.now(timezone.utc))
-
-    return [
-        {
-            "name": f"projects/neema-6037c/databases/(default)/documents/sessions/{session_id}",
-            "fields": {
-                "turns":   {"integerValue": str(row.turns)},
-                "lastTs":  {"timestampValue": _fmt_ts(row.last_ts)},
-                "wa_id":   {"stringValue": row.wa_id},
-                "startTs": {"timestampValue": _fmt_ts(row.start_ts)},
-            },
-            "createTime": _fmt_precise(row.start_ts),
-            "updateTime": now_precise,
-        }
-    ]
-
-
-# ── Get Messages ──────────────────────────────────────────
-
-async def get_messages(db: AsyncSession, wa_id: str) -> list:
-    wa_id = _normalize_wa_id(wa_id)
-    result = await db.execute(
-        select(Message)
-        .where(Message.wa_id == wa_id)
-        .order_by(Message.created_at.desc())
-        .limit(50)
-    )
-    msgs = result.scalars().all()
-
-    rows = []
-    for m in msgs:
-        created_at = m.created_at
-
-        # ts_ms: prefer the stored ts_ms column; fall back to created_at
-        if m.ts_ms is not None:
-            ts_ms = m.ts_ms
-        elif created_at:
-            ts_ms = int(created_at.astimezone(timezone.utc).timestamp() * 1000)
-        else:
-            ts_ms = None
-
-        # ts_iso: millisecond-precision ISO string for sorting consistency
-        if ts_ms is not None:
-            ts_iso = _fmt_ts_ms(datetime.fromtimestamp(ts_ms / 1000, tz=timezone.utc))
-        elif created_at:
-            ts_iso = _fmt_ts_ms(created_at.astimezone(timezone.utc))
-        else:
-            ts_iso = None
-
-        rows.append({
-            "id":         str(m.id),
-            "wa_id":      m.wa_id,
-            "direction":  m.direction,
-            "sender":     m.sender,
-            "text":       m.text,
-            "media_type": m.media_type,
-            "media_url":  m.media_url,
-            "ts_ms":      ts_ms,       # integer ms — used by Bundle messages for sort
-            "ts_iso":     ts_iso,      # ISO string with ms precision
-            "created_at": created_at.isoformat() if created_at else None,
-        })
-
-    return rows
-
-
-# ── Save User Facts ───────────────────────────────────────
-
-async def save_user_facts(db: AsyncSession, body) -> dict:
-    # Normalize wa_id — strip leading + to match how it's stored
-    wa_id = (body.wa_id or "").lstrip("+").strip()
-    
-    result = await db.execute(select(User).where(User.wa_id == wa_id))
-    user = result.scalar_one_or_none()
-    if not user:
-        return {"ok": False, "error": "User not found"}
-
-    only_if_empty = getattr(body, 'only_if_empty', [])
-    for field in ("name", "email", "phone", "location", "age", "country", "country_iso", "flag_url"):
-        val = getattr(body, field, None)
-        if val is None:
-            continue
-        if field in only_if_empty and getattr(user, field, None):
-            continue
-        setattr(user, field, val)
-
-    await db.commit()
-    return {"ok": True}
-
 
 # ── Upsert Order Event ────────────────────────────────────
 
 async def upsert_order_event(db: AsyncSession, body, redis=None) -> dict:
-    from app.models.order_event import OrderEvent
 
     event_id = f"{body.wa_id}_{int(datetime.now(timezone.utc).timestamp() * 1000)}"
 
@@ -1440,7 +759,6 @@ async def _maybe_push_order_to_hub(db: AsyncSession, redis, body, event_id: str)
     session: if this session already produced a hub order, we copy its ids and
     skip. Failures are recorded on the row for retry on the next confirmed event.
     """
-    from app.models.order_event import OrderEvent
     from app.core import hub_client
     from app.core.countries import resolve_country
 
@@ -1559,24 +877,6 @@ async def _maybe_push_order_to_hub(db: AsyncSession, redis, body, event_id: str)
     return out
 
 
-async def latest_inbound_message(db, wa_id: str) -> dict | None:
-    """The customer's most recent inbound message (id + text) — used to dedupe
-    and feed the Tier 2 agent."""
-    wa_id = _normalize_wa_id(wa_id)
-    row = (await db.execute(
-        select(Message)
-        .where(Message.wa_id == wa_id, Message.direction == MsgDirection.inbound)
-        .order_by(Message.created_at.desc()).limit(1)
-    )).scalar_one_or_none()
-    if row is None:
-        return None
-    return {
-        "id": str(row.id), "text": row.text or "",
-        "media_type": row.media_type, "media_url": row.media_url,
-        "media_caption": row.media_caption,
-    }
-
-
 async def save_outbound_message(db, redis, wa_id: str, text: str,
                                 waba_msg_id: str | None = None,
                                 raw_meta: dict | None = None) -> None:
@@ -1657,7 +957,7 @@ async def _relay_order_confirmation(db, redis, wa_id, *, order_number, currency,
 
     wamid = await _send_waba(wa_id, text)
 
-    # Persist as an outbound message (mirrors outbound_gate's single-row save).
+    # Persist as an outbound message (one row, like every other send).
     conv = (await db.execute(
         select(Conversation).where(Conversation.wa_id == wa_id)
     )).scalar_one_or_none()
@@ -1693,7 +993,6 @@ async def _relay_order_confirmation(db, redis, wa_id, *, order_number, currency,
 # ── Upsert Customer History ───────────────────────────────
 
 async def upsert_customer_history(db: AsyncSession, body) -> dict:
-    from app.models.customer_history import CustomerHistory
 
     # Identity spine (additive): bind the history snapshot to a person.
     from app.services.identity import resolve_person_id_for_wa_id

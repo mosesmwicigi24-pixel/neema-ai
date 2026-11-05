@@ -2274,11 +2274,12 @@ def build_llm(model: str | None = None, purpose: str = "other",
     )
 
 
-# ── Background trigger (used by the /profile hook) ───────────────────────────
-# Tier 2 runs the agent OFF the request path so /profile stays fast: it schedules
-# a background task that runs the loop, sends the reply, and persists it. n8n's
-# 'Should Run AI?' then sees should_run_ai=false and stays silent. Deduped per
-# inbound message so a retried /profile never double-replies.
+# ── Background trigger ───────────────────────────────────────────────────────
+# The agent runs OFF the webhook's request path: the native WhatsApp pipeline
+# (services/wa_native) and the Meta webhook schedule a background task that
+# runs the loop, sends the reply and persists it. Deduped per inbound message
+# so a redelivered webhook never double-replies. (n8n was retired 2026-07-30;
+# nothing here talks to it.)
 
 import asyncio  # noqa: E402
 

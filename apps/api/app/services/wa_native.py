@@ -1,10 +1,8 @@
-"""Native WhatsApp ingestion — everything n8n's Tier 1 pipeline did, in-process.
+"""Native WhatsApp ingestion — THE WhatsApp pipeline, in-process.
 
-Gated by settings.whatsapp_native (default OFF): the front door keeps forwarding
-to n8n untouched until the flag is flipped, so cutover is one env var and
-rollback is flipping it back.
-
-What this replaces, and with what:
+Every WhatsApp webhook comes through here (routers/whatsapp_webhook →
+handle_webhook); there is no flag and no other path. n8n, which once did this
+work, was retired on 2026-07-30. What the old pipeline did, and what does it now:
   · n8n webhook receive + parse       → parse_events() on the raw payload the
                                         front door ALREADY receives first
   · message persistence (/api/n8n/message)
