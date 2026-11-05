@@ -1237,7 +1237,12 @@ async def judge_proposal(
     await set_value(db, "rule_proposals", _json.dumps(proposals))
     if verdict == "approve":
         rules = await get_value(db, "learned_rules")
-        rules = (rules + "\n- " + proposals[idx]["rule"]).strip()[:1200]
+        rules = (rules + "\n- " + proposals[idx]["rule"]).strip()
+        # Keep the NEWEST rules when the block is full (audit, 2026-11-05: the
+        # old `[:1200]` kept the oldest text, so a new approval was silently
+        # cut the moment the block filled). Whole lines only.
+        from app.services.learned_rules import keep_newest
+        rules = keep_newest(rules, 1200)
         await set_value(db, "learned_rules", rules)
         redis = getattr(request.app.state, "redis", None)
         if redis is not None:

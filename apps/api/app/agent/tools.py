@@ -2063,6 +2063,13 @@ async def _remember(args: dict, ctx: ToolContext) -> dict:
     fact = (args.get("fact") or "").strip()
     if not fact:
         return {"error": "fact is required"}
+    # NEVER A PRICE IN MEMORY (audit, 2026-11-05): a remembered "quoted KES
+    # 60,500" would come back on every turn for years and beat the live hub
+    # row. Sizes, church, role, preferences — yes; money — the hub's.
+    from app.agent.review import money_figures
+    if money_figures(fact):
+        return {"ok": False, "not_saved": "a price is the hub's to remember, not memory's — "
+                                          "save the preference or size without the figure"}
     facts = await memorymod.add_fact(ctx.db, ctx.wa_id, fact, channel=ctx.channel)
     return {"ok": True, "memory": facts}
 
