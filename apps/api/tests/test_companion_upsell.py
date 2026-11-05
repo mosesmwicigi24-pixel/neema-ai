@@ -153,8 +153,8 @@ def test_replenishment_check_in_rides_the_template(monkeypatch):
         tpl["params"] = params
         return {"messages": [{"id": "wamid.R"}]}
     async def _fake_save(db, redis, wa_id, text, **k): pass
-    monkeypatch.setattr("app.services.n8n_bridge.send_wa_template", _fake_tpl)
-    monkeypatch.setattr("app.services.n8n_bridge.save_outbound_message", _fake_save)
+    monkeypatch.setattr("app.services.messaging.send_wa_template", _fake_tpl)
+    monkeypatch.setattr("app.services.messaging.save_outbound_message", _fake_save)
 
     class _DB:
         async def commit(self): pass

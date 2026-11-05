@@ -328,7 +328,7 @@ def test_the_measurement_guide_on_the_website_is_a_link_never_a_whatsapp_image(m
 
     async def boom(*a, **k):
         raise AssertionError("a WhatsApp image to a web session key")
-    monkeypatch.setattr("app.services.n8n_bridge._send_waba_image", boom)
+    monkeypatch.setattr("app.services.messaging._send_waba_image", boom)
     ctx = ToolContext(db=_DB(), redis=None, wa_id="web_abc123", currency="KES", channel="whatsapp")
     out = asyncio.run(tools._send_measurement_guide({}, ctx))
     assert out["ok"] and out["guide_url"] == "https://neema.example/measure.png"

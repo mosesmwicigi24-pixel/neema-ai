@@ -3,7 +3,7 @@
 Every conversation should have a backing user profile, and every user should
 have a country resolved from their phone prefix. Historically neither was
 guaranteed (upsert_message never created a user; country only landed via a
-fragile n8n facts call), leaving ~800 conversations with no profile and ~70%
+fragile external facts call), leaving ~800 conversations with no profile and ~70%
 of users with a null country. This backfills both, deterministically, from
 the server-side country table.
 

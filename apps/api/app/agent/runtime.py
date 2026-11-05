@@ -1622,7 +1622,7 @@ async def run_turn(db: AsyncSession, redis, wa_id: str, user_text: str, llm: LLM
                 # only a message carrying such a word needs the names — the
                 # common turn fetches nothing
                 try:
-                    from app.services import n8n_bridge as _svc_g
+                    from app.services import messaging as _svc_g
                     _guard_names = [p.get("name") for p in (await _svc_g.catalog_items(db, redis))
                                     if p.get("name")]
                 except Exception:
@@ -1770,7 +1770,7 @@ async def run_turn(db: AsyncSession, redis, wa_id: str, user_text: str, llm: LLM
     if img_block and not public_comment and not read_only and not scribe_only \
             and (settings.photo_check_mode or "off") in ("shadow", "live"):
         try:
-            from app.services import n8n_bridge as _svc_pc
+            from app.services import messaging as _svc_pc
             from app.services import photo_check as _pc
             _pc_catalog = await _svc_pc.catalog_items(db, redis)
             _pc_caption = (media.get("caption") or "").strip()
@@ -1880,7 +1880,7 @@ async def run_turn(db: AsyncSession, redis, wa_id: str, user_text: str, llm: LLM
         # several items (owner, 2026-09-21: the price of a set is its total).
         _catalog: list = []
         try:
-            from app.services import n8n_bridge as _svc_cat
+            from app.services import messaging as _svc_cat
             _catalog = await _svc_cat.catalog_items(db, redis)
         except Exception:
             _catalog = []
@@ -2171,7 +2171,7 @@ async def run_turn(db: AsyncSession, redis, wa_id: str, user_text: str, llm: LLM
             and not public_comment:
         try:
             from app.services import cassock_ladder
-            from app.services import n8n_bridge as _svc_lad
+            from app.services import messaging as _svc_lad
             _ladder = await cassock_ladder.follow_up(
                 redis, channel=channel, contact=key,
                 catalog=await _svc_lad.catalog_items(db, redis), ctx=ctx,
@@ -2196,7 +2196,7 @@ async def run_turn(db: AsyncSession, redis, wa_id: str, user_text: str, llm: LLM
     if reply and not read_only and not scribe_only:
         try:
             from app.agent import said_once as _so2
-            from app.services import n8n_bridge as _svc_so
+            from app.services import messaging as _svc_so
             _facts = _so2.facts_in_reply(reply, ctx.seen_products,
                                          await _svc_so.catalog_items(db, redis),
                                          currency=(getattr(ctx, "currency", None) or currency))
@@ -2239,7 +2239,7 @@ async def run_turn(db: AsyncSession, redis, wa_id: str, user_text: str, llm: LLM
     # purpose (services/ai_budget.meter) — the reviewer, the rewrite and every
     # vision read included — so nothing is metered twice here.
     try:
-        from app.services import n8n_bridge as svc
+        from app.services import messaging as svc
         _node = f"{channel}:comment" if public_comment else channel
         await svc.log_agent_usage(db, key, _served, totals, node=_node)
     except Exception:
@@ -2274,11 +2274,11 @@ def build_llm(model: str | None = None, purpose: str = "other",
     )
 
 
-# ── Background trigger (used by the /profile hook) ───────────────────────────
-# Tier 2 runs the agent OFF the request path so /profile stays fast: it schedules
-# a background task that runs the loop, sends the reply, and persists it. n8n's
-# 'Should Run AI?' then sees should_run_ai=false and stays silent. Deduped per
-# inbound message so a retried /profile never double-replies.
+# ── Background trigger ───────────────────────────────────────────────────────
+# The agent runs OFF the webhook's request path: the native WhatsApp pipeline
+# (services/wa_native) and the Meta webhook schedule a background task that
+# runs the loop, sends the reply and persists it. Deduped per inbound message
+# so a redelivered webhook never double-replies.
 
 import asyncio  # noqa: E402
 
@@ -2374,7 +2374,7 @@ async def _send_hold_line(redis, channel: str, key: str) -> None:
             except Exception:
                 pass
         from app.database import AsyncSessionLocal
-        from app.services import n8n_bridge as svc
+        from app.services import messaging as svc
         from app.services.reply_sweeper import HOLD_LINE_META
         text = _hold_line(channel)
         if channel == "whatsapp":
@@ -2524,7 +2524,7 @@ async def _run_and_send(redis, wa_id: str, text: str, media: dict | None = None,
     await _acquire_inflight(redis, "whatsapp", wa_id)
     try:
         from app.database import AsyncSessionLocal
-        from app.services import n8n_bridge as svc
+        from app.services import messaging as svc
         try:
             # A photo turn always takes the main model — vision + catalogue matching
             # is never "light" work, whatever the caption says.
@@ -2776,7 +2776,7 @@ async def _run_and_send_meta(redis, channel: str, external_id: str, text: str,
     try:
         from app.database import AsyncSessionLocal
         from app.services.meta_send import send_to_channel, send_typing_on
-        from app.services import n8n_bridge as svc
+        from app.services import messaging as svc
         reply = ""
         text, media = await _hear_voice_note(text, media, channel=channel, external_id=external_id)
         try:
@@ -4777,7 +4777,7 @@ async def _post_identity(redis, channel: str, pctx: dict) -> dict:
         if fresh and (post_caption(pctx) or pctx.get("thumb")):
             try:
                 from app.database import AsyncSessionLocal as _ASL2
-                from app.services import n8n_bridge as _svc2
+                from app.services import messaging as _svc2
                 from app.services import post_catalog as _pc2
                 async with _ASL2() as _db2:
                     _cat2 = await _svc2.catalog_items(_db2, redis)
@@ -4801,7 +4801,7 @@ async def _post_identity(redis, channel: str, pctx: dict) -> dict:
         if known.get("source") == "caption" and post_caption(pctx):
             try:
                 from app.database import AsyncSessionLocal as _ASL
-                from app.services import n8n_bridge as _svc
+                from app.services import messaging as _svc
                 from app.services import post_catalog as _pc
                 async with _ASL() as _db:
                     _cat = await _svc.catalog_items(_db, redis)
@@ -4812,7 +4812,7 @@ async def _post_identity(redis, channel: str, pctx: dict) -> dict:
             return known
     try:
         from app.database import AsyncSessionLocal
-        from app.services import n8n_bridge as svc
+        from app.services import messaging as svc
         from app.services import post_catalog
         async with AsyncSessionLocal() as db:
             catalog = await svc.catalog_items(db, redis)
@@ -5140,7 +5140,7 @@ async def _resolve_post_product(redis, channel: str, ext: str,
     cat: list = []
     if (not q and title) or known.get("bundle") or q:
         try:
-            from app.services import n8n_bridge as _svc
+            from app.services import messaging as _svc
             async with AsyncSessionLocal() as _db0:
                 cat = await _svc.catalog_items(_db0, redis)
         except Exception:
@@ -5460,7 +5460,7 @@ _SW_VERIFY_HOLD_POOL = [
 
 async def _run_comment_engage(redis, channel: str, comment: dict, own_pages: set) -> None:
     from app.database import AsyncSessionLocal
-    from app.services import n8n_bridge as svc
+    from app.services import messaging as svc
     from app.services.meta_send import like_comment, reply_to_comment, send_private_reply
 
     cid = comment.get("comment_id")

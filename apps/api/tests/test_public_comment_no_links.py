@@ -159,7 +159,7 @@ def test_whatsapp_is_not_touched_by_the_comment_guard(monkeypatch):
     async def fake_waba(num, text, context_wamid=None):
         sent.append(text)
 
-    import app.services.n8n_bridge as nb
+    import app.services.messaging as nb
     monkeypatch.setattr(nb, "_send_waba", fake_waba)
     body = "Order here 👉 https://bethanyhouse.co.ke/product/x?ref=AB12CD"
     asyncio.run(meta_send.send_to_channel("whatsapp", "254712345678", body))

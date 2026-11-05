@@ -215,7 +215,7 @@ def test_the_single_name_rungs_still_answer(monkeypatch):
 def _resolver_env(monkeypatch):
     async def fake_catalog(db, redis_):
         return CATALOG
-    monkeypatch.setattr("app.services.n8n_bridge.catalog_items", fake_catalog)
+    monkeypatch.setattr("app.services.messaging.catalog_items", fake_catalog)
 
     class _DB:
         async def __aenter__(self): return self

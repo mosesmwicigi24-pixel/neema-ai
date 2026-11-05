@@ -111,7 +111,7 @@ def test_voice_note_end_to_end_real_download_real_agent_turn(rig, clips, monkeyp
     from app.agent.llm import FakeLLM
     from app.models.message import Message, MsgDirection
     from app.routers import media as media_router
-    from app.services import n8n_bridge, wa_native
+    from app.services import messaging, wa_native
 
     wa, wamid = "254711100001", "wamid.C10VOICE1"
     with open(clips[3], "rb") as f:
@@ -146,7 +146,7 @@ def test_voice_note_end_to_end_real_download_real_agent_turn(rig, clips, monkeyp
     async def send_waba(to, text, *a, **k):
         sent.append((to, text))
         return "wamid.OUT1"
-    monkeypatch.setattr(n8n_bridge, "_send_waba", send_waba)
+    monkeypatch.setattr(messaging, "_send_waba", send_waba)
 
     async def go():
         n, failed = await wa_native.handle_webhook(wa_payload(wa, wamid), rig.redis)

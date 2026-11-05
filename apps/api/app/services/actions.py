@@ -123,7 +123,7 @@ async def _send_followup_template(db, redis, conv, action) -> bool:
     approved utility template (name / order / status placeholders). True when
     it went out."""
     import re
-    from app.services import n8n_bridge as svc
+    from app.services import messaging as svc
     try:
         m = re.search(r"[Oo]rder\s+([A-Za-z0-9-]+)", action.reason or "")
         number = m.group(1) if m else "your recent order"
@@ -221,7 +221,7 @@ async def _send(db, redis, conv, text: str) -> None:
     """Deliver, then record. Raises only when delivery failed: once the
     message is out, a failure to record it is logged, never raised — a raise
     there would put the action back in the queue and send it twice."""
-    from app.services import n8n_bridge as svc
+    from app.services import messaging as svc
     recipient = conv.wa_id if conv.channel == "whatsapp" else conv.external_id
     if conv.channel == "whatsapp":
         wamid = await svc._send_waba(recipient, text)

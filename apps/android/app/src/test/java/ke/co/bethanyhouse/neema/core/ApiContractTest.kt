@@ -198,7 +198,7 @@ class ApiContractTest {
         assertEquals("delivered", o.status)
     }
 
-    // ── GET /admin/catalog — admin.py list_catalog → n8n_bridge.catalog_items ─
+    // ── GET /admin/catalog — admin.py list_catalog → messaging.catalog_items ─
 
     @Test
     fun catalogSendsCategoryAndSearch() = runBlocking {

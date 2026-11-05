@@ -200,7 +200,7 @@ async def _notify_agents(redis, title: str, body: str, conv=None) -> None:
 
 
 async def _celebrate(db, redis, conv, event: dict) -> dict:
-    from app.services import n8n_bridge as svc
+    from app.services import messaging as svc
     brief = brief_for(event)
     if not brief:
         return {"handled": False, "reason": "unknown_event"}

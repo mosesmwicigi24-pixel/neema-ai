@@ -206,11 +206,11 @@ def test_messenger_and_instagram_sends_lose_their_asterisks(monkeypatch):
 
 def test_whatsapp_keeps_its_single_bold(monkeypatch):
     sent = []
-    from app.services import n8n_bridge
+    from app.services import messaging
 
     async def fake_waba(to, text, context_wamid=None):
         sent.append(text)
         return "wamid.1"
-    monkeypatch.setattr(n8n_bridge, "_send_waba", fake_waba)
+    monkeypatch.setattr(messaging, "_send_waba", fake_waba)
     asyncio.run(meta_send.send_to_channel("whatsapp", "+254700", "*Cassock* — KES 12,000"))
     assert sent == ["*Cassock* — KES 12,000"]

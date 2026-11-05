@@ -139,7 +139,7 @@ object Fixtures {
 
     /**
      * One hub product as GET /admin/catalog sends it — routers/admin.py
-     * `list_catalog` → services/n8n_bridge.py `catalog_items` →
+     * `list_catalog` → services/messaging.py `catalog_items` →
      * core/hub_client.py `fetch_hub_catalog` / `_map_product` (+ `_map_variant`,
      * `_apply_variant_pricing`, core/variants.py `label_variants`). No local
      * `id`: hub rows are keyed by `hub_product_id`; `unit` is always "".
@@ -175,7 +175,7 @@ object Fixtures {
     ]"""
 
     /**
-     * GET /admin/catalog while the hub is unreachable — n8n_bridge.py
+     * GET /admin/catalog while the hub is unreachable — messaging.py
      * `catalog_items` falls back to the local `catalog` table and maps each row
      * to eight keys only: no `id`, no `hub_product_id`, and `category` / `unit`
      * / `description` as "" rather than null.

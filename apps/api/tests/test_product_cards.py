@@ -7,7 +7,7 @@ import asyncio
 
 import app.main  # noqa: F401 — registers all SQLAlchemy models
 import app.agent.tools as tools
-import app.services.n8n_bridge as svc
+import app.services.messaging as svc
 from app.agent.tools import ToolContext
 from app.core.config import settings
 

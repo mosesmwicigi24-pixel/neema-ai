@@ -276,7 +276,7 @@ def test_whatsapp_media_send_hands_meta_a_24h_signed_link(monkeypatch):
 
 
 def test_whatsapp_image_audio_and_product_card_links_are_signed_for_meta(monkeypatch):
-    from app.services import n8n_bridge as svc
+    from app.services import messaging as svc
     sent = _capture_httpx(monkeypatch)
     img = "https://n.x/api/admin/media/img_abc.jpg"
     run(svc._send_waba_image("254700000001", img))

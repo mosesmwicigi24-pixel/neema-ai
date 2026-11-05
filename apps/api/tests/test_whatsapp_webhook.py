@@ -1,7 +1,6 @@
 """WhatsApp Cloud API front door: native in-process pipeline + calls tap.
 
-Every delivery is parsed/persisted/answered by wa_native (the n8n forward was
-retired 2026-07-30); inbound calls must ring the dashboard and dedupe on Meta
+Every delivery is parsed/persisted/answered by wa_native; inbound calls must ring the dashboard and dedupe on Meta
 retries, and a failed ingest must bounce so Meta redelivers.
 """
 import asyncio

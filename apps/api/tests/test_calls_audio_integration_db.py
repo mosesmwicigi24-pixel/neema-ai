@@ -129,8 +129,8 @@ def test_native_live_event_carries_every_field_the_bubble_needs(env, monkeypatch
     """The native WhatsApp path's new_message: id + direction + created_at +
     meta + transcriptStatus in ONE event (the two halves each added some)."""
     import asyncio
-    from app.schemas.n8n import MessageDto
-    from app.services import n8n_bridge as svc
+    from app.schemas.bridge import MessageDto
+    from app.services import messaging as svc
     import app.database as database
 
     sent = []

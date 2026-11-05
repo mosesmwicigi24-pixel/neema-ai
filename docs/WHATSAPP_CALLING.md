@@ -67,17 +67,15 @@ returns duration + status.
 2. **Enable Calling** on the number: WhatsApp Manager → the number → Calling →
    enable + accept calling terms.
 3. **Subscribe the `calls` webhook field.**
-4. **Webhook routing:** WhatsApp inbound currently flows WABA → **n8n** → our API.
-   Call signaling is real-time and must NOT detour through n8n. Repoint the WABA
-   webhook to our API directly (our API forwards `messages` to n8n if still
-   needed, handles `calls` itself), OR have n8n forward `calls` with minimal
-   latency. Direct-to-us is strongly preferred.
+4. **Webhook routing:** our API is the WABA webhook (`/api/wa/webhook`); it
+   handles `messages` and `calls` itself, so call signaling never detours
+   through anything else. *(Done.)*
 5. **TURN server**: stand up `coturn` (a VPS box + a domain/IP + TLS). Modest
    resources; needed for reliable media across mobile networks.
 
 ## ✅ Phase 0 DONE (2026-07-13) — pipe proven with a real call
-- Our API is the WABA front door (`/api/wa/webhook`), transparent-forwarding to
-  n8n (`whatsapp_forward_url`); messaging verified unbroken. Verify token
+- Our API is the WABA front door (`/api/wa/webhook`); messaging verified
+  unbroken. Verify token
   is the server setting `meta_verify_token` (env), never written in docs. `calls` + `messages` fields subscribed. "Allow voice
   calls" enabled; call hours Mon–Sat 08:00–19:00 Africa/Nairobi.
 - A REAL call (Pastor Mwicigi 254700706875 → 254785490805) hit the webhook and

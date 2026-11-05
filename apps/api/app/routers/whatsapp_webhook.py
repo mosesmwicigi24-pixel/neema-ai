@@ -1,9 +1,8 @@
 """WhatsApp Cloud API webhook — the front door.
 
 Our API is the WABA callback URL. Every inbound event is processed NATIVELY
-in-process (app/services/wa_native.py: parse, persist, debounce, reply) — the
-n8n forward this door originally fronted was retired on 2026-07-30. The door
-also taps the `calls` webhook field to drive voice calling — parsing
+in-process (app/services/wa_native.py: parse, persist, debounce, reply). The
+door also taps the `calls` webhook field to drive voice calling — parsing
 `connect`/`terminate` and ringing the dashboard over the existing WebSocket
 (signaling only; call audio is a browser↔Meta WebRTC connection).
 

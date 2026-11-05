@@ -267,8 +267,8 @@ async def lifespan(app: FastAPI):
         _lg.addHandler(_h)
         _lg.propagate = False
 
-    # One unambiguous boot line for the WhatsApp pipeline — native is the only
-    # mode since n8n's retirement (2026-07-30).
+    # One unambiguous boot line for the WhatsApp pipeline — native in-process
+    # is the only mode.
     logging.getLogger("neema.wa").info(
         "WhatsApp pipeline: native in-process (wa_native)")
 
@@ -527,8 +527,9 @@ app.include_router(hub_events.router, prefix="/api/hub", tags=["Hub Events"])
 app.include_router(order_link.router, prefix="/api", tags=["Order Links"])
 app.include_router(roles.router,      prefix="/api/admin", tags=["Roles"])
 app.include_router(hub_bridge.router, prefix="/api/hub",   tags=["Hub Bridge"])
-# Legacy mount: the hub's plugin still posts on the n8n-era prefix + header —
-# drop this line (and the X-N8N-Secret header support) once the hub migrates.
+# Alias mount: the hub's plugin is still configured with this older prefix and
+# the X-N8N-Secret header. Same router, same code; drop this line (and the
+# header param in hub_bridge.verify_hub_secret) once the hub is repointed.
 app.include_router(hub_bridge.router, prefix="/api/n8n",   tags=["Hub Bridge (legacy prefix)"])
 app.include_router(meta_webhook.router, prefix="/api/meta", tags=["Meta Webhook"])
 app.include_router(whatsapp_webhook.router, prefix="/api/wa", tags=["WhatsApp Webhook"])

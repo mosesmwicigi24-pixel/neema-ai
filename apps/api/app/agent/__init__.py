@@ -1,8 +1,7 @@
-"""Tier 2 — the intelligent, tool-calling Neema agent.
+"""The intelligent, tool-calling Neema agent.
 
-Unlike Tier 1 (a single GPT call wrapped in ~40 deterministic n8n nodes that
-pre-chew context and post-process brittle flags), Tier 2 is a real agent loop in
-the backend: the model reasons over the conversation and DECIDES when to act by
+A real agent loop in the backend (historically "Tier 2", which the tier2_
+settings prefix still reflects): the model reasons over the conversation and DECIDES when to act by
 calling tools (search the hub catalogue, build a cart, create the order, share
 the payment link). There is no confirmation regex — the model calls
 `create_order` when the customer confirms — which removes an entire class of

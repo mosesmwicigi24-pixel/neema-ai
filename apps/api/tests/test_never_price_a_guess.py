@@ -148,7 +148,7 @@ def test_a_size_word_that_is_the_product_is_kept():
 def _resolver_env(monkeypatch, redis):
     async def fake_catalog(db, redis_):
         return CATALOG
-    monkeypatch.setattr("app.services.n8n_bridge.catalog_items", fake_catalog)
+    monkeypatch.setattr("app.services.messaging.catalog_items", fake_catalog)
 
     class _DB:
         async def __aenter__(self): return self
@@ -369,7 +369,7 @@ def test_the_team_override_is_the_strongest_rung(monkeypatch):
 
     async def _catalog(db, redis):
         return CATALOG
-    monkeypatch.setattr("app.services.n8n_bridge.catalog_items", _catalog)
+    monkeypatch.setattr("app.services.messaging.catalog_items", _catalog)
     stored = {}
 
     async def _remember(redis, channel, pid, product, thumb=""):

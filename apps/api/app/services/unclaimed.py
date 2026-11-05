@@ -106,7 +106,7 @@ async def _ring(redis, conv, ext: str, said: str | None, mins: int) -> None:
 
 async def _send(redis, conv, ext: str, text: str, page_id) -> None:
     from app.database import AsyncSessionLocal
-    from app.services import n8n_bridge as svc
+    from app.services import messaging as svc
     if conv.channel == "whatsapp":
         wamid = await svc._send_waba(ext, text)
         async with AsyncSessionLocal() as db:

@@ -379,7 +379,7 @@ data class OrderItem(
  */
 object OrderItemsSerializer : JsonTransformingSerializer<List<OrderItem>>(ListSerializer(OrderItem.serializer())) {
     private val leadingNumber = Regex("^-?\\d+(?:\\.\\d+)?")
-    // n8n rows can carry text quantities ("2 pcs"): read the leading number.
+    // Older rows can carry text quantities ("2 pcs"): read the leading number.
     private fun num(e: JsonElement?): Double? = (e as? JsonPrimitive)?.let { p ->
         if (p is JsonNull) null else p.content.trim().let { t -> t.toDoubleOrNull() ?: leadingNumber.find(t)?.value?.toDoubleOrNull() }
     }

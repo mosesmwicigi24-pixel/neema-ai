@@ -5,7 +5,7 @@ from app.models.conversation import Conversation, InterceptMode
 from app.models.message import Message, MsgDirection, MsgSender
 from app.models.intercept import Intercept, InterceptAction
 from app.models.agent import Agent
-from app.services.n8n_bridge import _send_waba, _broadcast
+from app.services.messaging import _send_waba, _broadcast
 from app.services.meta_send import send_to_channel, META_CHANNELS
 
 
@@ -308,7 +308,7 @@ async def record_escalation(
     """
     Write an `escalated` Intercept row (no agent — AI-triggered).
     Also write a follow-up `flag` row to mark the conversation Needs Attention.
-    Called from n8n_bridge when the AI cannot satisfy the customer.
+    Called from messaging when the AI cannot satisfy the customer.
 
     Intercept rows are timestamped 1 second after the most recent inbound
     message so they always sort below it in the conversation thread.

@@ -245,7 +245,7 @@ async def web_chat(body: WebChatIn, request: Request, db: AsyncSession = Depends
 
     # Persist + broadcast the reply (same path the WhatsApp agent uses).
     try:
-        from app.services.n8n_bridge import save_outbound_message
+        from app.services.messaging import save_outbound_message
         await save_outbound_message(db, redis, wa_id, reply)
     except Exception:
         _log.warning("web chat: saving outbound failed for %s", wa_id)

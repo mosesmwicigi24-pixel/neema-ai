@@ -1,4 +1,4 @@
-from pydantic import field_validator
+from pydantic import AliasChoices, Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 class Settings(BaseSettings):
@@ -107,10 +107,11 @@ class Settings(BaseSettings):
     turn_credential: str = ""
     stun_url: str = "stun:stun.l.google.com:19302"
     wa_invite_lang: str = "en"
-    # Shared secret for the HUB's pushes on /api/n8n/* (payment, order-event,
-    # customer-history). n8n itself is retired — the name survives because the
-    # hub's plugin still sends the X-N8N-SECRET header on those legacy paths.
-    n8n_api_secret: str = ""
+    # Shared secret for the HUB's pushes (payment, order-event, customer-history
+    # on /api/hub/*). Env: HUB_BRIDGE_SECRET; the older N8N_API_SECRET name is
+    # still read so an existing box .env keeps working without an edit.
+    hub_bridge_secret: str = Field(
+        "", validation_alias=AliasChoices("HUB_BRIDGE_SECRET", "N8N_API_SECRET"))
     # ── Meta Messenger / Instagram webhook (multichannel ingestion) ──────────
     # sms_inbound_token: bearer token the phone-side SMS forwarder sends to
     # POST /api/sms/inbound (routers/sms.py). Empty = the bridge is disabled.
@@ -227,12 +228,12 @@ class Settings(BaseSettings):
     # webhook stays ingestion-only until you flip it on. Needs meta_page_token set.
     meta_agent_reply: bool = False
     # WhatsApp front door: our API is the Cloud API callback; every event is
-    # processed in-process by app/services/wa_native.py (the n8n pipeline this
-    # replaced was retired 2026-07-30). The webhook verify token falls back to
+    # processed in-process by app/services/wa_native.py. The webhook verify
+    # token falls back to
     # meta_verify_token if unset (must match the value pasted into the Meta
     # app's WhatsApp webhook config).
-    # Rapid-fire messages are combined for this long and answered ONCE. The
-    # retired n8n ran 15s; raised to 30s (owner, 2026-08-12) so a burst of
+    # Rapid-fire messages are combined for this long and answered ONCE. Was
+    # 15s; raised to 30s (owner, 2026-08-12) so a burst of
     # enquiries merges into ONE model call — half the turns on a typing
     # customer, and one coherent answer instead of two overlapping ones.
     whatsapp_debounce_seconds: int = 30
@@ -378,8 +379,8 @@ class Settings(BaseSettings):
     hub_push_orders: bool = True     # push confirmed WhatsApp orders into the hub (Part B)
     hub_relay_receipt: bool = True   # WhatsApp the customer the receipt/payment link (Loop C)
     hub_order_status_ttl: int = 60   # seconds to cache a hub order's live status (Loop C)
-    # ── The agent (tool-calling; the only brain since n8n's Tier 1 retired —
-    # the tier2_ prefix is the historical name, kept to spare a box-.env rename) ──
+    # ── The agent (tool-calling; the tier2_ prefix is the historical name of
+    # these settings, kept to spare a box-.env rename) ──
     anthropic_api_key: str = ""
     # The 5.5 generation (owner, 2026-10-30: "go ahead with all"): Sonnet 5.5
     # at Sonnet 5's price with cache reads at half, Haiku 5.5 at a tenth of

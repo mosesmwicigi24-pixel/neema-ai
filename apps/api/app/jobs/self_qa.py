@@ -233,9 +233,9 @@ async def compose_standup(db) -> str:
     except Exception:
         pass
 
-    # Hub-bridge migration watch: authenticated pushes still arriving on the
-    # legacy /api/n8n surface. When this line stays absent for ~a week after
-    # the hub plugin switches, dropping the legacy mount is evidence-backed
+    # Hub-bridge watch: authenticated pushes still arriving on the older
+    # /api/n8n alias. When this line stays absent for ~a week after the hub
+    # plugin is repointed, dropping the alias mount is evidence-backed
     # (docs/HUB_BRIDGE_MIGRATION.md).
     try:
         from app.main import app as _app
@@ -245,9 +245,9 @@ async def compose_standup(db) -> str:
             _n = int(await _redis.get(f"bridge:legacy:{_y}") or 0)
             if _n:
                 lines.append(
-                    f"🌉 Hub bridge: {_n} push(es) yesterday still used the legacy "
-                    "/api/n8n path — the hub plugin hasn't fully migrated "
-                    "(docs/HUB_BRIDGE_MIGRATION.md).")
+                    f"🌉 Hub bridge: {_n} push(es) yesterday still used the older "
+                    "/api/n8n alias — the hub plugin hasn't been repointed to "
+                    "/api/hub yet (docs/HUB_BRIDGE_MIGRATION.md).")
     except Exception:
         pass
 

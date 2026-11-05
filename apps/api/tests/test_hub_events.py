@@ -91,7 +91,7 @@ def test_celebrate_routes_and_paid_guard(monkeypatch):
     monkeypatch.setattr(he, "_within_window", fake_within)
     monkeypatch.setattr(he, "_compose_announcement", fake_compose)
     monkeypatch.setattr(he, "is_quiet_hours", lambda now=None: False)
-    from app.services import n8n_bridge as svc
+    from app.services import messaging as svc
     monkeypatch.setattr(svc, "_send_waba", fake_send)
     monkeypatch.setattr(svc, "save_outbound_message", fake_save)
 
@@ -116,7 +116,7 @@ def test_outside_window_uses_template_or_human(monkeypatch):
     monkeypatch.setattr(he, "_within_window", fake_within)
     monkeypatch.setattr(he, "is_quiet_hours", lambda now=None: False)
     tsent = []
-    from app.services import n8n_bridge as svc
+    from app.services import messaging as svc
     async def fake_tmpl(to, name, lang, params=None):
         tsent.append((to, name, lang, params))
         return {"messages": [{"id": "wamid.TPL1"}]}
@@ -188,7 +188,7 @@ def test_deferred_paid_event_sends_in_the_morning(monkeypatch):
     async def fake_save(db, redis, to, text, waba_msg_id=None): pass
     monkeypatch.setattr(he, "_within_window", fake_within)
     monkeypatch.setattr(he, "_compose_announcement", fake_compose)
-    from app.services import n8n_bridge as svc
+    from app.services import messaging as svc
     monkeypatch.setattr(svc, "_send_waba", fake_send)
     monkeypatch.setattr(svc, "save_outbound_message", fake_save)
 

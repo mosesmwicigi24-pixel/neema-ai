@@ -30,7 +30,7 @@ def rig(fresh_db, monkeypatch):  # noqa: F811
     from sqlalchemy.pool import NullPool
     import app.database as database
     from app.core.config import settings
-    from app.services import call_log, meta_send, n8n_bridge, recording_notice
+    from app.services import call_log, meta_send, messaging, recording_notice
 
     async_url = fresh_db.replace("postgresql+psycopg2://", "postgresql+asyncpg://")
     maker = async_sessionmaker(create_async_engine(async_url, poolclass=NullPool),
@@ -55,7 +55,7 @@ def rig(fresh_db, monkeypatch):  # noqa: F811
     async def no_page(channel, ext):
         return None
 
-    monkeypatch.setattr(n8n_bridge, "_send_waba", fake_waba)
+    monkeypatch.setattr(messaging, "_send_waba", fake_waba)
     monkeypatch.setattr(meta_send, "send_meta_message", fake_meta)
     monkeypatch.setattr(meta_send, "page_of_contact", no_page)
 

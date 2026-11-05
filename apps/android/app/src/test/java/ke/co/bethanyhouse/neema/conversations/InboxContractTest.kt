@@ -569,7 +569,7 @@ class InboxContractTest {
         socket(dash, """{"type":"new_message","conversationId":"k2","channel":"messenger","sender":"user","text":"Still there?","mediaType":null,"mediaUrl":null}""")
         val m = vm.thread.value.messages["k2"]!!.last()
         assertEquals("Still there?", m.body); assertTrue(m.inbound); assertEquals("user", m.sender)
-        // n8n_bridge's inbound WhatsApp frame: media fields, no id / direction.
+        // messaging's inbound WhatsApp frame: media fields, no id / direction.
         socket(dash, """{"type":"new_message","conversationId":"k2","waId":"250788123456","sender":"user","text":"[image]","mediaType":"image","mediaId":"wamid.M2","mediaUrl":"https://x/p.jpg","mediaCaption":null,"mimeType":"image/jpeg","filename":null}""")
         val img = vm.thread.value.messages["k2"]!!.last()
         assertTrue(img.inbound); assertEquals("image/jpeg", img.mimeType); assertEquals("wamid.M2", img.mediaId)
@@ -608,7 +608,7 @@ class InboxContractTest {
         assertEquals(2, vm.thread.value.messages["k1"]!!.count { it.body == "ok" })
     }
 
-    /** The AI reply frame (n8n_bridge) carries the DB id and, for voice, the media. */
+    /** The AI reply frame (messaging) carries the DB id and, for voice, the media. */
     @Test fun ws_aiReplyAndTranslationsAndPills() {
         val (dash, vm) = vm()
         vm.select("k1")

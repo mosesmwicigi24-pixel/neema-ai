@@ -134,9 +134,9 @@ enum ServerRoutes {
         ("POST", "/api/manychat/webhook"),  // manychat
         ("POST", "/api/meta/data-deletion"),  // meta_webhook
         ("POST", "/api/meta/webhook"),  // meta_webhook
-        ("POST", "/api/n8n/customer-history"),  // hub_bridge
-        ("POST", "/api/n8n/order-event"),  // hub_bridge
-        ("POST", "/api/n8n/payment"),  // hub_bridge
+        ("POST", "/api/n8n/customer-history"),  // hub_bridge (alias prefix)
+        ("POST", "/api/n8n/order-event"),  // hub_bridge (alias prefix)
+        ("POST", "/api/n8n/payment"),  // hub_bridge (alias prefix)
         ("POST", "/api/public/order/measure"),  // public
         ("POST", "/api/sms/inbound"),  // sms
         ("POST", "/api/tiktok/webhook/events"),  // tiktok_webhook

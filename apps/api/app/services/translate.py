@@ -347,7 +347,7 @@ async def _translate_thread(redis, conv_id: str, ids: list[str]) -> int:
             try:
                 u = resp.usage or {}
                 from app.services import ai_budget
-                from app.services import n8n_bridge as svc
+                from app.services import messaging as svc
                 totals = {k: int(u.get(k, 0) or 0) for k in
                           ("input_tokens", "output_tokens", "cache_read_tokens",
                            "cache_write_tokens", "cache_write_1h_tokens")}
@@ -361,7 +361,7 @@ async def _translate_thread(redis, conv_id: str, ids: list[str]) -> int:
         # appear in the open thread a beat after it loads.
         if done and redis is not None:
             try:
-                from app.services.n8n_bridge import _broadcast
+                from app.services.messaging import _broadcast
                 await _broadcast(redis, conv_id, {
                     "type": "translations", "conversationId": conv_id,
                     "items": done,
@@ -479,7 +479,7 @@ async def translate_reply(db, redis, conv_id, text: str) -> dict:
                    "lang": (str(obj.get("lang") or lang or "").strip()[:24] or None)}
         try:
             u = resp.usage or {}
-            from app.services import n8n_bridge as svc
+            from app.services import messaging as svc
             totals = {k: int(u.get(k, 0) or 0) for k in
                       ("input_tokens", "output_tokens", "cache_read_tokens",
                        "cache_write_tokens", "cache_write_1h_tokens")}

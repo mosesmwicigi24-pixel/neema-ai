@@ -29,7 +29,7 @@ def pay(fresh_db, monkeypatch):  # noqa: F811
     from sqlalchemy.pool import NullPool
     from app.jobs import payment_followup
     from app.core import hub_client
-    from app.services import n8n_bridge, meta_send
+    from app.services import messaging, meta_send
 
     eng = sa.create_engine(fresh_db)
     with eng.begin() as c:
@@ -56,7 +56,7 @@ def pay(fresh_db, monkeypatch):  # noqa: F811
 
     async def meta(channel, to, text, *a, **k):
         sent.append((to, text))
-    monkeypatch.setattr(n8n_bridge, "_send_waba", waba)
+    monkeypatch.setattr(messaging, "_send_waba", waba)
     monkeypatch.setattr(meta_send, "send_to_channel", meta)
     return {"maker": maker, "sent": sent, "hub": hub_states}
 

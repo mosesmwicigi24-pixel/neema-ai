@@ -981,7 +981,7 @@ async def sweep_page_posts(db, redis, limit: int = 25) -> dict:
     Returns {checked, resolved, unresolved} and stores the unresolved count."""
     from app.agent.runtime import _recall_post_product, _remember_post_product
     from app.routers.meta_webhook import _post_context
-    from app.services import n8n_bridge as svc
+    from app.services import messaging as svc
 
     page_id = (settings.meta_page_id or "").split(",")[0].strip()
     if not page_id or not settings.meta_page_token:

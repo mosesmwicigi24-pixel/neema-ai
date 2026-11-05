@@ -116,7 +116,7 @@ class InboxLiveTest {
         val m = vm.msgs("c7").last()
         assertEquals("Hello from the website", m.text); assertEquals("inbound", m.direction); assertEquals("user", m.sender)
         assertEquals("c7", vm.rows.value.first().rep.id)
-        // n8n_bridge.save_outbound_message: the Tier-2 agent's WhatsApp reply.
+        // messaging.save_outbound_message: the Tier-2 agent's WhatsApp reply.
         frame("""{"type":"message","conversationId":"c7","waId":"web_3fa9c1e20b7d4c5a9e11","direction":"outbound","text":"Yes — we ship to Kampala."}""")
         val r = vm.msgs("c7").last()
         assertEquals("outbound", r.direction); assertEquals("ai", r.sender)

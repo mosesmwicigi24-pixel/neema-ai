@@ -1,9 +1,9 @@
 """Turn a customer's inbound image into a Claude vision block for the Tier 2 agent.
 
 Two sources, one loader:
-- WhatsApp: n8n downloads every inbound media file to /var/neema/media/{id}{ext}
-  — the same container the agent runs in — so we map the stored URL back to the
-  local file and base64 it.
+- WhatsApp: the native pipeline (services/wa_native) downloads every inbound
+  media file to /var/neema/media/{id}{ext} — the same container the agent runs
+  in — so we map the stored URL back to the local file and base64 it.
 - Messenger/Instagram/Facebook: the webhook hands us a signed Meta CDN URL (the
   re-host to /var/neema/media runs concurrently and may not have finished), and
   comment engagement hands us a post-thumbnail URL — both remote. When the URL
@@ -11,7 +11,7 @@ Two sources, one loader:
   type guards.
 
 Either way the agent SEES the photo natively (Claude vision) — no OCR, no
-separate vision service. Voice notes need no handling here: n8n already
+separate vision service. Voice notes need no handling here: services/voice_notes
 transcribes them into the message text the agent reads.
 
 `load_image_block` does blocking I/O (disk or network) — async callers must run

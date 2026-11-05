@@ -634,7 +634,7 @@ async def mark_conversation_read(conv_id: UUID, request: Request,
     # Only a read that changed a count is news to the other screens.
     if redis is not None and was_unread:
         try:
-            from app.services.n8n_bridge import _broadcast
+            from app.services.messaging import _broadcast
             await _broadcast(redis, "agents:all", {
                 "event": "inbox_read", "type": "conversation_read",
                 "conversationId": str(conv.id), "by": agent.name,
@@ -1786,7 +1786,7 @@ async def answer_through_neema(conv_id: str, request: Request, body: dict,
         read_only=True)).strip()
     if not text:
         raise HTTPException(status_code=502, detail="Neema could not compose the answer")
-    from app.services import n8n_bridge as svc
+    from app.services import messaging as svc
     if conv.channel == "whatsapp":
         wamid = await svc._send_waba(key, text)
         await svc.save_outbound_message(db, request.app.state.redis, key, text,
@@ -1816,7 +1816,7 @@ async def set_post_product(post_id: str, request: Request, body: dict,
     valve behind the deterministic ladder (caption slug/alias → image
     fingerprint): even a rare miss is a one-call fix, not a support thread."""
     from app.agent.runtime import _remember_post_product
-    from app.services import n8n_bridge as svc
+    from app.services import messaging as svc
     from app.services.post_catalog import product_from_caption
     q = (body.get("product") or "").strip()
     channel = (body.get("channel") or "facebook").strip()
@@ -2523,7 +2523,7 @@ async def catalog_price_audit(
     a price — it says which rows to fix in the hub.
     """
     from app.core.config import settings
-    from app.services import n8n_bridge as svc
+    from app.services import messaging as svc
     from app.services.price_audit import audit
     items = await svc.catalog_items(db, request.app.state.redis)
     return audit(items, settings.usd_kes_rate or 100)
@@ -2544,7 +2544,7 @@ async def list_catalog(
     table if the hub is unreachable. Read-only here: products are maintained in
     the hub, so operators see exactly what the agent quotes.
     """
-    from app.services import n8n_bridge as svc
+    from app.services import messaging as svc
     items = await svc.catalog_items(db, request.app.state.redis)
     if category:
         items = [i for i in items if (i.get("category") or "") == category]
@@ -2850,7 +2850,7 @@ async def whatsapp_invite(
     from app.core.phone import is_plausible_phone
     from app.services.identity import resolve_or_create_person
     from app.services.channel import get_or_create_conversation
-    from app.services import n8n_bridge as bridge
+    from app.services import messaging as bridge
     from app.models.message import Message, MsgDirection, MsgSender
     from app.core.config import settings
 

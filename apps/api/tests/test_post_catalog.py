@@ -157,7 +157,7 @@ def test_sweep_resolves_and_counts(monkeypatch):
     monkeypatch.setattr("app.routers.meta_webhook._post_context", _ctx)
 
     async def _catalog(db, redis): return _CATALOG
-    monkeypatch.setattr("app.services.n8n_bridge.catalog_items", _catalog)
+    monkeypatch.setattr("app.services.messaging.catalog_items", _catalog)
 
     remembered = {}
     async def _recall(redis, channel, pid):
@@ -204,7 +204,7 @@ def test_team_override_sets_the_post_identity(monkeypatch):
     from app.routers import admin
 
     async def _catalog(db, redis): return _CATALOG
-    monkeypatch.setattr("app.services.n8n_bridge.catalog_items", _catalog)
+    monkeypatch.setattr("app.services.messaging.catalog_items", _catalog)
     stored = {}
     async def _remember(redis, channel, pid, product, thumb=""):
         stored[pid] = (channel, product.get("slug"))

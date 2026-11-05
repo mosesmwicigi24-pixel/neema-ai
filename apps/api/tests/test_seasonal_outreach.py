@@ -33,8 +33,8 @@ def test_outside_the_window_with_no_template_is_listed_never_sent(monkeypatch):
     async def boom(*a, **k):
         sent["n"] += 1
 
-    monkeypatch.setattr("app.services.n8n_bridge._send_waba", boom)
-    monkeypatch.setattr("app.services.n8n_bridge.send_wa_template", boom)
+    monkeypatch.setattr("app.services.messaging._send_waba", boom)
+    monkeypatch.setattr("app.services.messaging.send_wa_template", boom)
 
     r = asyncio.run(so._handle(None, _row(open_window=False), _season(), send=True))
     assert r["sent"] is False
@@ -54,8 +54,8 @@ def test_outside_the_window_uses_the_approved_template(monkeypatch):
     async def free_form_boom(*a, **k):
         raise AssertionError("free-form is illegal outside the 24h window")
 
-    monkeypatch.setattr("app.services.n8n_bridge.send_wa_template", fake_template)
-    monkeypatch.setattr("app.services.n8n_bridge._send_waba", free_form_boom)
+    monkeypatch.setattr("app.services.messaging.send_wa_template", fake_template)
+    monkeypatch.setattr("app.services.messaging._send_waba", free_form_boom)
 
     r = asyncio.run(so._handle(None, _row(open_window=False), _season(), send=True))
     assert r["sent"] is True and r["route"] == "template"
@@ -76,9 +76,9 @@ def test_inside_the_window_sends_a_warm_free_form_message(monkeypatch):
     async def template_boom(*a, **k):
         raise AssertionError("no template needed inside the window")
 
-    monkeypatch.setattr("app.services.n8n_bridge._send_waba", fake_wa)
-    monkeypatch.setattr("app.services.n8n_bridge.save_outbound_message", fake_save)
-    monkeypatch.setattr("app.services.n8n_bridge.send_wa_template", template_boom)
+    monkeypatch.setattr("app.services.messaging._send_waba", fake_wa)
+    monkeypatch.setattr("app.services.messaging.save_outbound_message", fake_save)
+    monkeypatch.setattr("app.services.messaging.send_wa_template", template_boom)
 
     r = asyncio.run(so._handle(None, _row(open_window=True), _season(), send=True))
     assert r["sent"] is True and r["route"] == "free-form"
@@ -144,7 +144,7 @@ def test_once_per_customer_per_season_per_year(monkeypatch):
     async def noop(*a, **k):
         pass
 
-    monkeypatch.setattr("app.services.n8n_bridge.send_wa_template", noop)
+    monkeypatch.setattr("app.services.messaging.send_wa_template", noop)
     r = _R()
     first = asyncio.run(so._handle(r, _row(), _season(), send=True))
     second = asyncio.run(so._handle(r, _row(), _season(), send=True))

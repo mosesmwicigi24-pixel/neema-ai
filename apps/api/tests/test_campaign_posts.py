@@ -259,7 +259,7 @@ def _engage(monkeypatch, text, *, reading, caption=OWNER_CAPTION, identity=None,
     the building: the public text, the DM, the human hand-off, the like, what
     run_turn was handed, and what was recorded as the post's identity."""
     import app.database as dbmod
-    from app.services import meta_send, n8n_bridge, post_catalog
+    from app.services import meta_send, messaging, post_catalog
     out = {"public": [], "dm": [], "human": [], "liked": [], "noted": [], "turn": None,
            "remembered": [], "saved": []}
     ident = dict(identity) if identity else {}
@@ -332,7 +332,7 @@ def _engage(monkeypatch, text, *, reading, caption=OWNER_CAPTION, identity=None,
     monkeypatch.setattr(meta_send, "reply_to_comment", reply_to_comment)
     monkeypatch.setattr(meta_send, "send_private_reply", send_private_reply)
     monkeypatch.setattr(meta_send, "like_comment", like_comment)
-    monkeypatch.setattr(n8n_bridge, "save_outbound_channel_message", save_outbound)
+    monkeypatch.setattr(messaging, "save_outbound_channel_message", save_outbound)
     monkeypatch.setattr(post_catalog, "identity_trusted",
                         lambda rec: bool((rec or {}).get("name")) and (rec or {}).get("source") == "caption")
     for n, f in (("read_comment", read_comment), ("run_turn", run_turn), ("_route_comment_to_human", route_human),

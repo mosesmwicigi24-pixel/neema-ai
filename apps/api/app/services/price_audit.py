@@ -143,7 +143,7 @@ async def health_summary(redis) -> dict:
             pass
     from app.core.config import settings
     from app.database import AsyncSessionLocal
-    from app.services import n8n_bridge as svc
+    from app.services import messaging as svc
     async with AsyncSessionLocal() as db:
         catalog = await svc.catalog_items(db, redis)
     out = health_summary_from(catalog, float(settings.usd_kes_rate or 100))

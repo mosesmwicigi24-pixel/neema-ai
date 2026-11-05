@@ -217,7 +217,7 @@ async def submit_measurement(
         lines.append(f"Notes: {notes}")
     text = "\n".join(lines)
 
-    from app.services.n8n_bridge import provision_user
+    from app.services.messaging import provision_user
     from app.services.channel import get_or_create_conversation
     from app.models.message import Message, MsgDirection, MsgSender
     from app.models.conversation import InterceptMode

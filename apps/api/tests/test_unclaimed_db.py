@@ -41,7 +41,7 @@ def _wire(monkeypatch, reply):
     async def _send_waba(to, text, **kw):
         sent.append((to, text))
         return f"wamid.{len(sent)}"
-    monkeypatch.setattr("app.services.n8n_bridge._send_waba", _send_waba)
+    monkeypatch.setattr("app.services.messaging._send_waba", _send_waba)
     return sent, _run_turn
 
 

@@ -18,7 +18,7 @@ def test_prompt_cache_discount():
 
 
 def test_display_name_and_unknown_model():
-    assert _norm("GPT-4.1") == "gpt-4.1"           # n8n display casing
+    assert _norm("GPT-4.1") == "gpt-4.1"           # display casing
     # unknown model falls back to a non-zero (conservative) cost, never $0
     assert estimate_cost_usd("some-future-model", 1000, 100) > 0
 

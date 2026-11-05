@@ -444,7 +444,7 @@ def guard_key(msg: Message) -> str:
 # ── one thread ───────────────────────────────────────────────────────────────
 
 async def _handle(redis, row: dict, *, send: bool, write: bool = True) -> dict:
-    from app.services import n8n_bridge as svc
+    from app.services import messaging as svc
     from app.services.meta_send import send_to_channel
 
     conv, to, last_in, last_out = row["conv"], row["to"], row["last_in"], row.get("last_out")

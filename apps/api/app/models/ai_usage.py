@@ -6,7 +6,7 @@ from app.models import Base
 
 
 class AiUsage(Base):
-    """One row per LLM call, logged by n8n via POST /api/n8n/usage.
+    """One row per LLM call, logged by the agent runtime.
 
     Makes token spend visible per conversation / workflow / model so cost
     optimizations can be measured instead of guessed at.

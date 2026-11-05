@@ -1,36 +1,26 @@
-"""Native WhatsApp ingestion — everything n8n's Tier 1 pipeline did, in-process.
+"""Native WhatsApp ingestion — THE WhatsApp pipeline, in-process.
 
-Gated by settings.whatsapp_native (default OFF): the front door keeps forwarding
-to n8n untouched until the flag is flipped, so cutover is one env var and
-rollback is flipping it back.
-
-What this replaces, and with what:
-  · n8n webhook receive + parse       → parse_events() on the raw payload the
-                                        front door ALREADY receives first
-  · message persistence (/api/n8n/message)
-                                      → the SAME svc.upsert_message() n8n calls —
-                                        conversation upsert, provision_user (name
-                                        + country), previews, broadcasts, and the
-                                        selective video/document escalation are
-                                        byte-for-byte identical
-  · debounce-buffer workflow          → a redis token buffer: rapid-fire messages
-                                        are combined for WHATSAPP_DEBOUNCE_SECONDS
-                                        and answered ONCE
-  · /profile → should_run_ai → reply  → reconcile_waref + runtime.schedule_reply
-                                        directly (pause + dedup guards included)
-  · voice-note transcription (OpenAI via n8n)
-                                      → call_transcribe's provider dispatch
-                                        (faster-whisper when installed, OpenAI
-                                        whisper-1 fallback when a key exists)
-  · product-image recognition (GPT-4o sub-workflow)
-                                      → nothing: Claude vision reads the image
-                                        NATIVELY in run_turn — the captioner was
-                                        already redundant spend
-  · TTS audio replies                 → DEFERRED (deliberate): voice notes get a
-                                        text reply. Revisit if customers miss it.
+Every WhatsApp webhook comes through here (routers/whatsapp_webhook →
+handle_webhook); there is no flag and no other path. The stages:
+  · receive + parse        → parse_events() on the raw Cloud API payload
+  · message persistence    → svc.upsert_message(): conversation upsert,
+                             provision_user (name + country), previews,
+                             broadcasts, and the selective video/document
+                             escalation
+  · debounce               → a redis token buffer: rapid-fire messages are
+                             combined for WHATSAPP_DEBOUNCE_SECONDS and
+                             answered ONCE
+  · should the agent reply → reconcile_waref + runtime.schedule_reply directly
+                             (pause + dedup guards included)
+  · voice notes            → call_transcribe's provider dispatch
+                             (faster-whisper when installed, OpenAI whisper-1
+                             fallback when a key exists)
+  · images                 → Claude vision reads the image NATIVELY in run_turn
+  · TTS audio replies      → DEFERRED (deliberate): voice notes get a text
+                             reply. Revisit if customers miss it.
 
 The wamid lands on the Message row through the existing front-door redis tap that
-upsert_message already recovers — native replies can quote customer messages.
+upsert_message already recovers — replies can quote customer messages.
 """
 from __future__ import annotations
 
@@ -67,7 +57,7 @@ def parse_events(payload: dict) -> list[dict]:
     """Flatten a Cloud API webhook payload into inbound message events.
 
     Statuses (sent/delivered/read receipts) are deliberately dropped — nothing in
-    the system consumes them today (parity with the n8n flow)."""
+    the system consumes them today."""
     out: list[dict] = []
     for entry in payload.get("entry", []) or []:
         for change in entry.get("changes", []) or []:
@@ -219,7 +209,7 @@ def media_ext(mime: str | None) -> str:
     /etc/mime.types) it answers None for audio/ogg — every voice note was
     saved as a bare `wa_<id>` from the native cutover (2026-07-30) until
     2026-10-05, and OpenAI refuses a file whose name carries no format. The
-    n8n-era table (routers/media._mime_to_ext) is the authority; the stdlib
+    table in routers/media._mime_to_ext is the authority; the stdlib
     is only the fallback for types that table doesn't know."""
     import mimetypes
     from app.routers.media import _mime_to_ext
@@ -318,8 +308,8 @@ async def _drain(redis, wa_id: str, token: int) -> tuple[str, dict | None] | Non
 
 def _is_doc_request(text: str | None) -> bool:
     """The customer wants a FILE we can't auto-produce (a PDF, a brochure, a
-    price list…) — a human sends those. Ports the n8n media-request detector's
-    document half (incl. its Swahili terms); PHOTO requests are NOT matched here
+    price list…) — a human sends those. Matches the document half of the
+    media-request vocabulary (incl. its Swahili terms); PHOTO requests are NOT matched here
     because Neema now sends product-photo cards herself."""
     import re
     low = (text or "").lower()
@@ -337,8 +327,7 @@ def _is_doc_request(text: str | None) -> bool:
 
 
 async def _escalate_doc_request(redis, wa_id: str, text: str) -> None:
-    """Flip the conversation to a human with a visible reason — the behaviour
-    the retired n8n media-escalation branch used to produce, now in-process."""
+    """Flip the conversation to a human with a visible reason."""
     from datetime import datetime, timezone
     from app.database import AsyncSessionLocal
     from app.models.conversation import Conversation, InterceptMode
@@ -491,8 +480,8 @@ async def _ingest_one(event: dict, redis) -> None:
 async def _ingest_guarded(event: dict, redis) -> None:
     """The actual ingest work — runs under _ingest_one's wamid guard."""
     from app.database import AsyncSessionLocal
-    from app.schemas.n8n import MessageDto
-    from app.services import n8n_bridge as svc
+    from app.schemas.bridge import MessageDto
+    from app.services import messaging as svc
 
     wa_id, wamid = event["wa_id"], event["wamid"]
     from app.services import voice_notes
@@ -557,12 +546,12 @@ async def _ingest_guarded(event: dict, redis) -> None:
         text = f'[replying to your message: "{q}"] {text}'.strip()
 
     async with AsyncSessionLocal() as db:
-        # Genuinely first contact? (The n8n version of this notification fired on
-        # EVERY text — its condition could never be false. This is the correct one.)
+        # Genuinely first contact? (Checked against the Conversation table, so
+        # the new-customer notification fires once, not on every text.)
         from app.models.conversation import Conversation
         is_new = (await db.execute(select(Conversation.id).where(
             Conversation.wa_id == svc._normalize_wa_id(wa_id)))).scalar_one_or_none() is None
-        # The SAME persistence n8n used: conversation upsert, provision_user
+        # The one persistence path: conversation upsert, provision_user
         # (name + country), previews, broadcast, video/document escalation.
         await svc.upsert_message(db, redis, dto, message_id=voice_id,
                                  transcript_status="queued" if voice_id else None)

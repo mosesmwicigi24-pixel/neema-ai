@@ -183,7 +183,7 @@ def guard_key(row: dict) -> str:
 
 
 async def _handle(redis, row: dict, *, send: bool, write: bool = True) -> dict:
-    from app.services import n8n_bridge as svc
+    from app.services import messaging as svc
     from app.services.meta_send import send_to_channel
 
     conv, to, items = row["conv"], row["to"], row["items"]

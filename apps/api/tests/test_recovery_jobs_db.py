@@ -174,7 +174,7 @@ def world(fresh_db, monkeypatch, off):  # noqa: F811
     from sqlalchemy.pool import NullPool
     from app.jobs import cart_recovery, payment_followup, reengage
     from app.core import hub_client
-    from app.services import n8n_bridge, meta_send
+    from app.services import messaging, meta_send
     from app.models.conversation import Conversation
     from app.models.message import Message, MsgDirection, MsgSender
     from app.models.order_event import OrderEvent
@@ -247,7 +247,7 @@ def world(fresh_db, monkeypatch, off):  # noqa: F811
 
     async def no_meta(channel, to, text, *a, **k):
         sent.append((to, text))
-    monkeypatch.setattr(n8n_bridge, "_send_waba", no_waba)
+    monkeypatch.setattr(messaging, "_send_waba", no_waba)
     monkeypatch.setattr(meta_send, "send_to_channel", no_meta)
     return {"maker": maker, "sent": sent, "settings": off}
 

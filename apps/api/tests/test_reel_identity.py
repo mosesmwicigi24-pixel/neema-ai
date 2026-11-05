@@ -95,7 +95,7 @@ def test_resolver_searches_the_winner_by_exact_name(monkeypatch):
     monkeypatch.setattr(rt, "_post_identity", no_identity)
 
     async def fake_catalog(db, redis): return CATALOG
-    monkeypatch.setattr("app.services.n8n_bridge.catalog_items", fake_catalog)
+    monkeypatch.setattr("app.services.messaging.catalog_items", fake_catalog)
 
     class _DB:
         async def __aenter__(self): return self

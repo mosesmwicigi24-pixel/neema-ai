@@ -13,8 +13,8 @@ What it picks:
     no transcript yet — status NULL/none and the stored text still a
     placeholder ("[audio received]", empty) — or a failure that was a
     configuration problem at the time (disabled, no_provider, provider_auth)
-    or transient (timeouts, 5xx, budget). Notes transcribed by the n8n era
-    (words in `text`, no status) are left alone.
+    or transient (timeouts, 5xx, budget). Notes transcribed before statuses
+    existed (words in `text`, no status) are left alone.
   · call recordings with no brief (none / recorded / failed:<non-poison>).
   Never: corrupt / too_long / too_large files (a poison file is never sent to
   a provider again), rows whose audio file is missing on disk (counted and
@@ -133,7 +133,7 @@ async def find(since: timedelta, kind: str, limit: int) -> tuple[list[Item], lis
                 if not _revisit(m.transcript_status):
                     continue
                 if m.transcript_status in (None, "none") and not _placeholder(m.text):
-                    continue                     # n8n-era rows that WERE transcribed
+                    continue                     # older rows that WERE transcribed
                 path = voice_notes._local_file(m.media_url)
                 if not path:
                     missing.append(f"note {m.id}")

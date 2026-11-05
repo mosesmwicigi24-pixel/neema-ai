@@ -2,7 +2,7 @@
 // transcript_status none | queued | processing | done | silent |
 // failed:<reason>; legacy "pending" = queued). Pure — tests/voiceNote.test.mjs.
 //
-// A row with NO status but words (a note transcribed by the n8n era, or a
+// A row with NO status but words (a note transcribed by an earlier era, or a
 // typed caption) reads as ready; a row with no status and no words reads as
 // nothing to show — never "Transcribing…" forever.
 export type VoiceNoteState = "working" | "ready" | "silent" | "failed" | "none";

@@ -20,9 +20,10 @@ single fact is the root of all the work below.
 
 ## 1. Where we are today (ground truth)
 
-- **Ingestion:** Meta Cloud API → **n8n workflow** → FastAPI bridge `/api/n8n/*`
-  (`apps/api/app/routers/n8n_bridge.py`). There is **no FastAPI webhook** and no
-  channel concept in the pipeline — every inbound is assumed WhatsApp.
+- **Ingestion (as of this plan's writing):** Meta Cloud API → the API's own
+  webhook, with no channel concept in the pipeline — every inbound was assumed
+  WhatsApp. *(Since superseded: the pipeline is `services/wa_native.py` and the
+  Meta channels have their own webhook — see below.)*
 - **Identity is `wa_id`** (normalised phone, `+`-stripped) across **6 tables**:
   `users`, `conversations`, `messages`, `order_events`, `customer_history`,
   `sessions`. Each has a UUID PK but `wa_id` is the de-facto join key.
@@ -95,16 +96,16 @@ behind a compatibility shim: keep `wa_id` working (WhatsApp identity's
 
 ### B. Channel ingestion (Messenger + Instagram first)
 - Meta **Messenger + Instagram Messaging** use the same Graph webhook family as
-  WhatsApp Cloud API — closest to what n8n already does. **TikTok has no
+  WhatsApp Cloud API — closest to what the WhatsApp pipeline already does. **TikTok has no
   comparable inbound messaging API for business DMs → explicitly out of the first
   phase** (revisit as social-listening, not conversation).
   - *2026-08 update:* TikTok DMs are now IN — relayed by ManyChat (official
     TikTok partner) into `routers/manychat.py` as a synchronous request→reply
     channel. Comments remain out (TikTok's comment-to-DM API is closed in our
     markets). See the router's docstring for TikTok's transport physics.
-- Extend the n8n workflow (or add a sibling) to receive Messenger/IG webhooks,
+- Receive Messenger/IG webhooks in the API (`routers/meta_webhook.py`),
   normalise to the existing `MessageDto` **plus `channel` + `external_id`**, and
-  POST to `/api/n8n/message`. Reply path (`/outbound`) gains per-channel send.
+  persist through the same messaging service. The reply path gains per-channel send.
 - Per-channel media rules (IG/Messenger attachment fetch differs from WhatsApp).
 - Meta app review + page/IG-account tokens + per-channel opt-in/24h-window
   policy compliance. **This is real Meta platform onboarding, not just code.**

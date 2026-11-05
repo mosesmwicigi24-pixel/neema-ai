@@ -274,7 +274,7 @@ def test_a_messenger_order_event_outside_the_window_asks_a_human(monkeypatch):
 def test_a_messenger_order_event_inside_the_window_sends_untagged(monkeypatch):
     import app.services.hub_events as hub
     import app.services.meta_send as ms
-    import app.services.n8n_bridge as svc
+    import app.services.messaging as svc
 
     calls = []
 

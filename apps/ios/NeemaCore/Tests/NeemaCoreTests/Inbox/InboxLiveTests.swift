@@ -79,7 +79,7 @@ final class InboxLiveTests: XCTestCase {
         let m = msgs(vm, "c7").last!
         XCTAssertEqual(m.text, "Hello from the website"); XCTAssertEqual(m.direction, "inbound"); XCTAssertEqual(m.sender, "user")
         XCTAssertEqual(vm.rows.first?.rep.id, "c7")
-        // n8n_bridge.save_outbound_message: the Tier-2 agent's WhatsApp reply.
+        // messaging.save_outbound_message: the Tier-2 agent's WhatsApp reply.
         await frame(host, #"{"type":"message","conversationId":"c7","waId":"web_3fa9c1e20b7d4c5a9e11","direction":"outbound","text":"Yes — we ship to Kampala."}"#)
         let r = msgs(vm, "c7").last!
         XCTAssertEqual(r.direction, "outbound"); XCTAssertEqual(r.sender, "ai")

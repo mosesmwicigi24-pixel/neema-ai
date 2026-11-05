@@ -100,7 +100,7 @@ async def _latest_open(db, conv) -> HandoverRequest | None:
 async def _notify(redis, conv, title: str, body: str, **extra) -> None:
     if not redis:
         return
-    from app.services.n8n_bridge import _broadcast
+    from app.services.messaging import _broadcast
     # "transfer" — both apps already refetch the inbox for it and file it under
     # the hand-over notification setting.
     await _broadcast(redis, "agents:all", {

@@ -131,11 +131,11 @@ async def send_for_call(call_id: str, redis=None) -> str:
         # Delivered: keep it in the thread so the team sees what was said. A
         # failure here must not resend (the customer has it) — logged only.
         try:
-            from app.services import n8n_bridge
+            from app.services import messaging
             if channel == "whatsapp":
-                await n8n_bridge.save_outbound_message(db, redis, recipient, text, waba_msg_id=wamid)
+                await messaging.save_outbound_message(db, redis, recipient, text, waba_msg_id=wamid)
             else:
-                await n8n_bridge.save_outbound_channel_message(db, redis, channel, recipient, text)
+                await messaging.save_outbound_channel_message(db, redis, channel, recipient, text)
         except Exception as exc:
             await db.rollback()
             _log.warning("recording notice to %s %s sent but not saved to the thread: %s",
@@ -152,8 +152,8 @@ async def _already(db, model, channel: str, recipient: str) -> bool:
 async def _deliver(channel: str, recipient: str, text: str) -> str | None:
     """One free-form text. Raises on any refusal (the caller releases the claim)."""
     if channel == "whatsapp":
-        from app.services import n8n_bridge
-        return await n8n_bridge._send_waba(recipient, text)
+        from app.services import messaging
+        return await messaging._send_waba(recipient, text)
     from app.services.meta_send import page_of_contact, send_meta_message
     page_id = await page_of_contact(channel, recipient)
     await send_meta_message(recipient, text, page_id=page_id)

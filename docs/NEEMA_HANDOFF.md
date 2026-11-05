@@ -743,7 +743,7 @@ Last updated: 2026-07-09. Branch of record: work is fused to **`origin/main`**
   profile names in one review.
 
 ## Tier-1 design port (2026-07-10, `9f92055` + `5478f3d`) — LIVE
-Moses's ChatGPT/n8n two-stage design reviewed. NOT ported (superseded by Tier 2
+The earlier two-stage design was reviewed. NOT ported (superseded by Tier 2
 architecture): state extractor, mood/commercial JSON, control lines, cart-text
 reconstruction, image-caption pipeline. PORTED: clergy-wear expertise (full-set
 composition, overlay base-garment-first, colour→gender→set→customer-led qty),
@@ -798,7 +798,7 @@ variants — hub doesn't expose variant lists yet; agent captures via remember).
   same-item names: `app/core/synonyms.py`
 - Meta: `app/routers/meta_webhook.py`, `app/services/meta_send.py`
 - Identity: `app/services/{identity,merge,reconcile}.py`, `app/models/person.py`
-- WhatsApp bridge/hook: `app/routers/n8n_bridge.py`, `app/services/n8n_bridge.py`
+- WhatsApp pipeline: `app/routers/whatsapp_webhook.py`, `app/services/wa_native.py`, `app/services/messaging.py`; hub pushes: `app/routers/hub_bridge.py`
 - Jobs: `app/jobs/reengage.py`
 - Inbox API: `app/routers/admin.py` (`/conversations`)
 - Web inbox: `apps/web/src/components/views/ConversationsView.tsx`, `ui/Avatar.tsx`

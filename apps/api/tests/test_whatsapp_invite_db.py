@@ -20,7 +20,7 @@ pytestmark = _calls.pytestmark
 @pytest.fixture
 def sent(env, monkeypatch):
     from app.core.config import settings
-    from app.services import n8n_bridge
+    from app.services import messaging
     monkeypatch.setattr(settings, "waba_token", "t", raising=False)
     monkeypatch.setattr(settings, "waba_phone_number_id", "PNID", raising=False)
     monkeypatch.setattr(settings, "wa_followup_template", "", raising=False)
@@ -29,7 +29,7 @@ def sent(env, monkeypatch):
     async def fake_send(wa_id, name, lang, body_params=None, **kw):
         out.append((wa_id, name, tuple(body_params or ())))
         return {}
-    monkeypatch.setattr(n8n_bridge, "send_wa_template", fake_send)
+    monkeypatch.setattr(messaging, "send_wa_template", fake_send)
     return out
 
 

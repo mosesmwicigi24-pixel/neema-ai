@@ -2,25 +2,21 @@
 
 Three pushes: a captured M-Pesa payment (identity reconciliation), an order
 event, and a customer-history snapshot. Canonical prefix: `/api/hub/*` with the
-`X-Hub-Secret` header. The same router is ALSO mounted at the legacy
-`/api/n8n/*` prefix accepting the legacy `X-N8N-Secret` header, because the
-hub's plugin was built in the n8n era and still posts there — the alias stays
-until the hub side migrates (see docs/HUB_BRIDGE_MIGRATION.md), after which the
-legacy mount can be dropped. Both headers carry the SAME secret value
-(`N8N_API_SECRET` in the box .env — the setting keeps its historical name to
-spare an env rename).
-
-n8n itself was retired 2026-07-30; its workflow-only endpoints were removed
-2026-08-11 (git history has them). The heavily-imported persistence/service
-layer keeps its historical module name at app/services/n8n_bridge.py — it is
-the messaging service, not an n8n client.
+`X-Hub-Secret` header. The same router is ALSO mounted at the older
+`/api/n8n/*` prefix, accepting the older `X-N8N-Secret` header, because that is
+the URL and header the hub's plugin is configured with today. Nothing behind
+either prefix depends on anything but this API; the alias is only the hub
+plugin's current address and stays until the hub side is repointed (see
+docs/HUB_BRIDGE_MIGRATION.md). Both headers carry the SAME secret value
+(`HUB_BRIDGE_SECRET` in the box .env; the older `N8N_API_SECRET` name is still
+read).
 """
 from fastapi import APIRouter, Depends, HTTPException, Header, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_db
 from app.core.config import settings
-from app.services import n8n_bridge as svc
-from app.schemas.n8n import OrderEventDto, CustomerHistoryDto, PaymentDto
+from app.services import messaging as svc
+from app.schemas.bridge import OrderEventDto, CustomerHistoryDto, PaymentDto
 
 router = APIRouter()
 
@@ -28,18 +24,19 @@ router = APIRouter()
 async def verify_hub_secret(request: Request,
                             x_hub_secret: str | None = Header(None),
                             x_n8n_secret: str | None = Header(None)):
-    """One shared secret, two accepted header names (clean + legacy).
+    """One shared secret, two accepted header names (clean + the older one the
+    hub plugin still sends).
 
     Fails CLOSED: an unconfigured secret rejects everything — the old check
     compared equal empty strings, which would have waved through a request
     carrying an empty legacy header on a box with no secret set."""
     supplied = x_hub_secret or x_n8n_secret
-    if not settings.n8n_api_secret or supplied != settings.n8n_api_secret:
+    if not settings.hub_bridge_secret or supplied != settings.hub_bridge_secret:
         raise HTTPException(status_code=403, detail="Forbidden")
     # Migration telemetry: count authenticated pushes still arriving on the
-    # LEGACY surface (old prefix or old header). The 08:00 standup reads the
-    # daily counter — a week of silence after the hub plugin switches is the
-    # evidence that makes dropping the /api/n8n mount safe. Best-effort.
+    # older surface (old prefix or old header). The 08:00 standup reads the
+    # daily counter — a week of silence after the hub plugin is repointed is
+    # the evidence that makes dropping the alias mount safe. Best-effort.
     if (not x_hub_secret) or request.url.path.startswith("/api/n8n/"):
         try:
             from datetime import datetime, timezone
