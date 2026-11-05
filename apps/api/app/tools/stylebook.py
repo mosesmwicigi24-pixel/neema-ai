@@ -16,9 +16,14 @@ app_settings under ``house_voice``. The prompt injects it beside the brevity
 contract, so every reply is drafted next to real examples of the house
 answering.
 
-Deterministic and zero-cost: no model call anywhere — selection is recency +
-filters. Rerun it any time the team's style (or team) changes; Neema picks up
-the new block within five minutes (settings cache TTL).
+Selection is deterministic — recency + filters. One small model call then
+POLISHES the chosen answers (owner, 2026-11-05: "rerun every Sunday from the
+team's replies, but also correct grammar"): spelling, grammar and
+punctuation are corrected; every number, price, name and the length stay
+exactly as the team wrote them, and any line the polish changes a figure in
+keeps its original. No key, no model → the raw lines stand. Rerun it any
+time the team's style (or team) changes; Neema picks up the new block within
+five minutes (settings cache TTL).
 
 The exemplars teach LENGTH and TONE only. The prompt says so explicitly:
 facts, prices and availability always come from the tools — a price in an
@@ -303,6 +308,69 @@ def render_block(exemplars: list[dict], human_wc: list[int],
     return out
 
 
+_DIGITS_RE = re.compile(r"\d+(?:[.,]\d+)*")
+POLISH_MAX_WORDS_DRIFT = 0.3
+
+
+def _figures(text: str) -> list[str]:
+    return [d.replace(",", "") for d in _DIGITS_RE.findall(text or "")]
+
+
+def polish_keeps_the_facts(original: str, polished: str) -> bool:
+    """The polished line may only fix the language: same figures in the same
+    order, roughly the same length, nothing emptied."""
+    o, p = (original or "").strip(), (polished or "").strip()
+    if not p or p == o:
+        return bool(p)
+    if _figures(o) != _figures(p):
+        return False
+    ow, pw = max(_words(o), 1), _words(p)
+    return abs(pw - ow) <= max(2, round(ow * POLISH_MAX_WORDS_DRIFT))
+
+
+async def polish_exemplars(exemplars: list[dict], llm=None) -> list[dict]:
+    """The team's answers with their grammar, spelling and punctuation
+    corrected — one light-model call for the whole set, best-effort. The
+    customers' questions are left exactly as typed (they are the voice we
+    answer, not ours)."""
+    if not exemplars:
+        return exemplars
+    try:
+        if llm is None:
+            from app.core.config import settings as _s
+            if not getattr(_s, "anthropic_api_key", ""):
+                return exemplars
+            from app.agent.runtime import build_llm
+            llm = build_llm(model=(getattr(_s, "review_model_light", "") or _s.tier2_model_light),
+                            purpose="stylebook", cache=False)
+        numbered = "\n".join(f"{i + 1}. {p['a']}" for i, p in enumerate(exemplars))
+        prompt = (
+            "These are real replies a shop's team sent to customers on WhatsApp. Correct "
+            "ONLY spelling, grammar and punctuation. Keep every number, price, currency, "
+            "product name, person's name, emoji and the meaning exactly; keep each reply "
+            "about the same length; do not add, drop or merge sentences; keep Swahili as "
+            "Swahili. Answer with the same numbered list, one reply per line, nothing else.\n\n"
+            + numbered)
+        resp = await llm.complete(system="You are a careful copy editor. Output the list only.",
+                                  messages=[{"role": "user", "content": prompt}], tools=[])
+        lines: dict[int, str] = {}
+        for ln in (resp.text or "").splitlines():
+            m = re.match(r"^\s*(\d+)[.)]\s*(.+?)\s*$", ln)
+            if m:
+                lines[int(m.group(1))] = m.group(2).strip().strip('"')
+        out = []
+        for i, p in enumerate(exemplars):
+            new = lines.get(i + 1, "")
+            q = dict(p)
+            if new and polish_keeps_the_facts(p["a"], new):
+                q["a"] = new[:A_CHARS]
+            out.append(q)
+        return out
+    except Exception as exc:
+        _log.info("house-voice polish skipped: %s", exc)
+        return exemplars
+
+
 async def refresh(db, redis) -> str:
     """Re-learn the house voice from the current replies and store the block.
     Returns the stored block ('' when there was nothing to learn). Used by the
@@ -312,7 +380,7 @@ async def refresh(db, redis) -> str:
     from app.services.app_settings import HOUSE_VOICE_CACHE, set_value
 
     pairs, human_wc, ai_wc = await collect_pairs(db)
-    chosen = choose_exemplars(pairs)
+    chosen = await polish_exemplars(choose_exemplars(pairs))
     block = render_block(chosen, human_wc, ai_wc)
 
     _log.info("human replies read : %d (window %dd)", len(human_wc), WINDOW_DAYS)
