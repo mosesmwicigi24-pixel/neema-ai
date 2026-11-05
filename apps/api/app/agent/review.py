@@ -802,6 +802,44 @@ _NO_PHOTOS_RE = re.compile(
     r"\b(?:photos?|pictures?|images?)\s+(?:can(?:no|')t|cannot)\s+be\s+(?:sent|shared)\b|"
     r"\bsi(?:wezi|tuwezi)\s+kutuma\s+picha\b",
     re.IGNORECASE)
+# INTERNAL TALK (audit, 2026-11-05: "shall I search for the price in our hub
+# to confirm it for you?", "shall I hold the Bishop's set while you decide"):
+# the customer sees a shop, not a system. "hub" is our word, never theirs.
+_INTERNAL_RE = re.compile(
+    r"\b(?:our|the|bethany(?:\s+house)?(?:'s)?)\s+hub\b|\bhub\b|"
+    r"\b(?:our|the)\s+(?:system|records|database|catalogue\s+system|back[- ]?end)\b|"
+    r"\bsearch(?:ing)?\s+(?:for\s+(?:it|the\s+price|that)\s+)?(?:in\s+)?(?:our|the)\s+(?:catalogue|catalog|hub|system)\b|"
+    r"\b(?:look|check)(?:ing)?\s+(?:it\s+|that\s+)?up\s+(?:in|on)\s+(?:our|the)\b|"
+    r"\bshall\s+i\s+(?:hold|reserve)\b|\bi(?:'ll| will| can)\s+(?:hold|reserve)\s+(?:it|this|the|these|that)\b",
+    re.I)
+# PROMISE ONLY: a check offered in place of an answer that is already in hand.
+_PROMISE_RE = re.compile(
+    r"\b(?:let\s+me|allow\s+me\s+to|i(?:'ll| will| shall))\s+(?:just\s+)?(?:confirm|check|verify|find\s+out)\b|"
+    r"\bget\s+back\s+to\s+you\b|\bconfirm\s+(?:it|that|this|the\s+\w+)?\s*with\s+(?:the|our)\s+team\b|"
+    r"\bwill\s+(?:confirm|revert|advise)\b|\bngoja\s+ni(?:hakikishe|angalie|thibitishe)\b|\bnitakujulisha\b",
+    re.I)
+
+
+def internal_talk(answer: str) -> str | None:
+    """The phrase that names our hub / system / search, or offers to hold an
+    item, to a customer — or None."""
+    m = _INTERNAL_RE.search(answer or "")
+    return m.group(0) if m else None
+
+
+def promise_only(answer: str, seen: list) -> dict | None:
+    """A reply that only promises to check, while a PRICED hub row is already
+    in hand: the row, or None. A promise with nothing in hand (a product we
+    could not find) is not this finding — the item rule or the reviewer
+    reads that one."""
+    if not _PROMISE_RE.search(answer or "") or money_figures(answer or ""):
+        return None
+    for r in seen or []:
+        if (r or {}).get("price") or (r or {}).get("price_usd"):
+            return r
+    return None
+
+
 _PHOTOS_SENT_RE = re.compile(
     r"\b(?:here\s+(?:are|is)\s+(?:the\s+|some\s+|a\s+)?(?:photos?|pictures?|pics?|images?)|"
     r"(?:sent|shared|attached)\s+(?:you\s+)?(?:the\s+|some\s+)?(?:photos?|pictures?|pics?|images?)|"
@@ -1084,6 +1122,19 @@ def rule_findings(comment: str, answer: str, seen: list,
     if sold is not None:
         out.extend(variant_issues(comment, answer, sold, currency))
     out.extend(colour_issues(comment, answer))
+    _internal = internal_talk(answer)
+    if _internal:
+        out.append({"kind": "internal", "hard": False,
+                    "text": f"it speaks of our systems to the customer (\"{_internal}\") — they see "
+                    "a shop, not a hub: give the fact (the rows above are the prices) or ask "
+                    "the one thing you need; nothing is 'held' or 'reserved' by a word"})
+    _promised = promise_only(answer, seen)
+    if _promised is not None:
+        out.append({"kind": "promise", "hard": False,
+                    "text": "it only promises to check or come back — a priced hub row is already in "
+                    f"hand ({_promised.get('name')}: {_promised.get('price')} / USD "
+                    f"{_promised.get('price_usd')}): give the answer in THIS message; a check is "
+                    "never the whole reply"})
     out.extend(payment_line_issues(comment, answer, transcript))
     out.extend(domain_issues(comment, answer, allow))
     out.extend(gift_issues(answer, allow))
@@ -1196,11 +1247,18 @@ def tools_text(tool_results: list | None, limit: int = 6) -> str:
     return "\n".join(lines)
 
 
-def conversation_text(transcript: list | None, limit: int = 8) -> str:
+# The reviewer's window (audit, 2026-11-05): 8 turns of 260 characters could
+# not see the colours a customer gave seven turns back, so "never re-ask a
+# detail they already gave" had nothing to compare against. 16 turns of 400.
+REVIEW_TURNS = 16
+REVIEW_TURN_CHARS = 400
+
+
+def conversation_text(transcript: list | None, limit: int = REVIEW_TURNS) -> str:
     lines = []
     for role, t in transcript_text(transcript, limit=limit):
         who = "Customer" if role == "user" else "Neema"
-        lines.append(f"{who}: {t[:260]}")
+        lines.append(f"{who}: {t[:REVIEW_TURN_CHARS]}")
     return "\n".join(lines)
 
 
@@ -1277,7 +1335,16 @@ async def reviewer_verdict(comment: str, answer: str, seen: list, *,
            "are ordinary promises, not inventions.)\n"
            "6. WRONG LANGUAGE — they wrote in Swahili and the reply is English, or the "
            "reverse (a mix is fine).\n" if mode != "comment" else "")
-        + "PASS otherwise. Never fail for tone, warmth, length or emoji.\n\n"
+        + "9. UNSUPPORTED CUSTOM — it states what a church, denomination, season or role "
+        "'wears' or 'uses', that an item 'comes in any colour', or what the customer or "
+        "a colleague 'will do' (come to the shop, visit, bring) when no hub row, tool "
+        "result or message of theirs says so. Asking their preference PASSES.\n"
+        "10. INTERNAL TALK — it mentions our hub, system, records, database, a search or "
+        "a lookup, or offers to 'hold' / 'reserve' an item (nothing is held): the "
+        "customer sees a shop, not a system.\n"
+        "11. PROMISE ONLY — it only promises to check, confirm or come back when the "
+        "answer (a price, a row, a fact) is already in the rows or the conversation.\n"
+        "PASS otherwise. Never fail for tone, warmth, length or emoji.\n\n"
         + (f"The post is about: {post_product or (post_caption or '')[:200] or 'unknown'}\n"
            if mode == "comment" else "")
         + ("" if campaign or not (post_product or post_caption) else
@@ -1428,7 +1495,12 @@ def rewrite_block(issues: list[str], draft: str, seen: list, currency: str,
         + ((f"THE POST'S PRODUCT is {post_product}: their words refer to it unless they "
             "explicitly name another — never another post's product, never a campaign "
             "this post is not; ") if post_product and not campaign else "")
-        + "keep the warmth and the closing question; write in their language.]"
+        + "keep the warmth; the corrected reply is NO LONGER than the held draft — fewer "
+        "words where you can, each fact said ONCE (what a set comes with is said once per "
+        "conversation, then it is 'the set'); never name our hub, system or a search, and "
+        "never offer to 'hold' anything; end with a question only if it moves the order "
+        "(how many, which colour, shall I start your order) — otherwise end on the fact; "
+        "write in their language.]"
     )
 
 
