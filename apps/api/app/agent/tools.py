@@ -60,6 +60,9 @@ class ToolContext:
     # KES because they wrote Swahili. Only their own words move a placed
     # customer — capture_contact naming a town in a hub-priced market.
     market_locked: bool = False
+    # Set rows whose CONTENTS this customer has already been told
+    # (`set:<slug>`, agent/said_once): the row then says "the set", not the list.
+    said: frozenset = field(default_factory=frozenset)
 
 
 def _channel_label(ctx: "ToolContext") -> str:
@@ -899,6 +902,13 @@ async def _search_catalog(args: dict, ctx: ToolContext) -> dict:
                          "complete set and say what it comes with; never one piece's "
                          "price as the set's"),
             }
+            if f"set:{p.get('slug')}" in (getattr(ctx, "said", None) or ()):
+                # SAID ONCE (audit, 2026-11-05): the contents were already told
+                # this customer — the set is now "the set".
+                row["set"]["already_told"] = True
+                row["set"]["note"] = ("ONE hub row priced as a whole set — its contents were "
+                                      "ALREADY told this customer: say 'the set' and its price, "
+                                      "do not list the pieces again unless they ask what is in it")
             # Each piece as the hub sells it ALONE, with its own price — so
             # "the cassock alone is $120; the complete set is $200" is a fact
             # in both directions (A SET IS PRICED AS ITS TOTAL).
@@ -924,6 +934,11 @@ async def _search_catalog(args: dict, ctx: ToolContext) -> dict:
                              "ask about the piece and the set, give the piece's own price "
                              "AND the set's total in one reply"),
                 }
+                if f"set:{_ps.get('slug')}" in (getattr(ctx, "said", None) or ()):
+                    row["part_of_set"]["already_told"] = True
+                    row["part_of_set"]["note"] = ("also sold inside this set, whose contents this "
+                                                  "customer was already told — name the set and "
+                                                  "its price only when they ask about it")
         # THE COMPANION MAP, grounded (owner, 2026-09-26): what a buyer of this
         # item completes it with — the humblest hub row of each companion kind
         # with its price, so the ONE suggestion (after their need is settled)

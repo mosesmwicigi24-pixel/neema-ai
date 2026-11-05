@@ -1949,6 +1949,18 @@ async def run_turn(db: AsyncSession, redis, wa_id: str, user_text: str, llm: LLM
         mem_ctx = await build_memory_context(db, redis, key, user=user, channel=channel)
         if mem_ctx:
             turn_notes.append(f"\n\n(Context — what you know about this customer:\n{mem_ctx})")
+    # SAID ONCE (audit, 2026-11-05): what this customer has already been told
+    # — a set's contents, a price, our address — rides as one short note, so
+    # the set is "the set" from the second time on. Best-effort.
+    _said: dict = {}
+    try:
+        from app.agent import said_once as _so
+        _said = await _so.told(redis, channel, key)
+        _said_note = _so.note(_said)
+        if _said_note:
+            turn_notes.append(_said_note)
+    except Exception as exc:
+        _log.info("said-once read skipped for %s: %s", key, exc)
     if public_comment and comment_reading:
         # What this comment IS (owner, 2026-09-22): a request is answered with
         # the shelf, a question with the answer, praise in kind.
@@ -1967,7 +1979,8 @@ async def run_turn(db: AsyncSession, redis, wa_id: str, user_text: str, llm: LLM
                       currency=currency, usd_rate=settings.usd_kes_rate,
                       market_locked=bool(loc.get("country_iso")),
                       seen_products=(product_sink if product_sink is not None else []),
-                      read_only=read_only)
+                      read_only=read_only,
+                      said=frozenset(k for k in _said if str(k).startswith("set:")))
     totals = {"input_tokens": 0, "output_tokens": 0, "cache_read_tokens": 0,
               "cache_write_tokens": 0, "cache_write_1h_tokens": 0}
 
@@ -2146,6 +2159,17 @@ async def run_turn(db: AsyncSession, redis, wa_id: str, user_text: str, llm: LLM
                     reply = reply.rstrip() + "\n\n" + _ladder
         except Exception as exc:
             _log.info("cassock ladder skipped for %s: %s", key, exc)
+    # SAID ONCE: what this reply carried is remembered for the next turn.
+    if reply and not read_only and not scribe_only:
+        try:
+            from app.agent import said_once as _so2
+            from app.services import n8n_bridge as _svc_so
+            _facts = _so2.facts_in_reply(reply, ctx.seen_products,
+                                         await _svc_so.catalog_items(db, redis),
+                                         currency=(getattr(ctx, "currency", None) or currency))
+            await _so2.remember(redis, channel, key, _facts)
+        except Exception as exc:
+            _log.info("said-once record skipped for %s: %s", key, exc)
     # THE CONVERSATION BUDGET + BOT SHIELD (owner, 2026-11-04) — record-only:
     # counts the turn, measures its progress toward the order and records
     # what pacing WOULD do (Reports → Pacing). The reply is not touched.
