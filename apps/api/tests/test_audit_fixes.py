@@ -106,10 +106,8 @@ def test_meta_orders_resolve_conversation_via_person():
 
 def test_sweep_latest_message_queries_exclude_notes():
     import inspect
-    import app.jobs.reengage as re_job
     import app.jobs.cart_recovery as cr
-    for fn in (re_job._latest_message, cr._latest_message):
-        assert '"note"' in inspect.getsource(fn)
+    assert '"note"' in inspect.getsource(cr._latest_message)
 
 
 def test_agent_history_excludes_notes():
@@ -122,11 +120,8 @@ def test_agent_history_excludes_notes():
 
 def test_dry_run_drafts_are_read_only():
     import inspect
-    import app.jobs.reengage as re_job
     import app.jobs.cart_recovery as cr
-    # re-engage composes with NO tools at all — it cannot act, preview or not
-    assert "tools=[])" in inspect.getsource(re_job._compose_llm)
-    assert "run_turn" not in inspect.getsource(re_job)
+    # the re-engage sweep is retired (Stage 2); the cart preview stays look-only
     assert "read_only=True" in inspect.getsource(cr._draft)
 
 
