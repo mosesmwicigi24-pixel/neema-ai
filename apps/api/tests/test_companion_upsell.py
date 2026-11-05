@@ -69,12 +69,15 @@ def test_prompt_carries_companion_set_and_scheduling():
 # ── the tool books it ────────────────────────────────────────────────────────
 
 class _ConvDB:
-    def __init__(self, conv):
+    """The conversation lookup, then the open check-ins (none, unless given)."""
+    def __init__(self, conv, open_rows=None):
         self._conv = conv
+        self._open = list(open_rows or [])
         self.added, self.committed = [], False
     async def execute(self, *a, **k):
-        c = self._conv
-        return types.SimpleNamespace(scalar_one_or_none=lambda: c)
+        c, rows = self._conv, self._open
+        return types.SimpleNamespace(scalar_one_or_none=lambda: c,
+                                     scalars=lambda: types.SimpleNamespace(all=lambda: rows))
     def add(self, obj): self.added.append(obj)
     async def commit(self): self.committed = True
 
@@ -161,11 +164,22 @@ def test_replenishment_check_in_rides_the_template(monkeypatch):
 
     conv = types.SimpleNamespace(wa_id="254712345678", contact_name="Pastor Moses")
     action = types.SimpleNamespace(kind="replenishment", status="planned", draft=None,
-                                   reason="Customer-agreed check-in (whatsapp): divai and cups")
+                                   reason="Supplies check-in (whatsapp): divai and cups")
     ok = asyncio.run(actions._send_followup_template(_DB(), None, conv, action))
     assert ok and action.status == "sent"
     assert tpl["params"][1] == "your supplies"             # no order number → honest fallback
     assert "check-in you asked for" in tpl["params"][2]
+    # A customer still DECIDING (the pre-purpose rows, and every purchase
+    # check-in) never rides the replenishment template (owner, 2026-11-05):
+    # without an approved follow-up template the row waits for a person.
+    import pytest
+    from app.services.templates import TemplateRefused
+    monkeypatch.setattr(settings, "wa_followup_template", "", raising=False)
+    deciding = types.SimpleNamespace(kind="replenishment", status="planned", draft=None,
+                                     reason="Customer-agreed check-in (whatsapp): the $335 quotation")
+    with pytest.raises(TemplateRefused):
+        asyncio.run(actions._send_followup_template(_DB(), None, conv, deciding))
+    assert deciding.status == "planned"
 
 
 # ── address the parcel, don't re-ask the name (Francis, 2026-08-08) ──────────

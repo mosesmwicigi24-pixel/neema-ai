@@ -1758,6 +1758,7 @@ async def answer_through_neema(conv_id: str, request: Request, body: dict,
     yourself when they next write."""
     from app.agent import runtime
     from app.services.hub_events import _within_window
+    from app.agent.composer import CONTINUATION_NOTE as _CONTINUATION
     facts = (body.get("facts") or body.get("text") or "").strip()
     if not facts:
         raise HTTPException(status_code=422,
@@ -1780,22 +1781,33 @@ async def answer_through_neema(conv_id: str, request: Request, body: dict,
                    "picking up exactly where the thread left off. If it confirms "
                    "availability or a price, invite the next step of the order "
                    "in the same breath. Never mention the checking process or "
-                   "the team's internals.]"),
+                   "the team's internals.] " + _CONTINUATION),
         llm=runtime.build_llm(purpose="admin"), channel=conv.channel,
         external_id=(None if conv.channel == "whatsapp" else conv.external_id),
         read_only=True)).strip()
     if not text:
         raise HTTPException(status_code=502, detail="Neema could not compose the answer")
     from app.services import messaging as svc
+    from app.services import outreach_log as _ol
+    _meta = _ol.stamp("team_answer", _ol.ANSWER, reference=str(agent.id))
     if conv.channel == "whatsapp":
         wamid = await svc._send_waba(key, text)
         await svc.save_outbound_message(db, request.app.state.redis, key, text,
-                                        waba_msg_id=wamid)
+                                        waba_msg_id=wamid, raw_meta=_meta)
     else:
         from app.services.meta_send import send_to_channel
         await send_to_channel(conv.channel, key, text)
         await svc.save_outbound_channel_message(db, request.app.state.redis,
-                                                conv.channel, key, text)
+                                                conv.channel, key, text, raw_meta=_meta)
+    # The fact the team owed is delivered: the open check closes, and the
+    # pending sales nudges on this thread are withdrawn.
+    try:
+        from app.services.deals import clear_team_check
+        from app.services.actions import withdraw_routine
+        await clear_team_check(db, conv.id, by=f"agent:{agent.id}")
+        await withdraw_routine(db, conv.id, why="team answer delivered")
+    except Exception:
+        pass
     # Audit trail: who answered, with what facts — an internal note, never sent.
     db.add(Message(wa_id=conv.wa_id, conversation_id=conv.id, direction="outbound",
                    sender="human_agent", media_type="note", agent_id=agent.id,

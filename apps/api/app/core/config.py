@@ -213,6 +213,11 @@ class Settings(BaseSettings):
     # outside-window celebrations become dashboard notifications instead.
     wa_event_template: str = ""
     wa_event_lang: str = "en"
+    # Mirror of that template's approved body, {1}=first name, {2}=order number,
+    # {3}=status phrase — so the thread stores what the customer actually read
+    # (services/templates.py). Empty: the row says which template went and
+    # with what, never invented words.
+    wa_event_body: str = ""
 
     def page_token_map(self) -> dict[str, str]:
         out: dict[str, str] = {}

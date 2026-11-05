@@ -680,6 +680,18 @@ async def send_agent_reply(
         await record_turn_success(redis)
     except Exception:
         pass
+    # A colleague has spoken (audit §7, 2026-11-05): whatever the team owed
+    # this customer is now theirs to judge — the open availability check is
+    # closed, and Neema's pending sales nudges on this thread are withdrawn
+    # so a person's answer is never followed by an automated one.
+    try:
+        from app.services.deals import clear_team_check
+        from app.services.actions import withdraw_routine
+        await clear_team_check(db, conv.id, by=f"agent:{agent.id}")
+        await withdraw_routine(db, conv.id, why="a colleague replied")
+    except Exception as exc:
+        import logging
+        logging.getLogger("neema.inbox").info("post-reply housekeeping skipped: %s", exc)
 
     q_sender = None
     if quoted is not None:

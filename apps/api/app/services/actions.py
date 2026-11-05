@@ -41,6 +41,40 @@ MAX_AUTO_NUDGES = 2
 # returns it on its own as `approval_reason`.
 _HOLD_RE = re.compile(r"\s*\[needs approval: [^\]]*\]")
 
+# Sales follow-ups nobody asked for, versus a check-in on a day someone named,
+# versus care about their own order. One customer, one routine message per
+# tick; a promise or a care message is deferred rather than merged.
+ROUTINE_KINDS = frozenset({"follow_up", "customer_promise", "quote_follow_up",
+                           "check_in", "replenishment"})
+CARE_KINDS = frozenset({"fit_check"})
+
+
+def message_class(action) -> str:
+    from app.services import outreach_log as ol
+    kind = getattr(action, "kind", "") or ""
+    reason = getattr(action, "reason", "") or ""
+    if kind in CARE_KINDS:
+        return ol.TRANSACTIONAL
+    if kind in ("check_in", "replenishment", "customer_promise") or \
+            reason.startswith(("Customer-agreed", "Supplies check-in", "Delivery check-in")):
+        return ol.PROMISE
+    return ol.ROUTINE
+
+
+def template_purpose(action) -> str | None:
+    """Which approved template may carry this action once the window has
+    closed — or None (a person sends it). A customer still DECIDING gets the
+    follow-up template, never the order/replenishment one (owner, 2026-11-05)."""
+    kind = getattr(action, "kind", "") or ""
+    reason = getattr(action, "reason", "") or ""
+    if kind == "fit_check":
+        return "care"
+    if kind == "replenishment" and reason.startswith("Supplies check-in"):
+        return "replenishment"
+    if kind in ("check_in", "replenishment", "customer_promise"):
+        return "check_in"
+    return None
+
 
 def with_hold_reason(reason: str | None, why: str) -> str:
     """`reason` with ONE needs-approval marker — any older one replaced."""
@@ -74,6 +108,26 @@ async def upsert_follow_up(db, deal, *, due_at: datetime, kind: str,
         row.kind = kind
         row.reason = reason[:500]
         row.status = "planned"
+
+
+async def withdraw_routine(db, conversation_id, *, why: str) -> int:
+    """Veto this conversation's pending ROUTINE rows (quote nudges, Neema's own
+    promise follow-ups): the customer or a colleague has moved the thread on.
+    A check-in on a day the customer named, and care about their order, stay.
+    Commits. Returns the number withdrawn."""
+    from app.models.agent_action import AgentAction
+    rows = (await db.execute(select(AgentAction).where(
+        AgentAction.conversation_id == conversation_id,
+        AgentAction.status.in_(("planned", "needs_approval")),
+        AgentAction.kind.in_(("follow_up", "quote_follow_up"))))).scalars().all()
+    n = 0
+    for row in rows:
+        row.status = "vetoed"
+        row.reason = f"{row.reason or ''} [{why}]"[:1000]
+        n += 1
+    if n:
+        await db.commit()
+    return n
 
 
 def deal_total(deal) -> float:
@@ -118,55 +172,97 @@ async def needs_approval(db, deal, conv, in_window: bool) -> str | None:
     return None
 
 
-async def _send_followup_template(db, redis, conv, action) -> bool:
-    """Send a due follow-up (fit check / replenishment check-in) as the
-    approved utility template (name / order / status placeholders). True when
-    it went out."""
+async def _contact_name(db, conv) -> str | None:
+    """The customer's name as we know it: the conversation's, else the
+    WhatsApp profile (users), else the person record."""
+    name = getattr(conv, "contact_name", None)
+    if name:
+        return name
+    try:
+        from app.models.user import User
+        if getattr(conv, "wa_id", None):
+            u = (await db.execute(select(User).where(User.wa_id == conv.wa_id))).scalar_one_or_none()
+            if u is not None and u.name:
+                return u.name
+        if getattr(conv, "person_id", None) is not None:
+            from app.models.person import Person
+            p = await db.get(Person, conv.person_id)
+            if p is not None and p.display_name:
+                return p.display_name
+    except Exception:
+        pass
+    return None
+
+
+async def _send_followup_template(db, redis, conv, action, purpose: str | None = None) -> bool:
+    """Send a due action as its approved template (services/templates.py) once
+    the window has closed. True when it went out. Raises TemplateRefused when
+    no template fits or a parameter would read as nonsense, and
+    SendOutcomeUnknown when Meta's answer never came — the caller parks the
+    row for a person in both cases; nothing is ever sent "approximately"."""
     import re
     from app.services import messaging as svc
-    try:
-        m = re.search(r"[Oo]rder\s+([A-Za-z0-9-]+)", action.reason or "")
-        number = m.group(1) if m else "your recent order"
-        first = ((getattr(conv, "contact_name", None) or "").split(" ") or ["there"])[0] or "there"
-        if action.kind == "replenishment":
-            number = m.group(1) if m else "your supplies"
-            phrase = ("the check-in you asked for — about time for the next "
-                      "round? Reply here and we'll plan your delivery")
-        else:
-            phrase = ("delivered a few days ago — how is it fitting? If anything "
-                      "needs adjusting, we're glad to help")
-        tpl = await svc.send_wa_template(conv.wa_id, settings.wa_event_template,
-                                         settings.wa_event_lang,
-                                         [first, number, phrase])
-        await svc.save_outbound_message(
-            db, redis, conv.wa_id,
-            f"[template {settings.wa_event_template}] {action.kind} on {number}",
-            waba_msg_id=(((tpl or {}).get("messages") or [{}])[0].get("id") or None))
-        await finish(db, action, "sent", draft=f"[template] {action.kind} on {number}")
-        _log.info("%s sent via template for %s", action.kind, conv.wa_id)
-        return True
-    except Exception as exc:
-        _log.warning("%s template send failed for %s: %s", action.kind, conv.wa_id, exc)
-        return False
+    from app.services import outreach_log as ol
+    from app.services import templates
+    purpose = purpose or template_purpose(action)
+    if purpose is None:
+        raise templates.TemplateRefused(f"a {action.kind} is never sent as a template")
+    first = templates.first_name_param(await _contact_name(db, conv))
+    if purpose == "check_in":
+        params = [first]
+    else:
+        m = re.search(r"\b(?:order|#)\s*#?([A-Z]{1,6}-?\d{3,}|\d{3,})\b", action.reason or "", re.IGNORECASE)
+        number = templates.order_number_param(
+            m.group(1) if m else None,
+            fallback="your supplies" if purpose == "replenishment" else "your recent order")
+        phrase = (("the check-in you asked for — about time for the next round? "
+                   "Reply here and we'll plan your delivery")
+                  if purpose == "replenishment" else
+                  ("delivered a few days ago — how is it fitting? If anything "
+                   "needs adjusting, we're glad to help"))
+        params = [first, number, phrase]
+    rendered, wamid, tpl = await templates.send(conv.wa_id, purpose, params)
+    await svc.save_outbound_message(
+        db, redis, conv.wa_id, rendered, waba_msg_id=wamid,
+        raw_meta=ol.stamp("actions", message_class(action), action_id=getattr(action, "id", None),
+                          kind=action.kind, template=templates.meta(tpl, params)))
+    await finish(db, action, "sent", draft=rendered)
+    _log.info("%s sent via template %s for %s", action.kind, tpl.name, conv.wa_id)
+    return True
+
+
+async def _last_outbound_at(db, conv):
+    from app.models.message import Message, MsgDirection
+    return (await db.execute(
+        select(sa_func.max(Message.created_at)).where(
+            Message.conversation_id == conv.id,
+            Message.direction == MsgDirection.outbound,
+            Message.media_type.is_(None) | (Message.media_type != "note")))).scalar()
 
 
 async def _compose_follow_up(db, redis, conv, reason: str) -> str:
     from app.agent import runtime
+    from app.agent.composer import CONTINUATION_NOTE, recently_spoke, strip_repeated_greeting
     key = conv.wa_id if conv.channel == "whatsapp" else conv.external_id
     text = ("[SCHEDULED FOLLOW-UP — not a customer message. Time to keep the "
             f"commitment: {reason}. FIRST re-read the conversation above: if a "
             "human colleague (lines marked [TEAM — a human colleague sent "
             "this]) has already answered part or all of it, their answer "
             "STANDS — repeat its substance as the update and only chase what "
-            "genuinely remains open. Compose the ONE short, warm message to "
-            "send them now. If the commitment was to confirm something nobody "
-            "has confirmed yet, be honest and say you're still on it. Never "
-            "repeat a message already sent; never pressure.]")
-    return (await runtime.run_turn(
+            "genuinely remains open. Compose the ONE short message to send "
+            "them now. If the commitment was to confirm something nobody has "
+            "confirmed yet, be honest and say you're still on it — once. Never "
+            "repeat a message already sent; never pressure.] " + CONTINUATION_NOTE)
+    out = (await runtime.run_turn(
         db, redis, wa_id=key, user_text=text, llm=runtime.build_llm(purpose="follow-up"),
         channel=conv.channel,
         external_id=(None if conv.channel == "whatsapp" else conv.external_id),
         read_only=True)).strip()
+    try:
+        recent = recently_spoke(await _last_outbound_at(db, conv))
+    except Exception:
+        recent = True
+    return strip_repeated_greeting(out, recent=recent)
 
 
 def _norm(s: str) -> str:
@@ -217,19 +313,35 @@ async def _repeats_earlier(db, conv, text: str, *, look_back: int = 6,
     return False
 
 
-async def _send(db, redis, conv, text: str) -> None:
+async def _send(db, redis, conv, text: str, action=None) -> None:
     """Deliver, then record. Raises only when delivery failed: once the
     message is out, a failure to record it is logged, never raised — a raise
-    there would put the action back in the queue and send it twice."""
+    there would put the action back in the queue and send it twice. An
+    UNKNOWN outcome (SendOutcomeUnknown) is recorded as such and re-raised
+    for the caller to park the action — never to retry it."""
     from app.services import messaging as svc
+    from app.services import outreach_log as ol
     recipient = conv.wa_id if conv.channel == "whatsapp" else conv.external_id
+    meta = ol.stamp("actions", message_class(action) if action is not None else ol.ROUTINE,
+                    action_id=getattr(action, "id", None), kind=getattr(action, "kind", None))
     if conv.channel == "whatsapp":
-        wamid = await svc._send_waba(recipient, text)
-        record = svc.save_outbound_message(db, redis, recipient, text, waba_msg_id=wamid)
+        try:
+            wamid = await svc._send_waba(recipient, text)
+        except svc.SendOutcomeUnknown as exc:
+            meta["delivery"] = {"status": "unknown", "error": str(exc)[:120]}
+            try:
+                await svc.save_outbound_message(db, redis, recipient, text,
+                                                waba_msg_id=None, raw_meta=meta)
+            except Exception as rec_exc:
+                _log.error("unknown-outcome follow-up to %s not recorded: %s", recipient, rec_exc)
+            raise
+        record = svc.save_outbound_message(db, redis, recipient, text, waba_msg_id=wamid,
+                                           raw_meta=meta)
     else:
         from app.services.meta_send import send_to_channel
         await send_to_channel(conv.channel, recipient, text)
-        record = svc.save_outbound_channel_message(db, redis, conv.channel, recipient, text)
+        record = svc.save_outbound_channel_message(db, redis, conv.channel, recipient, text,
+                                                   raw_meta=meta)
     try:
         await record
     except Exception as exc:
@@ -343,8 +455,13 @@ async def process_due(db, redis, *, now: datetime | None = None, limit: int = 10
     from app.models.agent_action import AgentAction
     from app.models.conversation import Conversation
     from app.models.deal import Deal
+    from app.services import deals as _deals
+    from app.services import intent as _intent
+    from app.services import outreach_log as ol
     from app.services import quote_followup
+    from app.services import templates as _templates
     from app.services.hub_events import _within_window, is_quiet_hours
+    from app.services.messaging import SendOutcomeUnknown
 
     now = now or datetime.now(timezone.utc)
     await _recover_interrupted(db, now)
@@ -356,6 +473,7 @@ async def process_due(db, redis, *, now: datetime | None = None, limit: int = 10
     ).order_by(AgentAction.due_at).limit(limit))).scalars().all()
 
     done = 0
+    spoken_to: set = set()          # conversations that got a message this tick
     for action in rows:
         try:
             conv = (await db.get(Conversation, action.conversation_id)
@@ -366,6 +484,65 @@ async def process_due(db, redis, *, now: datetime | None = None, limit: int = 10
                 action.status = "failed"
                 action.reason = (action.reason or "") + " [no conversation]"
                 await db.commit()
+                continue
+            who = conv.wa_id or conv.external_id
+            # ONE message per customer per tick (audit A, 2026-11-05): a
+            # second sales or promise row due at the same time is merged away
+            # (Judas's three "Good morning"s were three such rows); care
+            # about their order waits for tomorrow morning instead.
+            if conv.id in spoken_to:
+                if message_class(action) != ol.TRANSACTIONAL:
+                    if await claim(db, action, ("planned",), "vetoed"):
+                        await finish(db, action, "vetoed",
+                                     reason=f"{action.reason or ''} [merged: another message "
+                                            "went to this customer in the same tick]")
+                        ol.decision("actions", conv.channel, who, "suppress",
+                                    "merged into the message already sent this tick",
+                                    kind=getattr(action, "kind", None), action=getattr(action, "id", None))
+                else:
+                    from app.services.hub_events import next_morning_utc
+                    action.due_at = next_morning_utc(now)
+                    await db.commit()
+                    ol.decision("actions", conv.channel, who, "defer",
+                                "another message went to this customer in the same tick",
+                                kind=getattr(action, "kind", None), action=getattr(action, "id", None))
+                continue
+            # The customer asked not to be messaged: routine rows end here;
+            # a promise or care row waits for a person's judgement.
+            if await _intent.opted_out(db, redis, conv):
+                if message_class(action) == ol.ROUTINE:
+                    if await claim(db, action, ("planned",), "vetoed"):
+                        await finish(db, action, "vetoed",
+                                     reason=f"{action.reason or ''} [customer asked not to be messaged]")
+                else:
+                    if await claim(db, action, ("planned",), "needs_approval"):
+                        await finish(db, action, "needs_approval",
+                                     reason=with_hold_reason(action.reason,
+                                                             "customer asked not to be messaged"))
+                ol.decision("actions", conv.channel, who, "suppress",
+                            "customer opted out", kind=getattr(action, "kind", None), action=getattr(action, "id", None))
+                continue
+            # The team owes this customer a confirmation (check_availability):
+            # no sales follow-up until it arrives — a quote nudge is withdrawn,
+            # a promise waits visibly for a person.
+            _check_deal = deal
+            if _check_deal is None:
+                try:
+                    _check_deal = await _deals.open_deal_for(db, conversation_id=conv.id)
+                except Exception:
+                    _check_deal = None
+            _open_item = _deals.team_check_open(_check_deal, now=now) if _check_deal is not None else None
+            if _open_item and action.kind in ROUTINE_KINDS:
+                if action.kind == quote_followup.QUOTE_KIND:
+                    if await claim(db, action, ("planned",), "vetoed"):
+                        await finish(db, action, "vetoed",
+                                     reason=f"{action.reason or ''} [team check open: {_open_item}]")
+                elif await claim(db, action, ("planned",), "needs_approval"):
+                    await finish(db, action, "needs_approval",
+                                 reason=with_hold_reason(action.reason,
+                                                         f"team still confirming: {_open_item}"))
+                ol.decision("actions", conv.channel, who, "hold",
+                            f"team check open: {_open_item}", kind=getattr(action, "kind", None), action=getattr(action, "id", None))
                 continue
             # The deal may have closed since (paid, lost) — a follow-up on a
             # settled deal is noise, not initiative.
@@ -422,16 +599,37 @@ async def process_due(db, redis, *, now: datetime | None = None, limit: int = 10
             # follow-ups on the customer's own transaction/request, so they
             # ride the approved UTILITY template instead of dying in the
             # approvals queue.
-            if (gate == "outside the 24h messaging window"
-                    and action.kind in ("fit_check", "replenishment")
-                    and conv.channel == "whatsapp" and settings.wa_event_template
-                    and settings.agent_initiative):
+            _purpose = template_purpose(action)
+            if (gate == "outside the 24h messaging window" and _purpose
+                    and conv.channel == "whatsapp" and settings.agent_initiative):
                 # Vetoed or sent by hand since this tick read it → leave it be.
                 if not await claim(db, action, ("planned",)):
                     continue
-                if await _send_followup_template(db, redis, conv, action):
-                    done += 1
+                try:
+                    if await _send_followup_template(db, redis, conv, action, _purpose):
+                        spoken_to.add(conv.id)
+                        done += 1
+                        continue
+                except _templates.TemplateRefused as exc:
+                    # No template fits (a deciding customer and no approved
+                    # follow-up template, a parameter that would read as
+                    # nonsense): a person sends it, never an approximation.
+                    await finish(db, action, "needs_approval",
+                                 reason=with_hold_reason(action.reason,
+                                                         f"outside the 24h window — {exc}"))
+                    ol.decision("actions", conv.channel, who, "hold", str(exc),
+                                kind=getattr(action, "kind", None), action=getattr(action, "id", None))
+                    await _notify(redis, "⏳ Follow-up needs a person",
+                                  f"{str(exc)[:100]} — {(action.reason or '')[:80]}", conv)
                     continue
+                except SendOutcomeUnknown as exc:
+                    await finish(db, action, "needs_approval",
+                                 reason=with_hold_reason(action.reason,
+                                                         "sent? outcome unknown — check the thread before resending"))
+                    _log.warning("template for action %s: outcome unknown (%s)", action.id, exc)
+                    continue
+                except Exception as exc:
+                    _log.warning("%s template send failed for %s: %s", action.kind, who, exc)
                 # The template didn't go: back to planned for the usual path.
                 await finish(db, action, "planned")
             if gate is not None:
@@ -487,13 +685,26 @@ async def process_due(db, redis, *, now: datetime | None = None, limit: int = 10
                 _log.info("planned action %s changed while composing — not sent", action.id)
                 continue
             try:
-                await _send(db, redis, conv, text)
+                await _send(db, redis, conv, text, action)
+            except SendOutcomeUnknown as exc:
+                # Meta may have delivered it: the row is recorded as unknown
+                # and a person decides — never an automatic resend.
+                await finish(db, action, "needs_approval", draft=text,
+                             reason=with_hold_reason(
+                                 action.reason, "sent? outcome unknown — check the thread before resending"))
+                ol.decision("actions", conv.channel, who, "hold", f"outcome unknown: {exc}",
+                            kind=getattr(action, "kind", None), action=getattr(action, "id", None))
+                spoken_to.add(conv.id)
+                continue
             except Exception:
                 # Nothing went out: planned again, for the next tick (bounded
                 # by the 3-tries counter above).
                 await finish(db, action, "planned")
                 raise
             await finish(db, action, "sent", draft=text)
+            spoken_to.add(conv.id)
+            ol.decision("actions", conv.channel, who, "send", "planned action sent",
+                        kind=getattr(action, "kind", None), action=getattr(action, "id", None), cls=message_class(action))
             done += 1
             _log.info("planned action %s sent to %s", action.id,
                       conv.wa_id or conv.external_id)

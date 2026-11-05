@@ -16,10 +16,12 @@ def install(monkeypatch):
             return True
         return False
 
-    async def finish(db, action, status, draft=None):
+    async def finish(db, action, status, draft=None, reason=None):
         action.status = status
         if draft is not None:
             action.draft = draft
+        if reason is not None:
+            action.reason = reason
 
     async def no_sweep(db, now):
         return 0

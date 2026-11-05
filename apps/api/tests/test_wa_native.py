@@ -111,12 +111,12 @@ def test_debounce_supersede_only_the_last_token_flushes():
         t2 = await wn._enqueue(r, "254700", "second message", None)
         stale = await wn._drain(r, "254700", t1)       # superseded → no-op
         assert stale is None
-        text, media = await wn._drain(r, "254700", t2)  # the live token gets BOTH
+        text, media, ids = await wn._drain(r, "254700", t2)  # the live token gets BOTH
         assert text == "first message\nsecond message"
         assert media is None
         # buffer is consumed — a re-drain of the same token finds nothing
         again = await wn._drain(r, "254700", t2)
-        assert again == ("", None)
+        assert again == ("", None, [])
 
     asyncio.run(go())
 
@@ -127,7 +127,7 @@ def test_debounce_prefers_the_image_across_the_buffer():
     async def go():
         await wn._enqueue(r, "254700", "look at this", {"type": "image", "url": "u1"})
         t = await wn._enqueue(r, "254700", "do you have it?", None)
-        text, media = await wn._drain(r, "254700", t)
+        text, media, _ids = await wn._drain(r, "254700", t)
         assert "look at this" in text and "do you have it?" in text
         assert media == {"type": "image", "url": "u1"}   # the photo survives
 
@@ -140,7 +140,7 @@ def test_reply_respects_human_intercept(monkeypatch):
 
     scheduled = {"n": 0}
 
-    async def fake_schedule(redis, wa_id, text, dedup, media=None):
+    async def fake_schedule(redis, wa_id, text, dedup, media=None, **k):
         scheduled["n"] += 1
         return True
 
@@ -163,7 +163,7 @@ def test_reply_schedules_for_ai_mode(monkeypatch):
 
     captured = {}
 
-    async def fake_schedule(redis, wa_id, text, dedup, media=None):
+    async def fake_schedule(redis, wa_id, text, dedup, media=None, **k):
         captured.update(wa_id=wa_id, text=text, dedup=dedup, media=media)
         return True
 

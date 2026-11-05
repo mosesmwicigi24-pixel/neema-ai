@@ -110,7 +110,7 @@ def test_process_due_respects_flag_and_gate(monkeypatch):
     monkeypatch.setattr(settings, "agent_initiative", True, raising=False)
     sent = []
     async def fake_compose(db, redis, c, reason): return "Habari! Quick update…"
-    async def fake_send(db, redis, c, text): sent.append(text)
+    async def fake_send(db, redis, c, text, action=None): sent.append(text)
     monkeypatch.setattr(act, "_compose_follow_up", fake_compose)
     monkeypatch.setattr(act, "_send", fake_send)
     # This test is about the flag + gate; the repetition guard has its own.

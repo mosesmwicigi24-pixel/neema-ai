@@ -28,6 +28,7 @@ import asyncio
 import logging
 import os
 import uuid
+from datetime import datetime, timezone
 
 from sqlalchemy import select
 
@@ -56,8 +57,8 @@ def _text_of(msg: dict) -> str:
 def parse_events(payload: dict) -> list[dict]:
     """Flatten a Cloud API webhook payload into inbound message events.
 
-    Statuses (sent/delivered/read receipts) are deliberately dropped — nothing in
-    the system consumes them today."""
+    Delivery statuses (sent/delivered/read/failed) are read by parse_statuses
+    and stamped onto the outbound rows they belong to."""
     out: list[dict] = []
     for entry in payload.get("entry", []) or []:
         for change in entry.get("changes", []) or []:
@@ -103,6 +104,38 @@ def parse_events(payload: dict) -> list[dict]:
                             "referral": msg.get("referral") or None,
                             # WhatsApp reply-quote: the wamid they replied to.
                             "context_wamid": (msg.get("context") or {}).get("id")})
+    return out
+
+
+def parse_statuses(payload: dict) -> list[dict]:
+    """[{wamid, status, at, recipient, error}] for every message status in a
+    Cloud API payload — the provider's own account of what happened to a
+    message we sent (audit, 2026-11-05: until now "sent" meant only that Graph
+    answered 200)."""
+    out: list[dict] = []
+    for entry in payload.get("entry", []) or []:
+        for change in entry.get("changes", []) or []:
+            if change.get("field") != "messages":
+                continue
+            for st in (change.get("value") or {}).get("statuses", []) or []:
+                if not isinstance(st, dict) or st.get("type") == "call":
+                    continue
+                wamid, status = st.get("id"), (st.get("status") or "").lower()
+                if not wamid or status not in ("sent", "delivered", "read", "failed", "deleted"):
+                    continue
+                at = None
+                try:
+                    at = datetime.fromtimestamp(int(st.get("timestamp") or 0),
+                                                tz=timezone.utc).isoformat()
+                except (TypeError, ValueError, OSError):
+                    pass
+                err = None
+                errors = st.get("errors") or []
+                if errors and isinstance(errors[0], dict):
+                    e = errors[0]
+                    err = f"{e.get('code')}: {e.get('title') or e.get('message') or ''}".strip()
+                out.append({"wamid": wamid, "status": status, "at": at,
+                            "recipient": st.get("recipient_id"), "error": err})
     return out
 
 
@@ -264,14 +297,18 @@ def _tok_key(wa_id: str) -> str:
     return f"wa:native:tok:{wa_id}"
 
 
-async def _enqueue(redis, wa_id: str, text: str, media: dict | None) -> int | None:
+async def _enqueue(redis, wa_id: str, text: str, media: dict | None,
+                   msg_id: str | None = None) -> int | None:
     """Buffer one message and bump the debounce token. Returns the token, or None
-    when redis is down (caller then replies immediately — no debounce, no loss)."""
+    when redis is down (caller then replies immediately — no debounce, no loss).
+    `msg_id` is the stored row's id: the turn that answers this buffer learns
+    exactly which rows it is answering (audit, 2026-11-05)."""
     if redis is None:
         return None
     import json
     try:
-        await redis.rpush(_buf_key(wa_id), json.dumps({"text": text, "media": media}))
+        await redis.rpush(_buf_key(wa_id), json.dumps({"text": text, "media": media,
+                                                       "id": msg_id}))
         await redis.expire(_buf_key(wa_id), 600)
         tok = await redis.incr(_tok_key(wa_id))
         await redis.expire(_tok_key(wa_id), 600)
@@ -280,9 +317,10 @@ async def _enqueue(redis, wa_id: str, text: str, media: dict | None) -> int | No
         return None
 
 
-async def _drain(redis, wa_id: str, token: int) -> tuple[str, dict | None] | None:
-    """The combined buffered turn — or None when a newer message superseded this
-    flush (its own flush will carry the whole buffer)."""
+async def _drain(redis, wa_id: str, token: int) -> tuple[str, dict | None, list[str]] | None:
+    """The combined buffered turn (text, media, the ids of the rows it answers)
+    — or None when a newer message superseded this flush (its own flush will
+    carry the whole buffer)."""
     import json
     try:
         current = await redis.get(_tok_key(wa_id))
@@ -292,7 +330,7 @@ async def _drain(redis, wa_id: str, token: int) -> tuple[str, dict | None] | Non
         await redis.delete(_buf_key(wa_id))
     except Exception:
         return None
-    texts, media = [], None
+    texts, media, ids = [], None, []
     for r in raw:
         try:
             item = json.loads(r)
@@ -303,7 +341,9 @@ async def _drain(redis, wa_id: str, token: int) -> tuple[str, dict | None] | Non
         # Prefer an image so the agent SEES what they sent; else keep the latest.
         if item.get("media") and (media is None or item["media"].get("type") == "image"):
             media = item["media"]
-    return "\n".join(texts), media
+        if item.get("id"):
+            ids.append(str(item["id"]))
+    return "\n".join(texts), media, ids
 
 
 def _is_doc_request(text: str | None) -> bool:
@@ -365,17 +405,19 @@ async def _escalate_doc_request(redis, wa_id: str, text: str) -> None:
 
 
 async def _reply_after_debounce(redis, wa_id: str, token: int | None,
-                                text: str, media: dict | None) -> None:
+                                text: str, media: dict | None,
+                                msg_id: str | None = None) -> None:
     """Wait out the debounce window, then answer the COMBINED turn once."""
     from app.agent import runtime
     from app.database import AsyncSessionLocal
 
+    inbound_ids: list[str] = [msg_id] if msg_id else []
     if token is not None:
         await asyncio.sleep(max(settings.whatsapp_debounce_seconds, 1))
         drained = await _drain(redis, wa_id, token)
         if drained is None:
             return                            # superseded — a later flush owns it
-        text, media = drained
+        text, media, inbound_ids = drained
     # Voice notes: their tokens become the customer's words (or the reason
     # they couldn't be heard) — waited for, bounded, if still transcribing.
     try:
@@ -433,7 +475,8 @@ async def _reply_after_debounce(redis, wa_id: str, token: int | None,
             pass
 
     dedup = f"native:{wa_id}:{token if token is not None else text[:32]}"
-    await runtime.schedule_reply(redis, wa_id, text, dedup, media=media)
+    await runtime.schedule_reply(redis, wa_id, text, dedup, media=media,
+                                 inbound_ids=inbound_ids)
 
 
 # ── Entry point ──────────────────────────────────────────────────────────────
@@ -516,6 +559,10 @@ async def _ingest_guarded(event: dict, redis) -> None:
     # waits on a provider — and the turn carries a token the reply resolves
     # into the customer's words after the debounce window (services/voice_notes).
     voice_id = uuid.uuid4() if (media and media.get("kind") == "audio") else None
+    # Every inbound row's id is chosen here so the reply turn can name the
+    # exact rows it answers (a second message that lands while a turn composes
+    # must not be answered twice — audit, 2026-11-05).
+    row_id = voice_id or uuid.uuid4()
 
     dto = MessageDto(
         wa_id=wa_id, name=event.get("name"), direction="inbound",
@@ -553,7 +600,7 @@ async def _ingest_guarded(event: dict, redis) -> None:
             Conversation.wa_id == svc._normalize_wa_id(wa_id)))).scalar_one_or_none() is None
         # The one persistence path: conversation upsert, provision_user
         # (name + country), previews, broadcast, video/document escalation.
-        await svc.upsert_message(db, redis, dto, message_id=voice_id,
+        await svc.upsert_message(db, redis, dto, message_id=row_id,
                                  transcript_status="queued" if voice_id else None)
         if quoted is not None:
             try:
@@ -613,9 +660,9 @@ async def _ingest_guarded(event: dict, redis) -> None:
     elif not turn_text and media and not turn_media:
         turn_text = media.get("caption") or f"(the customer sent a {media['kind']})"
 
-    token = await _enqueue(redis, wa_id, turn_text, turn_media)
+    token = await _enqueue(redis, wa_id, turn_text, turn_media, str(row_id))
     task = asyncio.create_task(
-        _reply_after_debounce(redis, wa_id, token, turn_text, turn_media))
+        _reply_after_debounce(redis, wa_id, token, turn_text, turn_media, str(row_id)))
     _bg_tasks.add(task)
     task.add_done_callback(_bg_tasks.discard)
 
@@ -626,6 +673,15 @@ async def handle_webhook(payload: dict, redis) -> tuple[int, int]:
     non-200 for them and Meta redelivers. Never raises."""
     n = failed = 0
     try:
+        statuses = parse_statuses(payload)
+        if statuses:
+            try:
+                from app.database import AsyncSessionLocal
+                from app.services import messaging as _svc
+                async with AsyncSessionLocal() as db:
+                    await _svc.record_delivery_statuses(db, statuses)
+            except Exception as exc:
+                _log.info("delivery statuses not recorded: %s", exc)
         for event in parse_events(payload):
             try:
                 await _ingest_one(event, redis)

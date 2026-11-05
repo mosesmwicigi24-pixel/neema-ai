@@ -247,6 +247,7 @@ async def _handle(redis, group: dict, *, send: bool, write: bool = True) -> dict
     reminder. The guard stays PER ORDER — a live send claims each order's
     key, a dry run only reads it — and an order already reminded drops out."""
     from app.services import messaging as svc
+    from app.services import outreach_log as _ol
     from app.services.meta_send import send_to_channel
     from app.models.user import User
 
@@ -272,6 +273,14 @@ async def _handle(redis, group: dict, *, send: bool, write: bool = True) -> dict
     if not due:
         res["skipped"] = "already reminded"
         return res
+    try:
+        from app.services import intent as _intent
+        async with AsyncSessionLocal() as _db:
+            if await _intent.opted_out(_db, redis, conv):
+                res["skipped"] = "customer asked not to be messaged"
+                return res
+    except Exception:
+        pass
     if not write:
         return res
 
@@ -289,14 +298,17 @@ async def _handle(redis, group: dict, *, send: bool, write: bool = True) -> dict
         return res
 
     try:
+        _meta = _ol.stamp("payment_followup", _ol.TRANSACTIONAL, reference=res.get("order"))
         if is_wa:
             wamid = await svc._send_waba(to, text)
             async with AsyncSessionLocal() as db2:
-                await svc.save_outbound_message(db2, redis, to, text, waba_msg_id=wamid)
+                await svc.save_outbound_message(db2, redis, to, text, waba_msg_id=wamid,
+                                                raw_meta=_meta)
         else:
             await send_to_channel(conv.channel, to, text)
             async with AsyncSessionLocal() as db2:
-                await svc.save_outbound_channel_message(db2, redis, conv.channel, to, text)
+                await svc.save_outbound_channel_message(db2, redis, conv.channel, to, text,
+                                                        raw_meta=_meta)
         res["sent"] = True
     except Exception as e:
         res["error"] = f"send failed: {str(e)[:160]}"

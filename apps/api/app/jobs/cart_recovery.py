@@ -162,19 +162,33 @@ async def _draft(redis, conv: Conversation, to: str, items: list) -> str:
     from app.agent import runtime
     from app.agent.runtime import build_llm
     summary = _summarise(items)
+    from app.agent.composer import CONTINUATION_NOTE, strip_repeated_greeting
     prompt = (
         "(Internal: this customer built a cart and went quiet before confirming. "
-        f"Their cart: {summary}. Write ONE short, warm follow-up — greet them by "
-        "name if you know it, remind them what they picked, and ask if they'd like "
-        "to go ahead. No pressure, no discount, no links. Two sentences at most.)"
+        f"Their cart: {summary}. Write ONE short follow-up — name them if you know "
+        "their name, remind them what they picked, and ask if they'd like to go "
+        "ahead. No pressure, no discount, no links. Two sentences at most.) "
+        + CONTINUATION_NOTE
     )
     async with AsyncSessionLocal() as db:
         if conv.channel == "whatsapp":
-            return await runtime.run_turn(db, redis, to, prompt, build_llm(purpose="job:cart-recovery"),
-                                          read_only=True)
-        return await runtime.run_turn(db, redis, wa_id=to, user_text=prompt,
-                                      llm=build_llm(purpose="job:cart-recovery"), channel=conv.channel,
-                                      external_id=to, read_only=True)
+            out = await runtime.run_turn(db, redis, to, prompt, build_llm(purpose="job:cart-recovery"),
+                                         read_only=True)
+        else:
+            out = await runtime.run_turn(db, redis, wa_id=to, user_text=prompt,
+                                         llm=build_llm(purpose="job:cart-recovery"), channel=conv.channel,
+                                         external_id=to, read_only=True)
+    # A cart nudge goes inside the 24 h window by construction: we spoke today.
+    return strip_repeated_greeting(out or "", recent=True)
+
+
+async def _opted_out(redis, conv) -> bool:
+    from app.services import intent
+    try:
+        async with AsyncSessionLocal() as db:
+            return await intent.opted_out(db, redis, conv)
+    except Exception:
+        return False
 
 
 def guard_key(row: dict) -> str:
@@ -184,6 +198,7 @@ def guard_key(row: dict) -> str:
 
 async def _handle(redis, row: dict, *, send: bool, write: bool = True) -> dict:
     from app.services import messaging as svc
+    from app.services import outreach_log as _ol
     from app.services.meta_send import send_to_channel
 
     conv, to, items = row["conv"], row["to"], row["items"]
@@ -191,6 +206,9 @@ async def _handle(redis, row: dict, *, send: bool, write: bool = True) -> dict:
     res = {"channel": conv.channel, "to": to, "cart": _summarise(items),
            "total": row["total"], "draft": "", "sent": False,
            "skipped": None, "error": None}
+    if await _opted_out(redis, conv):
+        res["skipped"] = "customer asked not to be messaged"
+        return res
 
     if redis is not None:
         try:
@@ -217,14 +235,17 @@ async def _handle(redis, row: dict, *, send: bool, write: bool = True) -> dict:
         return res
 
     try:
+        _meta = _ol.stamp("cart_recovery", _ol.ROUTINE, reference=cart_fingerprint(items))
         if is_wa:
             wamid = await svc._send_waba(to, reply)
             async with AsyncSessionLocal() as db2:
-                await svc.save_outbound_message(db2, redis, to, reply, waba_msg_id=wamid)
+                await svc.save_outbound_message(db2, redis, to, reply, waba_msg_id=wamid,
+                                                raw_meta=_meta)
         else:
             await send_to_channel(conv.channel, to, reply)
             async with AsyncSessionLocal() as db2:
-                await svc.save_outbound_channel_message(db2, redis, conv.channel, to, reply)
+                await svc.save_outbound_channel_message(db2, redis, conv.channel, to, reply,
+                                                        raw_meta=_meta)
         res["sent"] = True
     except Exception as e:
         res["error"] = f"send failed: {str(e)[:160]}"

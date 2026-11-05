@@ -193,6 +193,33 @@ async def _send_waba_audio(wa_id: str, audio_url: str) -> str | None:
 
 # ── WABA Sender ───────────────────────────────────────────
 
+class SendOutcomeUnknown(RuntimeError):
+    """The request reached Meta but no answer came back in time (a read
+    timeout, a dropped connection after the write). The message MAY have been
+    accepted and delivered — the Cloud API has no idempotency key, so a blind
+    retry is how a customer gets the same text twice. Callers record the
+    attempt as `unknown` and never resend automatically; a person checks the
+    thread (audit, 2026-11-05)."""
+
+
+# Connect timeouts and refused connections mean the request never left:
+# retrying is safe. Anything after the write is ambiguous.
+_SEND_TIMEOUT = httpx.Timeout(30.0, connect=10.0)
+_UNKNOWN_AFTER_WRITE = (httpx.ReadTimeout, httpx.WriteTimeout, httpx.PoolTimeout,
+                        httpx.RemoteProtocolError, httpx.ReadError, httpx.WriteError)
+
+
+async def _post_graph(url: str, body: dict) -> httpx.Response:
+    """One Graph POST with an explicit timeout. Raises SendOutcomeUnknown when
+    the outcome cannot be known; other transport errors mean "not sent"."""
+    try:
+        async with httpx.AsyncClient(timeout=_SEND_TIMEOUT) as client:
+            return await client.post(
+                url, headers={"Authorization": f"Bearer {settings.waba_token}"}, json=body)
+    except _UNKNOWN_AFTER_WRITE as exc:
+        raise SendOutcomeUnknown(f"{type(exc).__name__}: outcome unknown") from exc
+
+
 async def _send_waba(wa_id: str, text: str, context_wamid: str | None = None) -> str | None:
     url = (f"https://graph.facebook.com/{settings.waba_api_version}"
            f"/{settings.waba_phone_number_id}/messages")
@@ -205,17 +232,12 @@ async def _send_waba(wa_id: str, text: str, context_wamid: str | None = None) ->
     # Native reply-quote: the customer sees this message quoting theirs.
     if context_wamid:
         body["context"] = {"message_id": context_wamid}
-    async with httpx.AsyncClient() as client:
-        resp = await client.post(
-            url,
-            headers={"Authorization": f"Bearer {settings.waba_token}"},
-            json=body,
-        )
-        if not resp.is_success:
-            import logging
-            logging.error(f"WABA error {resp.status_code}: {resp.text}")
-            resp.raise_for_status()
-        return _wamid_of(resp)
+    resp = await _post_graph(url, body)
+    if not resp.is_success:
+        import logging
+        logging.error(f"WABA error {resp.status_code}: {resp.text}")
+        resp.raise_for_status()
+    return _wamid_of(resp)
 
 
 async def _send_waba_product_card(wa_id: str, *, image_url: str | None, title: str,
@@ -289,27 +311,68 @@ async def send_wa_template(wa_id: str, template: str, lang: str,
         })
     url = (f"https://graph.facebook.com/{settings.waba_api_version}"
            f"/{settings.waba_phone_number_id}/messages")
-    async with httpx.AsyncClient() as client:
-        resp = await client.post(
-            url,
-            headers={"Authorization": f"Bearer {settings.waba_token}"},
-            json={
-                "messaging_product": "whatsapp",
-                "to": wa_id,
-                "type": "template",
-                "template": {
-                    "name": template,
-                    "language": {"code": lang},
-                    **({"components": components} if components else {}),
-                },
-            },
-            timeout=30.0,
-        )
+    resp = await _post_graph(url, {
+        "messaging_product": "whatsapp",
+        "to": wa_id,
+        "type": "template",
+        "template": {
+            "name": template,
+            "language": {"code": lang},
+            **({"components": components} if components else {}),
+        },
+    })
     if not resp.is_success:
         import logging
         logging.error("WABA template error %s: %s", resp.status_code, resp.text)
         raise RuntimeError(f"WhatsApp template send failed ({resp.status_code}): {resp.text[:300]}")
     return resp.json() if resp.content else {}
+
+
+# ── Delivery statuses (WhatsApp `statuses` webhooks) ─────────────────────────
+# Rank so a late "sent" never overwrites "delivered"; "failed" always wins.
+_STATUS_RANK = {"sent": 1, "delivered": 2, "read": 3, "failed": 9, "deleted": 9}
+
+
+async def record_delivery_statuses(db, statuses: list[dict]) -> int:
+    """Stamp provider delivery statuses onto the outbound rows they belong to
+    (`messages.raw_meta.delivery`), matched on the wamid Graph returned at send
+    time. Returns the number of rows updated. Best-effort, never raises."""
+    from sqlalchemy.orm.attributes import flag_modified
+    n = 0
+    for st in statuses or []:
+        wamid, status = st.get("wamid"), (st.get("status") or "").lower()
+        if not wamid or not status:
+            continue
+        try:
+            row = (await db.execute(
+                select(Message).where(Message.waba_msg_id == wamid)
+                .order_by(Message.created_at.desc()).limit(1))).scalar_one_or_none()
+            if row is None:
+                continue
+            meta = dict(row.raw_meta or {})
+            prev = (meta.get("delivery") or {}).get("status") or ""
+            if _STATUS_RANK.get(status, 0) < _STATUS_RANK.get(prev, 0):
+                continue
+            entry = {"status": status, "at": st.get("at")}
+            if st.get("error"):
+                entry["error"] = str(st["error"])[:300]
+            meta["delivery"] = entry
+            row.raw_meta = meta
+            try:
+                flag_modified(row, "raw_meta")
+            except Exception:
+                pass
+            n += 1
+        except Exception as exc:
+            import logging
+            logging.getLogger("neema.wa_native").info("delivery status not recorded: %s", exc)
+    if n:
+        try:
+            await db.commit()
+        except Exception:
+            await db.rollback()
+            return 0
+    return n
 
 
 # ── Redis Broadcast ───────────────────────────────────────

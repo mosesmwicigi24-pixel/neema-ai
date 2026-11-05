@@ -495,10 +495,21 @@ TOOLS: list[dict] = [
                        "check in then. A named time is a promise we keep, never a "
                        "pleasantry. For a NAMED DAY ('Sunday', 'next Tuesday', "
                        "'tomorrow') pass it as on_day and let the system do the "
-                       "calendar maths — never count the days yourself.",
+                       "calendar maths — never count the days yourself. ONE open "
+                       "check-in per customer per purpose: calling it again for the "
+                       "same purpose MOVES the date instead of booking a second one, and "
+                       "the result says when it was already booked — then confirm that "
+                       "day to them rather than promising it afresh.",
         "input_schema": {
             "type": "object",
             "properties": {
+                "about": {"type": "string",
+                          "enum": ["purchase_decision", "supplies", "delivery"],
+                          "description": "What the check-in is about: 'purchase_decision' "
+                                         "(they are still deciding on a purchase and named "
+                                         "when to come back), 'supplies' (when their divai, "
+                                         "wafers, cups… will need replenishing), 'delivery' "
+                                         "(the date they need an order ready by)."},
                 "on_day": {"type": "string",
                            "description": "The day they named: monday…sunday, "
                                           "'tomorrow', or 'next week'. Preferred "
@@ -2228,6 +2239,14 @@ async def _check_availability(args: dict, ctx: ToolContext) -> dict:
             media_type="note",
         ))
         await ctx.db.commit()
+        # The open check is STATE, not just a note (audit F, 2026-11-05): the
+        # scheduler holds sales follow-ups while it is open, and the next turn
+        # is told not to close on this item until the team's word is in.
+        try:
+            from app.services.deals import open_team_check
+            await open_team_check(ctx.db, conv, item)
+        except Exception as exc:
+            _log.info("team check not recorded for %s: %s", ctx.wa_id, exc)
         if ctx.redis is not None:
             try:
                 import json as _json
@@ -2240,9 +2259,12 @@ async def _check_availability(args: dict, ctx: ToolContext) -> dict:
             except Exception:
                 pass
 
-    return {"ok": True, "item": item,
+    return {"ok": True, "item": item, "team_check_open": True,
             "note": "The team has been asked to confirm. Tell them you're checking and "
-                    "will come back shortly — never that we don't have it — and in the "
+                    "will come back shortly — never that we don't have it. Until the "
+                    "team's answer is in this chat, do NOT ask them to start, confirm or "
+                    "pay for THIS item (no 'shall I start the order?' for it); serve the "
+                    "rest of their list meanwhile — and in the "
                     "SAME message show the closest items from the same family."}
 
 
@@ -2902,10 +2924,39 @@ async def _pause_conversation(args: dict, ctx: ToolContext) -> dict:
     return {"ok": False}
 
 
+_SUPPLY_WORDS_RE = re.compile(
+    r"\b(?:divai|wine|wafers?|hosts?|bread|cups?|candles?|incense|charcoal|oil|supplies|"
+    r"run(?:s|ning)? out|refill|restock|replenish\w*|next (?:round|batch|delivery))\b",
+    re.IGNORECASE)
+_CHECK_IN_KINDS = {"purchase_decision": "check_in", "delivery": "check_in",
+                   "supplies": "replenishment"}
+_CHECK_IN_LABEL = {"purchase_decision": "Customer-agreed check-in",
+                   "delivery": "Delivery check-in", "supplies": "Supplies check-in"}
+
+
+def check_in_about(args: dict) -> str:
+    """The commitment's purpose — the model's `about` when given, else read
+    from the reason (supply words → supplies). Never a guess beyond that."""
+    about = str(args.get("about") or "").strip().lower()
+    if about in _CHECK_IN_KINDS:
+        return about
+    if _SUPPLY_WORDS_RE.search(str(args.get("reason") or "")):
+        return "supplies"
+    return "purchase_decision"
+
+
 async def _schedule_check_in(args: dict, ctx: ToolContext) -> dict:
-    """Plan a replenishment check-in on the initiative scheduler. The customer
-    named a time; this makes it a kept promise — process_due sends the message
-    (utility template when the 24h window has closed by then, as it will have)."""
+    """Book — or move — the ONE check-in this customer has for a purpose.
+
+    Audit, 2026-11-05: every call used to add a new row, the prompt asks for
+    the call whenever a day is named, and each turn re-reads the thread, so
+    Judas was booked for Thursday twice (and Wednesday besides) and heard from
+    us five times. Now the identity of a check-in is (conversation, purpose):
+    a second call for the same purpose updates the date and the reason, and
+    tells the model it was already booked. Genuinely different commitments
+    (a supplies check-in and a purchase decision) stay separate rows.
+    process_due sends the message (a template when the window has closed —
+    the follow-up template for a decision, never the replenishment one)."""
     from datetime import timedelta
     on_day = (args.get("on_day") or "").strip().lower()
     hour_utc = 7                                   # default 10:00 Nairobi
@@ -2934,8 +2985,10 @@ async def _schedule_check_in(args: dict, ctx: ToolContext) -> dict:
     reason = (args.get("reason") or "").strip()
     if not reason:
         return {"error": "reason is required — what should the check-in be about?"}
+    about = check_in_about(args)
+    kind = _CHECK_IN_KINDS[about]
     if ctx.read_only:
-        return {"ok": True, "preview": True}
+        return {"ok": True, "preview": True, "about": about}
     from app.models.agent_action import AgentAction
     from app.models.conversation import Conversation
     channel = _channel_label(ctx)
@@ -2949,11 +3002,46 @@ async def _schedule_check_in(args: dict, ctx: ToolContext) -> dict:
     _nbo_now = datetime.now(timezone.utc) + timedelta(hours=3)
     due = (_nbo_now + timedelta(days=days)).replace(
         hour=hour_utc + 3, minute=0, second=0, microsecond=0) - timedelta(hours=3)
+    label = f"{_CHECK_IN_LABEL[about]} ({channel}): {reason[:400]}"
+    # The open row for this purpose, if any. Rows booked before purposes
+    # existed (kind "replenishment", reason "Customer-agreed check-in …") are
+    # purchase-decision check-ins and count as that purpose.
+    open_rows = (await ctx.db.execute(select(AgentAction).where(
+        AgentAction.conversation_id == conv.id,
+        AgentAction.status.in_(("planned", "needs_approval")),
+        AgentAction.kind.in_(("check_in", "replenishment")),
+    ).order_by(AgentAction.due_at))).scalars().all()
+
+    def _purpose_of(row) -> str:
+        r = row.reason or ""
+        if row.kind == "replenishment" and not r.startswith("Customer-agreed check-in"):
+            return "supplies"
+        if r.startswith("Delivery check-in"):
+            return "delivery"
+        return "purchase_decision"
+
+    existing = next((r for r in open_rows if _purpose_of(r) == about), None)
+    if existing is not None:
+        was = existing.due_at
+        existing.due_at = due
+        existing.kind = kind
+        existing.reason = label
+        existing.status = "planned"
+        existing.draft = None
+        await ctx.db.commit()
+        moved = was is not None and abs((was - due).total_seconds()) > 3600
+        return {"ok": True, "check_in_on": due.strftime("%d %b %Y"), "about": about,
+                "already_booked": True,
+                "note": ("the check-in was already booked for "
+                         f"{was.strftime('%d %b %Y') if was else 'them'}"
+                         + (f" and is now moved to {due.strftime('%d %b %Y')}" if moved else "")
+                         + " — confirm that day to them in one short line; do not promise "
+                           "it as if new, and do not book again")}
     ctx.db.add(AgentAction(deal_id=None, conversation_id=conv.id, due_at=due,
-                           kind="replenishment",
-                           reason=f"Customer-agreed check-in ({channel}): {reason[:400]}"))
+                           kind=kind, reason=label))
     await ctx.db.commit()
-    return {"ok": True, "check_in_on": due.strftime("%d %b %Y"),
+    return {"ok": True, "check_in_on": due.strftime("%d %b %Y"), "about": about,
+            "already_booked": False,
             "note": "booked — now tell them plainly you'll check in then"}
 
 

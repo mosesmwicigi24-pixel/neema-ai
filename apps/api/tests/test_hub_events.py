@@ -86,7 +86,7 @@ def test_celebrate_routes_and_paid_guard(monkeypatch):
     async def fake_send(to, text, context_wamid=None):
         sent.append(("wa", to, text))
         return "wamid.CELEBRATE1"
-    async def fake_save(db, redis, to, text, waba_msg_id=None):
+    async def fake_save(db, redis, to, text, waba_msg_id=None, **k):
         sent.append(("save", to, text, waba_msg_id))
     monkeypatch.setattr(he, "_within_window", fake_within)
     monkeypatch.setattr(he, "_compose_announcement", fake_compose)
@@ -120,7 +120,7 @@ def test_outside_window_uses_template_or_human(monkeypatch):
     async def fake_tmpl(to, name, lang, params=None):
         tsent.append((to, name, lang, params))
         return {"messages": [{"id": "wamid.TPL1"}]}
-    async def fake_save(db, redis, to, text, waba_msg_id=None):
+    async def fake_save(db, redis, to, text, waba_msg_id=None, **k):
         tsent.append(("save", text, waba_msg_id))
     monkeypatch.setattr(svc, "send_wa_template", fake_tmpl, raising=False)
     monkeypatch.setattr(svc, "save_outbound_message", fake_save)
@@ -185,7 +185,7 @@ def test_deferred_paid_event_sends_in_the_morning(monkeypatch):
     async def fake_within(db, c): return True
     async def fake_compose(db, redis, c, brief): return "Asante! 🙏"
     async def fake_send(to, text, context_wamid=None): sent.append(text)
-    async def fake_save(db, redis, to, text, waba_msg_id=None): pass
+    async def fake_save(db, redis, to, text, waba_msg_id=None, **k): pass
     monkeypatch.setattr(he, "_within_window", fake_within)
     monkeypatch.setattr(he, "_compose_announcement", fake_compose)
     from app.services import messaging as svc

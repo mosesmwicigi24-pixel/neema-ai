@@ -175,9 +175,10 @@ async def _compose_announcement(db, redis, conv, brief: str) -> str:
     message is Neema's own voice, in the customer's language — not a template."""
     from app.agent import runtime
     key = conv.wa_id if conv.channel == "whatsapp" else conv.external_id
+    from app.agent.composer import CONTINUATION_NOTE
     text = ("[SYSTEM EVENT — not a customer message. Compose the ONE short, warm "
             "message Neema should send them right now about this. No questions "
-            f"unless truly natural, no re-selling.] {brief}")
+            f"unless truly natural, no re-selling.] {brief} " + CONTINUATION_NOTE)
     return (await runtime.run_turn(
         db, redis, wa_id=key, user_text=text, llm=runtime.build_llm(purpose="announce"),
         channel=conv.channel,
@@ -249,6 +250,20 @@ async def _celebrate(db, redis, conv, event: dict) -> dict:
 
     in_window = await _within_window(db, conv)
     recipient = _recipient_of(conv)
+    from app.services import outreach_log as ol
+    # Order news is transactional — it is never held behind a sales cap — but
+    # a customer who asked for no messages gets it from a person.
+    try:
+        from app.services import intent as _intent
+        if await _intent.opted_out(db, redis, conv):
+            await _notify_agents(redis, "🔕 Order update for an opted-out customer",
+                                 f"{event.get('order_number') or ''}: {brief} — they asked "
+                                 "for no automated messages; please tell them yourself.", conv)
+            return {"handled": True, "sent": "notified_human", "reason": "opted_out"}
+    except Exception:
+        pass
+    _stamp = ol.stamp("hub_events", ol.TRANSACTIONAL, reference=event.get("order_number"),
+                      kind=event.get("type"))
 
     # Outside the 24 h window no automated Messenger / Instagram message is
     # allowed: Meta sunset POST_PURCHASE_UPDATE (with CONFIRMED_EVENT_UPDATE and
@@ -260,17 +275,26 @@ async def _celebrate(db, redis, conv, event: dict) -> dict:
         if not text:
             return {"handled": False, "reason": "compose_failed"}
         if conv.channel == "whatsapp":
-            wamid = await svc._send_waba(recipient, text)
-            await svc.save_outbound_message(db, redis, recipient, text, waba_msg_id=wamid)
+            try:
+                wamid = await svc._send_waba(recipient, text)
+            except svc.SendOutcomeUnknown as exc:
+                _stamp["delivery"] = {"status": "unknown", "error": str(exc)[:120]}
+                await svc.save_outbound_message(db, redis, recipient, text, waba_msg_id=None,
+                                                raw_meta=_stamp)
+                return {"handled": True, "sent": "unknown"}
+            await svc.save_outbound_message(db, redis, recipient, text, waba_msg_id=wamid,
+                                            raw_meta=_stamp)
         else:
             from app.services.meta_send import send_to_channel
             await send_to_channel(conv.channel, recipient, text)
-            await svc.save_outbound_channel_message(db, redis, conv.channel, recipient, text)
+            await svc.save_outbound_channel_message(db, redis, conv.channel, recipient, text,
+                                                    raw_meta=_stamp)
         _log.info("hub event %s → celebrated in-window to %s", event.get("type"), recipient)
         return {"handled": True, "sent": "freeform"}
 
     if conv.channel == "whatsapp" and settings.wa_event_template:
-        name = (getattr(conv, "contact_name", None) or "").split(" ")[0] or "there"
+        from app.services import templates as _templates
+        name = _templates.first_name_param(getattr(conv, "contact_name", None))
         status_word = {
             "order.paid": "payment received — thank you! Production begins",
             "order.production_started": "in production at our workshop",
@@ -279,12 +303,18 @@ async def _celebrate(db, redis, conv, event: dict) -> dict:
         }.get(event.get("type") or "", "updated")
         if receipt:
             status_word += f". Receipt: {receipt}"
-        params = [name, event.get("order_number") or "your order", status_word]
-        tpl = await svc.send_wa_template(recipient, settings.wa_event_template,
-                                         settings.wa_event_lang, params)
-        await svc.save_outbound_message(
-            db, redis, recipient, f"[template {settings.wa_event_template}] {brief}",
-            waba_msg_id=(((tpl or {}).get("messages") or [{}])[0].get("id") or None))
+        params = [name, _templates.order_number_param(event.get("order_number")), status_word]
+        try:
+            rendered, wamid, tpl = await _templates.send(recipient, "order_update", params)
+        except _templates.TemplateRefused as exc:
+            await _notify_agents(redis, "💰 " + (event.get("type") or "hub event"),
+                                 f"{event.get('order_number') or ''}: template refused "
+                                 f"({exc}) — send the good news manually. ({brief})", conv)
+            return {"handled": True, "sent": "notified_human", "reason": str(exc)}
+        # The thread stores what the customer read, tagged as a template.
+        _stamp["template"] = _templates.meta(tpl, params)
+        await svc.save_outbound_message(db, redis, recipient, rendered, waba_msg_id=wamid,
+                                        raw_meta=_stamp)
         return {"handled": True, "sent": "template"}
 
     await _notify_agents(
