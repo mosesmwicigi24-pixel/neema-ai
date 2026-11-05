@@ -399,6 +399,11 @@ async def sweep_missed_replies(redis, *, min_age_s: int = 90, max_age_h: int = 2
             pass
         if await _is_paused(redis, channel, ext):
             continue
+        # A turn on this thread is still composing (a slow voice note, a photo
+        # check, the model loop): not a miss — leave it (audit, 2026-11-05).
+        from app.agent.runtime import in_flight
+        if await in_flight(redis, channel, ext):
+            continue
         # Pacing holds a cooled thread's chat to answer it together, later —
         # answering it now would undo the slow lane.
         from app.agent.cooling import on_slow_lane

@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import logging
 import re
+from datetime import datetime, timezone
 
 from sqlalchemy import func as sa_func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -1174,6 +1175,8 @@ async def _flag_held_reply(db, channel: str, key: str, issues: list, draft: str,
                 "was NOT sent; the customer was told a colleague will come back to them "
                 "here. Please answer them from the hub.\n• Why it was held: " + why[:600])
         already_human = conv.intercept_mode == InterceptMode.human
+        if not already_human or conv.intercept_since is None:
+            conv.intercept_since = datetime.now(timezone.utc)
         conv.intercept_mode = InterceptMode.human
         db.add(Intercept(conversation_id=conv.id, action=InterceptAction.flag, note=note,
                          ai_reply_held=(draft or "")[:2000]))
@@ -1418,8 +1421,12 @@ async def run_turn(db: AsyncSession, redis, wa_id: str, user_text: str, llm: LLM
                    comment_reading: dict | None = None,
                    comment_post_id: str | None = None,
                    thread_parent: dict | None = None,
-                   turn_facts: dict | None = None) -> str:
+                   turn_facts: dict | None = None,
+                   extra_note: str | None = None) -> str:
     """Run one agent turn and return the reply text (does NOT send it).
+
+    `extra_note` rides on the current message as one more turn note (the
+    unclaimed-chat answer, services/unclaimed) — never in the cached prefix.
 
     WhatsApp is the default and unchanged. For Messenger/Instagram, pass
     channel + external_id (the PSID/IGSID): the agent keys history on that,
@@ -1949,6 +1956,35 @@ async def run_turn(db: AsyncSession, redis, wa_id: str, user_text: str, llm: LLM
         mem_ctx = await build_memory_context(db, redis, key, user=user, channel=channel)
         if mem_ctx:
             turn_notes.append(f"\n\n(Context — what you know about this customer:\n{mem_ctx})")
+    if extra_note:
+        turn_notes.append(extra_note)
+    # THE LENGTH TARGET (audit, 2026-11-05): computed from their message, one
+    # line on it — a short ask earns a short reply (agent/reply_length).
+    _len_target: dict = {}
+    try:
+        from app.agent import reply_length as _rl
+        _len_target = _rl.target_for(
+            user_text or "", closer=is_closer(user_text or ""),
+            greeting=bool(_GREETING_RE.match((user_text or "").strip())),
+            negative=looks_negative(user_text or ""))
+        if not scribe_only and not read_only:
+            _len_note = _rl.note(_len_target)
+            if _len_note:
+                turn_notes.append(_len_note)
+    except Exception as exc:
+        _log.info("length target skipped for %s: %s", key, exc)
+    # SAID ONCE (audit, 2026-11-05): what this customer has already been told
+    # — a set's contents, a price, our address — rides as one short note, so
+    # the set is "the set" from the second time on. Best-effort.
+    _said: dict = {}
+    try:
+        from app.agent import said_once as _so
+        _said = await _so.told(redis, channel, key)
+        _said_note = _so.note(_said)
+        if _said_note:
+            turn_notes.append(_said_note)
+    except Exception as exc:
+        _log.info("said-once read skipped for %s: %s", key, exc)
     if public_comment and comment_reading:
         # What this comment IS (owner, 2026-09-22): a request is answered with
         # the shelf, a question with the answer, praise in kind.
@@ -1967,7 +2003,8 @@ async def run_turn(db: AsyncSession, redis, wa_id: str, user_text: str, llm: LLM
                       currency=currency, usd_rate=settings.usd_kes_rate,
                       market_locked=bool(loc.get("country_iso")),
                       seen_products=(product_sink if product_sink is not None else []),
-                      read_only=read_only)
+                      read_only=read_only,
+                      said=frozenset(k for k in _said if str(k).startswith("set:")))
     totals = {"input_tokens": 0, "output_tokens": 0, "cache_read_tokens": 0,
               "cache_write_tokens": 0, "cache_write_1h_tokens": 0}
 
@@ -2146,6 +2183,26 @@ async def run_turn(db: AsyncSession, redis, wa_id: str, user_text: str, llm: LLM
                     reply = reply.rstrip() + "\n\n" + _ladder
         except Exception as exc:
             _log.info("cassock ladder skipped for %s: %s", key, exc)
+    # THE LENGTH TARGET, measured (record-only): a reply past its target is
+    # recorded for the owner to see, once per contact per day.
+    if reply and not read_only and not scribe_only and _len_target:
+        try:
+            from app.agent import reply_length as _rl2
+            await _rl2.record(redis, db, channel=channel, key=key, reply=reply,
+                              target=_len_target, tool_log=tool_log)
+        except Exception as exc:
+            _log.info("length record skipped for %s: %s", key, exc)
+    # SAID ONCE: what this reply carried is remembered for the next turn.
+    if reply and not read_only and not scribe_only:
+        try:
+            from app.agent import said_once as _so2
+            from app.services import n8n_bridge as _svc_so
+            _facts = _so2.facts_in_reply(reply, ctx.seen_products,
+                                         await _svc_so.catalog_items(db, redis),
+                                         currency=(getattr(ctx, "currency", None) or currency))
+            await _so2.remember(redis, channel, key, _facts)
+        except Exception as exc:
+            _log.info("said-once record skipped for %s: %s", key, exc)
     # THE CONVERSATION BUDGET + BOT SHIELD (owner, 2026-11-04) — record-only:
     # counts the turn, measures its progress toward the order and records
     # what pacing WOULD do (Reports → Pacing). The reply is not touched.
@@ -2386,67 +2443,146 @@ async def _is_echo(db, channel: str, key: str, reply: str,
 FOLLOW_UP_DELAY_S = 1.5
 
 
+# ── ONE TURN AT A TIME PER CONVERSATION (audit, 2026-11-05) ──────────────────
+# Nothing serialised turns on one thread: a burst landing while the previous
+# turn was still composing started a second, concurrent turn, and the missed-
+# reply sweeper (90 s) re-ran a turn that was simply slow (voice wait, photo
+# check, the model loop). The in-flight key below is held for the life of a
+# turn; a second caller waits for it (never drops the message), and the
+# sweeper leaves an in-flight thread alone.
+INFLIGHT_TTL_S = 240
+INFLIGHT_WAIT_S = 120
+
+
+def _inflight_key(channel: str, key: str) -> str:
+    return f"agent:inflight:{channel}:{key}"
+
+
+async def _acquire_inflight(redis, channel: str, key: str) -> bool:
+    """Take the thread's turn slot, waiting for a running turn to finish
+    (up to INFLIGHT_WAIT_S). Fail-open: no redis, or a wait that runs out,
+    still answers — a silent customer is the worse failure."""
+    if redis is None:
+        return True
+    k = _inflight_key(channel, key)
+    waited = 0
+    while True:
+        try:
+            if await redis.set(k, "1", nx=True, ex=INFLIGHT_TTL_S):
+                return True
+        except Exception:
+            return True
+        if waited >= INFLIGHT_WAIT_S:
+            _log.warning("in-flight turn on %s/%s did not finish in %ss — answering anyway",
+                         channel, key, INFLIGHT_WAIT_S)
+            return True
+        await asyncio.sleep(2)
+        waited += 2
+
+
+async def _release_inflight(redis, channel: str, key: str) -> None:
+    if redis is None:
+        return
+    try:
+        await redis.delete(_inflight_key(channel, key))
+    except Exception:
+        pass
+
+
+async def in_flight(redis, channel: str, key: str) -> bool:
+    """True while a turn on this thread is composing (the sweeper's check)."""
+    if redis is None:
+        return False
+    try:
+        return bool(await redis.exists(_inflight_key(channel, key)))
+    except Exception:
+        return False
+
+
+async def _still_ai(channel: str, key: str) -> bool:
+    """Re-read the thread's mode right before a send: a colleague who took
+    the chat while the turn composed is not talked over. Fail-open."""
+    from sqlalchemy import or_
+    from app.database import AsyncSessionLocal
+    from app.models.conversation import Conversation, InterceptMode
+    try:
+        async with AsyncSessionLocal() as db:
+            mode = (await db.execute(select(Conversation.intercept_mode).where(
+                Conversation.channel == channel,
+                or_(Conversation.external_id == key, Conversation.wa_id == key))
+            )).scalars().first()
+        return mode is None or mode == InterceptMode.ai
+    except Exception:
+        return True
+
+
 async def _run_and_send(redis, wa_id: str, text: str, media: dict | None = None,
                         *, deferred: bool = False, hold_line: bool = True) -> bool:
     """`hold_line=False` for a retry (the sweeper): the customer already had
     their hold line when the live turn failed — a retry that fails again must
     not send them a second one."""
-    from app.database import AsyncSessionLocal
-    from app.services import n8n_bridge as svc
+    await _acquire_inflight(redis, "whatsapp", wa_id)
     try:
-        # A photo turn always takes the main model — vision + catalogue matching
-        # is never "light" work, whatever the caption says.
-        model = settings.tier2_model if media else route_model(text)
-        facts: dict = {}                 # this turn's tool results, for the scribe
-        async with AsyncSessionLocal() as db:
-            reply = await run_turn(db, redis, wa_id, text,
-                                   build_llm(model=model, purpose="whatsapp"), media=media,
-                                   deferred=deferred, turn_facts=facts)
-            if not (reply or "").strip():
-                _log.info("silence for %s: nothing to send (a closer, or a held acknowledgement)", wa_id)
-                # A decision, not a miss: the missed-reply sweep leaves it be
-                # (as on Messenger) instead of re-running the silence.
-                await _mark_silenced(redis, "whatsapp", wa_id)
-                return False
-            if await _is_echo(db, "whatsapp", wa_id, reply):
-                _log.info("echo guard: identical reply within minutes suppressed for %s", wa_id)
-                await _mark_silenced(redis, "whatsapp", wa_id)
-                return False
-        wamid = await svc._send_waba(wa_id, reply)
-        async with AsyncSessionLocal() as db2:
-            await svc.save_outbound_message(db2, redis, wa_id, reply, waba_msg_id=wamid)
-        if facts.get("follow_up"):
-            # Its own message, a beat after the reply (the cassock ladder).
-            await asyncio.sleep(FOLLOW_UP_DELAY_S)
-            wamid2 = await svc._send_waba(wa_id, facts["follow_up"])
-            async with AsyncSessionLocal() as db2b:
-                await svc.save_outbound_message(db2b, redis, wa_id, facts["follow_up"],
-                                                waba_msg_id=wamid2)
-        await mark_closer_answered(redis, "whatsapp", wa_id, text)
-        _log.info("tier2 replied to %s (%d chars)", wa_id, len(reply))
-        # She answered — so whatever a person was told to go and fix is fixed.
-        from app.services.agent_health import record_turn_success
-        await record_turn_success(redis)
-        # The scribe files the turn (deal items/stage/promises) — best-effort.
+        from app.database import AsyncSessionLocal
+        from app.services import n8n_bridge as svc
         try:
-            from app.services.deals import scribe_update
-            async with AsyncSessionLocal() as db3:
-                await scribe_update(db3, wa_id, "whatsapp", reply, inbound_text=text,
-                                    tools=facts.get("tools"))
-        except Exception:
-            pass
-        return True
-    except Exception as exc:
-        _log.exception("tier2 background turn failed for %s", wa_id)
-        # Count it so the hourly self-check can say the AI has stopped replying —
-        # and why. An out-of-credit account silenced every channel for days and
-        # the only trace was this log line.
-        from app.services.agent_health import record_turn_failure
-        await record_turn_failure(redis, wa_id, exc)
-        if hold_line:
-            await _send_hold_line(redis, "whatsapp", wa_id)
-        return False
-
+            # A photo turn always takes the main model — vision + catalogue matching
+            # is never "light" work, whatever the caption says.
+            model = settings.tier2_model if media else route_model(text)
+            facts: dict = {}                 # this turn's tool results, for the scribe
+            async with AsyncSessionLocal() as db:
+                reply = await run_turn(db, redis, wa_id, text,
+                                       build_llm(model=model, purpose="whatsapp"), media=media,
+                                       deferred=deferred, turn_facts=facts)
+                if not (reply or "").strip():
+                    _log.info("silence for %s: nothing to send (a closer, or a held acknowledgement)", wa_id)
+                    # A decision, not a miss: the missed-reply sweep leaves it be
+                    # (as on Messenger) instead of re-running the silence.
+                    await _mark_silenced(redis, "whatsapp", wa_id)
+                    return False
+                if await _is_echo(db, "whatsapp", wa_id, reply):
+                    _log.info("echo guard: identical reply within minutes suppressed for %s", wa_id)
+                    await _mark_silenced(redis, "whatsapp", wa_id)
+                    return False
+            if not await _still_ai("whatsapp", wa_id):
+                _log.info("a colleague took %s while the turn composed — not sent", wa_id)
+                return False
+            wamid = await svc._send_waba(wa_id, reply)
+            async with AsyncSessionLocal() as db2:
+                await svc.save_outbound_message(db2, redis, wa_id, reply, waba_msg_id=wamid)
+            if facts.get("follow_up"):
+                # Its own message, a beat after the reply (the cassock ladder).
+                await asyncio.sleep(FOLLOW_UP_DELAY_S)
+                wamid2 = await svc._send_waba(wa_id, facts["follow_up"])
+                async with AsyncSessionLocal() as db2b:
+                    await svc.save_outbound_message(db2b, redis, wa_id, facts["follow_up"],
+                                                    waba_msg_id=wamid2)
+            await mark_closer_answered(redis, "whatsapp", wa_id, text)
+            _log.info("tier2 replied to %s (%d chars)", wa_id, len(reply))
+            # She answered — so whatever a person was told to go and fix is fixed.
+            from app.services.agent_health import record_turn_success
+            await record_turn_success(redis)
+            # The scribe files the turn (deal items/stage/promises) — best-effort.
+            try:
+                from app.services.deals import scribe_update
+                async with AsyncSessionLocal() as db3:
+                    await scribe_update(db3, wa_id, "whatsapp", reply, inbound_text=text,
+                                        tools=facts.get("tools"))
+            except Exception:
+                pass
+            return True
+        except Exception as exc:
+            _log.exception("tier2 background turn failed for %s", wa_id)
+            # Count it so the hourly self-check can say the AI has stopped replying —
+            # and why. An out-of-credit account silenced every channel for days and
+            # the only trace was this log line.
+            from app.services.agent_health import record_turn_failure
+            await record_turn_failure(redis, wa_id, exc)
+            if hold_line:
+                await _send_hold_line(redis, "whatsapp", wa_id)
+            return False
+    finally:
+        await _release_inflight(redis, "whatsapp", wa_id)
 
 async def schedule_reply(redis, wa_id: str, text: str, dedup_id: str | None,
                          media: dict | None = None) -> bool:
@@ -2545,6 +2681,10 @@ async def escalate_to_human(channel: str, ext: str, note: str,
                     Conversation.wa_id == ext)))).scalars().first()
             if conv is None:
                 return False
+            if conv.intercept_mode != InterceptMode.human or conv.intercept_since is None:
+                # When the hand-over began (audit, 2026-11-05): auto-release
+                # and the unclaimed-chat sweep both count from here.
+                conv.intercept_since = datetime.now(timezone.utc)
             conv.intercept_mode = InterceptMode.human
             db.add(Intercept(conversation_id=conv.id,
                              action=InterceptAction.flag, note=note[:500],
@@ -2632,81 +2772,87 @@ async def _run_and_send_meta(redis, channel: str, external_id: str, text: str,
     """Generate + send one Meta reply. Returns True only when it actually
     reached the customer (so the sweep counts real sends, not attempts).
     `hold_line=False` for a retry, as in `_run_and_send`."""
-    from app.database import AsyncSessionLocal
-    from app.services.meta_send import send_to_channel, send_typing_on
-    from app.services import n8n_bridge as svc
-    reply = ""
-    text, media = await _hear_voice_note(text, media, channel=channel, external_id=external_id)
+    await _acquire_inflight(redis, channel, external_id)
     try:
-        # Human presence: "typing…" in their Messenger while the turn composes.
-        # Meta-only edge — TikTok (which also rides this path natively) has no
-        # typing indicator API.
+        from app.database import AsyncSessionLocal
+        from app.services.meta_send import send_to_channel, send_typing_on
+        from app.services import n8n_bridge as svc
+        reply = ""
+        text, media = await _hear_voice_note(text, media, channel=channel, external_id=external_id)
         try:
-            from app.agent.domain import is_paused as _guard_paused
-            if channel in META_CHANNELS and not await _guard_paused(redis, channel, external_id):
-                await send_typing_on(external_id, page_id=page_id)
-        except Exception:
-            pass
-        model = settings.tier2_model if media else route_model(text)
-        facts: dict = {}                 # this turn's tool results, for the scribe
-        async with AsyncSessionLocal() as db:
-            reply = await run_turn(db, redis, wa_id=external_id, user_text=text,
-                                   llm=build_llm(model=model, purpose=channel),
-                                   channel=channel, external_id=external_id,
-                                   media=media, deferred=deferred, turn_facts=facts)
-            if not (reply or "").strip():
-                _log.info("silence on %s for %s: nothing to send (a closer, or a held "
-                          "acknowledgement)", channel, external_id)
-                await _mark_silenced(redis, channel, external_id)
+            # Human presence: "typing…" in their Messenger while the turn composes.
+            # Meta-only edge — TikTok (which also rides this path natively) has no
+            # typing indicator API.
+            try:
+                from app.agent.domain import is_paused as _guard_paused
+                if channel in META_CHANNELS and not await _guard_paused(redis, channel, external_id):
+                    await send_typing_on(external_id, page_id=page_id)
+            except Exception:
+                pass
+            model = settings.tier2_model if media else route_model(text)
+            facts: dict = {}                 # this turn's tool results, for the scribe
+            async with AsyncSessionLocal() as db:
+                reply = await run_turn(db, redis, wa_id=external_id, user_text=text,
+                                       llm=build_llm(model=model, purpose=channel),
+                                       channel=channel, external_id=external_id,
+                                       media=media, deferred=deferred, turn_facts=facts)
+                if not (reply or "").strip():
+                    _log.info("silence on %s for %s: nothing to send (a closer, or a held "
+                              "acknowledgement)", channel, external_id)
+                    await _mark_silenced(redis, channel, external_id)
+                    return True
+                if await _is_echo(db, channel, external_id, reply):
+                    _log.info("echo guard: identical reply within minutes suppressed for %s/%s",
+                              channel, external_id)
+                    await _mark_silenced(redis, channel, external_id)
+                    return True
+            if not await _still_ai(channel, external_id):
+                _log.info("a colleague took %s/%s while the turn composed — not sent", channel, external_id)
                 return True
-            if await _is_echo(db, channel, external_id, reply):
-                _log.info("echo guard: identical reply within minutes suppressed for %s/%s",
+            await send_to_channel(channel, external_id, reply, page_id=page_id)
+            async with AsyncSessionLocal() as db2:
+                await svc.save_outbound_channel_message(db2, redis, channel, external_id, reply)
+            if facts.get("follow_up"):
+                await asyncio.sleep(FOLLOW_UP_DELAY_S)
+                await send_to_channel(channel, external_id, facts["follow_up"], page_id=page_id)
+                async with AsyncSessionLocal() as db2b:
+                    await svc.save_outbound_channel_message(db2b, redis, channel, external_id,
+                                                            facts["follow_up"])
+            await mark_closer_answered(redis, channel, external_id, text)
+            _log.info("tier2 replied on %s to %s (%d chars)", channel, external_id, len(reply))
+            from app.services.agent_health import record_turn_success
+            await record_turn_success(redis)
+            # The scribe files the turn (deal items/stage/promises) — best-effort.
+            try:
+                from app.services.deals import scribe_update
+                async with AsyncSessionLocal() as db3:
+                    await scribe_update(db3, external_id, channel, reply, inbound_text=text,
+                                        tools=facts.get("tools"))
+            except Exception:
+                pass
+            return True
+        except Exception as exc:
+            if is_outside_window(exc):
+                # Meta's 24h window shut before we could answer. The reply Neema
+                # already composed becomes the thread's held draft — the dashboard
+                # shows it with an Approve button, and one tap sends it under the
+                # human-agent window (7 days). A person's tap, a person's send.
+                note = ("Outside Meta's 24-hour window — Neema drafted a reply; "
+                        "review it and tap Approve to send it as a human agent "
+                        "(Meta allows 7 days).")
+                _log.info("meta 24h window closed for %s/%s — draft held for one-tap send",
                           channel, external_id)
-                await _mark_silenced(redis, channel, external_id)
-                return True
-        await send_to_channel(channel, external_id, reply, page_id=page_id)
-        async with AsyncSessionLocal() as db2:
-            await svc.save_outbound_channel_message(db2, redis, channel, external_id, reply)
-        if facts.get("follow_up"):
-            await asyncio.sleep(FOLLOW_UP_DELAY_S)
-            await send_to_channel(channel, external_id, facts["follow_up"], page_id=page_id)
-            async with AsyncSessionLocal() as db2b:
-                await svc.save_outbound_channel_message(db2b, redis, channel, external_id,
-                                                        facts["follow_up"])
-        await mark_closer_answered(redis, channel, external_id, text)
-        _log.info("tier2 replied on %s to %s (%d chars)", channel, external_id, len(reply))
-        from app.services.agent_health import record_turn_success
-        await record_turn_success(redis)
-        # The scribe files the turn (deal items/stage/promises) — best-effort.
-        try:
-            from app.services.deals import scribe_update
-            async with AsyncSessionLocal() as db3:
-                await scribe_update(db3, external_id, channel, reply, inbound_text=text,
-                                    tools=facts.get("tools"))
-        except Exception:
-            pass
-        return True
-    except Exception as exc:
-        if is_outside_window(exc):
-            # Meta's 24h window shut before we could answer. The reply Neema
-            # already composed becomes the thread's held draft — the dashboard
-            # shows it with an Approve button, and one tap sends it under the
-            # human-agent window (7 days). A person's tap, a person's send.
-            note = ("Outside Meta's 24-hour window — Neema drafted a reply; "
-                    "review it and tap Approve to send it as a human agent "
-                    "(Meta allows 7 days).")
-            _log.info("meta 24h window closed for %s/%s — draft held for one-tap send",
-                      channel, external_id)
-            await escalate_to_human(channel, external_id, note,
-                                    draft=(reply or None), redis=redis)
-        else:
-            _log.exception("tier2 meta turn failed for %s/%s", channel, external_id)
-            from app.services.agent_health import record_turn_failure
-            await record_turn_failure(redis, external_id, exc)
-            if hold_line:
-                await _send_hold_line(redis, channel, external_id)
-        return False
-
+                await escalate_to_human(channel, external_id, note,
+                                        draft=(reply or None), redis=redis)
+            else:
+                _log.exception("tier2 meta turn failed for %s/%s", channel, external_id)
+                from app.services.agent_health import record_turn_failure
+                await record_turn_failure(redis, external_id, exc)
+                if hold_line:
+                    await _send_hold_line(redis, channel, external_id)
+            return False
+    finally:
+        await _release_inflight(redis, channel, external_id)
 
 async def schedule_meta_reply(redis, channel: str, external_id: str, text: str,
                               dedup_id: str | None, page_id: str | None = None,

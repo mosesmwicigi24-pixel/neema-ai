@@ -61,6 +61,9 @@ DECISIONS = {
     "bot": "Would treat as a bot",
     "move_to_dm": "Would move the comment thread to DM",
     "spam": "Would treat the comment as spam",
+    # agent/reply_length (audit, 2026-11-05): the reply ran past its target
+    # (turns = words written, budget = the target).
+    "long": "Reply ran long (words / target)",
 }
 
 _AUTOREPLY_RE = re.compile(
