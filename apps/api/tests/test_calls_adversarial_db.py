@@ -244,7 +244,7 @@ def _make_rig(fresh_db, world, monkeypatch, *, fake_meta=True):  # noqa: F811
     from app.core.config import settings
     from app.routers import meta_webhook as mw
     from app.services import (conversation, identity, meta_send, messenger_calling, missed_call,
-                              n8n_bridge, wa_calling, wa_native, call_log)
+                              messaging, wa_calling, wa_native, call_log)
     eng = sa.create_engine(fresh_db)
     agents = [world["ann"], world["ben"], world["boss"]]
     with eng.begin() as c:
@@ -307,8 +307,8 @@ def _make_rig(fresh_db, world, monkeypatch, *, fake_meta=True):  # noqa: F811
     async def save(*a, **k):
         return None
     monkeypatch.setattr(meta_send, "send_to_channel", send)
-    monkeypatch.setattr(n8n_bridge, "save_outbound_message", save)
-    monkeypatch.setattr(n8n_bridge, "save_outbound_channel_message", save)
+    monkeypatch.setattr(messaging, "save_outbound_message", save)
+    monkeypatch.setattr(messaging, "save_outbound_channel_message", save)
     monkeypatch.setattr(conversation, "record_escalation", save)
     monkeypatch.setattr(missed_call, "_local_cooldown", {}, raising=False)
     monkeypatch.setattr(call_log, "_local_requests", {}, raising=False)

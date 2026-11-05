@@ -540,7 +540,7 @@ final class InboxContractTests: XCTestCase {
         await socket(host, #"{"type":"new_message","conversationId":"k2","channel":"messenger","sender":"user","text":"Still there?","mediaType":null,"mediaUrl":null}"#)
         let m = vm.thread.value.messages["k2"]!.last!
         XCTAssertEqual(m.body, "Still there?"); XCTAssertTrue(m.inbound); XCTAssertEqual(m.sender, "user")
-        // n8n_bridge's inbound WhatsApp frame: media fields, no id / direction.
+        // messaging's inbound WhatsApp frame: media fields, no id / direction.
         await socket(host, #"{"type":"new_message","conversationId":"k2","waId":"250788123456","sender":"user","text":"[image]","mediaType":"image","mediaId":"wamid.M2","mediaUrl":"https://x/p.jpg","mediaCaption":null,"mimeType":"image/jpeg","filename":null}"#)
         let img = vm.thread.value.messages["k2"]!.last!
         XCTAssertTrue(img.inbound); XCTAssertEqual(img.mimeType, "image/jpeg"); XCTAssertEqual(img.mediaId, "wamid.M2")
@@ -579,7 +579,7 @@ final class InboxContractTests: XCTestCase {
         XCTAssertEqual(vm.thread.value.messages["k1"]!.filter { $0.body == "ok" }.count, 2)
     }
 
-    /// The AI reply frame (n8n_bridge) carries the DB id and, for voice, the media.
+    /// The AI reply frame (messaging) carries the DB id and, for voice, the media.
     func testWsAiReplyAndTranslationsAndPills() async {
         let (host, vm) = await vm()
         vm.select("k1"); await drain()

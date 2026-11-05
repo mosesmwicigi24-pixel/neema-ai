@@ -145,7 +145,7 @@ def test_model_output_parsing_survives_fences_and_garbage():
 def _worker_world(monkeypatch, *, reply_json, rows):
     import app.database as database
     import app.agent.runtime as runtime
-    import app.services.n8n_bridge as bridge
+    import app.services.messaging as bridge
 
     class _Sess:
         def __init__(self):

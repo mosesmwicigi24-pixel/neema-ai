@@ -165,7 +165,7 @@ async def run(keep: bool) -> None:
 
     import redis.asyncio as aioredis
     from app.agent.runtime import run_turn, build_llm
-    from app.services.n8n_bridge import provision_user
+    from app.services.messaging import provision_user
 
     try:
         redis = aioredis.from_url(settings.redis_url, decode_responses=True,

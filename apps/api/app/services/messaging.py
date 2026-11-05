@@ -1,11 +1,8 @@
 """The messaging persistence + delivery service.
 
-Historical name: this module was built as the API side of the n8n bridge, and
-kept the filename when n8n was retired (2026-07-30) because it was never an n8n
-client — it IS the message/conversation/user persistence layer and the WABA
-sender, imported across the app (native WhatsApp pipeline, web chat, Meta
-channels, sweeps, admin). Renaming it is pure churn; the name is the only
-n8n-era thing left in here.
+The message / conversation / user persistence layer and the WhatsApp (WABA)
+sender, imported across the app: the native WhatsApp pipeline, web chat, the
+Meta channels, the sweeps and the admin routes all save and send through here.
 """
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, update
@@ -63,7 +60,7 @@ async def provision_user(
 
     This is the single place that guarantees every conversation has a backing
     profile. It is server-AUTHORITATIVE for country (resolved from the dialing
-    prefix, so it never depends on the n8n enrichment call landing) and it
+    prefix, so it never depends on any external enrichment) and it
     captures the WhatsApp profile name without ever clobbering a name an
     operator has confirmed.
 
@@ -445,7 +442,8 @@ async def catalog_items(db: AsyncSession, redis) -> list[dict]:
 # An inbound attachment Neema cannot read (video, document, sticker) is FLAGGED
 # for an agent to view — but the conversation stays in AI mode, so she keeps
 # serving the customer instead of going silent while nobody is watching.
-# Returns a Firestore-style document array so n8n can consume the output directly.
+# Returns a Firestore-style document array (the shape the callers and the
+# dashboard previews were built on).
 
 async def upsert_message(db: AsyncSession, redis, body, *, message_id=None,
                          transcript_status: str | None = None) -> list:
@@ -530,8 +528,8 @@ async def upsert_message(db: AsyncSession, redis, body, *, message_id=None,
         raw_meta=getattr(body, "raw_meta", None),
     )
     # Recover the customer's WhatsApp message id (wamid), captured by the API front
-    # door keyed on (wa_id, text-hash), so a human reply can quote it natively (the
-    # n8n path itself doesn't carry the wamid). Best-effort.
+    # door keyed on (wa_id, text-hash), so a human reply can quote it natively
+    # (the DTO itself doesn't carry the wamid). Best-effort.
     if direction == MsgDirection.inbound and (body.text or "").strip() and redis is not None:
         try:
             import hashlib as _hl
@@ -666,18 +664,15 @@ async def upsert_message(db: AsyncSession, redis, body, *, message_id=None,
         fields["escalated"]    = {"booleanValue": True}
 
     # Expose the identity/message fields at the TOP LEVEL too — not just inside
-    # the Firestore-style `fields` envelope. n8n's HTTP node makes this response
-    # the new `$json`, and every downstream node (the debounce, and via it the
-    # session setup, the AI, and reply dispatch) reads `$json.wa_id` etc.
-    # directly. Without these top-level keys wa_id was empty all the way down,
-    # so /context/{wa_id} 404'd and no reply was ever sent. Additive — the
+    # the Firestore-style `fields` envelope — so callers can read `wa_id`,
+    # `docid` and the timestamps without unwrapping the envelope. Additive: the
     # nested `fields` and doc `name` are unchanged, so existing readers still work.
     result = {
         "name": f"projects/neema-6037c/databases/(default)/documents/messages/{doc_id}",
         "fields": fields,
         "createTime": now_str,
         "updateTime": now_str,
-        # top-level identity/message fields for n8n expressions
+        # top-level identity/message fields
         "wa_id": body.wa_id,
         "docid": doc_id,
         "tsMs": ts_ms,

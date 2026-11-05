@@ -122,8 +122,8 @@ def test_prompt_tells_her_what_to_do_with_an_unreadable_attachment():
 def test_media_escalation_no_longer_switches_to_human_mode():
     """The source of the mute: media handling must write a FLAG, not an intercept."""
     import inspect
-    from app.services import n8n_bridge
-    src = inspect.getsource(n8n_bridge.upsert_message)
+    from app.services import messaging
+    src = inspect.getsource(messaging.upsert_message)
     # the flag is written…
     assert "InterceptAction.flag" in src
     # …and the line that muted the AI is gone

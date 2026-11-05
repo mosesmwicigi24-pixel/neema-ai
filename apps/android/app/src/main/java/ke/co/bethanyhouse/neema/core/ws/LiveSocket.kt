@@ -45,16 +45,16 @@ import okhttp3.WebSocketListener
  *   sender: "user"|"ai"|"human_agent", text, id?, waId?, channel?, direction?,
  *   mediaType?, mediaId?, mediaUrl?, mediaCaption?, mimeType?, filename?,
  *   replyTo?, translation?, translatedFrom?}`. Only the AI's own text reply
- *   (n8n_bridge.outbound_gate) carries the DB `id`; every other sender omits
+ *   (messaging.save_outbound_message) carries the DB `id`; every other sender omits
  *   it, and most omit `direction` (read absent as "outbound" unless
- *   `sender == "user"`). Senders: n8n_bridge (inbound WhatsApp, AI replies),
+ *   `sender == "user"`). Senders: messaging (inbound WhatsApp, AI replies),
  *   conversation.py (agent reply / AI message / agent media / transfer
  *   notice), meta_webhook (Messenger / Instagram / Facebook inbound), sms.py,
  *   public.py (website measurement form), agent/tools.py (product photo).
  * - `message` — the OLDER shape some channels still use: `{type,
  *   conversationId, text, direction: "inbound"|"outbound", waId?, channel?,
  *   sender?, reply_to?}` (web_chat.py and manychat / tiktok inbound;
- *   n8n_bridge outbound channel sends and comment replies). The web ignores
+ *   messaging outbound channel sends and comment replies). The web ignores
  *   it; treat it as "this thread moved".
  * - `intercept_changed` — the thread's mode changed. `{type, conversationId,
  *   mode?: "ai"|"human"|"paused", assignedAgentId?: string|null,
@@ -62,7 +62,7 @@ import okhttp3.WebSocketListener
  *   "escalated"|"flag", eventAgentName?, eventReason?, eventNote?}`. `mode` is
  *   missing on an AI escalation (conversation.record_escalation).
  * - `ai_draft_ready` — a suggested reply for a human-held thread. `{type,
- *   conversationId, draft, waId?}` (n8n_bridge, copilot, agent/runtime).
+ *   conversationId, draft, waId?}` (messaging, copilot, agent/runtime).
  * - `translations` — the background translator finished. `{type,
  *   conversationId, items: [{id, text, lang: string|null}]}` (translate.py).
  * - `history_cleared` — `{type, conversationId, clearedBy}` (admin.py
@@ -74,7 +74,7 @@ import okhttp3.WebSocketListener
  * `conv_id`, `wa_id` or `waId`. `type` is one of:
  * `new_conversation` (wa_native), `new_message` (sms.py — note the same name
  * as the conversation frame, told apart by `event`), `human_transfer`
- * (n8n_bridge media, + `mediaType`), `media_escalation` (wa_native),
+ * (messaging media, + `mediaType`), `media_escalation` (wa_native),
  * `intercept` (pick-up / AI escalation), `system` (released to AI),
  * `draft_ready` (agent/runtime), `availability_check` (agent/tools),
  * `take_back` (copilot), `planned_action` (actions.py), `standup`

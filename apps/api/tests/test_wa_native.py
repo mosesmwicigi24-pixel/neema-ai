@@ -1,4 +1,4 @@
-"""Native WhatsApp ingestion (the n8n replacement) — parser, debounce, media,
+"""Native WhatsApp ingestion — parser, debounce, media,
 transcription fallback, and the flag gating that keeps production unchanged
 until WHATSAPP_NATIVE is flipped.
 """
@@ -206,7 +206,7 @@ def test_voice_notes_use_the_one_engine(monkeypatch):
     assert not hasattr(wn, "_transcribe_path_sync")
 
 
-# ── native is the ONLY pipeline (n8n retired 2026-07-30, code 2026-08-11) ────
+# ── native is the ONLY pipeline ─────────────────────────────────────────────
 
 def test_front_door_is_native_only():
     import inspect
@@ -217,7 +217,7 @@ def test_front_door_is_native_only():
     assert "wa_native" in src                     # in-process pipeline
     # the retired forward machinery must be GONE, not merely off
     module_src = inspect.getsource(ww)
-    assert "_forward_to_n8n" not in module_src
+    assert "_forward_to" not in module_src
     assert "whatsapp_native" not in module_src    # no flag — native unconditionally
     # and the route itself must route through the shared front door
     assert "process_payload" in inspect.getsource(ww.receive)
@@ -265,6 +265,6 @@ def test_doc_request_escalates_instead_of_scheduling(monkeypatch):
     assert escalated["n"] == 1 and scheduled["n"] == 0
 
 
-def test_debounce_default_is_the_value_n8n_actually_ran():
+def test_debounce_default_is_thirty_seconds():
     from app.core.config import Settings
     assert Settings.model_fields["whatsapp_debounce_seconds"].default == 30

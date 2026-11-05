@@ -165,7 +165,7 @@ def test_an_attempt_that_finds_the_account_down_gives_the_strike_back(rig, monke
 
 def test_the_hold_line_row_is_stamped(rig, monkeypatch):  # noqa: F811
     from app.agent import runtime as rt
-    from app.services import n8n_bridge as svc
+    from app.services import messaging as svc
     import app.services.meta_send as meta_send
 
     async def fake_waba(to, text, *a, **k):

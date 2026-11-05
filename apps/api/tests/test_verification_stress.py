@@ -519,7 +519,7 @@ def test_the_writer_is_told_it_can_send_photos():
 
 def test_the_search_tool_never_implies_one_price_for_every_size(monkeypatch):
     from app.agent import tools
-    from app.services import n8n_bridge as svc
+    from app.services import messaging as svc
     from app.services import promotions as promo
 
     async def items(db, redis):

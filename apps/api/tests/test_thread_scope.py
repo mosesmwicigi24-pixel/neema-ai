@@ -335,7 +335,7 @@ def _wire_ladder(monkeypatch, hit, calls):
 
     async def items(db, redis):
         return CATALOG
-    monkeypatch.setattr("app.services.n8n_bridge.catalog_items", items)
+    monkeypatch.setattr("app.services.messaging.catalog_items", items)
 
     async def resolve(redis, pctx, catalog):
         calls.append(pctx.get("post_id"))

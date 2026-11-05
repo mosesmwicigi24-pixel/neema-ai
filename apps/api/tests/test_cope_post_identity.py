@@ -182,7 +182,7 @@ def test_the_team_corrects_a_post_by_any_name_and_is_never_guessed_for(monkeypat
 
     async def _catalog(db, redis):
         return CATALOG
-    monkeypatch.setattr("app.services.n8n_bridge.catalog_items", _catalog)
+    monkeypatch.setattr("app.services.messaging.catalog_items", _catalog)
     stored = {}
 
     async def _remember(redis, channel, pid, product, thumb=""):

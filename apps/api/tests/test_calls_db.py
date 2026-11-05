@@ -1373,7 +1373,7 @@ def test_a_window_we_misread_falls_back_to_the_template(env, world, monkeypatch)
 def test_a_missed_call_gets_one_message_and_a_flag_only_when_switched_on(env, world, monkeypatch):
     import asyncio as _a
     from app.core.config import settings
-    from app.services import missed_call, meta_send, n8n_bridge
+    from app.services import missed_call, meta_send, messaging
     sent, saved = [], []
 
     async def fake_send(channel, to, text, **kw):
@@ -1383,7 +1383,7 @@ def test_a_missed_call_gets_one_message_and_a_flag_only_when_switched_on(env, wo
     async def fake_save(db, redis, wa_id, text, waba_msg_id=None):
         saved.append((wa_id, waba_msg_id))
     monkeypatch.setattr(meta_send, "send_to_channel", fake_send)
-    monkeypatch.setattr(n8n_bridge, "save_outbound_message", fake_save)
+    monkeypatch.setattr(messaging, "save_outbound_message", fake_save)
 
     wa = "254777000001"
     _ring(env, "wacid.mc.1", frm=wa)

@@ -187,7 +187,7 @@ def _turn(monkeypatch, mode, check, reply="Our Ornate Chasuble is KES 13,000."):
 
     async def _cat(db, redis):
         return CATALOG
-    monkeypatch.setattr("app.services.n8n_bridge.catalog_items", _cat)
+    monkeypatch.setattr("app.services.messaging.catalog_items", _cat)
 
     async def _pass(reply, **kw):
         return reply, [], "pass"

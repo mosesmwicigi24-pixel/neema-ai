@@ -647,7 +647,7 @@ def test_a_comment_naming_another_finish_or_kind_does_not_name_the_posts_product
 # ── the search: gold is golden, cups are the small cups ─────────────────────
 
 def _search(monkeypatch, q):
-    from app.services import n8n_bridge as svc
+    from app.services import messaging as svc
     from app.services import promotions as promo
 
     async def items(db, redis):

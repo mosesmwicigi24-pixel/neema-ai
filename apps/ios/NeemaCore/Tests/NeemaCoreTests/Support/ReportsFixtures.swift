@@ -91,23 +91,23 @@ enum ReportsFixtures {
         """
     }
 
-    static func n8nLine(_ name: String, _ qty: Int, _ unit: Double) -> String { "{\"name\":\"\(name)\",\"qty\":\(qty),\"unit\":\(unit),\"total\":\(unit * Double(qty))}" }
+    static func cartLine(_ name: String, _ qty: Int, _ unit: Double) -> String { "{\"name\":\"\(name)\",\"qty\":\(qty),\"unit\":\(unit),\"total\":\(unit * Double(qty))}" }
     static func cartLine(_ name: String, _ qty: Int, _ unit: Double, _ product: Int, _ sku: String) -> String {
         "{\"hub_product_id\":\(product),\"name\":\"\(name)\",\"sku\":\"\(sku)\",\"qty\":\(qty),\"unit_price\":\(unit),\"price_usd\":null,\"prices\":{\"KES\":\(unit)},\"in_stock\":true,\"made_to_order\":false}"
     }
 
     static var orders: [String] {
         [
-            order("o1", "254712345678", "confirmed", 8000.0, ago(1 * H), "[\(n8nLine("Clergy Shirt — Black, 16 inch", 2, 3500.0)),\(n8nLine("Roman Collar Tab", 4, 250.0))]", payment: "paid"),
+            order("o1", "254712345678", "confirmed", 8000.0, ago(1 * H), "[\(cartLine("Clergy Shirt — Black, 16 inch", 2, 3500.0)),\(cartLine("Roman Collar Tab", 4, 250.0))]", payment: "paid"),
             // The agent's own order: pushed to the hub, cart lines priced by unit_price (no unit / total).
             order("o2", "254722000111", "pending", 12500.0, ago(1 * D + 2 * H), "[\(cartLine("Cassock — Purple, L", 1, 12500.0, 502, "CAS-PUR-L"))]", channel: "messenger", hub: 1042),
-            order("o3", "254733444555", "delivered", 18000.0, ago(3 * D), "[\(n8nLine("Alb — White, M", 3, 6000.0))]", payment: "paid"),
-            order("o4", "254700111222", "cancelled", 9600.0, ago(4 * D), "[\(n8nLine("Stole — Green", 2, 4800.0))]"),
-            // An n8n cart snapshot that never became an order: status "open" (shown as pending).
-            order("o5", "254711000999", "open", 4800.0, ago(6 * D), "[\(n8nLine("Stole — Green", 1, 4800.0))]"),
-            order("o6", "254733444555", "delivered", 3500.0, ago(10 * D), "[\(n8nLine("Clergy Shirt", 1, 3500.0))]", payment: "paid"),
+            order("o3", "254733444555", "delivered", 18000.0, ago(3 * D), "[\(cartLine("Alb — White, M", 3, 6000.0))]", payment: "paid"),
+            order("o4", "254700111222", "cancelled", 9600.0, ago(4 * D), "[\(cartLine("Stole — Green", 2, 4800.0))]"),
+            // A cart snapshot that never became an order: status "open" (shown as pending).
+            order("o5", "254711000999", "open", 4800.0, ago(6 * D), "[\(cartLine("Stole — Green", 1, 4800.0))]"),
+            order("o6", "254733444555", "delivered", 3500.0, ago(10 * D), "[\(cartLine("Clergy Shirt", 1, 3500.0))]", payment: "paid"),
             // Outside 30 days.
-            order("o7", "254722333444", "delivered", 25000.0, ago(40 * D), "[\(n8nLine("Clergy Shirt", 1, 25000.0))]", payment: "paid"),
+            order("o7", "254722333444", "delivered", 25000.0, ago(40 * D), "[\(cartLine("Clergy Shirt", 1, 25000.0))]", payment: "paid"),
         ]
     }
 

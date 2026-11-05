@@ -5,7 +5,7 @@ Pure/mock style, no DB. Requires Python 3.11 (SQLAlchemy models registered).
 import asyncio
 
 import app.main  # noqa: F401
-from app.services import n8n_bridge as nb
+from app.services import messaging as nb
 from app.services import meta_send as ms
 from app.core.config import settings
 
@@ -57,7 +57,7 @@ def test_send_to_channel_whatsapp_passes_context(monkeypatch):
         captured.update(num=num, text=text, ctx=context_wamid)
         return "wamid.OUT1"
 
-    monkeypatch.setattr("app.services.n8n_bridge._send_waba", fake_waba)
+    monkeypatch.setattr("app.services.messaging._send_waba", fake_waba)
     wamid = asyncio.run(ms.send_to_channel("whatsapp", "+254700", "hi", context_wamid="w.1"))
     assert captured["num"] == "254700" and captured["ctx"] == "w.1"
     assert wamid == "wamid.OUT1"   # passed through so the saved row keeps it

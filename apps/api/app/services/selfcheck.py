@@ -425,7 +425,7 @@ async def _probe_price_consistency(db, redis) -> list[str]:
     were wrong the same way. Nothing had looked. This looks, daily, and names
     the worst row so the fix is a hub edit and not an investigation."""
     from app.core.config import settings
-    from app.services import n8n_bridge as svc
+    from app.services import messaging as svc
     from app.services.price_audit import audit, summary_line
     catalog = await svc.catalog_items(db, redis)
     line = summary_line(audit(catalog, settings.usd_kes_rate or 100))

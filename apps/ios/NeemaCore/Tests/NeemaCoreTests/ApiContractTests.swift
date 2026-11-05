@@ -161,7 +161,7 @@ final class ApiContractTests: XCTestCase {
         XCTAssertEqual("delivered", o.status)
     }
 
-    // ── GET /admin/catalog — admin.py list_catalog → n8n_bridge.catalog_items ─
+    // ── GET /admin/catalog — admin.py list_catalog → messaging.catalog_items ─
 
     func testCatalogSendsCategoryAndSearch() async throws {
         _ = try await api.catalog.list(category: "Vestments", search: "stole & alb")

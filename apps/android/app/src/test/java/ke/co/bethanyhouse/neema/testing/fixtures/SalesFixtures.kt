@@ -74,7 +74,7 @@ object SalesFixtures {
     // ── Orders ──────────────────────────────────────────────────────────────
 
     /**
-     * An n8n (Tier 1) cart line — n8n_bridge.py `upsert_order_event` stores
+     * A legacy cart line — messaging.py `upsert_order_event` stores
      * `OrderEventDto.items` verbatim, in the `{name, qty, unit, total, sku}`
      * shape the web's `ApiOrder` was written against.
      */
@@ -150,8 +150,8 @@ object SalesFixtures {
         mapOf("hub_status" to status, "hub_payment_status" to payment, "hub_fulfillment_status" to fulfillment, "hub_status_at" to at)
 
     /**
-     * The order detail's subject: an n8n order pushed to the hub by
-     * n8n_bridge.py `_maybe_push_order_to_hub` (legacy priced lines), then
+     * The order detail's subject: a legacy order pushed to the hub by
+     * messaging.py `_maybe_push_order_to_hub` (legacy priced lines), then
      * mirrored as processing/paid by the hub, with the reply Neema sent.
      */
     val linkedOrder = order(
@@ -179,7 +179,7 @@ object SalesFixtures {
         createdAt = FIXED_AT, hub = pushed(1050, 145000.0),
     )
 
-    /** A cart the hub refused: n8n_bridge.py `_save(hub_push_status="failed", hub_last_error=str(exc)[:500])`. */
+    /** A cart the hub refused: messaging.py `_save(hub_push_status="failed", hub_last_error=str(exc)[:500])`. */
     val failedOrder = order(
         "254722000111_1773480600000", "254722000111", "open", 12500.0,
         items = listOf(legacyLine("Cassock — Purple, L", 1, 12500, "CAS-PUR-L")),
@@ -201,7 +201,7 @@ object SalesFixtures {
             hub = pushed(1031, 4800.0, withToken = false) + mirrored("completed", "paid", "fulfilled")),
         order("o4", "254700999888", "cancelled", 18000.0, channel = "instagram", createdAt = ago(60 * 72),
             items = listOf(agentLine("Alb — White, M", 3, 6000.0))),
-        // An n8n cart snapshot: no lines, status "open", event_type "cart".
+        // A cart snapshot: no lines, status "open", event_type "cart".
         order("o5", "254733444555", "open", 3500.0, channel = "whatsapp", createdAt = ago(60 * 5),
             items = emptyList(), eventType = "cart"),
         order("o6", "260977123456", "pending", 1450.0, currency = "ZMW",

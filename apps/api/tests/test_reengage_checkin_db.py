@@ -33,7 +33,7 @@ def re(fresh_db, monkeypatch):  # noqa: F811
     from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
     from sqlalchemy.pool import NullPool
     from app.jobs import reengage
-    from app.services import n8n_bridge, meta_send
+    from app.services import messaging, meta_send
 
     eng = sa.create_engine(fresh_db)
     with eng.begin() as c:
@@ -67,8 +67,8 @@ def re(fresh_db, monkeypatch):  # noqa: F811
 
     async def save(*a, **k):
         return None
-    monkeypatch.setattr(n8n_bridge, "_send_waba", waba)
-    monkeypatch.setattr(n8n_bridge, "save_outbound_message", save)
+    monkeypatch.setattr(messaging, "_send_waba", waba)
+    monkeypatch.setattr(messaging, "save_outbound_message", save)
     monkeypatch.setattr(meta_send, "send_to_channel", meta)
     _seed(maker)
     return {"maker": maker, "sent": sent, "llm": llm}

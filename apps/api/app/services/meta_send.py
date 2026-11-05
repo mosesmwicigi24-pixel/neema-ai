@@ -641,7 +641,7 @@ async def send_to_channel(channel: str, recipient: str, text: str,
                                 tag=(tag if channel == "messenger" else None))
         return None
     # WhatsApp — the existing WABA sender expects a bare number (no '+').
-    from app.services.n8n_bridge import _send_waba
+    from app.services.messaging import _send_waba
     return await _send_waba((recipient or "").lstrip("+"), text, context_wamid=context_wamid)
 
 

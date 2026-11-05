@@ -107,7 +107,7 @@ object ReportsFixtures {
      * FastAPI's jsonable_encoder: every column, Numeric → float, timestamptz →
      * isoformat, and nothing joined (no contact_name / contact_phone).
      * Two item shapes live in `items`:
-     *  - n8n's `upsert_order_event` (services/n8n_bridge.py): {name, qty, unit, total, sku?}
+     *  - `upsert_order_event` (services/messaging.py): {name, qty, unit, total, sku?}
      *  - the agent's create_order (agent/tools.py → agent/cart.py lines):
      *    {hub_product_id, name, sku, qty, unit_price, price_usd, prices, in_stock, made_to_order}
      */
@@ -124,24 +124,24 @@ object ReportsFixtures {
         "hub_public_url":null,"hub_public_token":null,"short_ref":null,
         "hub_status":null,"hub_payment_status":null,"hub_fulfillment_status":null,"hub_status_at":null}"""
 
-    private fun n8nLine(name: String, qty: Int, unit: Double) = """{"name":"$name","qty":$qty,"unit":$unit,"total":${unit * qty}}"""
+    private fun cartLine(name: String, qty: Int, unit: Double) = """{"name":"$name","qty":$qty,"unit":$unit,"total":${unit * qty}}"""
     private fun cartLine(name: String, qty: Int, unit: Double, product: Int, sku: String) =
         """{"hub_product_id":$product,"name":"$name","sku":"$sku","qty":$qty,"unit_price":$unit,"price_usd":null,
             "prices":{"KES":$unit},"in_stock":true,"made_to_order":false}"""
 
     val orders = listOf(
         order("o1", "254712345678", "confirmed", 8000.0, ago(1 * H),
-            "[${n8nLine("Clergy Shirt — Black, 16 inch", 2, 3500.0)},${n8nLine("Roman Collar Tab", 4, 250.0)}]", payment = "paid"),
+            "[${cartLine("Clergy Shirt — Black, 16 inch", 2, 3500.0)},${cartLine("Roman Collar Tab", 4, 250.0)}]", payment = "paid"),
         // The agent's own order: pushed to the hub, cart lines priced by unit_price (no unit / total).
         order("o2", "254722000111", "pending", 12500.0, ago(1 * D + 2 * H),
             "[${cartLine("Cassock — Purple, L", 1, 12500.0, 502, "CAS-PUR-L")}]", channel = "messenger", hub = 1042),
-        order("o3", "254733444555", "delivered", 18000.0, ago(3 * D), "[${n8nLine("Alb — White, M", 3, 6000.0)}]", payment = "paid"),
-        order("o4", "254700111222", "cancelled", 9600.0, ago(4 * D), "[${n8nLine("Stole — Green", 2, 4800.0)}]"),
-        // An n8n cart snapshot that never became an order: status "open" (shown as pending).
-        order("o5", "254711000999", "open", 4800.0, ago(6 * D), "[${n8nLine("Stole — Green", 1, 4800.0)}]"),
-        order("o6", "254733444555", "delivered", 3500.0, ago(10 * D), "[${n8nLine("Clergy Shirt", 1, 3500.0)}]", payment = "paid"),
+        order("o3", "254733444555", "delivered", 18000.0, ago(3 * D), "[${cartLine("Alb — White, M", 3, 6000.0)}]", payment = "paid"),
+        order("o4", "254700111222", "cancelled", 9600.0, ago(4 * D), "[${cartLine("Stole — Green", 2, 4800.0)}]"),
+        // A cart snapshot that never became an order: status "open" (shown as pending).
+        order("o5", "254711000999", "open", 4800.0, ago(6 * D), "[${cartLine("Stole — Green", 1, 4800.0)}]"),
+        order("o6", "254733444555", "delivered", 3500.0, ago(10 * D), "[${cartLine("Clergy Shirt", 1, 3500.0)}]", payment = "paid"),
         // Outside 30 days.
-        order("o7", "254722333444", "delivered", 25000.0, ago(40 * D), "[${n8nLine("Clergy Shirt", 1, 25000.0)}]", payment = "paid"),
+        order("o7", "254722333444", "delivered", 25000.0, ago(40 * D), "[${cartLine("Clergy Shirt", 1, 25000.0)}]", payment = "paid"),
     )
 
     /**
@@ -217,7 +217,7 @@ object ReportsFixtures {
 
     /**
      * `GET /admin/catalog` when the hub is unreachable and no last-good copy
-     * exists: n8n_bridge `catalog_items()` reads Neema's local table — IN-STOCK
+     * exists: messaging `catalog_items()` reads Neema's local table — IN-STOCK
      * rows only, no id, no hub_product_id, and `category` / `unit` /
      * `description` coerced to "" (str(x or "")).
      */
@@ -282,14 +282,14 @@ object ReportsFixtures {
         val longName = "Wanjiku Nyambura-Kariuki wa Parokia ya Mtakatifu Yohana 🙏"
         val bigOrders = orders + listOf(
             order("b1", "254700999888", "delivered", 845_000.0, ago(2 * H),
-                "[${n8nLine("Kasula ya Kiaskofu — Dhahabu na Nyeupe, Imeshonwa kwa Mkono ✝️", 5, 169_000.0)}]", payment = "paid"),
+                "[${cartLine("Kasula ya Kiaskofu — Dhahabu na Nyeupe, Imeshonwa kwa Mkono ✝️", 5, 169_000.0)}]", payment = "paid"),
             order("b2", "254700999887", "confirmed", 1_250_000.0, ago(1 * D + 5 * H),
-                "[${n8nLine("Kengele ya Kanisa ya Shaba — Kubwa Sana", 1, 1_250_000.0)}]", payment = "paid"),
+                "[${cartLine("Kengele ya Kanisa ya Shaba — Kubwa Sana", 1, 1_250_000.0)}]", payment = "paid"),
             order("b3", "254700999886", "pending", 386_500.0, ago(2 * D + 1 * H),
-                "[${n8nLine("Viti vya Madhabahu (Seti ya 12)", 1, 386_500.0)}]"),
+                "[${cartLine("Viti vya Madhabahu (Seti ya 12)", 1, 386_500.0)}]"),
         ) + (1..40).map { i ->
             order("m$i", "2547001${"%05d".format(i)}", listOf("delivered", "confirmed", "pending", "cancelled")[i % 4],
-                (i * 7_350).toDouble(), ago((i % 13) * D + i * 17L), "[${n8nLine("Clergy Shirt", 1, (i * 7_350).toDouble())}]")
+                (i * 7_350).toDouble(), ago((i % 13) * D + i * 17L), "[${cartLine("Clergy Shirt", 1, (i * 7_350).toDouble())}]")
         }
         f.on("GET", "/admin/orders", body = "[${bigOrders.joinToString(",")}]")
         f.on("GET", "/admin/conversations") { r, _ ->

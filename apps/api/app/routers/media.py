@@ -52,8 +52,7 @@ async def download_media(
     agent=Depends(get_current_agent),
 ):
     """
-    Called by n8n after extracting media info.
-    Downloads the file from WhatsApp and stores it locally.
+    Downloads a WhatsApp media item by id and stores it locally.
     Returns a stable internal URL.
     """
     media_url = body.get("media_url")

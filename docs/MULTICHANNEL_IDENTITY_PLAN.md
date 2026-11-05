@@ -105,7 +105,7 @@ order_event  → already has channel; gains person_id
 ## Meta platform realities / guardrails
 
 - Messenger + IG ride the **same Messenger-Platform webhook** once IG is linked to
-  the Page; same relay pattern as WhatsApp today (Meta → n8n → `/api/n8n/*`).
+  the Page; handled in-process like WhatsApp (`routers/meta_webhook.py`).
 - Needs **App Review**: `pages_messaging`, `instagram_manage_messages`,
   `business_management` (for ID-Match). Page + IG tokens. Weeks of platform
   paperwork, not engineering.
@@ -141,7 +141,7 @@ WhatsApp unchanged).** Not yet fused to `main`. Commits:
   E.164 (WhatsApp identity → phone identifier → new person; auto-merges a
   phone-only person into a WhatsApp one on a match — Tier-1 deterministic).
   Records phone/mpesa_ref/order_number identifiers + stamps the local order_event.
-  Receiver: `POST /api/n8n/payment`. Contract for the hub:
+  Receiver: `POST /api/hub/payment`. Contract for the hub:
   [`PAYMENT_RECONCILE_CONTRACT.md`](./PAYMENT_RECONCILE_CONTRACT.md). Merge now
   also moves identifiers (reversibly).
 - **Person-scoped CRM reads** — a merged customer shows unified order/chat history
@@ -171,7 +171,7 @@ replies. Next: auto AI-reply on Meta (route the Tier-2 agent to messenger convs)
   (`pages_messaging`, `instagram_manage_messages`, `business_management`) for
   production access, and full two-way chat (inbox + replies) needs the wa_id→
   person conversation cutover below. Verification + identity capture work now.
-- M-Pesa payment→person receiver — **neema side DONE** (`POST /api/n8n/payment`,
+- M-Pesa payment→person receiver — **neema side DONE** (`POST /api/hub/payment`,
   see above). Remaining: the **hub** (`feat/customer-country-e164` in bethany-house)
   must POST captured payments to it — contract in `PAYMENT_RECONCILE_CONTRACT.md`.
 - Pre-existing: the Alembic chain isn't replayable on a fresh DB (migration

@@ -9,9 +9,9 @@ person world — the only signal precise enough to auto-link across identity wor
 
 ```
 POST /api/hub/payment
-Header:  X-Hub-Secret: <n8n_api_secret>        # same secret as the other bridge calls
-# Legacy alias (the hub's current config — still live): POST /api/n8n/payment
-# with X-N8N-Secret. Same body, same secret. See HUB_BRIDGE_MIGRATION.md.
+Header:  X-Hub-Secret: <HUB_BRIDGE_SECRET>     # same secret as the other bridge calls
+# The plugin's current config (still live): POST /api/n8n/payment with
+# X-N8N-Secret. Same body, same secret. See HUB_BRIDGE_MIGRATION.md.
 Body (JSON):
   {
     "payer_msisdn": "254712345678",   // REQUIRED. Any format — 0712…, +254…, 254… — canonicalized to E.164.

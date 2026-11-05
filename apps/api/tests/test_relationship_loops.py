@@ -103,8 +103,8 @@ def test_team_answer_is_composed_and_sent_by_neema(monkeypatch):
     monkeypatch.setattr("app.agent.runtime.run_turn", _fake_turn)
     monkeypatch.setattr("app.agent.runtime.build_llm", lambda *a, **k: None)
     monkeypatch.setattr("app.services.hub_events._within_window", _window_open)
-    monkeypatch.setattr("app.services.n8n_bridge._send_waba", _fake_send)
-    monkeypatch.setattr("app.services.n8n_bridge.save_outbound_message", _fake_save)
+    monkeypatch.setattr("app.services.messaging._send_waba", _fake_send)
+    monkeypatch.setattr("app.services.messaging.save_outbound_message", _fake_save)
 
     db = _DB([_Res(one=_conv())])
     out = asyncio.run(admin.answer_through_neema(
@@ -150,8 +150,8 @@ def test_hold_line_sends_once_and_flags(monkeypatch):
         return "wamid.H"
     async def _fake_save(db, redis, wa_id, text, **k): pass
 
-    monkeypatch.setattr("app.services.n8n_bridge._send_waba", _fake_send)
-    monkeypatch.setattr("app.services.n8n_bridge.save_outbound_message", _fake_save)
+    monkeypatch.setattr("app.services.messaging._send_waba", _fake_send)
+    monkeypatch.setattr("app.services.messaging.save_outbound_message", _fake_save)
     monkeypatch.setattr("app.database.AsyncSessionLocal",
                         lambda: _SessionCM(_DB([_Res(one=None), _Res(one=None)])))
     r = _Redis()
@@ -168,7 +168,7 @@ def test_hold_line_never_raises(monkeypatch):
     from app.agent import runtime
 
     async def _boom(*a, **k): raise RuntimeError("send path down too")
-    monkeypatch.setattr("app.services.n8n_bridge._send_waba", _boom)
+    monkeypatch.setattr("app.services.messaging._send_waba", _boom)
     asyncio.run(runtime._send_hold_line(_Redis(), "whatsapp", "254700000000"))
 
 
@@ -208,8 +208,8 @@ def test_fit_check_rides_the_utility_template(monkeypatch):
         return {"messages": [{"id": "wamid.T"}]}
     async def _fake_save(db, redis, wa_id, text, **k): pass
 
-    monkeypatch.setattr("app.services.n8n_bridge.send_wa_template", _fake_tpl)
-    monkeypatch.setattr("app.services.n8n_bridge.save_outbound_message", _fake_save)
+    monkeypatch.setattr("app.services.messaging.send_wa_template", _fake_tpl)
+    monkeypatch.setattr("app.services.messaging.save_outbound_message", _fake_save)
     action = types.SimpleNamespace(reason="Order BH-2417 was delivered 6 days ago — ask...",
                                    status="planned", draft=None, kind="fit_check")
     ok = asyncio.run(actions._send_followup_template(_DB(), None, _conv(), action))
@@ -277,8 +277,8 @@ def test_measurement_guide_sends_the_image_on_whatsapp(monkeypatch):
         return "wamid.I"
     async def _fake_save(db, redis, wa_id, text, **k): pass
 
-    monkeypatch.setattr("app.services.n8n_bridge._send_waba_image", _fake_img)
-    monkeypatch.setattr("app.services.n8n_bridge.save_outbound_message", _fake_save)
+    monkeypatch.setattr("app.services.messaging._send_waba_image", _fake_img)
+    monkeypatch.setattr("app.services.messaging.save_outbound_message", _fake_save)
     out = asyncio.run(tools._send_measurement_guide({}, _ctx()))
     assert out["ok"] and sent["url"].endswith("guide.jpg")
     # Meta channels get the link to include instead.

@@ -246,7 +246,7 @@ async def _handle(redis, group: dict, *, send: bool, write: bool = True) -> dict
     """One customer: ONE message covering every order of theirs still due a
     reminder. The guard stays PER ORDER — a live send claims each order's
     key, a dry run only reads it — and an order already reminded drops out."""
-    from app.services import n8n_bridge as svc
+    from app.services import messaging as svc
     from app.services.meta_send import send_to_channel
     from app.models.user import User
 

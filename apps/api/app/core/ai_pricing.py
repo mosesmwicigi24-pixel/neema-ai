@@ -52,7 +52,7 @@ _CACHE_WRITE_1H_MULT = 2.0     # 1-hour-TTL cache-write premium (x input)
 
 def _norm(model: str | None) -> str:
     m = (model or "").strip().lower()
-    # tolerate n8n's "GPT-4.1" display names and dated suffixes
+    # tolerate "GPT-4.1"-style display names and dated suffixes
     m = m.replace("gpt4", "gpt-4")
     if m in _PRICES:
         return m

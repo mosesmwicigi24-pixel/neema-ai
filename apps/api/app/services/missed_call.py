@@ -84,7 +84,7 @@ async def _follow_up(redis, call_id: str) -> bool:
             return False
         from app.services.meta_send import send_to_channel
         wamid = await send_to_channel(channel, handle, text)
-        from app.services import n8n_bridge as bridge
+        from app.services import messaging as bridge
         async with AsyncSessionLocal() as db:
             if channel == "whatsapp":
                 await bridge.save_outbound_message(db, redis, handle, text, waba_msg_id=wamid)

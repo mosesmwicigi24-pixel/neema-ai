@@ -1,8 +1,8 @@
 """Photo requests go to Neema (she sends product-photo cards herself);
 genuine document/file requests still flip to a human. Tests the LIVE native
 classifier (`wa_native._is_doc_request`) that gates the in-process escalation —
-the n8n-era `/api/n8n/escalate` route and its `_is_image_request` twin were
-removed with the retirement (2026-08-11).
+the old `/escalate` route and its `_is_image_request` twin were removed
+(2026-08-11).
 """
 from app.services.wa_native import _is_doc_request
 

@@ -577,7 +577,7 @@ def test_public_cta_resolves_product_from_the_post_caption(monkeypatch):
                  "price": 45000, "price_usd": 450, "aliases": [], "images": [], "description": ""},
                 {"name": "Purple Red Cope", "slug": "purple-red-cope", "hub_product_id": 8,
                  "price": 15000, "price_usd": 150, "aliases": [], "images": [], "description": ""}]
-    monkeypatch.setattr("app.services.n8n_bridge.catalog_items", fake_catalog)
+    monkeypatch.setattr("app.services.messaging.catalog_items", fake_catalog)
 
     calls = []
     async def fake_run_tool(name, args, ctx):

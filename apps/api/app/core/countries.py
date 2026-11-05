@@ -3,9 +3,8 @@ Server-authoritative country resolution from a WhatsApp id / phone number.
 
 The WhatsApp `wa_id` is the full international number without a '+', e.g.
 "254717905405". We resolve the dialing prefix to a country by LONGEST-PREFIX
-match (so "1-684" American Samoa wins over "1" USA/Canada). This mirrors the
-table the n8n "countrycodes" node uses, but runs on the server so every
-customer gets a country regardless of whether the n8n enrichment call landed.
+match (so "1-684" American Samoa wins over "1" USA/Canada). It runs on the
+server so every customer gets a country without any external enrichment.
 
 Used at message/user upsert time and by the CRM backfill migration.
 """

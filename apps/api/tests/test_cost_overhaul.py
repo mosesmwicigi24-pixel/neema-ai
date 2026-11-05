@@ -26,7 +26,7 @@ def test_usage_logs_the_model_that_actually_served(monkeypatch):
 def test_usage_rows_carry_where_the_money_went():
     import inspect
     from app.agent import runtime
-    from app.services.n8n_bridge import log_agent_usage
+    from app.services.messaging import log_agent_usage
     src = inspect.getsource(runtime.run_turn)
     assert 'f"{channel}:comment" if public_comment else channel' in src
     assert "node" in inspect.signature(log_agent_usage).parameters

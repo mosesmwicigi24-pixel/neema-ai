@@ -58,7 +58,7 @@ enum SalesFixtures {
 
     // ── Orders ──────────────────────────────────────────────────────────────
 
-    /// An n8n (Tier 1) cart line — n8n_bridge.py `upsert_order_event` stores
+    /// A legacy cart line — messaging.py `upsert_order_event` stores
     /// `OrderEventDto.items` verbatim, in the `{name, qty, unit, total, sku}`
     /// shape the web's `ApiOrder` was written against.
     static func legacyLine(_ name: String, _ qty: Int, _ unit: Int, _ sku: String? = nil) -> JSONValue {
@@ -127,8 +127,8 @@ enum SalesFixtures {
         ["hub_status": .string(status), "hub_payment_status": s(payment), "hub_fulfillment_status": s(fulfillment), "hub_status_at": .string(at)]
     }
 
-    /// The order detail's subject: an n8n order pushed to the hub by
-    /// n8n_bridge.py `_maybe_push_order_to_hub` (legacy priced lines), then
+    /// The order detail's subject: a legacy order pushed to the hub by
+    /// messaging.py `_maybe_push_order_to_hub` (legacy priced lines), then
     /// mirrored as processing/paid by the hub, with the reply Neema sent.
     static let linkedOrder = order(
         "254712345678_1773480600000", "254712345678", "confirmed", 9800.0,
@@ -151,7 +151,7 @@ enum SalesFixtures {
         createdAt: FIXED_AT, hub: pushed(1050, 145000.0)
     )
 
-    /// A cart the hub refused: n8n_bridge.py `_save(hub_push_status="failed", hub_last_error=str(exc)[:500])`.
+    /// A cart the hub refused: messaging.py `_save(hub_push_status="failed", hub_last_error=str(exc)[:500])`.
     static let failedOrder = order(
         "254722000111_1773480600000", "254722000111", "open", 12500.0,
         items: [legacyLine("Cassock — Purple, L", 1, 12500, "CAS-PUR-L")],
@@ -170,7 +170,7 @@ enum SalesFixtures {
             order("o3", "255754333222", "delivered", 4800.0, items: [legacyLine("Stole — Green", 1, 4800)], createdAt: ago(60 * 30),
                   hub: pushed(1031, 4800.0, withToken: false) + mirrored("completed", "paid", "fulfilled")),
             order("o4", "254700999888", "cancelled", 18000.0, items: [agentLine("Alb — White, M", 3, 6000.0)], channel: "instagram", createdAt: ago(60 * 72)),
-            // An n8n cart snapshot: no lines, status "open", event_type "cart".
+            // A cart snapshot: no lines, status "open", event_type "cart".
             order("o5", "254733444555", "open", 3500.0, items: [], channel: "whatsapp", createdAt: ago(60 * 5), eventType: "cart"),
             order("o6", "260977123456", "pending", 1450.0,
                   items: [agentLine("Mitre — Gold embroidered", 1, 850.0), agentLine("Cope — Festal white", 1, 600.0)],

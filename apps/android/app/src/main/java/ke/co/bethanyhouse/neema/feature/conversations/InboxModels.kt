@@ -238,7 +238,7 @@ internal fun mergeServer(existing: List<ThreadMsg>, incoming: List<ThreadMsg>): 
 /**
  * A live `new_message` frame → a thread bubble (ConversationsView's socket
  * handler). What the server publishes varies by path: the AI reply
- * (n8n_bridge) carries an `id`; the human reply / approve / media paths
+ * (messaging) carries an `id`; the human reply / approve / media paths
  * (services/conversation.py) carry no id, direction or created_at; the
  * INBOUND paths (the WhatsApp webhook, meta_webhook, sms, public forms)
  * carry `sender: "user"` but no `direction` at all. The web defaults a
@@ -249,7 +249,7 @@ internal fun mergeServer(existing: List<ThreadMsg>, incoming: List<ThreadMsg>): 
  */
 internal fun wsMessageOf(e: JsonObject): ThreadMsg? {
     if (e.s("event") == "notification") return null
-    // The older `message` frame (web_chat, n8n outbound sends) states its
+    // The older `message` frame (web_chat, outbound channel sends) states its
     // direction but often no sender: an inbound one is the customer.
     val dir = e.s("direction")?.takeIf { it == "inbound" || it == "outbound" }
     val sender = e.s("sender") ?: if (dir == "inbound") "user" else "ai"

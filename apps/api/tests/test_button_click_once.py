@@ -148,13 +148,13 @@ def test_whatsapp_gates_hold_for_paused_not_just_human():
     gates checked `== human` and kept replying. They must gate on `!= ai`."""
     import inspect
     import app.services.wa_native as wa
-    import app.services.n8n_bridge as bridge
+    import app.services.messaging as bridge
     wa_src = inspect.getsource(wa)
     assert "intercept_mode != InterceptMode.ai" in wa_src
     # the REPLY gate specifically must not be the old human-only check (the
     # media-escalation block legitimately keeps its own `== human` skip)
     assert 'conv.intercept_mode == InterceptMode.human:\n                _log.info("native' not in wa_src
-    # the n8n-era outbound gate is gone (2026-11-05): wa_native's is the ONLY
+    # the second outbound gate is gone (2026-11-05): wa_native's is the ONLY
     # WhatsApp reply gate, so no second check can drift back to `== human`
     assert "outbound_gate" not in inspect.getsource(bridge)
 

@@ -16,7 +16,7 @@ test("every server status has a state", () => {
     assert.equal(voiceNoteState("done", "Nataka shati mbili"), "ready");
 });
 
-test("no status: words read as ready (n8n-era rows), nothing reads as nothing", () => {
+test("no status: words read as ready (older rows), nothing reads as nothing", () => {
     assert.equal(voiceNoteState(null, "hello"), "ready");
     assert.equal(voiceNoteState(null, null), "none");
     assert.equal(voiceNoteState("done", "  "), "none");

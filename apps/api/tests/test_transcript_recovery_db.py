@@ -273,14 +273,14 @@ def _backfill(rig, **kw):
 
 def _pre_fix_world(rig, clips):
     """What production holds: pre-fix notes (no status, placeholder text,
-    extensionless files), an n8n-era transcribed note, a poison note, a note
+    extensionless files), an older already-transcribed note, a poison note, a note
     whose file is gone, a recorded call, and a newer message in the chat."""
     conv = _conv(rig, preview="[image received]")
     ids = {
         "a": _note(rig, clips[0], minutes_ago=3 * 24 * 60, conv=conv),
         "b": _note(rig, clips[1], minutes_ago=2 * 24 * 60, conv=conv, text=""),
         "c": _note(rig, clips[2], status="failed:no_provider", minutes_ago=24 * 60, conv=conv),
-        "n8n": _note(rig, clips[3], minutes_ago=24 * 60, conv=conv, text="Habari, bei ya stole?"),
+        "transcribed": _note(rig, clips[3], minutes_ago=24 * 60, conv=conv, text="Habari, bei ya stole?"),
         "poison": _note(rig, clips[4], status="failed:corrupt", minutes_ago=24 * 60, conv=conv),
         "old": _note(rig, clips[5], minutes_ago=40 * 24 * 60, conv=conv),
     }
@@ -328,7 +328,7 @@ def test_backfill_execute_transcribes_extensionless_notes_and_calls_idempotently
         m = run(_msg(rig, ids[k]))
         assert m.transcript_status == "done" and m.text == "Nataka kapa nyekundu.", k
         assert m.translated_text and m.transcript_lang == "sw"
-    assert run(_msg(rig, ids["n8n"])).text == "Habari, bei ya stole?"            # left alone
+    assert run(_msg(rig, ids["transcribed"])).text == "Habari, bei ya stole?"            # left alone
     assert run(_msg(rig, ids["poison"])).transcript_status == "failed:corrupt"
     assert run(_msg(rig, ids["old"])).transcript_status is None                 # outside --since
     assert run(_msg(rig, ids["gone"])).transcript_status is None                # missing file: not written

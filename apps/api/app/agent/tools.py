@@ -23,7 +23,7 @@ from app.core.synonyms import canonical as _canonical, range_for as _range_for, 
 from app.core import vernacular as _vernacular
 from app.models.order_event import OrderEvent
 from app.models.user import User
-from app.services import n8n_bridge as svc
+from app.services import messaging as svc
 from app.services.market import users_for_person
 from app.services.state_lock import lock_for_write
 from app.agent import cart as cartmod
@@ -3026,7 +3026,7 @@ async def _send_measurement_guide(args: dict, ctx: ToolContext) -> dict:
     from app.core.phone import is_plausible_phone as _plausible_phone
     if ctx.channel == "whatsapp" and _plausible_phone(ctx.wa_id):
         try:
-            from app.services import n8n_bridge as _svc
+            from app.services import messaging as _svc
             wamid = await _svc._send_waba_image(
                 ctx.wa_id, url, caption="How to take your measurements 📏")
             await _svc.save_outbound_message(

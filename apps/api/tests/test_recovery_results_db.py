@@ -154,7 +154,7 @@ def test_a_job_records_only_a_message_that_was_sent(monkeypatch):
     """The cart sweep writes its row after a successful send, keyed by the
     cart's fingerprint — and none when the send fails."""
     from app.jobs import cart_recovery as cr
-    from app.services import n8n_bridge as svc
+    from app.services import messaging as svc
     from app.services import recovery_results
     recorded = []
 

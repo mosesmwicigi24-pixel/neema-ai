@@ -510,7 +510,7 @@ async def get_customer(
         )
         if conv_exists.scalar_one_or_none() is None:
             raise HTTPException(status_code=404, detail="Customer not found")
-        from app.services.n8n_bridge import provision_user
+        from app.services.messaging import provision_user
         user = await provision_user(db, wa_id)
     await db.commit()
     await db.refresh(user)
@@ -768,7 +768,7 @@ async def update_customer(
         )
         if conv_exists.scalar_one_or_none() is None:
             raise HTTPException(status_code=404, detail="Customer not found")
-        from app.services.n8n_bridge import provision_user
+        from app.services.messaging import provision_user
         user = await provision_user(db, wa_id)
 
     # Direct model fields the operator can edit.
@@ -1485,8 +1485,8 @@ async def ai_cost(
     agent: Agent = Depends(get_current_agent),
 ):
     """Token spend by model over the last `days` — so cost optimizations can
-    be measured. Populated once n8n logs calls via POST /api/n8n/usage."""
-    from app.services.n8n_bridge import ai_cost_summary
+    be measured. Rows come from the agent's own usage log (ai_usage)."""
+    from app.services.messaging import ai_cost_summary
     return await ai_cost_summary(db, days=max(1, min(days, 365)))
 
 

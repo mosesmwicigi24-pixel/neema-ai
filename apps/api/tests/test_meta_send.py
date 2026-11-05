@@ -23,7 +23,7 @@ def test_send_to_channel_routes_whatsapp_and_strips_plus(monkeypatch):
     async def fake_waba(num, text, context_wamid=None):
         sent.append((num, text))
 
-    import app.services.n8n_bridge as nb
+    import app.services.messaging as nb
     monkeypatch.setattr(nb, "_send_waba", fake_waba)
     asyncio.run(meta_send.send_to_channel("whatsapp", "+254712345678", "hello"))
     assert sent == [("254712345678", "hello")]   # '+' stripped for WABA

@@ -69,7 +69,7 @@ def _wire(monkeypatch, conv=None, reply="Karibu! Yes, we stock cassocks.",
     monkeypatch.setattr(runtime, "run_turn", fake_run_turn)
     monkeypatch.setattr(runtime, "build_llm", lambda model=None, **kw: object())
     monkeypatch.setattr(runtime, "route_model", lambda t: "m")
-    monkeypatch.setattr("app.services.n8n_bridge.save_outbound_channel_message", fake_save)
+    monkeypatch.setattr("app.services.messaging.save_outbound_channel_message", fake_save)
     return conv, called
 
 

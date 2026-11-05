@@ -5,7 +5,7 @@ how a customer CONFIRMS an order, so affirmatives must NOT match (else the AI
 never runs, the order is never placed, and nothing reaches the hub). Only pure
 gratitude/closers may be suppressed.
 """
-from app.services.n8n_bridge import _ACK_RE, _GREETING_RE
+from app.services.messaging import _ACK_RE, _GREETING_RE
 
 
 def _is_ack(text: str) -> bool:

@@ -39,7 +39,7 @@ SEEDS = [
 ]
 
 
-# ── Catalog seeds (extracted from n8n workflow) ───────────────────────────────
+# ── Catalog seeds (the original launch catalogue) ───────────────────────────────
 
 CATALOG = [
 

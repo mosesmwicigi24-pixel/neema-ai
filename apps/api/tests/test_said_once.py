@@ -70,7 +70,7 @@ def test_the_search_row_marks_a_set_already_told(monkeypatch):
 
     async def _cat(db, redis):
         return CATALOG
-    monkeypatch.setattr("app.services.n8n_bridge.catalog_items", _cat)
+    monkeypatch.setattr("app.services.messaging.catalog_items", _cat)
     ctx = ToolContext(db=None, redis=None, wa_id="254700000001", currency="KES",
                       said=frozenset({"set:cassock-set"}))
     out = asyncio.run(_search_catalog({"query": "cassock set"}, ctx))

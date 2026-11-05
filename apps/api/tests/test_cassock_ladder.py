@@ -104,7 +104,7 @@ def test_the_rules_name_the_three_steps_and_one_figure():
 # ── the second message, sent as its own bubble ──────────────────────────────
 
 def test_whatsapp_sends_the_ladder_as_a_second_message(monkeypatch):
-    from app.services import n8n_bridge as svc
+    from app.services import messaging as svc
     sent, saved = [], []
     monkeypatch.setattr(runtime, "FOLLOW_UP_DELAY_S", 0)
 
@@ -145,7 +145,7 @@ def test_a_turn_with_no_second_sender_gets_it_as_the_last_paragraph(monkeypatch)
 
     async def _cat(db, redis):
         return CATALOG
-    monkeypatch.setattr("app.services.n8n_bridge.catalog_items", _cat)
+    monkeypatch.setattr("app.services.messaging.catalog_items", _cat)
 
     async def fake_run_tool(name, args, ctx):
         ctx.seen_products.append(CASSOCK)

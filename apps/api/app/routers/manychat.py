@@ -203,7 +203,7 @@ async def _save_reply(db, redis, sub_id: str, reply: str) -> None:
     what the customer actually received. Best-effort: a bookkeeping failure
     must never cost the customer their answer."""
     try:
-        from app.services.n8n_bridge import save_outbound_channel_message
+        from app.services.messaging import save_outbound_channel_message
         await save_outbound_channel_message(db, redis, CHANNEL, sub_id, reply)
     except Exception:
         _log.warning("manychat: saving outbound failed for %s", sub_id)

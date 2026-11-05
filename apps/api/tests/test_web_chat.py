@@ -11,7 +11,7 @@ import pytest
 import app.main  # noqa: F401 — registers all SQLAlchemy models
 import app.routers.web_chat as wc
 import app.agent.runtime as runtime
-import app.services.n8n_bridge as n8n
+import app.services.messaging as messaging
 from app.core.config import settings
 from app.models.conversation import InterceptMode
 from app.models.message import Message, MsgDirection
@@ -90,7 +90,7 @@ def test_web_chat_runs_agent_and_returns_reply(monkeypatch):
     monkeypatch.setattr(runtime, "run_turn", fake_run_turn)
     monkeypatch.setattr(runtime, "build_llm", lambda model=None, **kw: object())
     monkeypatch.setattr(runtime, "route_model", lambda t: "m")
-    monkeypatch.setattr(n8n, "save_outbound_message", fake_save_outbound)
+    monkeypatch.setattr(messaging, "save_outbound_message", fake_save_outbound)
 
     db = _FakeDB([_Res(None), _Res(None)])   # no existing User, no existing Conversation
     body = wc.WebChatIn(session_id="sess-1", message="Do you have cassocks?", name="Grace")

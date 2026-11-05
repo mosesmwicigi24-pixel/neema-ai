@@ -228,7 +228,7 @@ def template_params(row: dict, season: dict, name: str | None = None) -> list[st
 
 
 async def _handle(redis, row: dict, season: dict, *, send: bool) -> dict:
-    from app.services import n8n_bridge as svc
+    from app.services import messaging as svc
     from app.services.meta_send import send_to_channel, META_CHANNELS
 
     conv = row["conv"]

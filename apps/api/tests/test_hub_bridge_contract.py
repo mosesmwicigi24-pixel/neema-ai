@@ -1,10 +1,11 @@
-"""The n8n retirement (2026-08-11) — the code matches the infrastructure.
+"""The hub bridge contract — the Bethany House hub's pushes keep working.
 
-n8n's container was stopped 2026-07-30; the owner then asked for the code to be
-corrected and aligned. These tests pin the retirement so the dead surface can't
-quietly return, and pin the SURVIVORS so the hub's legacy pushes keep working:
-the hub's plugin still posts payments/orders/history on the `/api/n8n` prefix
-with the `X-N8N-SECRET` header — that bridge must outlive n8n itself.
+Canonical surface: `/api/hub/*` with `X-Hub-Secret`. The hub's plugin is still
+configured with the older `/api/n8n/*` prefix and `X-N8N-Secret` header, so the
+same router is mounted there too; both read ONE secret (HUB_BRIDGE_SECRET, or
+the older env name N8N_API_SECRET an existing box .env still carries). These
+tests pin that nothing in the API depends on anything outside it, and that the
+plugin's current address does not break.
 """
 import app.main  # noqa: F401 — registers all models + routes
 from app.main import app
@@ -14,13 +15,13 @@ def _paths() -> set[str]:
     return {r.path for r in app.routes if hasattr(r, "path")}
 
 
-def test_hub_bridge_survives_on_both_prefixes():
-    """Canonical clean paths at /api/hub/*, legacy aliases at /api/n8n/* —
-    the aliases stay until the hub's plugin migrates (HUB_BRIDGE_MIGRATION.md)."""
+def test_hub_bridge_answers_on_both_prefixes():
+    """Canonical paths at /api/hub/*, the plugin's current address at /api/n8n/*
+    — the alias stays until the hub is repointed (HUB_BRIDGE_MIGRATION.md)."""
     paths = _paths()
     for route in ("payment", "order-event", "customer-history"):
         assert f"/api/hub/{route}" in paths, f"canonical /api/hub/{route} missing"
-        assert f"/api/n8n/{route}" in paths, f"legacy alias /api/n8n/{route} missing"
+        assert f"/api/n8n/{route}" in paths, f"alias /api/n8n/{route} missing"
 
 
 class _FakeRedis:
@@ -49,7 +50,7 @@ def test_hub_secret_accepts_both_headers_and_fails_closed(monkeypatch):
     from fastapi import HTTPException
     from app.core.config import settings
     from app.routers.hub_bridge import verify_hub_secret
-    monkeypatch.setattr(settings, "n8n_api_secret", "s3cret", raising=False)
+    monkeypatch.setattr(settings, "hub_bridge_secret", "s3cret", raising=False)
     r = _req("/api/hub/payment")
     asyncio.run(verify_hub_secret(r, x_hub_secret="s3cret", x_n8n_secret=None))
     asyncio.run(verify_hub_secret(r, x_hub_secret=None, x_n8n_secret="s3cret"))
@@ -58,27 +59,41 @@ def test_hub_secret_accepts_both_headers_and_fails_closed(monkeypatch):
                 dict(x_hub_secret="", x_n8n_secret="")):
         with pytest.raises(HTTPException):
             asyncio.run(verify_hub_secret(r, **bad))
-    # Unconfigured secret must reject EVERYTHING — the old check compared
-    # equal empty strings and would have waved an empty header through.
-    monkeypatch.setattr(settings, "n8n_api_secret", "", raising=False)
+    # Unconfigured secret must reject EVERYTHING — a check that compared equal
+    # empty strings would wave an empty header through.
+    monkeypatch.setattr(settings, "hub_bridge_secret", "", raising=False)
     with pytest.raises(HTTPException):
         asyncio.run(verify_hub_secret(r, x_hub_secret="", x_n8n_secret=None))
     with pytest.raises(HTTPException):
         asyncio.run(verify_hub_secret(r, x_hub_secret=None, x_n8n_secret=None))
 
 
-def test_legacy_surface_hits_are_counted_clean_ones_are_not(monkeypatch):
-    """The migration's evidence: legacy prefix OR legacy header bumps the daily
-    counter; a fully-clean push (new path + new header) does not."""
+def test_the_secret_is_read_from_either_env_name(monkeypatch):
+    """A box .env that still says N8N_API_SECRET keeps authenticating the hub;
+    a fresh box uses HUB_BRIDGE_SECRET. Same setting either way."""
+    from app.core.config import Settings
+    monkeypatch.delenv("HUB_BRIDGE_SECRET", raising=False)
+    monkeypatch.setenv("N8N_API_SECRET", "old-name")
+    assert Settings(_env_file=None).hub_bridge_secret == "old-name"
+    monkeypatch.setenv("HUB_BRIDGE_SECRET", "new-name")
+    assert Settings(_env_file=None).hub_bridge_secret == "new-name"
+    monkeypatch.delenv("N8N_API_SECRET")
+    assert Settings(_env_file=None).hub_bridge_secret == "new-name"
+    assert "n8n_api_secret" not in Settings.model_fields
+
+
+def test_alias_surface_hits_are_counted_clean_ones_are_not(monkeypatch):
+    """The evidence for dropping the alias: the older prefix OR the older
+    header bumps the daily counter; a fully-clean push does not."""
     import asyncio
     from app.core.config import settings
     from app.routers.hub_bridge import verify_hub_secret
-    monkeypatch.setattr(settings, "n8n_api_secret", "s3cret", raising=False)
+    monkeypatch.setattr(settings, "hub_bridge_secret", "s3cret", raising=False)
     r = _FakeRedis()
-    # legacy PATH (even with the clean header) counts
+    # older PATH (even with the clean header) counts
     asyncio.run(verify_hub_secret(_req("/api/n8n/payment", r),
                                   x_hub_secret="s3cret", x_n8n_secret=None))
-    # legacy HEADER on the clean path counts
+    # older HEADER on the clean path counts
     asyncio.run(verify_hub_secret(_req("/api/hub/payment", r),
                                   x_hub_secret=None, x_n8n_secret="s3cret"))
     assert sum(r.counts.values()) == 2
@@ -97,9 +112,9 @@ def test_legacy_surface_hits_are_counted_clean_ones_are_not(monkeypatch):
     assert sum(r.counts.values()) == 2
 
 
-def test_standup_reports_legacy_bridge_pushes(monkeypatch):
+def test_standup_reports_alias_bridge_pushes(monkeypatch):
     """The owner learns from the 08:00 standup — not from box archaeology —
-    whether the hub plugin has fully migrated."""
+    whether the hub plugin has been repointed."""
     import asyncio
     from datetime import datetime, timedelta, timezone
     from app.jobs.self_qa import compose_standup
@@ -117,40 +132,40 @@ def test_standup_reports_legacy_bridge_pushes(monkeypatch):
     class _DB:
         async def execute(self, *a, **k): return _Res()
     out = asyncio.run(compose_standup(_DB()))
-    assert "🌉 Hub bridge: 7 push(es) yesterday still used the legacy /api/n8n path" in out
+    assert "🌉 Hub bridge: 7 push(es) yesterday still used the older /api/n8n alias" in out
     # and silence when the counter is empty
     r.counts.clear()
     out = asyncio.run(compose_standup(_DB()))
     assert "Hub bridge" not in out
 
 
-def test_n8n_workflow_only_routes_are_gone():
-    paths = _paths()
-    for gone in ("/api/n8n/context/{wa_id}", "/api/n8n/session",
-                 "/api/n8n/profile/{wa_id}", "/api/n8n/messages/{wa_id}",
-                 "/api/n8n/message", "/api/n8n/user", "/api/n8n/usage",
-                 "/api/n8n/route", "/api/n8n/outbound", "/api/n8n/catalog",
-                 "/api/n8n/notify", "/api/n8n/escalate",
-                 "/api/n8n/media/save-tts", "/api/n8n/media/download"):
-        assert gone not in paths, f"n8n-only route {gone} should be retired"
-
-
-def test_tier_routing_seam_is_gone():
-    """/agent/turn was n8n's hop into the agent; native calls the runtime
-    directly, so the whole Tier-1/Tier-2 seam retires with it."""
+def test_only_the_three_hub_pushes_exist_on_the_alias():
+    """Nothing but the hub's three pushes answers under the older prefix: no
+    message, session, usage, route, outbound, catalog, notify, escalate or
+    media endpoints — the API never calls out to an orchestrator."""
+    alias = sorted(p for p in _paths() if p.startswith("/api/n8n/"))
+    assert alias == ["/api/n8n/customer-history", "/api/n8n/order-event", "/api/n8n/payment"]
     assert "/api/agent/turn" not in _paths()
     from app.agent import runtime
     assert not hasattr(runtime, "is_tier2")
 
 
-def test_the_hub_secret_and_service_module_stay():
-    """N8N_API_SECRET authenticates the hub's pushes (setting keeps its env
-    name), and services/n8n_bridge.py is the messaging service — historical
-    name, real code."""
-    from app.core.config import Settings
-    assert "n8n_api_secret" in Settings.model_fields
-    from app.services import n8n_bridge as svc
-    assert hasattr(svc, "upsert_message") and hasattr(svc, "save_outbound_message")
-    # and the retired ROUTER module name is gone — the router is hub_bridge now
+def test_no_module_file_or_setting_carries_the_old_name():
+    """The rename is complete: the messaging service and the bridge DTOs live
+    under their own names, and nothing imports the old module paths."""
     import importlib.util
-    assert importlib.util.find_spec("app.routers.n8n_bridge") is None
+    import pathlib
+    from app.services import messaging as svc
+    assert hasattr(svc, "upsert_message") and hasattr(svc, "save_outbound_message")
+    for gone in ("app.services.n8n_bridge", "app.schemas.n8n", "app.routers.n8n_bridge"):
+        assert importlib.util.find_spec(gone) is None, gone
+    app_dir = pathlib.Path(__file__).resolve().parents[1] / "app"
+    offenders = [str(p.relative_to(app_dir)) for p in app_dir.rglob("*.py")
+                 if "n8n" in p.name.lower()]
+    assert offenders == []
+    # Only the hub plugin's current address (prefix + header) and the env alias
+    # may still spell the old name — nowhere else in the app's own code.
+    allowed = {"routers/hub_bridge.py", "main.py", "jobs/self_qa.py", "core/config.py"}
+    spelt = {str(p.relative_to(app_dir)) for p in app_dir.rglob("*.py")
+             if "n8n" in p.read_text(errors="ignore").lower()}
+    assert spelt <= allowed, spelt - allowed

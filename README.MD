@@ -24,9 +24,9 @@ WhatsApp / Messenger / Instagram / Web chat
       └── Bethany House hub (catalogue, orders, payments)
 ```
 
-> n8n orchestrated the WhatsApp pipeline until 2026-07-30; everything now runs
-> natively in the API (`app/services/wa_native.py`, `app/agent/`). See
-> `docs/N8N_REPLACEMENT.md` for the migration record.
+> The whole WhatsApp pipeline runs natively in the API
+> (`app/services/wa_native.py`, `app/agent/`); there is no external
+> orchestrator in the loop.
 
 ### Services
 
@@ -143,7 +143,7 @@ REDIS_URL=redis://redis:6379/0
 
 # FastAPI
 SECRET_KEY=your_jwt_secret
-N8N_API_SECRET=your_hub_bridge_secret   # hub → /api/n8n/* pushes (legacy header name)
+HUB_BRIDGE_SECRET=your_hub_bridge_secret   # hub → /api/hub/* pushes (an existing N8N_API_SECRET still works)
 ANTHROPIC_API_KEY=your_anthropic_key
 
 # WhatsApp Business API
@@ -271,8 +271,9 @@ alembic upgrade head
 | POST | `/api/hub/order-event` | Hub pushes an order event |
 | POST | `/api/hub/customer-history` | Hub pushes a customer-history snapshot |
 
-Legacy aliases at `/api/n8n/*` (header `X-N8N-Secret`) stay live until the
-hub's plugin migrates — see `docs/HUB_BRIDGE_MIGRATION.md`.
+The hub's plugin is still configured with the older `/api/n8n/*` prefix and
+`X-N8N-Secret` header; the same router answers there until the hub is
+repointed — see `docs/HUB_BRIDGE_MIGRATION.md`.
 
 ### WebSocket
 ```
