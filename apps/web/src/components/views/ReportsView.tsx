@@ -333,6 +333,7 @@ const PACING_TONE: Record<string, string> = {
     repeat_price: "bg-[#f0f9ff] text-[#0369a1] border-[#bae6fd]",
     move_to_dm: "bg-[#f0f9ff] text-[#0369a1] border-[#bae6fd]",
     alert: "bg-[#ecfdf5] text-[#047857] border-[#a7f3d0]",
+    long: "bg-[#f5f3ff] text-[#6d28d9] border-[#ddd6fe]",
 };
 
 function PacingPanel({ onToast }: { onToast: ReportsViewProps["onToast"] }) {

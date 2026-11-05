@@ -444,6 +444,13 @@ class Settings(BaseSettings):
     pacing_budget_base: int = 15
     pacing_budget_per_step: int = 10
     pacing_bot_threshold: int = 3
+    # THE REPLY-LENGTH TARGET (audit, 2026-11-05; agent/reply_length): a target
+    # computed from the customer's message rides on it as one line (note), and a
+    # reply past the target by `slack` is recorded in Reports → Pacing as
+    # "long" (record). Nothing is trimmed: a trim pass is a later decision.
+    reply_length_note: bool = True
+    reply_length_record: bool = True
+    reply_length_slack: float = 1.5
     # A person commenting many times under one post: this many full model
     # replies a day; beyond it, a bare price ask still gets the free priced
     # line on an identified post and anything else the warm canned line.

@@ -1949,6 +1949,21 @@ async def run_turn(db: AsyncSession, redis, wa_id: str, user_text: str, llm: LLM
         mem_ctx = await build_memory_context(db, redis, key, user=user, channel=channel)
         if mem_ctx:
             turn_notes.append(f"\n\n(Context — what you know about this customer:\n{mem_ctx})")
+    # THE LENGTH TARGET (audit, 2026-11-05): computed from their message, one
+    # line on it — a short ask earns a short reply (agent/reply_length).
+    _len_target: dict = {}
+    try:
+        from app.agent import reply_length as _rl
+        _len_target = _rl.target_for(
+            user_text or "", closer=is_closer(user_text or ""),
+            greeting=bool(_GREETING_RE.match((user_text or "").strip())),
+            negative=looks_negative(user_text or ""))
+        if not scribe_only and not read_only:
+            _len_note = _rl.note(_len_target)
+            if _len_note:
+                turn_notes.append(_len_note)
+    except Exception as exc:
+        _log.info("length target skipped for %s: %s", key, exc)
     # SAID ONCE (audit, 2026-11-05): what this customer has already been told
     # — a set's contents, a price, our address — rides as one short note, so
     # the set is "the set" from the second time on. Best-effort.
@@ -2159,6 +2174,15 @@ async def run_turn(db: AsyncSession, redis, wa_id: str, user_text: str, llm: LLM
                     reply = reply.rstrip() + "\n\n" + _ladder
         except Exception as exc:
             _log.info("cassock ladder skipped for %s: %s", key, exc)
+    # THE LENGTH TARGET, measured (record-only): a reply past its target is
+    # recorded for the owner to see, once per contact per day.
+    if reply and not read_only and not scribe_only and _len_target:
+        try:
+            from app.agent import reply_length as _rl2
+            await _rl2.record(redis, db, channel=channel, key=key, reply=reply,
+                              target=_len_target, tool_log=tool_log)
+        except Exception as exc:
+            _log.info("length record skipped for %s: %s", key, exc)
     # SAID ONCE: what this reply carried is remembered for the next turn.
     if reply and not read_only and not scribe_only:
         try:
