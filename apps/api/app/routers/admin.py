@@ -1143,6 +1143,9 @@ async def _conversation_rows(
             "lead_stage":           _stage_for(c),
             "tags":                 (user_map[c.wa_id].state or {}).get("tags", []) if c.wa_id in user_map else [],
             "handover_request":     handover_map.get(str(c.id)),
+            # Stage 3: what they last said about buying, and their language.
+            "customer_state":       (_pstate(c).get("customer_state") or {}).get("said"),
+            "language":             (_pstate(c).get("contact_preferences") or {}).get("language"),
         }
         for c in conversations
     ]

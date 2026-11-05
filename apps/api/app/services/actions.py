@@ -797,6 +797,31 @@ async def process_due(db, redis, *, now: datetime | None = None, limit: int = 10
                                 "hub status unconfirmable — not chasing on a guess",
                                 kind="payment_reminder", action=getattr(action, "id", None))
                     continue
+            # What the customer themselves said (Stage 3) — never shadowed:
+            # "give me time / I'm comparing / I must ask the bishop" holds every
+            # unprompted sales message until the day they named (or a week);
+            # a language no automated message can be written in parks the row
+            # for a person. A kept promise and care about an order still go.
+            from app.services import customer_state as _cs
+            if message_class(action) == "routine":
+                _hold = await _cs.hold_for(db, action, now=now)
+                if _hold:
+                    _until, _said = _hold
+                    action.due_at = _until
+                    await db.commit()
+                    ol.decision("actions", conv.channel, who, "hold",
+                                f"they asked for time ({_said}) — until {_until.date().isoformat()}",
+                                kind=getattr(action, "kind", None), action=getattr(action, "id", None))
+                    continue
+            _lang = await _cs.language_for(db, conv)
+            if not _cs.automated_ok(_lang) and (message_class(action) == "routine"
+                                                 or not in_window):
+                if await claim(db, action, ("planned",), "needs_approval"):
+                    await finish(db, action, "needs_approval",
+                                 reason=f"{action.reason or ''} [they write in '{_lang}' — a person should write this]")
+                    ol.decision("actions", conv.channel, who, "park", f"language {_lang}",
+                                kind=getattr(action, "kind", None), action=getattr(action, "id", None))
+                continue
             # The contextual decision (shadow or enforce).
             shadow_flags: list[str] = []
             verdict, why = await decide(db, conv, action, now=now)

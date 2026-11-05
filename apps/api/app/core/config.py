@@ -199,6 +199,10 @@ class Settings(BaseSettings):
     # anyway (the comparison week); enforce = hold. The Stage 1 rules (opt-out,
     # open team check, one message per tick, template purposes) always apply.
     outreach_mode: str = "shadow"
+    # Stage 3: the customer-state note after real turns (light model, no
+    # tools) and how long a bare "give me time" holds unprompted messages.
+    customer_state_note: bool = True
+    customer_hold_days: int = 7
     # Recovery sweeps on a daily Nairobi-hour timer (services/recovery_jobs.py).
     # Each OFF until the owner has seen a sample (GET /api/admin/recovery/preview
     # or `python -m app.services.recovery_jobs --preview`). DRY_RUN composes a

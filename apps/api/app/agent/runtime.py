@@ -1791,6 +1791,17 @@ async def run_turn(db: AsyncSession, redis, wa_id: str, user_text: str, llm: LLM
     except Exception:
         pass
 
+    # What the customer themselves asked for (Stage 3): an open hold, an item
+    # the team is still confirming, a payment claim — so the live turn neither
+    # re-asks for a date nor re-pitches. Best-effort.
+    try:
+        from app.services import customer_state as _cs
+        _state = await _cs.live_note(db, key, channel)
+        if _state:
+            turn_notes.append(_state)
+    except Exception:
+        pass
+
     # Per-deal operator guidance ("no discount on this one") — obeyed for THIS
     # customer only; safety rules still win. Best-effort.
     try:

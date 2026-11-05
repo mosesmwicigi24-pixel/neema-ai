@@ -41,7 +41,8 @@ PROMISE_FOLLOW_UP_HOURS = 3
 _CUSTOMER_PROMISE_RE = re.compile(
     r"\b(?:i(?:'ll| will)|we(?:'ll| will)|nita|tuta)\s?"
     r"(?:confirm|get back|let you know|revert|respond|reply|check|decide|send|pay"
-    r"|need|order|buy|take)",
+    r"|need|order|buy|take|contact|call|message|text|write|remind|communicate"
+    r"|come back|be in touch|consult|ask|discuss|talk|wasiliana|piga)",
     re.IGNORECASE)
 _TIME_HINT_RE = re.compile(
     r"\b(tomorrow|kesho|tonight|this evening|later today|"
@@ -205,10 +206,20 @@ async def scribe_update(db, key: str, channel: str, reply: str,
         cust = detect_customer_promise(inbound_text)
         quote = quote_followup.extract_quote(tools, reply)
 
+        from app.services import customer_state
+        reading = customer_state.floor(inbound_text)
+        # A request for time or a payment claim is a deal worth owning even
+        # before a cart: the hold and the claim need a deal row to live on.
+        holding = bool(reading and reading.get("customer_said") in customer_state.HOLD_STATES + ("paid_claim",))
+
         deal = await open_deal_for(db, conversation_id=conv.id)
         if deal is None:
-            if not items and not promise and not cust and not quote:
-                return                      # nothing worth owning yet
+            if not items and not promise and not cust and not quote and not holding:
+                # Nothing worth owning yet — still remember their language and
+                # what they said, on the person.
+                await customer_state.after_turn(db, conv, None, inbound_text=inbound_text,
+                                                reply=reply, reading=reading)
+                return
             deal = Deal(conversation_id=conv.id, person_id=conv.person_id)
             db.add(deal)
             await db.flush()                # id needed for the action row
@@ -241,6 +252,14 @@ async def scribe_update(db, key: str, channel: str, reply: str,
             if quote:
                 _log.info("quote follow-up for %s/%s: %s", channel, conv.id, outcome)
         await db.commit()
+        # What the customer's words mean for what we do next (Stage 3): a hold,
+        # their language, a payment claim — on the deal and the person. Its own
+        # try: a failure here never loses the scribe's work above.
+        try:
+            await customer_state.after_turn(db, conv, deal, inbound_text=inbound_text, reply=reply,
+                                            reading=reading, llm=customer_state.note_llm())
+        except Exception as exc:
+            _log.info("customer state skipped for %s: %s", key, exc)
     except Exception as exc:
         _log.info("deal scribe skipped for %s: %s", key, exc)
         try:
