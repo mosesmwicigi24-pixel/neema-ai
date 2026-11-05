@@ -437,7 +437,8 @@ def test_the_rules_say_a_set_is_its_total():
     for currency in ("USD", "KES"):
         p = build_system_prompt(country_iso="KE" if currency == "KES" else "", currency=currency)
         assert "A SET IS PRICED AS ITS TOTAL (owner rule, 2026-09-21)" in p
-        assert "it goes for $210, everything\n  included. It comes with the cassock, a stole, a belt" in p
+        # the owner's example, at the length the owner now asks for (audit, 2026-11-05)
+        assert "Our Cassock Set is $210, everything included — the cassock, stole, belt, shirt and collar" in " ".join(p.split())
         assert "Separate items merely listed together" in p
         assert "the cassock alone is\n  $130; the complete set with the stole, belt, shirt and collar is $210" in p
     add = rt._public_comment_addendum("USD")

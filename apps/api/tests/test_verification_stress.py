@@ -162,7 +162,9 @@ S = [
     ("no-finish", "I need a stole", "Our stoles are made to order — which colour?", [], [], [], None, "pass"),
     ("black", "black cassock", "The Cassock in black is $130, made to your measurements.", _seen("cassock"), [], [], None, "pass"),
     ("where-answered", "where are you located?", "We're in Nairobi, Kenya — and we deliver worldwide by DHL.", [], [], [], None, "pass"),
-    ("where-can-i-get", "Where can I get it", "Order right here with me — tell me the colour and I'll reserve it.", [], [], [], None, "pass"),
+    # nothing is "reserved" by a word (owner, 2026-11-05): the pull is the order itself
+    ("where-can-i-get", "Where can I get it", "Order right here with me — tell me the colour and I'll start your order.", [], [], [], None, "pass"),
+    ("reserve-talk", "Where can I get it", "Order right here with me — tell me the colour and I'll reserve it.", [], [], [], None, "soft"),
     ("live-in", "I live in Kenya", "Lovely — then it's KES 13,000 for the Cassock.", _seen("cassock"), [], [], None, "pass"),
     ("filler", "communion cup filler", "The Refiller Bottle 500ML is $15.", _seen("refiller"), [], [], None, "pass"),
     ("earlier-price", "and the tallit?", "As I said, the Medium Tallit is $60.",

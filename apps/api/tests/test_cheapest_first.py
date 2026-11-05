@@ -151,7 +151,8 @@ def test_the_rules_say_cheapest_first_and_the_human_shape():
         assert "CHEAPEST FIRST, THEN CLIMB (owner rule, 2026-09-16)" in p
         assert "never open with\n  the three dearest" in p
         assert "STAY IN THE RANGE" in p
-        assert "This is our\n  Silver Communion Tray, and it goes for $180." in p
+        # the owner's example, at the length the owner now asks for (audit, 2026-11-05)
+        assert "This is our Silver Communion Tray at $180" in " ".join(p.split())
         assert 'never "The photo shows our…"' in p
     add = rt._public_comment_addendum("USD")
     assert "SAY IT LIKE A PERSON WHO KNOWS THE STOCK (owner, 2026-09-16)" in add
