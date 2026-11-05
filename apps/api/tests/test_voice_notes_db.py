@@ -612,7 +612,11 @@ def test_prompt_injection_in_a_voice_note_stays_customer_speech(rig, monkeypatch
     system, messages = seen[0]
     assert evil not in (system if isinstance(system, str) else json.dumps(system))
     user_turns = [m for m in messages if m["role"] == "user"]
-    assert any(evil in (m["content"] if isinstance(m["content"], str) else json.dumps(m["content"]))
+    # The current message now carries its notes as extra blocks (a length
+    # target, what was already told), so its content is a list: compare the
+    # text itself, never an ASCII-escaped dump (the em dash in `evil`).
+    assert any(evil in (m["content"] if isinstance(m["content"], str)
+                        else json.dumps(m["content"], ensure_ascii=False))
                for m in user_turns)
     assert all(evil not in str(m["content"]) for m in messages if m["role"] == "assistant")
     p = build_system_prompt(country_iso="KE", currency="KES")
