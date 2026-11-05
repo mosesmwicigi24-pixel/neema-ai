@@ -451,6 +451,12 @@ class Settings(BaseSettings):
     reply_length_note: bool = True
     reply_length_record: bool = True
     reply_length_slack: float = 1.5
+    # UNCLAIMED HUMAN CHATS (owner, 2026-11-05; services/unclaimed): a chat
+    # handed to the team that nobody picked up, its latest message a customer's,
+    # for this many minutes → the team is rung again, and Neema may answer a
+    # plain price or stock question from the hub, then say a colleague follows.
+    unclaimed_alert_minutes: int = 30
+    unclaimed_answer: bool = True
     # A person commenting many times under one post: this many full model
     # replies a day; beyond it, a bare price ask still gets the free priced
     # line on an identified post and anything else the warm canned line.

@@ -423,6 +423,25 @@ async def lifespan(app: FastAPI):
 
     app.state._auto_release_task = _asyncio.create_task(_auto_release_loop())
 
+    # ── Unclaimed human chats (owner, 2026-11-05) ─────────────────────────────
+    # A chat handed to the team that nobody picked up: after
+    # unclaimed_alert_minutes the team is rung again and Neema answers a plain
+    # price/stock question from the hub, then says a colleague follows
+    # (services/unclaimed.py). Redis-locked so one worker sweeps per tick.
+    async def _unclaimed_loop(interval: int = 300):
+        await _asyncio.sleep(120)
+        while True:
+            try:
+                if redis is None or await redis.set("agent:unclaimed:tick", "1",
+                                                    nx=True, ex=interval - 30):
+                    from app.services.unclaimed import sweep_unclaimed
+                    await sweep_unclaimed(redis)
+            except Exception as exc:
+                logger.warning("unclaimed tick failed: %s", exc)
+            await _asyncio.sleep(interval)
+
+    app.state._unclaimed_task = _asyncio.create_task(_unclaimed_loop())
+
     # Hub event agency: quiet-hours-deferred celebrations drain each morning
     # (leader-locked; no-op while HUB_EVENTS_SECRET is unset).
     from app.services import hub_events as _hub_events
