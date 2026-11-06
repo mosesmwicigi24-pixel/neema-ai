@@ -39,11 +39,11 @@ Last update: 2026-11-06 (session 1, end: discovery, baseline, first implementati
 | R2.5 | Hub and commercial data integrations | CAPABILITY_BASELINE §2C; hub-side behaviour [H] | PARTIALLY COMPLETE (hub side unobservable) |
 | R2.6 | Quotation, cart, order, payment, after-sales | CAPABILITY_BASELINE §2C | VERIFIED COMPLETE |
 | R2.7 | WhatsApp, Messenger, Instagram, web chat, comments, TikTok | CAPABILITY_BASELINE §2D | VERIFIED COMPLETE |
-| R2.8 | Autonomous actions, follow-ups, dispatch, takeover, consent | CAPABILITY_BASELINE §2D/E + Stage 1–8 reports | VERIFIED COMPLETE |
+| R2.8 | Autonomous actions, follow-ups, dispatch, takeover, consent | CAPABILITY_BASELINE §2D/E + the Stage 1–8 reports (now under `reports/`) | VERIFIED COMPLETE |
 | R2.9 | Response verification and factual grounding | CAPABILITY_BASELINE §2E (28 outbound paths, gate coverage) | VERIFIED COMPLETE |
 | R2.10 | Dashboard, monitoring, evaluation tools | CAPABILITY_BASELINE §2G | VERIFIED COMPLETE |
 | R2.11 | Android/iOS contracts (inspect only) | CAPABILITY_BASELINE §2G (81 endpoints; shared set listed); apps untouched | VERIFIED COMPLETE |
-| R2.12 | Verify deployed commit, flags, models, credentials, channel status, execution behaviour | ff8c3b5 live; models from config; channels per inbox; 22 flag values unknown (box .env unreadable, credential never saved) | PARTIALLY COMPLETE |
+| R2.12 | Verify deployed commit, flags, models, credentials, channel status, execution behaviour | d084e91 live (read from `/api/health`); models from config; channels per inbox; 22 flag values unknown (box .env unreadable, credential never saved) | PARTIALLY COMPLETE |
 | R2.13 | Capability-to-implementation inventory with all listed fields | CAPABILITY_BASELINE (230 rows) | VERIFIED COMPLETE |
 | R2.14 | Trace end-to-end workflows | CAPABILITY_BASELINE §1 | VERIFIED COMPLETE |
 | R2.15 | Document paths examined and paths inaccessible/unverified | CAPABILITY_BASELINE §5 | VERIFIED COMPLETE |
@@ -73,18 +73,18 @@ Last update: 2026-11-06 (session 1, end: discovery, baseline, first implementati
 | R4.7 | Memory and context | newest rules kept; contradictions resolved; silence honoured; locked writes; context experiment NOT STARTED (needs model) | PARTIALLY COMPLETE |
 | R4.8 | Multilingual | language guess 0.528→0.930 on the blind set (intervals separated; the earlier held-out figure was withdrawn as contaminated, BENCHMARK_RESULTS Correction 1); deterministic continuity rule; 100 language cases; native review BLOCKED | PARTIALLY COMPLETE |
 | R4.9 | Autonomous execution | outcomes say customer_told; handoff rings; order idempotency and legacy path not changed (recorded) | PARTIALLY COMPLETE |
-| R4.10 | Continuous evaluation | agent_eval --cases, history in app_settings, dashboard reads it; no automatic prompt change exists | VERIFIED COMPLETE (harness) / run BLOCKED |
+| R4.10 | Continuous evaluation | agent_eval --cases, history in app_settings, dashboard reads it; no automatic prompt change exists. The first CI run (19:57 UTC) crashed at start-up in the runner (models not all registered) — fixed in PR #319; the run on the fixed branch is in progress | VERIFIED COMPLETE (harness) / run IN PROGRESS |
 
 ## §5 Independent intelligence baseline
 
 | ID | Requirement | Status |
 |---|---|---|
 | R5.1 | 300–500 cases covering the eleven listed categories | 453 tuning cases + 120 blind cases, all categories (EVALUATION_DATASET) | VERIFIED COMPLETE (no production-derived cases yet) |
-| R5.2 | Real model against controlled data, sends disabled | BLOCKED (no key in session; box/CI run) |
+| R5.2 | Real model against controlled data, sends disabled | the repository secret now exists (the key check passed at 19:57 UTC); the first run crashed in the runner before any case (fixed in PR #319); the run on the fixed branch is in progress | PARTIALLY COMPLETE (run in progress) |
 | R5.3 | Objective assertions + human evaluation where judgment is required | objective verdicts in eval_run; judged turns exported to a packet | PARTIALLY COMPLETE |
 | R5.4 | Blind comparison: Neema vs skilled humans vs reference agent | design only (INTERNATIONAL_ASSESSMENT) | NOT STARTED |
 | R5.5 | Record inputs, model version, prompt revision, traces, outcomes, criteria, limitations | eval_run record (git sha, model ids, prompt hashes, case-set hash, tool traces) | VERIFIED COMPLETE (harness) |
-| R5.6 | Grader independence | objective code + human raters; model judge optional and never sole | VERIFIED COMPLETE (design) |
+| R5.6 | Grader independence | objective code + human raters; model judge optional and never sole — a design, not yet exercised by a run or a rater | PARTIALLY COMPLETE |
 
 ## §6 Excellence Score
 
@@ -94,7 +94,7 @@ Last update: 2026-11-06 (session 1, end: discovery, baseline, first implementati
 | R6.2 | Per metric: methodology, denominator, sample size, evaluator, evidence source, uncertainty | EXCELLENCE_SCORE table | VERIFIED COMPLETE |
 | R6.3 | NOT MEASURED where unreliable; no invented scores | applied |
 | R6.4 | ≥10-point verified improvement on a held-out set | floors only, on the blind set (the only uncontaminated held-out): language +40.2 points (0.528→0.930, separated); customer state +5.5 (0.725→0.780, intervals overlap); opt-out +5.9 (0.912→0.971, n=34, overlap); reply length +2.1 after the scorer correction. The 100-point aggregate is NOT MEASURED (model-dependent dimensions blocked) — the 10-point claim is NOT demonstrated | PARTIALLY COMPLETE |
-| R6.5 | Investigate the six preliminary targets | EXCELLENCE_SCORE §targets: language continuity measurable now (0.930 floor on the blind set), the rest need the model run | PARTIALLY COMPLETE |
+| R6.5 | Investigate the six preliminary targets | EXCELLENCE_SCORE §targets: the language GUESS is measurable now (0.930 floor on the blind set; continuity of the reply itself needs the model run), the rest need the model run | PARTIALLY COMPLETE |
 | R6.6 | Aggregate never excuses critical safety/financial errors | applied (gating rule in EXCELLENCE_SCORE) |
 
 ## §7 Executive performance dashboard

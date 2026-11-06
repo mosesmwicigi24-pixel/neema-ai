@@ -310,3 +310,21 @@ def test_a_cut_that_would_drop_the_answer_asks_once_more():
                                   read_only=True, turn_facts=facts))
     assert out == "The cope set is KES 45,000 and ships in a week."
     assert facts.get("truncation") == "retried" and len(calls) == 2 and calls[1] == "none"
+
+
+@pytest.mark.asyncio
+async def test_apply_lifts_a_hold_on_a_plain_question_that_is_not_a_buying_signal():
+    """Verification pass 4 (W2-3): the earlier test's question was also a
+    buying signal. A plain question — where the shop is — lifts the hold too."""
+    import types
+
+    class _DB:
+        async def commit(self):
+            pass
+    assert cs._buying_message("Where is your shop?")
+    deal = types.SimpleNamespace(next_action={"kind": "follow_up", "hold": {"until": "2026-11-13T07:00:00", "said": "needs_time"}},
+                                 blocking="Asked for time — until 13 Nov")
+    conv = types.SimpleNamespace(person_id=None)
+    changed = await cs.apply(_DB(), conv, deal, {"customer_said": "none"}, source="floor",
+                             inbound_text="Where is your shop?")
+    assert changed.get("hold_cleared") is True and "hold" not in (deal.next_action or {})

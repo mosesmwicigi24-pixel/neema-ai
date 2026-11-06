@@ -60,10 +60,15 @@ jobs:
           fi
       - name: Schema
         run: python -m alembic upgrade head
+      # `pipefail`: a crash behind `tee` must fail the step (2026-11-06: both
+      # stages died at start-up and the run still reported success).
       - name: Scripted scenarios (the original battery)
-        run: python -m app.jobs.agent_eval 2>&1 | tee agent-eval-transcript.txt
+        shell: bash
+        run: set -o pipefail; python -m app.jobs.agent_eval 2>&1 | tee agent-eval-transcript.txt
       - name: The blind held-out case set, pass^3 (the programme's held-out number)
+        shell: bash
         run: |
+          set -o pipefail
           python -m app.jobs.agent_eval --cases --file blind_heldout.jsonl --repeat 3 \
             --out agent-eval-blind.json --packet rater-packet.md 2>&1 | tee agent-eval-blind.log
       - uses: actions/upload-artifact@v4

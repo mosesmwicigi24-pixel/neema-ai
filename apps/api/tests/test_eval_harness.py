@@ -240,3 +240,17 @@ def test_the_runner_and_the_scorer_reach_the_blind_set_and_refuse_an_empty_run(t
     with pytest.raises(SystemExit) as e:
         eval_floors._cli()
     assert e.value.code == 2
+
+
+def test_the_runner_process_can_configure_every_mapper():
+    """CI, 2026-11-06: the eval process imported a hand-picked list of models,
+    and in CI the first database use died on persons.parish_id → parishes
+    before a single case ran. The runner now registers every model, as the
+    API process does. This pins that registration (the old list happened to
+    resolve in the local environment, so this is a guard, not a reproduction;
+    the workflow run is the proof)."""
+    import importlib
+    from sqlalchemy.orm import clear_mappers, configure_mappers
+    importlib.import_module("app.jobs.agent_eval")
+    configure_mappers()                      # raises NoReferencedTableError when a model is missing
+    assert clear_mappers is not None

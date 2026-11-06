@@ -1,6 +1,6 @@
-# Final Release Readiness Report — slice 1 (2026-11-06)
+# Final Release Readiness Report — slices 1–4 (2026-11-06)
 
-**Status: slice 1 is LIVE** — PR #316 squash-merged as `c8c3356` at 17:18 UTC
+**Status: slices 1–4 are LIVE (box on `d084e91`)** — slice 1 (PR #316) squash-merged as `c8c3356` at 17:18 UTC
 on the owner's word ("merge and deploy when green"), after the full suite
 (3,294 passed, 0 failed) and CI were green on its head. The box reported
 `version = c8c3356…` at ~17:52 UTC with `agent.replies = ok`, outreach still
@@ -11,9 +11,14 @@ The verification pass's S1/S2 findings are fixed or recorded
 passes 2 and 2b (every S1/S2 fixed) and green CI; **live on the box at
 ~19:22 UTC** (replies ok, outreach still shadow; the first main build hung
 on the runner's apt step and was re-run). Slice 4
-(PR #318: durable opt-out without a person, held draft never promised to
-nobody, dated facts, rule-proposals card) is open, with verification pass 3
-running.
+(PR #318: durable opt-out without a person, an unowned hold left to the
+sweep, dated facts, Meta receipts, figure facts, rule-proposals card, the
+one-step real-model run) merged as `d084e91` at 19:44 UTC after
+verification passes 3 and 3b (every S1/S2 fixed, two test gaps closed) and
+green CI; **live on the box at ~19:55 UTC** (replies ok, outreach still shadow;
+the bounded apt step in CI held this time). Full suite on the merged main:
+3,313 passed, 0 failed. Verification pass 4 (an audit of every VERIFIED
+COMPLETE row against the merged code) is running.
 
 ## Measured improvement
 
@@ -47,7 +52,7 @@ silence, plus fail-closed safeguards that had been fail-open.
 
 - ~~Merge and deploy PR #316 (production deployment).~~ Done, c8c3356 live.
 - The `/api/health` hub wait (UNFINISHED_REGISTER): a one-function change to serve only the cached price audit — production behaviour, waits for the owner's word.
-- A model key on the box or as the repository secret (to run the evaluation).
+- ~~A model key on the box or as the repository secret~~ — the secret exists; the first run crashed in the runner (fixed in PR #319); the run on the fixed branch is in progress.
 - Saving the dashboard credential from a browser (for production-derived cases).
 - Naming human raters and native speakers.
 - A post-conversation rating ask (an unprompted message).
@@ -56,6 +61,6 @@ silence, plus fail-closed safeguards that had been fail-open.
 
 ## What ships in this slice if approved
 
-Code: see PR #316. No migration. Android untouched. Web: one new view.
+Code: PRs #316, #317, #318 (and #319, the eval runner fix). No migration. Android untouched. Web: the Performance view, the rule-proposals card, honest Settings panels.
 Rollback: `git revert` of the squash commit; no data changes to unwind
 (app_settings `eval_history` is written only by an eval run).
