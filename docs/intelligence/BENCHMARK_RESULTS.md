@@ -163,7 +163,15 @@ Files: `results/floors-rescored-{all,dev,held-out,blind}.json`. The blind
 column remains the only number this programme claims as held-out; the
 dev/held-out split is tuned-on and contaminated, as Correction 1 records.
 
-## Real-model baseline — NOT MEASURED
+## Real-model runs — log (2026-11-06)
+
+| Run | Code | What happened |
+|---|---|---|
+| 42284150514, 19:57 UTC | main d084e91 | key check passed (the secret exists); both stages crashed at start-up — the runner had not registered every model (`persons.parish_id → parishes`); reported success behind `tee`. Fixed in PR #319. |
+| 42284679182, 20:01 UTC | branch 87a2b29 | the scripted battery ran (37 replies, mean 30 words, 3 over target, 3 with an unverified figure, 23 not passed first draft, 1 turn failed on an aborted database transaction — see UNFINISHED); the blind stage was killed by the job's 30-minute limit with nothing written. Fixed in PR #320 (300-minute limit; a checkpoint after every case). |
+| 42289125585, 20:31 UTC | branch aaf7978 | in progress: scripted battery, then the blind set pass^3. |
+
+## Real-model baseline — NOT MEASURED (run in progress)
 
 Command, once a key exists on the box or as the `ANTHROPIC_API_KEY`
 repository secret:

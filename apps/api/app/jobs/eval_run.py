@@ -357,6 +357,21 @@ def select_cases(selection: str = "all", *, only: str | None = None, limit: int 
     return chosen
 
 
+def _write_record(record: dict, out_path: str, *, partial: bool, done: int = 0, of: int = 0) -> None:
+    """The run record on disk — the final one, or a checkpoint marked
+    `partial` with how far it got, so an interrupted run is still evidence
+    (and never mistaken for a complete one)."""
+    rec = dict(record)
+    if partial:
+        rec["partial"] = {"done": done, "of": of, "at": datetime.now(timezone.utc).isoformat()}
+    else:
+        rec.pop("partial", None)
+    tmp = out_path + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(rec, f, ensure_ascii=False, indent=1)
+    os.replace(tmp, out_path)
+
+
 async def run_cases(*, selection: str = "all", repeat: int = 1, only: str | None = None,
                     out_path: str | None = None, packet_path: str | None = None,
                     history: bool = False, keep: bool = False, limit: int | None = None,
@@ -479,6 +494,12 @@ async def run_cases(*, selection: str = "all", repeat: int = 1, only: str | None
                     print(f"[{mark}] {case['id']} t{i} ({exp.get('next')}) {verdict['observations']['words']}w "
                           f"{latency}s" + ("  — " + "; ".join(verdict["failures"]) if verdict["failures"] else ""))
                 record["results"].append(case_res)
+                # A checkpoint after every case: a run killed by a time limit
+                # (CI, 2026-11-06: 30 min, nothing written) still leaves what
+                # it measured, marked partial.
+                if out_path:
+                    _write_record(record, out_path, partial=True, done=len(record["results"]),
+                                  of=len(chosen) * repeat)
         record["sandboxed_calls"] = box.calls
 
     record["finished"] = datetime.now(timezone.utc).isoformat()
@@ -492,8 +513,7 @@ async def run_cases(*, selection: str = "all", repeat: int = 1, only: str | None
         print("failure kinds:", json.dumps(s["failure_kinds"], ensure_ascii=False))
 
     if out_path:
-        with open(out_path, "w", encoding="utf-8") as f:
-            json.dump(record, f, ensure_ascii=False, indent=1)
+        _write_record(record, out_path, partial=False)
         print(f"written {out_path}")
     if packet_path:
         write_packet(record, packet_path)

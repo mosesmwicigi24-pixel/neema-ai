@@ -13,7 +13,9 @@ on:
 jobs:
   eval:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    # A model-in-the-loop pass over 120 cases × 3 is hours, not minutes: the
+    # first run (2026-11-06) was killed at 30 min with no record written.
+    timeout-minutes: 300
     defaults:
       run:
         working-directory: apps/api
