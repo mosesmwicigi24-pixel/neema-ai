@@ -179,3 +179,47 @@ def test_the_hold_line_is_not_promised_when_nobody_could_be_told(monkeypatch):
         public_comment=False, closer=False, swahili=False, error="boom"))
     assert (reply, outcome) == ("", "held")                             # nobody told: silence, the sweep's
     assert any("missed-reply sweep" in i for i in issues)
+
+
+# ── the opt-out outlives redis even for a contact with no person ─────────────
+
+def test_an_opt_out_from_a_contact_with_no_person_makes_one_and_lands_on_it(monkeypatch):
+    """Verification 1.3: before, a comment-DM or early-funnel contact's "stop"
+    lived in redis for a year and died with a flush. Now the resolver makes
+    the person, the preference lands on it, the thread is linked, and a later
+    read with no person on the thread still finds it through the identity."""
+    import types
+    import uuid
+    from app.services import intent, identity
+
+    person = types.SimpleNamespace(id=uuid.uuid4(), state={})
+    ident = types.SimpleNamespace(person_id=person.id, channel="messenger", external_id="PSID_9")
+    made = []
+
+    async def fake_resolve(db, channel, external_id, **kw):
+        made.append((channel, external_id))
+        return ident
+    monkeypatch.setattr(identity, "resolve_or_create_person", fake_resolve)
+    monkeypatch.setattr("app.services.intent.flag_modified", lambda *a, **k: None, raising=False)
+
+    class _DB:
+        def __init__(self): self.added = []
+        async def get(self, model, pk): return person if pk == person.id else None
+        def add(self, o): self.added.append(o)
+        async def commit(self): pass
+        async def rollback(self): pass
+
+    conv = types.SimpleNamespace(id="conv9", person_id=None, channel="messenger", external_id="PSID_9", wa_id=None)
+    asyncio.run(intent.record_opt_out(_DB(), None, conv, "stop messaging me", channel="messenger", key="PSID_9"))
+    assert made == [("messenger", "PSID_9")]
+    assert person.state["contact_preferences"]["opt_out"]["said"] == "stop messaging me"
+    assert conv.person_id == person.id                                  # the thread now knows its person
+
+    # a synthetic thread (no person, no redis) still reads the preference through the identity
+    async def fake_select(db, channel, external_id):
+        return ident if (channel, external_id) == ("messenger", "PSID_9") else None
+    monkeypatch.setattr(identity, "_select_identity", fake_select)
+    synthetic = types.SimpleNamespace(person_id=None, channel="messenger", external_id="PSID_9", wa_id=None)
+    assert asyncio.run(intent.opted_out(_DB(), None, synthetic)) is True
+    stranger = types.SimpleNamespace(person_id=None, channel="messenger", external_id="PSID_0", wa_id=None)
+    assert asyncio.run(intent.opted_out(_DB(), None, stranger)) is False

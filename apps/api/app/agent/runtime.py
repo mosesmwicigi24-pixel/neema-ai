@@ -2884,14 +2884,19 @@ async def _handle_opt_out(redis, channel: str, key: str, text: str) -> None:
                                                         Conversation.wa_id == key))
             conv = (await db.execute(select(Conversation).where(where))).scalars().first()
             if conv is None:
-                return
+                # No conversation row yet (a comment-DM reply, a first message
+                # that never landed): the preference is still recorded, on the
+                # person the resolver makes for this handle (verification 1.3).
+                conv = types.SimpleNamespace(id=None, person_id=None, channel=channel,
+                                             external_id=key, wa_id=key if channel == "whatsapp" else None)
             already = await _intent.opted_out(db, redis, conv)
             await _intent.record_opt_out(db, redis, conv, text, channel=channel, key=key)
-            try:
-                from app.services.actions import withdraw_routine
-                await withdraw_routine(db, conv.id, why="customer asked not to be messaged")
-            except Exception:
-                pass
+            if getattr(conv, "id", None) is not None:
+                try:
+                    from app.services.actions import withdraw_routine
+                    await withdraw_routine(db, conv.id, why="customer asked not to be messaged")
+                except Exception:
+                    pass
             _ol.decision("opt_out", channel, key, "suppress" if already else "send",
                          "customer asked not to be messaged" + (" (already recorded)" if already else ""))
             if already:
