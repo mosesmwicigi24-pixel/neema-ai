@@ -60,6 +60,20 @@ def read_memory(state: dict | None) -> list[str]:
     return facts if isinstance(facts, list) else []
 
 
+def _union(facts: list[str], more: list[str]) -> list[str]:
+    """`facts` then whatever in `more` is not already there — compared the
+    way the writer compares (case-insensitive, stripped), so two homes never
+    show the same fact twice."""
+    seen = {f.strip().lower() for f in facts}
+    out = list(facts)
+    for f in more:
+        k = f.strip().lower()
+        if k and k not in seen:
+            seen.add(k)
+            out.append(f)
+    return out
+
+
 def _merge(facts: list[str], fact: str) -> list[str]:
     """Append `fact` unless it's already present (case-insensitive), then cap
     the list to the most recent `_MAX_FACTS`, dropping the oldest first."""
@@ -153,7 +167,7 @@ async def build_memory_context(db: AsyncSession, redis, wa_id: str, user: User |
         # WhatsApp conversation continues where Messenger left off.
         person = await db.get(Person, store.person_id)
         pfacts = read_memory(person.state if person else None)
-        facts = facts + [f for f in pfacts if f not in facts]
+        facts = _union(facts, pfacts)
     elif isinstance(store, Person):
         # The other direction (W7-5, 2026-11-06): a customer who started on
         # WhatsApp carries facts on their USER row — surface them on
@@ -161,10 +175,11 @@ async def build_memory_context(db: AsyncSession, redis, wa_id: str, user: User |
         # off. Best-effort: a failed lookup leaves the person's own facts.
         try:
             u = (await db.execute(
-                select(User).where(User.person_id == store.id).limit(1)
+                select(User).where(User.person_id == store.id)
+                .order_by(User.updated_at.desc()).limit(1)       # the newest, when a merge left two
             )).scalar_one_or_none()
             ufacts = read_memory(getattr(u, "state", None) if u is not None else None)
-            facts = facts + [f for f in ufacts if f not in facts]
+            facts = _union(facts, ufacts)
         except Exception:
             pass
     person_id = store.id if (channel != "whatsapp" and isinstance(store, Person)) else None

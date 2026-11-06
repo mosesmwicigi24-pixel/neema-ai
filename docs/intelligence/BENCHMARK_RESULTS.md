@@ -70,13 +70,15 @@ narrowing is reported honestly as "dev, tuned".
 ## After W2 (the floor reads what customers write) — same day, same case set
 
 Files: `results/floors-after-{all,dev,held-out}.json`. Tuned on the
-development half only; the held-out half is the report.
+development half; the held-out half was meant to be the report and is
+**not** (Correction 1 — in-sample). Kept for the record; the blind set
+below is the report.
 
 | Metric (floors) | Held-out before | Held-out after | Dev after (tuned) |
 |---|---|---|---|
 | customer state | 137/254 = 0.539 [0.478, 0.600] | 200/254 = 0.787 — **withdrawn: in-sample** (see correction above) | 204/214 = 0.953 (before narrowing) |
-| language guess | 111/149 = 0.745 [0.669, 0.808] | **136/149 = 0.913 [0.856, 0.948]** | 182/183 = 0.995 |
-| opt-out recognition | 22/29 = 0.759 [0.579, 0.878] | **28/29 = 0.966 [0.828, 0.994]** | 10/11 = 0.909 |
+| language guess | 111/149 = 0.745 [0.669, 0.808] | 136/149 = 0.913 — in-sample (blind: 0.930) | 182/183 = 0.995 |
+| opt-out recognition | 22/29 = 0.759 [0.579, 0.878] | 28/29 = 0.966 — in-sample (blind: 0.971) | 10/11 = 0.909 |
 | developer negatives (20) | 2 misses (one false opt-out) | **0 misses** | — |
 
 The intervals do not overlap, but the "after" column is not clean (above).

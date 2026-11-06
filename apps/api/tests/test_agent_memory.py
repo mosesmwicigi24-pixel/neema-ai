@@ -168,13 +168,27 @@ def test_a_messenger_turn_reads_the_linked_whatsapp_users_facts(monkeypatch):
     async def fake_store(db, key, channel="whatsapp", *, lock=False):
         return person
     monkeypatch.setattr(memory, "_load_store", fake_store)
-    wa_user = types.SimpleNamespace(state={"agent_memory": ["prefers black cassocks", "parish: St Peter's, Nakuru"]})
-    db = _FakeDB([_Res(one=wa_user)])     # the User lookup; the orders query then fails and is swallowed
+    wa_user = types.SimpleNamespace(state={"agent_memory": ["prefers black cassocks", "Parish: St Peter's, Nakuru"]})
 
+    class _RowDB:
+        """Answers the User lookup from the statement itself (verification
+        pass 2b): only a query on users.person_id = <this person> finds the row."""
+        def __init__(self, raise_on_execute=False):
+            self.sql, self.raise_on_execute = [], raise_on_execute
+        async def execute(self, stmt):
+            if self.raise_on_execute:
+                raise RuntimeError("db down")
+            from sqlalchemy.dialects import postgresql
+            sql = str(stmt.compile(dialect=postgresql.dialect(), compile_kwargs={"literal_binds": True}))
+            self.sql.append(sql)
+            hit = f"users.person_id = '{person.id}'" in sql and "FROM users" in sql
+            return types.SimpleNamespace(scalar_one_or_none=lambda: wa_user if hit else None)
+
+    db = _RowDB()
     ctx = asyncio.run(memory.build_memory_context(db, None, "PSID_1", channel="messenger"))
     assert ctx is not None
-    assert "prefers black cassocks" in ctx and ctx.count("St Peter's") == 1
-    # no linked user: the person's facts alone, no error
-    db2 = _FakeDB([_Res(one=None)])
-    ctx2 = asyncio.run(memory.build_memory_context(db2, None, "PSID_1", channel="messenger"))
+    assert "prefers black cassocks" in ctx and ctx.lower().count("st peter's") == 1   # case-insensitive union
+    assert "ORDER BY users.updated_at DESC" in db.sql[0]                                 # the newest linked row wins
+    # a DB error on the lookup leaves the person's own facts, no exception
+    ctx2 = asyncio.run(memory.build_memory_context(_RowDB(raise_on_execute=True), None, "PSID_1", channel="messenger"))
     assert "St Peter's" in ctx2 and "black cassocks" not in ctx2

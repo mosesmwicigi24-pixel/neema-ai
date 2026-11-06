@@ -47,7 +47,7 @@ candidates for a second rater (κ to be reported).
 - `python -m app.jobs.eval_floors` — model-free, seconds, anywhere: the
   deterministic floors (customer state, language guess, opt-out, length
   target) against the gold labels.
-- `python -m app.jobs.agent_eval --cases [--file blind_heldout.jsonl | --held-out] [--repeat 3] --out … --packet … --history` —
+- `python -m app.jobs.agent_eval --cases --file blind_heldout.jsonl [--repeat 3] --out … --packet … --history` (the blind set is the report; `--held-out` is the contaminated half, for diagnosis only) —
   the real prompt, model, catalogue, cart and gate with sends sandboxed;
   objective verdicts per turn; pass^k; run record with model ids and prompt
   hashes; rater packet for the judged dimensions; history row in

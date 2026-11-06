@@ -16,6 +16,7 @@ model-in-the-loop run measures. Nothing here touches a database or redis.
 from __future__ import annotations
 
 import argparse
+import sys
 import json
 import math
 from collections import defaultdict
@@ -117,7 +118,15 @@ def _cli() -> None:
     chosen = cases if args.file else held if args.held_out else dev if args.dev else cases
     label = f"file:{args.file}" if args.file else "held-out" if args.held_out else "dev" if args.dev else "all"
     cov = eval_cases.coverage(chosen)
+    if not chosen:
+        print(f"no cases selected ({label}) — check --file", file=sys.stderr)
+        raise SystemExit(2)                 # never a green exit on an empty run
     res = score(chosen)
+    if any(c.get("blind") for c in chosen) and not args.misses:
+        # The blind set is scored aggregate-only: its misses (with the case
+        # text) stay out of the record unless asked for on purpose.
+        res["misses"] = []
+        res["misses_withheld"] = "blind set — pass --misses to see them"
     print(f"case set: {cov['cases']} cases / {cov['turns']} turns ({label}); "
           f"sources {cov['by_source']}; critical {cov['critical']}")
     for metric, rows in res["metrics"].items():

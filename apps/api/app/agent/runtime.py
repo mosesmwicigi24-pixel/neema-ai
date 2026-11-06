@@ -1512,25 +1512,70 @@ async def _gate_turn_reply(reply: str, *, user_text: str, transcript: list, tool
 
 
 _SENTENCE_END_RE = re.compile(r"[.!?…][\"'”’)\]]*(?=\s|$)")
+# A full stop that does NOT end a sentence: an abbreviation ("St.", "Rev.",
+# "e.g."), an initial ("J."), or a list number ("3."). Matched against the
+# text before the stop (verification pass 2b: "Your parish is St." was a cut).
+_NOT_A_SENTENCE_END_RE = re.compile(
+    r"(?:^|[\s(\[])(?:[A-Za-z]|\d{1,3}|St|Mt|Ft|Rev|Fr|Sr|Br|Dr|Mr|Mrs|Ms|Prof|Pr|Hon|"
+    r"vs|etc|approx|no|nos|e\.g|i\.e|cf|Jan|Feb|Mar|Apr|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec)$",
+    re.I)
+# What a dropped tail may have been carrying: a figure, a currency, a question.
+_ANSWER_MARK_RE = re.compile(r"\d|KES|USD|ZMW|[$€£]|\?", re.I)
+
+
+def _sentence_ends(t: str) -> list[int]:
+    ends = []
+    for m in _SENTENCE_END_RE.finditer(t):
+        if t[m.start()] == "." and _NOT_A_SENTENCE_END_RE.search(t[:m.start()]):
+            continue
+        ends.append(m.end())
+    return ends
 
 
 def trim_truncated(text: str) -> tuple[str, bool]:
     """A reply the model could not finish (stop_reason max_tokens), cut back
     to its last complete sentence. Returns (text, cut). Nothing is cut when
     the text already ends a sentence, when it has no sentence boundary at
-    all, or when what would remain is too little to stand as the answer
-    (under 12 characters or under a third of the draft) — then the whole
-    draft goes on to the gate as written."""
+    all (abbreviations, initials and list numbers are not boundaries), or
+    when what would remain is too little to stand as the answer (under 12
+    characters or under a third of the draft) — then the whole draft goes
+    on as written."""
     t = (text or "").rstrip()
     if not t:
         return t, False
-    ends = [m.end() for m in _SENTENCE_END_RE.finditer(t)]
+    ends = _sentence_ends(t)
     if not ends or ends[-1] == len(t):
         return t, False
     keep = ends[-1]
     if keep < 12 or keep < len(t) // 3:
         return t, False
     return t[:keep].rstrip(), True
+
+
+async def _settle_truncated(reply: str, llm, sys_blocks, messages: list, tools: list,
+                            key: str, turn_facts: dict | None) -> str:
+    """What goes on to the gate when the writer hit the token ceiling. Cut
+    back to the last whole sentence when the dropped tail carried nothing
+    the customer asked for; when it carried a figure, a currency or a
+    question — or there was no sentence to keep — ask once for the reply in
+    words (the loop's own mechanism), and only then settle for the cut or
+    the draft as written (verification pass 2b: a cut once kept the
+    pleasantry and dropped the price)."""
+    cut, was_cut = trim_truncated(reply)
+    dropped = reply[len(cut):] if was_cut else reply
+    how = "cut" if was_cut else "kept"
+    if not was_cut or _ANSWER_MARK_RE.search(dropped):
+        retry = await _reply_in_words(llm, sys_blocks, messages, tools)
+        if retry:
+            cut, how = retry, "retried"
+    _log.warning("reply for %s hit max_tokens — %s", key,
+                 {"cut": "cut back to its last whole sentence",
+                  "retried": "asked once more for the reply in words",
+                  "kept": "no whole sentence to keep; sent as written"}[how])
+    if turn_facts is not None:
+        turn_facts["truncated"] = True
+        turn_facts["truncation"] = how
+    return cut
 
 
 def length_target_for(user_text: str | None) -> dict:
@@ -2258,15 +2303,9 @@ async def run_turn(db: AsyncSession, redis, wa_id: str, user_text: str, llm: LLM
             reply = resp.text or ""
             if reply and getattr(resp, "stop_reason", "") == "max_tokens":
                 # The writer hit the token ceiling mid-sentence. A half-written
-                # sentence is never the answer: cut back to the last whole one
-                # when there is one worth keeping, and say so in the facts
-                # (W7-4, verification: stop_reason was never inspected).
-                reply, _cut = trim_truncated(reply)
-                _log.warning("reply for %s hit max_tokens — %s", key,
-                             "cut back to its last whole sentence" if _cut
-                             else "no sentence boundary to cut at; sent as written")
-                if turn_facts is not None:
-                    turn_facts["truncated"] = True
+                # sentence is never the answer (W7-4, verification: stop_reason
+                # was never inspected).
+                reply = await _settle_truncated(reply, llm, sys_blocks, messages, tools, key, turn_facts)
             if not reply and (_overlap_noted or is_closer(user_text or "")):
                 # The contract the turn was given: an empty reply SENDS NOTHING
                 # when the message was already answered (OVERLAP_NOTE) or was
@@ -2317,6 +2356,8 @@ async def run_turn(db: AsyncSession, redis, wa_id: str, user_text: str, llm: LLM
         # never "let me get a colleague" when the facts are already in hand.
         reply = resp.text or await _reply_in_words(llm, sys_blocks, messages, tools) \
             or "Let me get a colleague to help you with this."
+        if resp.text and getattr(resp, "stop_reason", "") == "max_tokens":
+            reply = await _settle_truncated(reply, llm, sys_blocks, messages, tools, key, turn_facts)
 
     # THE GATE BEFORE POSTING (owner, 2026-09-25) — EVERY channel: the reply
     # is verified against this turn's ground truth before anyone sends it;

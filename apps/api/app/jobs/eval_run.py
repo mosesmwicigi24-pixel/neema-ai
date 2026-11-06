@@ -338,6 +338,25 @@ def summarise(results: list[dict], *, repeat: int) -> dict:
     return out
 
 
+def select_cases(selection: str = "all", *, only: str | None = None, limit: int | None = None,
+                 file: str | None = None) -> list[dict]:
+    """The cases one run covers. `file` names one case file and ignores the
+    split — the way the blind set is run (verification pass 2: the runner
+    had lost every way to reach it once the loader left blind cases out of
+    the sweep); `--held-out`/`--dev` mean nothing with it."""
+    if file:
+        chosen = eval_cases.load(file, include_blind=True)
+    else:
+        cases = eval_cases.load()
+        dev, held = eval_cases.split(cases)
+        chosen = held if selection == "held-out" else dev if selection == "dev" else cases
+    if only:
+        chosen = [c for c in chosen if c["id"].startswith(only)]
+    if limit:
+        chosen = chosen[:limit]
+    return chosen
+
+
 async def run_cases(*, selection: str = "all", repeat: int = 1, only: str | None = None,
                     out_path: str | None = None, packet_path: str | None = None,
                     history: bool = False, keep: bool = False, limit: int | None = None,
@@ -357,23 +376,12 @@ async def run_cases(*, selection: str = "all", repeat: int = 1, only: str | None
     from app.services.messaging import provision_user
     from app.jobs.agent_eval import _cleanup_contacts
 
-    # `file` names one case file and ignores the split — the way the blind
-    # set is run (verification pass 2: the runner had lost every way to reach
-    # it once the loader left blind cases out of the sweep).
+    chosen = select_cases(selection, only=only, limit=limit, file=file)
     if file:
-        cases = eval_cases.load(file, include_blind=True)
-        chosen = cases
-    else:
-        cases = eval_cases.load()
-        dev, held = eval_cases.split(cases)
-        chosen = held if selection == "held-out" else dev if selection == "dev" else cases
-    if only:
-        chosen = [c for c in chosen if c["id"].startswith(only)]
-    if limit:
-        chosen = chosen[:limit]
+        selection = f"file:{file}"
     if not chosen:
-        print("no cases selected")
-        return None
+        print("no cases selected — check --file / --only")
+        raise SystemExit(2)                 # never a green exit on an empty run
 
     try:
         redis = aioredis.from_url(settings.redis_url, decode_responses=True,
@@ -388,7 +396,7 @@ async def run_cases(*, selection: str = "all", repeat: int = 1, only: str | None
     async with AsyncSessionLocal() as db:
         revision = await _prompt_revision(db, redis)
     record = {
-        "started": datetime.now(timezone.utc).isoformat(), "selection": selection, "repeat": repeat,
+        "started": datetime.now(timezone.utc).isoformat(), "selection": selection, "file": file, "repeat": repeat,
         "git_sha": _git_sha(), "case_set": _case_set_hash(chosen), "cases": len(chosen),
         "models": {"producer": settings.tier2_model, "light": settings.tier2_model_light,
                    "reviewer": settings.review_model_main, "reviewer_light": settings.review_model_light},

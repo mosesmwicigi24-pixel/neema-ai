@@ -23,7 +23,7 @@ Last update: 2026-11-06 (session 1, end: discovery, baseline, first implementati
 | R1.6 | Never invent evidence | tags [C] confirmed / [H] hypothesis / [P] planned / [U] unavailable throughout | applied |
 | R1.7 | Never duplicate architecture | ADVANCEMENTS_REGISTER names the existing system each change extends | applied |
 | R1.8 | Never weaken working functionality | REGRESSION_SAFETY_REPORT: full suite + safeguard checklist per change | applied |
-| R1.9 | Never declare success prematurely | BENCHMARK_RESULTS before/after on a held-out set; otherwise "not demonstrated" | applied |
+| R1.9 | Never declare success prematurely | BENCHMARK_RESULTS before/after on the blind set (the held-out half was withdrawn as contaminated); otherwise "not demonstrated" | applied |
 | R1.10 | Never expand scope without justification | every new component in ADVANCEMENTS_REGISTER must cite the proven limitation and the simpler alternative rejected | applied |
 
 ## §2 Reconstruct the actual current state

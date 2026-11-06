@@ -238,6 +238,18 @@ def test_a_draft_cut_by_the_token_ceiling_ends_on_a_whole_sentence():
     assert cut("Ok. " + "x" * 200) == ("Ok. " + "x" * 200, False)
     assert cut("It is 2.5 metres long and") == ("It is 2.5 metres long and", False)   # a decimal is not a boundary
     assert cut("") == ("", False)
+    # verification pass 2b: abbreviations, initials and list numbers are not sentence ends
+    assert cut("Your parish is St. Peter's in Nakuru, and the") == ("Your parish is St. Peter's in Nakuru, and the", False)
+    assert cut("Delivery to Mt. Kenya region takes a week. We also stock the") == ("Delivery to Mt. Kenya region takes a week.", True)
+    assert cut("Ask Rev. Fr. Otieno for the size, e.g. 42 or 44, and we") == ("Ask Rev. Fr. Otieno for the size, e.g. 42 or 44, and we", False)
+    assert cut("1. Cope\n2. Stole\n3.") == ("1. Cope\n2. Stole\n3.", False)
+    assert cut("We have three options for you today. 1. Cope\n2. Stole\n3.") == ("We have three options for you today.", True)
+    # the thresholds and the lookahead, pinned
+    assert cut("Hello there friend. " + "x" * 100) == ("Hello there friend. " + "x" * 100, False)   # under a third
+    assert cut("Yes we do. " + "y" * 20) == ("Yes we do. " + "y" * 20, False)                      # 10 chars < 12: kept
+    assert cut("Yes, we do. " + "y" * 20) == ("Yes, we do. " + "y" * 20, False)                    # 11 chars < 12: kept
+    assert cut("Yes, we do!! " + "y" * 20) == ("Yes, we do!!", True)                               # 12 chars: cut
+    assert cut("Price KES 2,500.Then we") == ("Price KES 2,500.Then we", False)                      # no space after the stop
 
 
 def test_the_turn_cuts_a_max_tokens_draft_and_records_it():
@@ -268,3 +280,33 @@ def test_the_turn_cuts_a_max_tokens_draft_and_records_it():
     out2 = asyncio.run(rt.run_turn(db(), None, "254700000001", "how much is the cope set?",
                                    llm("end_turn"), read_only=True, turn_facts=facts2))
     assert out2.endswith("the matching stole in") and "truncated" not in facts2
+
+
+def test_a_cut_that_would_drop_the_answer_asks_once_more():
+    """Verification pass 2b: 'Thanks for asking, Moses. The cope set is KES
+    45,000 and ships in a' must not become 'Thanks for asking, Moses.' —
+    the dropped tail carried the figure, so the turn asks once for the reply
+    in words and sends that."""
+    import asyncio
+    import types
+    from tests.test_agent_flow import _FakeDB, _Res
+
+    calls = []
+
+    class _L:
+        async def complete(self, *, system, messages, tools, **kw):
+            calls.append(kw.get("tool_choice"))
+            if len(calls) == 1:
+                return types.SimpleNamespace(
+                    text="Thanks for asking, Moses. The cope set is KES 45,000 and ships in a",
+                    tool_calls=[], assistant_content=[], usage={}, stop_reason="max_tokens")
+            return types.SimpleNamespace(text="The cope set is KES 45,000 and ships in a week.",
+                                         tool_calls=[], assistant_content=[], usage={}, stop_reason="end_turn")
+
+    user = types.SimpleNamespace(name="Moses")
+    db = _FakeDB([_Res(one=user), _Res(one=None), _Res(one=None), _Res(one=None), _Res(many=[])])
+    facts: dict = {}
+    out = asyncio.run(rt.run_turn(db, None, "254700000001", "how much is the cope set?", _L(),
+                                  read_only=True, turn_facts=facts))
+    assert out == "The cope set is KES 45,000 and ships in a week."
+    assert facts.get("truncation") == "retried" and len(calls) == 2 and calls[1] == "none"
