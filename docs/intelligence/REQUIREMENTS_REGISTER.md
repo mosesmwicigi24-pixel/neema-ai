@@ -65,13 +65,13 @@ Last update: 2026-11-06 (session 1, end: discovery, baseline, first implementati
 | ID | Workstream | Status |
 |---|---|---|
 | R4.1 | Reliability, truth, customer trust | gate fails closed; opt-out door on every channel; takeover fail-closed; paid-ack rule; promised offer surfaced; Meta 502; inbound verified from outside; identity merge and delivery receipts not changed (recorded) | PARTIALLY COMPLETE (production verification pending) |
-| R4.2 | Intent and contextual reasoning | floor widened and measured on held-out (0.54→0.79); holds lift; scribe merge | VERIFIED COMPLETE (floor) / model layer NOT MEASURED |
+| R4.2 | Intent and contextual reasoning | floor widened and measured on the blind set (0.725→0.780, intervals overlap; the held-out 0.54→0.79 was withdrawn as contaminated); holds lift; scribe merge | VERIFIED COMPLETE (floor) / model layer NOT MEASURED |
 | R4.3 | Emotional intelligence | complaint → care-first length; rater packet built; no ratings | PARTIALLY COMPLETE (BLOCKED on raters) |
 | R4.4 | Consultative intelligence | hard pressure rule; discount figures grounded by the figure rule; judgment unmeasured | PARTIALLY COMPLETE |
 | R4.5 | Onboarding | photo turns kept; memory/onboarding case slices written; re-asking unmeasured | PARTIALLY COMPLETE |
 | R4.6 | Closing | readiness read (floor); paid conversion on the dashboard (partial denominator); delivery-total rule not changed | PARTIALLY COMPLETE |
 | R4.7 | Memory and context | newest rules kept; contradictions resolved; silence honoured; locked writes; context experiment NOT STARTED (needs model) | PARTIALLY COMPLETE |
-| R4.8 | Multilingual | language guess 0.75→0.91 held-out; deterministic continuity rule; 100 language cases; native review BLOCKED | PARTIALLY COMPLETE |
+| R4.8 | Multilingual | language guess 0.528→0.930 on the blind set (intervals separated; the earlier held-out figure was withdrawn as contaminated, BENCHMARK_RESULTS Correction 1); deterministic continuity rule; 100 language cases; native review BLOCKED | PARTIALLY COMPLETE |
 | R4.9 | Autonomous execution | outcomes say customer_told; handoff rings; order idempotency and legacy path not changed (recorded) | PARTIALLY COMPLETE |
 | R4.10 | Continuous evaluation | agent_eval --cases, history in app_settings, dashboard reads it; no automatic prompt change exists | VERIFIED COMPLETE (harness) / run BLOCKED |
 
@@ -79,7 +79,7 @@ Last update: 2026-11-06 (session 1, end: discovery, baseline, first implementati
 
 | ID | Requirement | Status |
 |---|---|---|
-| R5.1 | 300–500 cases covering the eleven listed categories | 430 cases, all categories (EVALUATION_DATASET) | VERIFIED COMPLETE (no production-derived cases yet) |
+| R5.1 | 300–500 cases covering the eleven listed categories | 453 tuning cases + 120 blind cases, all categories (EVALUATION_DATASET) | VERIFIED COMPLETE (no production-derived cases yet) |
 | R5.2 | Real model against controlled data, sends disabled | BLOCKED (no key in session; box/CI run) |
 | R5.3 | Objective assertions + human evaluation where judgment is required | objective verdicts in eval_run; judged turns exported to a packet | PARTIALLY COMPLETE |
 | R5.4 | Blind comparison: Neema vs skilled humans vs reference agent | design only (INTERNATIONAL_ASSESSMENT) | NOT STARTED |
@@ -93,8 +93,8 @@ Last update: 2026-11-06 (session 1, end: discovery, baseline, first implementati
 | R6.1 | 10 dimensions, weights as given | EXCELLENCE_SCORE | VERIFIED COMPLETE |
 | R6.2 | Per metric: methodology, denominator, sample size, evaluator, evidence source, uncertainty | EXCELLENCE_SCORE table | VERIFIED COMPLETE |
 | R6.3 | NOT MEASURED where unreliable; no invented scores | applied |
-| R6.4 | ≥10-point verified improvement on a held-out set | floors only: +24.8 points on customer state, +16.8 language, +20.7 opt-out (held-out). The 100-point aggregate is NOT MEASURED (model-dependent dimensions blocked) — the 10-point claim is NOT demonstrated | PARTIALLY COMPLETE |
-| R6.5 | Investigate the six preliminary targets | EXCELLENCE_SCORE §targets: language continuity measurable now (0.91 floor), the rest need the model run | PARTIALLY COMPLETE |
+| R6.4 | ≥10-point verified improvement on a held-out set | floors only, on the blind set (the only uncontaminated held-out): language +40.2 points (0.528→0.930, separated); customer state +5.5 (0.725→0.780, intervals overlap); opt-out +5.9 (0.912→0.971, n=34, overlap); reply length +2.1 after the scorer correction. The 100-point aggregate is NOT MEASURED (model-dependent dimensions blocked) — the 10-point claim is NOT demonstrated | PARTIALLY COMPLETE |
+| R6.5 | Investigate the six preliminary targets | EXCELLENCE_SCORE §targets: language continuity measurable now (0.930 floor on the blind set), the rest need the model run | PARTIALLY COMPLETE |
 | R6.6 | Aggregate never excuses critical safety/financial errors | applied (gating rule in EXCELLENCE_SCORE) |
 
 ## §7 Executive performance dashboard

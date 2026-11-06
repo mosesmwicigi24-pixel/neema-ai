@@ -27,7 +27,7 @@ held-out half. That reference-agent run has not happened.
 ## Where Neema is ahead of common practice (evidence-backed)
 
 - Hard grounding of money figures and links to tool results in a deterministic gate (review.py) — most published agents rely on the model alone.
-- A durable, multi-language opt-out with a deterministic recogniser measured at 0.966 on held-out independent cases.
+- A durable, multi-language opt-out with a deterministic recogniser measured at 0.971 on the blind set (n=34, wide interval; the held-out figure was withdrawn as contaminated).
 - Consent and outreach controls per rule with a shadow tally (Stages 2–5).
 
 ## Where Neema is behind (evidence-backed)
