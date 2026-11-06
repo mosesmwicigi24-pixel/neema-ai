@@ -1,9 +1,14 @@
-"""Abandoned-cart recovery: nudge the people who were mid-purchase and stopped.
+"""Abandoned-cart recovery: PLAN one nudge for the people who were mid-purchase
+and stopped (Stage 2, audit 2026-11-05: planners plan, one dispatcher speaks).
 
 The single biggest pot of money already in the system. Neema builds a real cart
 during the conversation (hub product ids, variant SKUs, hub prices) — and when a
 customer goes quiet before confirming, that cart just sits there. This sweep finds
-those carts and sends ONE warm, specific nudge naming what they picked.
+those carts and files ONE `buying_follow_up` planned action per deal
+(services/actions.plan, identity `buying:<deal>` — the same identity a quote
+nudge carries, so a customer who was quoted AND built a cart hears from us
+once). The dispatcher (actions.process_due) composes the nudge into the open
+conversation, applies every contextual rule, and sends it.
 
 Manual by default; the daily timer (services/recovery_jobs.py) runs it only
 when RECOVERY_CART_ENABLED is switched on — an outbound campaign is an
@@ -33,7 +38,6 @@ from __future__ import annotations
 import argparse
 import asyncio
 import hashlib
-import json
 import logging
 from datetime import datetime, timedelta, timezone
 
@@ -162,19 +166,33 @@ async def _draft(redis, conv: Conversation, to: str, items: list) -> str:
     from app.agent import runtime
     from app.agent.runtime import build_llm
     summary = _summarise(items)
+    from app.agent.composer import CONTINUATION_NOTE, strip_repeated_greeting
     prompt = (
         "(Internal: this customer built a cart and went quiet before confirming. "
-        f"Their cart: {summary}. Write ONE short, warm follow-up — greet them by "
-        "name if you know it, remind them what they picked, and ask if they'd like "
-        "to go ahead. No pressure, no discount, no links. Two sentences at most.)"
+        f"Their cart: {summary}. Write ONE short follow-up — name them if you know "
+        "their name, remind them what they picked, and ask if they'd like to go "
+        "ahead. No pressure, no discount, no links. Two sentences at most.) "
+        + CONTINUATION_NOTE
     )
     async with AsyncSessionLocal() as db:
         if conv.channel == "whatsapp":
-            return await runtime.run_turn(db, redis, to, prompt, build_llm(purpose="job:cart-recovery"),
-                                          read_only=True)
-        return await runtime.run_turn(db, redis, wa_id=to, user_text=prompt,
-                                      llm=build_llm(purpose="job:cart-recovery"), channel=conv.channel,
-                                      external_id=to, read_only=True)
+            out = await runtime.run_turn(db, redis, to, prompt, build_llm(purpose="job:cart-recovery"),
+                                         read_only=True)
+        else:
+            out = await runtime.run_turn(db, redis, wa_id=to, user_text=prompt,
+                                         llm=build_llm(purpose="job:cart-recovery"), channel=conv.channel,
+                                         external_id=to, read_only=True)
+    # A cart nudge goes inside the 24 h window by construction: we spoke today.
+    return strip_repeated_greeting(out or "", recent=True)
+
+
+async def _opted_out(redis, conv) -> bool:
+    from app.services import intent
+    try:
+        async with AsyncSessionLocal() as db:
+            return await intent.opted_out(db, redis, conv)
+    except Exception:
+        return False
 
 
 def guard_key(row: dict) -> str:
@@ -183,14 +201,13 @@ def guard_key(row: dict) -> str:
 
 
 async def _handle(redis, row: dict, *, send: bool, write: bool = True) -> dict:
-    from app.services import messaging as svc
-    from app.services.meta_send import send_to_channel
-
     conv, to, items = row["conv"], row["to"], row["items"]
-    is_wa = conv.channel == "whatsapp"
     res = {"channel": conv.channel, "to": to, "cart": _summarise(items),
            "total": row["total"], "draft": "", "sent": False,
            "skipped": None, "error": None}
+    if await _opted_out(redis, conv):
+        res["skipped"] = "customer asked not to be messaged"
+        return res
 
     if redis is not None:
         try:
@@ -206,31 +223,38 @@ async def _handle(redis, row: dict, *, send: bool, write: bool = True) -> dict:
     if not write:
         return res
 
+    if send:
+        # Plan, don't send: the dispatcher composes and speaks (one voice, one
+        # set of rules, one message per customer).
+        try:
+            from app.services import actions
+            from app.services.deals import open_deal_for
+            from app.services.hub_events import is_quiet_hours, next_morning_utc
+            async with AsyncSessionLocal() as db:
+                deal = await open_deal_for(db, conversation_id=conv.id)
+                now = datetime.now(timezone.utc)
+                row, created = await actions.plan(
+                    db, conversation_id=conv.id, kind="buying_follow_up",
+                    due_at=(next_morning_utc(now) if is_quiet_hours(now) else now),
+                    reason=(f"They built a cart — {_summarise(items)}"
+                            f"{' (total ' + str(row['total']) + ')' if row.get('total') else ''}"
+                            " — and went quiet before confirming. One warm nudge naming "
+                            f"what they picked, then silence (basket {cart_fingerprint(items)})."),
+                    source="cart_recovery", deal_id=(deal.id if deal is not None else None))
+            res["sent"] = True                      # planned — the dispatcher sends
+            res["planned"] = str(row.id)
+            res["draft"] = "(composed by the dispatcher when due)"
+        except Exception as e:
+            res["error"] = f"plan failed: {str(e)[:160]}"
+        return res
+
+    # Dry run / preview: show what the nudge would read like.
     try:
         reply = await _draft(redis, conv, to, items)
     except Exception as e:
         res["error"] = f"draft failed: {str(e)[:160]}"
         return res
     res["draft"] = (reply or "")[:200]
-
-    if not send or not reply:
-        return res
-
-    try:
-        if is_wa:
-            wamid = await svc._send_waba(to, reply)
-            async with AsyncSessionLocal() as db2:
-                await svc.save_outbound_message(db2, redis, to, reply, waba_msg_id=wamid)
-        else:
-            await send_to_channel(conv.channel, to, reply)
-            async with AsyncSessionLocal() as db2:
-                await svc.save_outbound_channel_message(db2, redis, conv.channel, to, reply)
-        res["sent"] = True
-    except Exception as e:
-        res["error"] = f"send failed: {str(e)[:160]}"
-        return res
-    from app.services.recovery_results import record_send
-    await record_send("cart_recovery", conv, ref=cart_fingerprint(items))
     return res
 
 
@@ -245,7 +269,7 @@ async def run(send: bool, ignore_quiet_hours: bool = False, *, redis=None,
     async with AsyncSessionLocal() as db:
         rows = await find_abandoned(db)
 
-    mode = "LIVE SEND" if send else "DRY RUN (no messages sent)"
+    mode = "LIVE (plans the nudges; the dispatcher sends)" if send else "DRY RUN (no messages sent)"
     _log.info("── abandoned-cart sweep · %s ────────────────────────", mode)
     _log.info("%d cart(s) left hanging (idle >%dm, inside the %dh window, AI mode)",
               len(rows), MIN_IDLE_MINUTES, WINDOW_HOURS)

@@ -1,10 +1,11 @@
-"""Recovery sweeps on a daily timer (services/recovery_jobs.py), real Postgres.
-
-cart_recovery, payment_followup and reengage were manual-only and had sent
-nothing in 7–14+ days. Now each runs once a day at its Nairobi hour under a
-fleet lock — only when its own switch is on (all OFF by default), with a
-dry-run that composes and sends nothing, a run history on /api/health and a
-"what would be sent today" preview with masked handles.
+"""Recovery planners on a daily timer (services/recovery_jobs.py), real Postgres.
+cart_recovery and payment_followup run once a day at their Nairobi hour under
+a fleet lock — only when their own switch is on (OFF by default), with a
+dry-run that composes previews and plans nothing, a run history on
+/api/health and a "what would be sent today" preview with masked handles.
+Since Stage 2 (audit, 2026-11-05) a live run PLANS rows on agent_actions and
+the dispatcher (services/actions.process_due) sends them; the 15:00 re-engage
+sweep is retired.
 """
 import asyncio
 import json
@@ -70,8 +71,7 @@ class FakeRedis:
 def off(monkeypatch):
     """Every switch at its shipped default."""
     from app.core.config import settings
-    for f in ("recovery_cart_enabled", "recovery_payment_enabled",
-              "recovery_reengage_enabled", "recovery_jobs_dry_run"):
+    for f in ("recovery_cart_enabled", "recovery_payment_enabled", "recovery_jobs_dry_run"):
         monkeypatch.setattr(settings, f, False)
     return settings
 
@@ -81,8 +81,8 @@ def off(monkeypatch):
 def test_every_switch_ships_off():
     from app.core.config import Settings
     s = Settings(_env_file=None)
-    assert not (s.recovery_cart_enabled or s.recovery_payment_enabled
-                or s.recovery_reengage_enabled or s.recovery_jobs_dry_run)
+    assert not (s.recovery_cart_enabled or s.recovery_payment_enabled or s.recovery_jobs_dry_run)
+    assert not hasattr(s, "recovery_reengage_enabled")          # retired (owner decision 2)
 
 
 def test_off_by_default_runs_and_sends_nothing(off, monkeypatch):
@@ -120,7 +120,7 @@ def test_the_lock_lets_one_worker_run_a_tick(off, monkeypatch):
 
 def test_each_job_runs_once_a_day_at_its_hour(off, monkeypatch):
     from app.services import recovery_jobs as rj
-    for f in ("recovery_cart_enabled", "recovery_payment_enabled", "recovery_reengage_enabled"):
+    for f in ("recovery_cart_enabled", "recovery_payment_enabled"):
         monkeypatch.setattr(off, f, True)
     calls = []
 
@@ -137,11 +137,11 @@ def test_each_job_runs_once_a_day_at_its_hour(off, monkeypatch):
     assert tick(12, 10) == ["payment_followup"]
     assert tick(12, 10, 40) == []               # same hour, later tick: not again
     assert tick(12, 11) == ["cart_recovery"]
-    assert tick(12, 15) == ["reengage"]
+    assert tick(12, 15) == []                   # the 15:00 re-engage sweep is retired
     assert tick(12, 21) == []
     assert tick(13, 11) == ["cart_recovery"]    # the next day, again
     assert calls == [("payment_followup", True), ("cart_recovery", True),
-                     ("reengage", True), ("cart_recovery", True)]
+                     ("cart_recovery", True)]
 
 
 def test_a_failed_run_is_recorded_not_raised(off, monkeypatch):
@@ -172,7 +172,8 @@ def world(fresh_db, monkeypatch, off):  # noqa: F811
     with every send path wired to fail the test if it is ever reached."""
     from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
     from sqlalchemy.pool import NullPool
-    from app.jobs import cart_recovery, payment_followup, reengage
+    import app.database as database
+    from app.jobs import cart_recovery, payment_followup
     from app.core import hub_client
     from app.services import messaging, meta_send
     from app.models.conversation import Conversation
@@ -188,7 +189,7 @@ def world(fresh_db, monkeypatch, off):  # noqa: F811
     url = fresh_db.replace("postgresql+psycopg2://", "postgresql+asyncpg://")
     maker = async_sessionmaker(create_async_engine(url, poolclass=NullPool),
                                class_=AsyncSession, expire_on_commit=False)
-    for m in (cart_recovery, payment_followup, reengage):
+    for m in (cart_recovery, payment_followup, database):
         monkeypatch.setattr(m, "AsyncSessionLocal", maker)
     now = datetime.now(timezone.utc)
 
@@ -231,12 +232,8 @@ def world(fresh_db, monkeypatch, off):  # noqa: F811
         return "Hi Grace 🙏 your 2 Aluminium Trays are still saved — shall I place the order?"
     monkeypatch.setattr(cart_recovery, "_draft", cart_draft)
 
-    async def checkin(system, user, redis=None):
-        return ('{"item": "Red Stole", "text": "Hello 🙏 just checking in on the Red Stole at '
-                'KES 3,500 — would you like me to set one aside for you?"}')
-    monkeypatch.setattr(reengage, "_compose_llm", checkin)
-    monkeypatch.setattr(reengage, "within_quiet_hours", lambda *a, **k: True)
     monkeypatch.setattr(cart_recovery, "within_quiet_hours", lambda *a, **k: True)
+    monkeypatch.setattr("app.services.hub_events.is_quiet_hours", lambda now=None: False)
     monkeypatch.setattr(payment_followup, "within_quiet_hours", lambda *a, **k: True)
 
     sent = []
@@ -254,15 +251,44 @@ def world(fresh_db, monkeypatch, off):  # noqa: F811
 
 def _all_on(world, monkeypatch, dry):
     s = world["settings"]
-    for f in ("recovery_cart_enabled", "recovery_payment_enabled", "recovery_reengage_enabled"):
+    for f in ("recovery_cart_enabled", "recovery_payment_enabled"):
         monkeypatch.setattr(s, f, True)
     monkeypatch.setattr(s, "recovery_jobs_dry_run", dry)
 
 
-def _day(r, rj, hours=(10, 11, 15)):
+def _day(r, rj, hours=(10, 11)):
     for h in hours:
         r.kv.pop(rj.LOCK_KEY, None)
         run(rj.tick(r, now=at_nbo(12, h)))
+
+
+def _planned(world):
+    from sqlalchemy import select
+    from app.models.agent_action import AgentAction
+
+    async def go():
+        async with world["maker"]() as db:
+            return [(a.kind, a.status, a.source, a.dedupe_key, a.draft) for a in (await db.execute(
+                select(AgentAction).order_by(AgentAction.created_at))).scalars().all()]
+    return run(go())
+
+
+def _dispatch(world, monkeypatch, r):
+    """The dispatcher's tick: sends what the planners filed."""
+    from app.services import actions
+    monkeypatch.setattr(world["settings"], "agent_initiative", True, raising=False)
+
+    async def fake_window(db, c): return True
+    monkeypatch.setattr("app.services.hub_events._within_window", fake_window)
+
+    async def compose(db, redis, c, reason):
+        return "Grace, your 2 Aluminium Trays are still saved — shall I place the order?"
+    monkeypatch.setattr(actions, "_compose_follow_up", compose)
+
+    async def go():
+        async with world["maker"]() as db:
+            return await actions.process_due(db, r)
+    return run(go())
 
 
 def test_dry_run_composes_sends_nothing_and_records_history(world, monkeypatch):
@@ -270,9 +296,9 @@ def test_dry_run_composes_sends_nothing_and_records_history(world, monkeypatch):
     _all_on(world, monkeypatch, dry=True)
     r = FakeRedis()
     _day(r, rj)
-    assert world["sent"] == []
+    assert world["sent"] == [] and _planned(world) == []
     # no guard was claimed: a real run later is not blocked by the rehearsal
-    assert not [k for k in r.kv if k.startswith(("cartnudge:", "payfollow:", "reengage:"))]
+    assert not [k for k in r.kv if k.startswith(("cartnudge:", "payfollow:"))]
     for job in rj.JOBS:
         hist = [json.loads(x) for x in r.lists[f"recoveryjobs:history:{job}"]]
         assert len(hist) == 1
@@ -285,22 +311,36 @@ def test_dry_run_composes_sends_nothing_and_records_history(world, monkeypatch):
     assert view["dry_run"] is True and view["cart_recovery"]["last_runs"][0]["mode"] == "dry_run"
 
 
-def test_a_live_run_sends_once_and_never_twice(world, monkeypatch):
+def test_a_live_run_plans_once_the_dispatcher_sends_once(world, monkeypatch):
+    """Stage 2: the planners file rows (nothing is sent by them); the
+    dispatcher sends each once; the quiet-after-a-quote customer is NOT
+    chased by a re-engage sweep any more."""
     from app.services import recovery_jobs as rj
     _all_on(world, monkeypatch, dry=False)
     r = FakeRedis()
     _day(r, rj)
-    assert sorted(to for to, _ in world["sent"]) == [CART_WA, WAIT_WA, PAY_WA]
-    assert any("https://pay.example/abc" in t and "KES 4,500" in t for _, t in world["sent"])
+    assert world["sent"] == []                                   # planners never send
+    rows = _planned(world)
+    assert sorted((k, s, src) for k, s, src, _, _ in rows) == [
+        ("buying_follow_up", "planned", "cart_recovery"),
+        ("payment_reminder", "planned", "payment_followup")]
+    pay = next(x for x in rows if x[0] == "payment_reminder")
+    assert pay[3] == "payment:501" and "https://pay.example/abc" in pay[4] and "KES 4,500" in pay[4]
     for job in rj.JOBS:
         e = json.loads(r.lists[f"recoveryjobs:history:{job}"][0])
         assert (e["mode"], e["sent"], e["errors"]) == ("send", 1, 0), (job, e)
-    # a manual run the same day (or tomorrow's timer) hits each job's own guard
-    world["sent"].clear()
+    # the dispatcher speaks — once per customer, with the planned text
+    assert _dispatch(world, monkeypatch, r) == 2
+    assert sorted(to for to, _ in world["sent"]) == [CART_WA, PAY_WA]
+    assert any("https://pay.example/abc" in t and "KES 4,500" in t for _, t in world["sent"])
+    assert all(s == "sent" for _, s, _, _, _ in _planned(world))
+    assert _dispatch(world, monkeypatch, r) == 0 and len(world["sent"]) == 2
+    # a manual run the same day (or tomorrow's timer) hits each planner's own guard
     from app.jobs import cart_recovery, payment_followup
     out_c = run(cart_recovery.run(send=True, redis=r))
     out_p = run(payment_followup.run(send=True, redis=r))
-    assert world["sent"] == [] and out_c["skipped"] == 1 and out_p["skipped"] == 1
+    assert len(world["sent"]) == 2 and out_c["skipped"] == 1 and out_p["skipped"] == 1
+    assert len(_planned(world)) == 2
 
 
 def test_preview_counts_and_masks_three_samples(world, monkeypatch, capsys):

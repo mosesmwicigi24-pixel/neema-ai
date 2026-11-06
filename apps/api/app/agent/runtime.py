@@ -912,8 +912,42 @@ def _window_keep(total: int, limit: int) -> int:
     return total - ((total - limit) // step) * step
 
 
+OVERLAP_NOTE = (
+    "(The customer's message below arrived WHILE your previous reply was being "
+    "written — that reply did not see it. Re-read your previous reply first: if it "
+    "already answers this message, reply with NOTHING (an empty reply sends "
+    "nothing — silence is correct). Otherwise answer only what this message adds, "
+    "in one or two sentences, without repeating anything already said.)")
+
+
+async def _answered_after(db: AsyncSession, key: str, channel: str, inbound_ids: list) -> bool:
+    """True when one of OUR messages (not an internal note) was recorded after
+    the earliest of these inbound rows arrived — the overlap case."""
+    import uuid as _uuid
+    ids = []
+    for i in inbound_ids or []:
+        try:
+            ids.append(_uuid.UUID(str(i)))
+        except (ValueError, TypeError, AttributeError):
+            pass
+    if not ids:
+        return False
+    first_in = (await db.execute(
+        select(sa_func.min(Message.created_at)).where(Message.id.in_(ids)))).scalar()
+    if first_in is None:
+        return False
+    where = (Message.wa_id == key) if channel == "whatsapp" else (
+        (Message.channel == channel) & (Message.external_id == key))
+    last_out = (await db.execute(
+        select(sa_func.max(Message.created_at)).where(
+            where, Message.direction == MsgDirection.outbound,
+            Message.media_type.is_(None) | (Message.media_type != "note")))).scalar()
+    return bool(last_out is not None and last_out > first_in)
+
+
 async def _history(db: AsyncSession, key: str, limit: int = 20,
-                   *, channel: str = "whatsapp", post_id: str | None = None) -> list[dict]:
+                   *, channel: str = "whatsapp", post_id: str | None = None,
+                   exclude_ids: list | None = None) -> list[dict]:
     # WhatsApp keys on wa_id (the compat shim); other channels key on
     # (channel, external_id) since their messages carry no wa_id.
     where = (Message.wa_id == key) if channel == "whatsapp" else (
@@ -922,6 +956,19 @@ async def _history(db: AsyncSession, key: str, limit: int = 20,
     # silent-decision records) — they were never sent to the customer and must
     # NEVER reach the model as assistant turns it could echo back.
     not_note = Message.media_type.is_(None) | (Message.media_type != "note")
+    # The rows the live turn is answering are appended ONCE as the current
+    # message by the caller — never also as history, where a Meta-timestamped
+    # row can sort above a reply that never saw it (audit, 2026-11-05).
+    if exclude_ids:
+        import uuid as _uuid
+        _ex = []
+        for _i in exclude_ids:
+            try:
+                _ex.append(_uuid.UUID(str(_i)))
+            except (ValueError, AttributeError, TypeError):
+                pass
+        if _ex:
+            not_note = not_note & Message.id.notin_(_ex)
     # A public comment turn reads ONE post's thread (see _thread_rows): fetch
     # wider, then keep the thread's last `limit` turns.
     fetch = max(limit * 4, 60) if post_id else limit + max(limit // 2, 1)
@@ -1422,8 +1469,14 @@ async def run_turn(db: AsyncSession, redis, wa_id: str, user_text: str, llm: LLM
                    comment_post_id: str | None = None,
                    thread_parent: dict | None = None,
                    turn_facts: dict | None = None,
-                   extra_note: str | None = None) -> str:
+                   extra_note: str | None = None,
+                   inbound_ids: list[str] | None = None) -> str:
     """Run one agent turn and return the reply text (does NOT send it).
+
+    `inbound_ids` are the stored rows this turn answers (the WhatsApp debounce
+    buffer carries them). They are kept out of history and appended once as
+    the current message; when one of our replies went out AFTER they arrived,
+    the turn is told so and may answer with nothing (see OVERLAP_NOTE).
 
     `extra_note` rides on the current message as one more turn note (the
     unclaimed-chat answer, services/unclaimed) — never in the cached prefix.
@@ -1575,7 +1628,18 @@ async def run_turn(db: AsyncSession, redis, wa_id: str, user_text: str, llm: LLM
     # the same person's comments under another post are another conversation.
     messages = await _history(db, key,
                               limit=(14 if public_comment else 40), channel=channel,
-                              post_id=(comment_post_id if public_comment else None))
+                              post_id=(comment_post_id if public_comment else None),
+                              exclude_ids=inbound_ids)
+    # A message that landed while the previous turn was composing was not seen
+    # by that reply. Say so — the model then answers only what is new, or
+    # nothing at all (two answers to one question was the most visible robotic
+    # tell in the 2026-11-05 audit).
+    if inbound_ids:
+        try:
+            if await _answered_after(db, key, channel, inbound_ids):
+                turn_notes.append(OVERLAP_NOTE)
+        except Exception as exc:
+            _log.info("overlap check skipped for %s: %s", key, exc)
 
     # Voice + text are one memory: recent call summaries join the context
     # (best-effort — a calls hiccup never blocks a chat reply).
@@ -1724,6 +1788,17 @@ async def run_turn(db: AsyncSession, redis, wa_id: str, user_text: str, llm: LLM
         _link = await shared_link_context(user_text, redis)
         if _link:
             turn_notes.append(_link)
+    except Exception:
+        pass
+
+    # What the customer themselves asked for (Stage 3): an open hold, an item
+    # the team is still confirming, a payment claim — so the live turn neither
+    # re-asks for a date nor re-pitches. Best-effort.
+    try:
+        from app.services import customer_state as _cs
+        _state = await _cs.live_note(db, key, channel)
+        if _state:
+            turn_notes.append(_state)
     except Exception:
         pass
 
@@ -2517,7 +2592,8 @@ async def _still_ai(channel: str, key: str) -> bool:
 
 
 async def _run_and_send(redis, wa_id: str, text: str, media: dict | None = None,
-                        *, deferred: bool = False, hold_line: bool = True) -> bool:
+                        *, deferred: bool = False, hold_line: bool = True,
+                        inbound_ids: list[str] | None = None) -> bool:
     """`hold_line=False` for a retry (the sweeper): the customer already had
     their hold line when the live turn failed — a retry that fails again must
     not send them a second one."""
@@ -2533,7 +2609,8 @@ async def _run_and_send(redis, wa_id: str, text: str, media: dict | None = None,
             async with AsyncSessionLocal() as db:
                 reply = await run_turn(db, redis, wa_id, text,
                                        build_llm(model=model, purpose="whatsapp"), media=media,
-                                       deferred=deferred, turn_facts=facts)
+                                       deferred=deferred, turn_facts=facts,
+                                       inbound_ids=inbound_ids)
                 if not (reply or "").strip():
                     _log.info("silence for %s: nothing to send (a closer, or a held acknowledgement)", wa_id)
                     # A decision, not a miss: the missed-reply sweep leaves it be
@@ -2547,10 +2624,21 @@ async def _run_and_send(redis, wa_id: str, text: str, media: dict | None = None,
             if not await _still_ai("whatsapp", wa_id):
                 _log.info("a colleague took %s while the turn composed — not sent", wa_id)
                 return False
-            wamid = await svc._send_waba(wa_id, reply)
+            unknown = None
+            try:
+                wamid = await svc._send_waba(wa_id, reply)
+            except svc.SendOutcomeUnknown as exc:
+                # Meta may have delivered it. Record it so nothing re-answers
+                # the same message (the sweeper reads the thread as answered);
+                # never resend (audit, 2026-11-05).
+                wamid, unknown = None, str(exc)[:120]
+                _log.warning("reply to %s: outcome unknown (%s) — recorded, not resent", wa_id, unknown)
             async with AsyncSessionLocal() as db2:
-                await svc.save_outbound_message(db2, redis, wa_id, reply, waba_msg_id=wamid)
-            if facts.get("follow_up"):
+                await svc.save_outbound_message(
+                    db2, redis, wa_id, reply, waba_msg_id=wamid,
+                    raw_meta=({"delivery": {"status": "unknown", "error": unknown}}
+                              if unknown else None))
+            if facts.get("follow_up") and not unknown:
                 # Its own message, a beat after the reply (the cassock ladder).
                 await asyncio.sleep(FOLLOW_UP_DELAY_S)
                 wamid2 = await svc._send_waba(wa_id, facts["follow_up"])
@@ -2584,11 +2672,62 @@ async def _run_and_send(redis, wa_id: str, text: str, media: dict | None = None,
     finally:
         await _release_inflight(redis, "whatsapp", wa_id)
 
+async def _handle_opt_out(redis, channel: str, key: str, text: str) -> None:
+    """Record the preference durably and acknowledge it in their language —
+    once. A second opt-out message gets silence, not a second acknowledgement."""
+    from app.database import AsyncSessionLocal
+    from app.models.conversation import Conversation
+    from app.services import intent as _intent
+    from app.services import messaging as svc
+    from app.services import outreach_log as _ol
+    from sqlalchemy import or_
+    try:
+        async with AsyncSessionLocal() as db:
+            where = (Conversation.wa_id == key) if channel == "whatsapp" else (
+                (Conversation.channel == channel) & or_(Conversation.external_id == key,
+                                                        Conversation.wa_id == key))
+            conv = (await db.execute(select(Conversation).where(where))).scalars().first()
+            if conv is None:
+                return
+            already = await _intent.opted_out(db, redis, conv)
+            await _intent.record_opt_out(db, redis, conv, text, channel=channel, key=key)
+            try:
+                from app.services.actions import withdraw_routine
+                await withdraw_routine(db, conv.id, why="customer asked not to be messaged")
+            except Exception:
+                pass
+            _ol.decision("opt_out", channel, key, "suppress" if already else "send",
+                         "customer asked not to be messaged" + (" (already recorded)" if already else ""))
+            if already:
+                return
+            ack = _intent.acknowledgement(text)
+            meta = _ol.stamp("opt_out", _ol.ANSWER)
+            if channel == "whatsapp":
+                try:
+                    wamid = await svc._send_waba(key, ack)
+                except svc.SendOutcomeUnknown as exc:
+                    wamid, meta["delivery"] = None, {"status": "unknown", "error": str(exc)[:120]}
+                await svc.save_outbound_message(db, redis, key, ack, waba_msg_id=wamid, raw_meta=meta)
+            else:
+                from app.services.meta_send import send_to_channel
+                await send_to_channel(channel, key, ack)
+                await svc.save_outbound_channel_message(db, redis, channel, key, ack, raw_meta=meta)
+    except Exception as exc:
+        _log.warning("opt-out handling failed for %s/…%s: %s", channel, str(key)[-4:], exc)
+
+
 async def schedule_reply(redis, wa_id: str, text: str, dedup_id: str | None,
-                         media: dict | None = None) -> bool:
+                         media: dict | None = None,
+                         inbound_ids: list[str] | None = None) -> bool:
     """Fire the agent for this inbound once. Returns False if already handled."""
     if await _is_paused(redis, "whatsapp", wa_id, text):
         return False
+    # "Please stop messaging me" (any of our customers' languages) is answered
+    # once, recorded for good, and never argued with — no model turn.
+    from app.services import intent as _intent
+    if media is None and _intent.is_opt_out(text):
+        await _handle_opt_out(redis, "whatsapp", wa_id, text)
+        return True
     if media is None and await closer_gate(redis, "whatsapp", wa_id, text):
         return False
     if redis is not None and dedup_id:
@@ -2606,12 +2745,12 @@ async def schedule_reply(redis, wa_id: str, text: str, dedup_id: str | None,
         if await _pace.should_defer(redis, "whatsapp", wa_id, text, bool(media),
                                     closer=is_closer(text or "")):
             async def _later(t, m):
-                await _run_and_send(redis, wa_id, t, m, deferred=True)
+                await _run_and_send(redis, wa_id, t, m, deferred=True, inbound_ids=inbound_ids)
             if await _pace.slow_lane(redis, "whatsapp", wa_id, text, media, _later):
                 return True
     except Exception:
         pass
-    task = asyncio.create_task(_run_and_send(redis, wa_id, text, media))
+    task = asyncio.create_task(_run_and_send(redis, wa_id, text, media, inbound_ids=inbound_ids))
     _bg_tasks.add(task)
     task.add_done_callback(_bg_tasks.discard)
     return True

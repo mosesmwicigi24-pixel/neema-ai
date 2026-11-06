@@ -7,9 +7,12 @@ Skips cleanly without a database (the Docker harness / CI migrations job has one
 """
 import asyncio
 import types
+from datetime import datetime, timezone
 import uuid
 
 import pytest
+
+from app.core.config import settings
 import sqlalchemy as sa
 
 from tests.test_security_db import _reachable, _sync_url, fresh_db  # noqa: F401 — the throwaway-database fixture
@@ -151,50 +154,60 @@ def test_record_send_writes_one_row_and_never_raises(env, monkeypatch):
 
 
 def test_a_job_records_only_a_message_that_was_sent(monkeypatch):
-    """The cart sweep writes its row after a successful send, keyed by the
-    cart's fingerprint — and none when the send fails."""
-    from app.jobs import cart_recovery as cr
-    from app.services import messaging as svc
+    """Stage 2: the cart PLANNER records nothing (it files a row); the
+    dispatcher writes the recovery row after a successful send of that row,
+    keyed by the planner and its reference — and none when the send fails."""
+    from app.services import actions as act
     from app.services import recovery_results
+    from tests._action_fakes import install
+    from app.models.conversation import InterceptMode
+    install(monkeypatch)
     recorded = []
 
     async def fake_record(job, conv, *, ref=None):
         recorded.append((job, ref))
         return True
-
-    async def fake_draft(redis, conv, to, items):
-        return "Still keen on the alb?"
-
-    async def ok_send(to, text):
-        return "wamid.1"
-
-    async def bad_send(to, text):
-        raise RuntimeError("meta down")
-
-    async def noop(*a, **k):
-        return None
-
-    class _Session:
-        async def __aenter__(self):
-            return None
-
-        async def __aexit__(self, *a):
-            return False
-
     monkeypatch.setattr(recovery_results, "record_send", fake_record)
-    monkeypatch.setattr(cr, "_draft", fake_draft)
-    monkeypatch.setattr(cr, "AsyncSessionLocal", lambda: _Session())
-    monkeypatch.setattr(svc, "save_outbound_message", noop)
-    items = [{"name": "Alb", "qty": 1}]
-    row = {"conv": types.SimpleNamespace(id=uuid.uuid4(), channel="whatsapp", person_id=None),
-           "to": "254700777009", "items": items, "total": 100.0, "owner": "Person:x"}
 
-    monkeypatch.setattr(svc, "_send_waba", ok_send)
-    res = asyncio.run(cr._handle(None, row, send=True))
-    assert res["sent"] is True
-    assert recorded == [("cart_recovery", cr.cart_fingerprint(items))]
+    now = datetime.now(timezone.utc)
+    action = types.SimpleNamespace(id="a1", status="planned", due_at=now, kind="buying_follow_up",
+                                   conversation_id="c1", deal_id=None, source="cart_recovery",
+                                   dedupe_key="buying:c1", reason="They built a cart — Alb", draft=None)
+    conv = types.SimpleNamespace(id="c1", channel="whatsapp", wa_id="254700777009",
+                                 external_id=None, intercept_mode=InterceptMode.ai, person_id=None)
 
-    monkeypatch.setattr(svc, "_send_waba", bad_send)
-    res = asyncio.run(cr._handle(None, row, send=True))
-    assert res["sent"] is False and res["error"]
-    assert len(recorded) == 1
+    class _Rows:
+        def scalars(self): return types.SimpleNamespace(all=lambda: [action])
+        def scalar_one_or_none(self): return None
+        def scalar(self): return None
+    class _DB:
+        async def execute(self, *a, **k): return _Rows()
+        async def get(self, model, pk): return conv if model.__name__ == "Conversation" else None
+        async def commit(self): pass
+        async def rollback(self): pass
+
+    async def fake_window(db, c): return True
+    monkeypatch.setattr("app.services.hub_events._within_window", fake_window)
+    monkeypatch.setattr("app.services.hub_events.is_quiet_hours", lambda now=None: False)
+    async def no_gate(db, d, c, in_window): return None
+    monkeypatch.setattr(act, "needs_approval", no_gate)
+    monkeypatch.setattr(settings, "agent_initiative", True, raising=False)
+    async def compose(db, redis, c, reason): return "Still keen on the alb?"
+    monkeypatch.setattr(act, "_compose_follow_up", compose)
+    async def not_repeat(db, c, t): return False
+    monkeypatch.setattr(act, "_repeats_earlier", not_repeat)
+    async def not_opted(db, redis, c): return False
+    monkeypatch.setattr("app.services.intent.opted_out", not_opted)
+    async def go(db, c, a, *, now): return "go", ""
+    monkeypatch.setattr(act, "decide", go)
+
+    async def ok_send(db, redis, c, text, action=None, **kw): pass
+    monkeypatch.setattr(act, "_send", ok_send)
+    assert asyncio.run(act.process_due(_DB(), None, now=now)) == 1
+    assert recorded == [("cart_recovery", "c1")]
+
+    action.status = "planned"
+    async def bad_send(db, redis, c, text, action=None, **kw): raise RuntimeError("meta down")
+    monkeypatch.setattr(act, "_send", bad_send)
+    assert asyncio.run(act.process_due(_DB(), None, now=now)) == 0
+    assert len(recorded) == 1 and action.status == "planned"

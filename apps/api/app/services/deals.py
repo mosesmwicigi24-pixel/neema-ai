@@ -41,7 +41,8 @@ PROMISE_FOLLOW_UP_HOURS = 3
 _CUSTOMER_PROMISE_RE = re.compile(
     r"\b(?:i(?:'ll| will)|we(?:'ll| will)|nita|tuta)\s?"
     r"(?:confirm|get back|let you know|revert|respond|reply|check|decide|send|pay"
-    r"|need|order|buy|take)",
+    r"|need|order|buy|take|contact|call|message|text|write|remind|communicate"
+    r"|come back|be in touch|consult|ask|discuss|talk|wasiliana|piga)",
     re.IGNORECASE)
 _TIME_HINT_RE = re.compile(
     r"\b(tomorrow|kesho|tonight|this evening|later today|"
@@ -205,10 +206,20 @@ async def scribe_update(db, key: str, channel: str, reply: str,
         cust = detect_customer_promise(inbound_text)
         quote = quote_followup.extract_quote(tools, reply)
 
+        from app.services import customer_state
+        reading = customer_state.floor(inbound_text)
+        # A request for time or a payment claim is a deal worth owning even
+        # before a cart: the hold and the claim need a deal row to live on.
+        holding = bool(reading and reading.get("customer_said") in customer_state.HOLD_STATES + ("paid_claim",))
+
         deal = await open_deal_for(db, conversation_id=conv.id)
         if deal is None:
-            if not items and not promise and not cust and not quote:
-                return                      # nothing worth owning yet
+            if not items and not promise and not cust and not quote and not holding:
+                # Nothing worth owning yet — still remember their language and
+                # what they said, on the person.
+                await customer_state.after_turn(db, conv, None, inbound_text=inbound_text,
+                                                reply=reply, reading=reading)
+                return
             deal = Deal(conversation_id=conv.id, person_id=conv.person_id)
             db.add(deal)
             await db.flush()                # id needed for the action row
@@ -241,12 +252,75 @@ async def scribe_update(db, key: str, channel: str, reply: str,
             if quote:
                 _log.info("quote follow-up for %s/%s: %s", channel, conv.id, outcome)
         await db.commit()
+        # What the customer's words mean for what we do next (Stage 3): a hold,
+        # their language, a payment claim — on the deal and the person. Its own
+        # try: a failure here never loses the scribe's work above.
+        try:
+            await customer_state.after_turn(db, conv, deal, inbound_text=inbound_text, reply=reply,
+                                            reading=reading, llm=customer_state.note_llm())
+        except Exception as exc:
+            _log.info("customer state skipped for %s: %s", key, exc)
     except Exception as exc:
         _log.info("deal scribe skipped for %s: %s", key, exc)
         try:
             await db.rollback()
         except Exception:
             pass
+
+
+TEAM_CHECK_DAYS = 7
+
+
+def team_check_open(deal, *, now: datetime | None = None) -> str | None:
+    """The item the team was asked to confirm and has not yet — or None.
+    Stored on the deal by check_availability (tools.py); cleared when a
+    colleague answers (the team-answer endpoint, a human reply in the thread);
+    expires after TEAM_CHECK_DAYS so a forgotten check never freezes a deal."""
+    nxt = getattr(deal, "next_action", None) or {}
+    if not isinstance(nxt, dict) or nxt.get("kind") != "team_check":
+        return None
+    since = nxt.get("since")
+    try:
+        at = datetime.fromisoformat(since) if since else None
+    except (TypeError, ValueError):
+        at = None
+    if at is not None and at.tzinfo is None:
+        at = at.replace(tzinfo=timezone.utc)
+    if at is not None and (now or datetime.now(timezone.utc)) - at > timedelta(days=TEAM_CHECK_DAYS):
+        return None
+    return (nxt.get("item") or "").strip() or None
+
+
+async def open_team_check(db, conv, item: str) -> None:
+    """Record that the team owes this customer a confirmation (audit F,
+    2026-11-05): until it arrives, no automated sales follow-up goes to this
+    thread and the model is told not to close on the item. Creates the deal
+    on first need. Commits."""
+    item = " ".join((item or "").split())[:160]
+    if not item or conv is None:
+        return
+    from app.models.deal import Deal
+    deal = await open_deal_for(db, conversation_id=conv.id)
+    if deal is None:
+        deal = Deal(conversation_id=conv.id, person_id=getattr(conv, "person_id", None))
+        db.add(deal)
+        await db.flush()
+    deal.blocking = f"Team confirming: {item}"
+    deal.next_action = {"kind": "team_check", "owner": "human", "item": item,
+                        "since": datetime.now(timezone.utc).isoformat(timespec="seconds")}
+    await db.commit()
+
+
+async def clear_team_check(db, conversation_id, *, by: str = "team") -> bool:
+    """A colleague answered: the check is closed. Commits. True when one was open."""
+    deal = await open_deal_for(db, conversation_id=conversation_id)
+    if deal is None or team_check_open(deal) is None:
+        return False
+    deal.blocking = None
+    deal.next_action = {"kind": "team_check_closed", "owner": by,
+                        "at": datetime.now(timezone.utc).isoformat(timespec="seconds")}
+    await db.commit()
+    return True
 
 
 async def mark_won_for_conversation(db, conversation_id) -> None:

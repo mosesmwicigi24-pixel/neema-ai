@@ -921,6 +921,7 @@ async def list_actions(
         "due_at": a.due_at.isoformat() if a.due_at else None,
         "kind": a.kind, "reason": a.reason, "draft": a.draft,
         "status": a.status, "created_by": a.created_by,
+        "dedupe_key": getattr(a, "dedupe_key", None), "source": getattr(a, "source", None),
         # WHY it waits for a human (the marker the scheduler stores on reason).
         "approval_reason": hold_reason(a.reason) if a.status == "needs_approval" else None,
     } for a in rows]}

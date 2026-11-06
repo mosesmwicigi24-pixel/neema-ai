@@ -178,7 +178,7 @@ def rig(fresh_db, monkeypatch, tmp_path):  # noqa: F811
 
     turns: list = []
 
-    async def capture_reply(redis, wa_id, text, dedup, media=None):
+    async def capture_reply(redis, wa_id, text, dedup, media=None, **_kw):
         turns.append({"wa_id": wa_id, "text": text, "media": media})
     monkeypatch.setattr(runtime, "schedule_reply", capture_reply)
 
@@ -498,7 +498,7 @@ def test_messenger_and_instagram_voice_notes(rig, clips, channel, obj):
     rig.monkeypatch.setattr("app.services.meta_send.fetch_profile", no_profile)
     scheduled = []
 
-    async def capture(redis, ch, sender, text, dedup_id=None, page_id=None, media=None):
+    async def capture(redis, ch, sender, text, dedup_id=None, page_id=None, media=None, **_kw):
         scheduled.append((ch, sender, text, media))
         return True
     rig.monkeypatch.setattr(runtime, "schedule_meta_reply", capture)

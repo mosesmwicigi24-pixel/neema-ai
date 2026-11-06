@@ -72,7 +72,7 @@ def env(fresh_db, monkeypatch):  # noqa: F811
 
     turns: list = []
 
-    async def fake_schedule(redis, wa_id, text, dedup, media=None):
+    async def fake_schedule(redis, wa_id, text, dedup, media=None, **_kw):
         turns.append({"wa_id": wa_id, "text": text, "media": media})
         return True
     monkeypatch.setattr("app.agent.runtime.schedule_reply", fake_schedule)

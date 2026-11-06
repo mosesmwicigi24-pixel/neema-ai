@@ -34,6 +34,11 @@ MIGRATION_STATEMENTS = [
     # Source-post context for Facebook/Instagram comment messages (see
     # models/message.py) — lets the inbox show WHAT a comment is replying to.
     "ALTER TABLE messages ADD COLUMN IF NOT EXISTS comment_context JSONB",
+    # The commitment identity of a planned action (models/agent_action.py);
+    # the partial unique index itself is alembic e8a1c3d5f7b9's (it merges
+    # duplicates first, which a boot statement must never do).
+    "ALTER TABLE agent_actions ADD COLUMN IF NOT EXISTS dedupe_key VARCHAR(80)",
+    "ALTER TABLE agent_actions ADD COLUMN IF NOT EXISTS source VARCHAR(30)",
     # Made-to-order enquiries from the public measurement form (see
     # models/production_enquiry.py). Reviewed in the inbox, then pushed to the hub.
     """

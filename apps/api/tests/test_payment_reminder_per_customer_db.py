@@ -39,8 +39,17 @@ def pay(fresh_db, monkeypatch):  # noqa: F811
     url = fresh_db.replace("postgresql+psycopg2://", "postgresql+asyncpg://")
     maker = async_sessionmaker(create_async_engine(url, poolclass=NullPool),
                                class_=AsyncSession, expire_on_commit=False)
+    import app.database as database
+    from app.core.config import settings
     monkeypatch.setattr(payment_followup, "AsyncSessionLocal", maker)
+    monkeypatch.setattr(database, "AsyncSessionLocal", maker)
     monkeypatch.setattr(payment_followup, "within_quiet_hours", lambda *a, **k: True)
+    # Stage 2: the sweep PLANS one reminder per customer; the dispatcher sends
+    # it. These seeds carry no inbound rows, so the window is held open here.
+    async def _open(db, c): return True
+    monkeypatch.setattr("app.services.hub_events._within_window", _open)
+    monkeypatch.setattr("app.services.hub_events.is_quiet_hours", lambda now=None: False)
+    monkeypatch.setattr(settings, "agent_initiative", True, raising=False)
 
     hub_states: dict = {}
 
@@ -84,6 +93,16 @@ def _seed(maker, convs: dict, orders: list[tuple]):
     run(go())
 
 
+def _deliver(pay, r):
+    """The dispatcher's tick — what the customer actually receives."""
+    from app.services import actions
+
+    async def go():
+        async with pay["maker"]() as db:
+            return await actions.process_due(db, r)
+    return run(go())
+
+
 def test_two_unpaid_orders_for_one_customer_are_one_message(pay):
     from app.jobs import payment_followup as pf
     _seed(pay["maker"], {ONE_WA: "Hepsivardhan Rao"},
@@ -91,6 +110,8 @@ def test_two_unpaid_orders_for_one_customer_are_one_message(pay):
            (ONE_WA, 902, "WA-261010-LKEPE", 485, "USD", 4)])
     r = FakeRedis()
     out = run(pf.run(send=True, redis=r))
+    assert pay["sent"] == []                                   # the planner never sends
+    assert _deliver(pay, r) == 1
     assert len(pay["sent"]) == 1, pay["sent"]                 # ONE message, not two
     to, text = pay["sent"][0]
     assert to == ONE_WA
@@ -103,7 +124,7 @@ def test_two_unpaid_orders_for_one_customer_are_one_message(pay):
     assert r.kv.get("payfollow:901") == "1" and r.kv.get("payfollow:902") == "1"
     pay["sent"].clear()
     again = run(pf.run(send=True, redis=r))
-    assert pay["sent"] == [] and again["skipped"] == 1
+    assert again["skipped"] == 1 and _deliver(pay, r) == 0 and pay["sent"] == []
 
 
 def test_two_customers_get_one_message_each(pay):
@@ -112,7 +133,9 @@ def test_two_customers_get_one_message_each(pay):
           [(ONE_WA, 911, "BH-911", 4500, "KES", 3),
            (TWO_WA, 912, "BH-912", 7000, "KES", 3),
            (TWO_WA, 913, "BH-913", 1200, "KES", 5)])
-    run(pf.run(send=True, redis=FakeRedis()))
+    r = FakeRedis()
+    run(pf.run(send=True, redis=r))
+    _deliver(pay, r)
     assert sorted(to for to, _ in pay["sent"]) == [ONE_WA, TWO_WA]
     peter = next(t for to, t in pay["sent"] if to == TWO_WA)
     assert "BH-912" in peter and "BH-913" in peter and "BH-911" not in peter
@@ -128,6 +151,7 @@ def test_a_paid_order_is_left_out_of_the_reminder(pay):
     pay["hub"][922] = "paid"                                   # landed silently
     r = FakeRedis()
     run(pf.run(send=True, redis=r))
+    _deliver(pay, r)
     assert len(pay["sent"]) == 1
     text = pay["sent"][0][1]
     assert "BH-921" in text and "BH-922" not in text
@@ -142,6 +166,7 @@ def test_an_order_already_reminded_drops_out_and_a_new_one_still_goes(pay):
     r = FakeRedis()
     r.kv["payfollow:931"] = "1"                                # reminded yesterday
     run(pf.run(send=True, redis=r))
+    _deliver(pay, r)
     assert len(pay["sent"]) == 1
     text = pay["sent"][0][1]
     assert "BH-932" in text and "BH-931" not in text

@@ -324,7 +324,8 @@ async def on_turn(db, conv, deal, *, quote: list[dict], inbound_text: str,
     swahili = looks_swahili(inbound_text) or looks_swahili(reply)
     db.add(AgentAction(deal_id=deal.id, conversation_id=conv.id, due_at=due,
                        kind=QUOTE_KIND, reason=reason_for(quote),
-                       draft=compose(quote, name=name, swahili=swahili)))
+                       draft=compose(quote, name=name, swahili=swahili),
+                       dedupe_key=f"buying:{deal.id}", source="scribe"))
     return "planned"
 
 

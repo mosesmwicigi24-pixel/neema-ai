@@ -79,7 +79,7 @@ def test_verify_storefront_key(monkeypatch):
 def test_web_chat_runs_agent_and_returns_reply(monkeypatch):
     called = {}
 
-    async def fake_run_turn(db, redis, wa_id, text, llm, media=None):
+    async def fake_run_turn(db, redis, wa_id, text, llm, media=None, **_kw):
         called["wa_id"] = wa_id
         called["text"] = text
         return "Karibu Bethany House! Yes, we stock cassocks."

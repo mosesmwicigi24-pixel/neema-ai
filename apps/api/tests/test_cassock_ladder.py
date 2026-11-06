@@ -108,7 +108,7 @@ def test_whatsapp_sends_the_ladder_as_a_second_message(monkeypatch):
     sent, saved = [], []
     monkeypatch.setattr(runtime, "FOLLOW_UP_DELAY_S", 0)
 
-    async def _turn(db, redis, wa_id, text, llm, media=None, deferred=False, turn_facts=None):
+    async def _turn(db, redis, wa_id, text, llm, media=None, deferred=False, turn_facts=None, **kw):
         turn_facts["follow_up"] = "We also have the Cassock Set — … at KES 19,500 …"
         return "Our cassock is KES 13,000, made to measure in your colour."
 

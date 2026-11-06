@@ -224,8 +224,12 @@ def test_scheduler_routes_windowless_fit_checks_to_the_template():
     import inspect
     from app.services import actions
     src = inspect.getsource(actions.process_due)
-    assert "fit_check" in src and "_send_followup_template" in src
-    assert "replenishment" in src          # customer-agreed check-ins ride it too
+    assert "template_purpose(" in src and "_send_followup_template" in src
+    # Which rows may ride a template is decided in ONE place (audit, 2026-11-05):
+    # a fit check and a SUPPLIES check-in do; a deciding customer's check-in
+    # takes the follow-up template, never the order/replenishment one.
+    purpose = inspect.getsource(actions.template_purpose)
+    assert "fit_check" in purpose and "Supplies check-in" in purpose and '"check_in"' in purpose
 
 
 # ── B4: "how long will it take?" gets a real answer ──────────────────────────

@@ -251,6 +251,26 @@ async def compose_standup(db) -> str:
     except Exception:
         pass
 
+    # Outreach, shadow week (Stage 2): what the dispatcher's contextual rules
+    # WOULD have held yesterday — the owner reads this before enforce.
+    try:
+        from app.main import app as _app
+        _redis = getattr(_app.state, "redis", None)
+        if _redis is not None:
+            _y = (datetime.now(timezone.utc) + timedelta(hours=3) - timedelta(days=1)).strftime("%Y%m%d")
+            from app.core.config import settings
+            _h = await _redis.hgetall(f"outreach:shadow:{_y}") or {}
+            _h = {(k.decode() if isinstance(k, bytes) else k): int(v) for k, v in _h.items()}
+            if _h:
+                lines.append(
+                    "🧭 Outreach: yesterday the contextual rules "
+                    + ("held " if "enforced_suppress" in _h or "enforced_defer" in _h else "would have held ")
+                    + f"{_h.get('suppress', 0) + _h.get('enforced_suppress', 0)} and deferred "
+                    f"{_h.get('defer', 0) + _h.get('enforced_defer', 0)} unprompted message(s)"
+                    + (" (shadow — sent anyway)." if settings.outreach_mode != "enforce" else "."))
+    except Exception:
+        pass
+
     # Unmet demand — what customers asked for that we couldn't sell. The pile
     # exists to be read: three lines a day beat a table nobody opens.
     try:
