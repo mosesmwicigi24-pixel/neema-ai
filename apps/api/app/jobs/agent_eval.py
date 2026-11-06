@@ -27,14 +27,11 @@ import re
 import logging
 
 # Full model registry so mappers configure standalone.
-import app.models.agent      # noqa: F401
-import app.models.catalog    # noqa: F401
-import app.models.conversation  # noqa: F401
-import app.models.intercept  # noqa: F401
-import app.models.message    # noqa: F401
-import app.models.order_event  # noqa: F401
-import app.models.person     # noqa: F401
-import app.models.user       # noqa: F401
+# EVERY model, not a hand-picked list: the first database use configures
+# the mappers, and a Person's foreign key to `parishes` (and any later
+# table) fails to resolve when its model was never imported — the blind
+# run in CI died that way on 2026-11-06 before a single case ran.
+import app.main  # noqa: F401
 
 from sqlalchemy import delete, select
 
