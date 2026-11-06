@@ -1,8 +1,8 @@
 """Run the intelligence case set through the REAL agent — prompt, model,
 catalogue, cart, gate — and score every turn against its gold labels.
 
-    python -m app.jobs.agent_eval --cases [--held-out|--dev] [--repeat 3]
-        [--only sales-0] [--out results.json] [--history] [--keep]
+    python -m app.jobs.agent_eval --cases [--held-out|--dev|--file blind_heldout.jsonl]
+        [--repeat 3] [--only sales-0] [--out results.json] [--history] [--keep]
 
 Extends agent_eval (same pipeline, same throwaway contacts, same cleanup):
 the SCENARIOS and EXPERIENCE sets stay as they are; this adds the 300–500
@@ -340,7 +340,8 @@ def summarise(results: list[dict], *, repeat: int) -> dict:
 
 async def run_cases(*, selection: str = "all", repeat: int = 1, only: str | None = None,
                     out_path: str | None = None, packet_path: str | None = None,
-                    history: bool = False, keep: bool = False, limit: int | None = None) -> dict | None:
+                    history: bool = False, keep: bool = False, limit: int | None = None,
+                    file: str | None = None) -> dict | None:
     import logging
     logging.basicConfig(level=logging.WARNING, format="    %(name)s: %(message)s")
     if not settings.anthropic_api_key:
@@ -356,9 +357,16 @@ async def run_cases(*, selection: str = "all", repeat: int = 1, only: str | None
     from app.services.messaging import provision_user
     from app.jobs.agent_eval import _cleanup_contacts
 
-    cases = eval_cases.load()
-    dev, held = eval_cases.split(cases)
-    chosen = held if selection == "held-out" else dev if selection == "dev" else cases
+    # `file` names one case file and ignores the split — the way the blind
+    # set is run (verification pass 2: the runner had lost every way to reach
+    # it once the loader left blind cases out of the sweep).
+    if file:
+        cases = eval_cases.load(file, include_blind=True)
+        chosen = cases
+    else:
+        cases = eval_cases.load()
+        dev, held = eval_cases.split(cases)
+        chosen = held if selection == "held-out" else dev if selection == "dev" else cases
     if only:
         chosen = [c for c in chosen if c["id"].startswith(only)]
     if limit:

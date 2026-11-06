@@ -145,11 +145,37 @@ def test_a_redelivered_comment_is_not_answered_twice_without_redis(monkeypatch):
     payload = {"object": "page", "entry": [{"id": "PAGE1", "changes": [{"field": "feed", "value": {
         "item": "comment", "verb": "add", "comment_id": "c9", "post_id": "p9",
         "from": {"id": "U9", "name": "Mary"}, "message": "how much?"}}]}]}
-    db = _FakeDB(existing_mid="c9")            # the row for c9 already exists
+
+    class _RowDB(_FakeDB):
+        """Answers the dedupe SELECT from the statement itself (verification
+        pass 2: a fake that ignores the statement cannot tell a correct
+        predicate from a wrong one). `rows` holds (channel, comment id)."""
+        def __init__(self, rows):
+            super().__init__()
+            self.rows, self.sql = rows, []
+
+        async def execute(self, stmt):
+            import types
+            from sqlalchemy.dialects import postgresql
+            sql = str(stmt.compile(dialect=postgresql.dialect(), compile_kwargs={"literal_binds": True}))
+            self.sql.append(sql)
+            hit = any(f"messages.channel = '{ch}'" in sql and f"messages.waba_msg_id = '{cid}'" in sql
+                      for ch, cid in self.rows)
+            return types.SimpleNamespace(scalar_one_or_none=lambda: ("row" if hit else None))
+
+    db = _RowDB({("facebook", "c9")})          # the row for c9 exists on the comment channel
     asyncio.run(mw._capture_comment_events(db, "messenger", payload, redis=None))
     assert not engaged and not any(isinstance(o, Message) for o in db.added)
     assert db.commits == 0
-    # and a comment with no row goes through as before
-    db2 = _FakeDB()
+    assert "messages.channel = 'facebook'" in db.sql[0] and "messages.waba_msg_id = 'c9'" in db.sql[0]
+    # the same id on the DM channel is a different message: no dedupe
+    db2 = _RowDB({("messenger", "c9")})
     asyncio.run(mw._capture_comment_events(db2, "messenger", payload, redis=None))
     assert engaged and any(isinstance(o, Message) for o in db2.added)
+    # and an Instagram comment is looked up on "instagram"
+    engaged.clear()
+    ig = {"object": "instagram", "entry": [{"id": "PAGE1", "changes": [{"field": "comments", "value": {
+        "id": "ig9", "media": {"id": "m9"}, "from": {"id": "U9", "username": "mary"}, "text": "price?"}}]}]}
+    db3 = _RowDB({("instagram", "ig9")})
+    asyncio.run(mw._capture_comment_events(db3, "instagram", ig, redis=None))
+    assert db3.sql and "messages.channel = 'instagram'" in db3.sql[0] and not engaged

@@ -112,7 +112,7 @@ def _cli() -> None:
     ap.add_argument("--json", help="write the full result here")
     ap.add_argument("--misses", action="store_true", help="print every miss")
     args = ap.parse_args()
-    cases = eval_cases.load(args.file) if args.file else eval_cases.load()
+    cases = eval_cases.load(args.file, include_blind=True) if args.file else eval_cases.load()
     dev, held = eval_cases.split(cases)
     chosen = cases if args.file else held if args.held_out else dev if args.dev else cases
     label = f"file:{args.file}" if args.file else "held-out" if args.held_out else "dev" if args.dev else "all"

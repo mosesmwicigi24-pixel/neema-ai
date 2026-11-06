@@ -59,17 +59,15 @@ LANGS = ("en", "sw", "ke-en", "sheng", "fr", "pt", "hi", "mixed")
 HERE = Path(__file__).parent
 
 
-def load(pattern: str = "*.jsonl", *, include_blind: bool | None = None) -> list[dict]:
+def load(pattern: str = "*.jsonl", *, include_blind: bool = False) -> list[dict]:
     """Every case, validated, in file order. Raises on a malformed case so a
     bad label never scores silently.
 
-    Blind cases (`"blind": true`) are LEFT OUT of the default sweep: they are
-    the untouched held-out set, scored only when their file is named
-    explicitly (`load("blind_heldout.jsonl")`), never folded into the
-    development/held-out split that the floors are tuned on (verification
-    pass 1, repaired 2026-11-06)."""
-    if include_blind is None:
-        include_blind = pattern != "*.jsonl"
+    Blind cases (`"blind": true`) are LEFT OUT unless `include_blind=True`,
+    whatever the pattern: they are the untouched held-out set, never folded
+    into the development/held-out split that the floors are tuned on
+    (verification pass 1, repaired 2026-11-06; pass 2 closed the pattern
+    loophole). The two scorers' `--file` flags pass `include_blind=True`."""
     cases: list[dict] = []
     seen: set[str] = set()
     for path in sorted(HERE.glob(pattern)):

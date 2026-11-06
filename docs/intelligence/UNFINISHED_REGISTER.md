@@ -37,6 +37,8 @@ the precise dependency · status. Last update: 2026-11-06, end of session 1.
 | Deferring product-card sends until after the gate (W1-6) | would create a worse failure (words promising cards that then fail) | ADVANCEMENTS_REGISTER W1-6 |
 | Refusing an order when the promised offer cannot be read (W1-7) | the owner's recorded trade-off prefers the order; the gap is now surfaced | W1-7 |
 | A DB-side idempotency key for orders (W9-3) | needs a migration (owner approval) | INVESTIGATION 9.3 |
+| An index on `messages.waba_msg_id` (the comment and DM dedupe lookups seq-scan today) | a migration (owner approval); one line in alembic | VERIFICATION_PASS_2 #6 |
+| A DB error during Meta comment capture is acked, so the comment is lost silently (pre-existing: the DM path answers 502 so Meta redelivers; the comment path acks anyway) | decide whether comments should also 502 on a DB error — Meta then redelivers, and the durable dedupe now makes that safe | VERIFICATION_PASS_2 #4 |
 | Context-engineering experiment (W7-1: structured state object vs raw history) | must be a controlled comparison on the held-out set; needs the model | INVESTIGATION 7.1 |
 | Prompt shortening / SELL LIKE A CONSULTANT rewrite (W4-3) | no blind cut; replay comparison first | INVESTIGATION 4.3 |
 | Delivery total consistency (W6-2), `payment_url` key rename (W6-1) | prompt/tool contract changes to be measured with the model | INVESTIGATION 6.1–6.2 |

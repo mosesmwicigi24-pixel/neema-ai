@@ -207,7 +207,9 @@ def test_the_default_sweep_leaves_the_blind_set_out():
     swept = eval_cases.load()
     assert swept and not any(c.get("blind") for c in swept)
     assert not any(c["_file"] == "blind_heldout.jsonl" for c in swept)
-    blind = eval_cases.load("blind_heldout.jsonl")
+    assert eval_cases.load("blind_heldout.jsonl") == []           # not even when named, unless asked
+    assert not any(c.get("blind") for c in eval_cases.load("*.json*"))   # no pattern loophole (pass 2)
+    blind = eval_cases.load("blind_heldout.jsonl", include_blind=True)
     assert blind and all(c.get("blind") for c in blind)
     assert eval_cases.load(include_blind=True) and len(eval_cases.load(include_blind=True)) == len(swept) + len(blind)
     dev, held = eval_cases.split(swept)

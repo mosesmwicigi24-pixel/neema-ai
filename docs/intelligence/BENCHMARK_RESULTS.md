@@ -168,6 +168,6 @@ repository secret:
 
 ```
 docker compose -f docker-compose.yml -f docker-compose.vps.yml exec -T api \
-  python -m app.jobs.agent_eval --cases --held-out --repeat 3 \
+  python -m app.jobs.agent_eval --cases --file blind_heldout.jsonl --repeat 3 \
   --out agent-eval-heldout.json --packet rater-packet.md --history
 ```
