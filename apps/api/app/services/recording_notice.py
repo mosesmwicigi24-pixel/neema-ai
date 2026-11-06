@@ -117,7 +117,7 @@ async def send_for_call(call_id: str, redis=None) -> str:
                 from app.models.conversation import Conversation
                 conv = (await db.execute(select(Conversation).where(
                     Conversation.wa_id == recipient))).scalars().first()
-            if conv is not None and await opted_out(db, redis, conv):
+            if conv is not None and await opted_out(db, redis, conv, fail_closed=True):
                 _log.info("recording notice skipped for %s …%s (call %s): opted out",
                           channel, str(recipient)[-4:], call_id)
                 return OPTED_OUT

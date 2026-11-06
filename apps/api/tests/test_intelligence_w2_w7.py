@@ -313,9 +313,13 @@ def test_a_cut_that_would_drop_the_answer_asks_once_more():
 
 
 @pytest.mark.asyncio
-async def test_apply_lifts_a_hold_on_a_plain_question_that_is_not_a_buying_signal():
-    """Verification pass 4 (W2-3): the earlier test's question was also a
-    buying signal. A plain question — where the shop is — lifts the hold too."""
+async def test_apply_lifts_a_hold_on_a_location_question():
+    """Verification pass 4 (W2-3). NOTE (slice 5, 2026-11-06): "shop" is a
+    word in `cooling._BUY_RE`, so this question is ALSO a buying signal and
+    this test exercises that branch, not the bare "?" branch — the earlier
+    name claimed otherwise and mutant M6 survived it. The bare-question case
+    is `test_a_bare_question_with_no_buying_word_lifts_a_hold`
+    (test_intelligence_slice5)."""
     import types
 
     class _DB:

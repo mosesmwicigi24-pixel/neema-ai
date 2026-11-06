@@ -60,10 +60,14 @@ jobs:
         # Bounded: this apt step hung for 20+ minutes twice on 2026-11-06
         # (a stalled mirror), holding the whole deploy. A retry with a
         # time limit beats an unbounded wait before any test has run.
-        timeout-minutes: 8
+        # 16 minutes covers three worst-case attempts (3 × ~305 s); an
+        # attempt killed mid-install can leave dpkg interrupted, so each
+        # attempt first lets dpkg finish (verification pass 3b, #6).
+        timeout-minutes: 16
         run: |
           command -v ffmpeg && exit 0
           for i in 1 2 3; do
+            sudo dpkg --configure -a || true
             sudo timeout 150 apt-get update -q -o Acquire::Retries=3 \
               && sudo timeout 150 apt-get install -y -q --no-install-recommends -o Acquire::Retries=3 ffmpeg \
               && exit 0
@@ -157,10 +161,14 @@ jobs:
         # Bounded: this apt step hung for 20+ minutes twice on 2026-11-06
         # (a stalled mirror), holding the whole deploy. A retry with a
         # time limit beats an unbounded wait before any test has run.
-        timeout-minutes: 8
+        # 16 minutes covers three worst-case attempts (3 × ~305 s); an
+        # attempt killed mid-install can leave dpkg interrupted, so each
+        # attempt first lets dpkg finish (verification pass 3b, #6).
+        timeout-minutes: 16
         run: |
           command -v ffmpeg && exit 0
           for i in 1 2 3; do
+            sudo dpkg --configure -a || true
             sudo timeout 150 apt-get update -q -o Acquire::Retries=3 \
               && sudo timeout 150 apt-get install -y -q --no-install-recommends -o Acquire::Retries=3 ffmpeg \
               && exit 0

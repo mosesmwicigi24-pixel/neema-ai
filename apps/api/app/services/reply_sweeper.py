@@ -176,7 +176,7 @@ async def _try_continue_elsewhere(redis, conv, msg):
             # A Neema-initiated message on another channel is unprompted
             # there: the opt-out rule applies (W1, 2026-11-06).
             from app.services.intent import opted_out as _opted_out
-            if await _opted_out(db, redis, sib):
+            if await _opted_out(db, redis, sib, fail_closed=True):
                 _log.info("cross-channel: %s asked not to be messaged — not continued", sib.channel)
                 return False
             text = await _compose_bridge(db, redis, sib, conv.channel, msg.text)

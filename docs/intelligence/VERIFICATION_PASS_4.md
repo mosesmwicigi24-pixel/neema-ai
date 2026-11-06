@@ -318,7 +318,7 @@ code findings stand unchanged. What the new commits claim, checked:
 | S2-1 W1-14 announcement hold pinned by a source string | **Fixed.** The rules-held announcement branch is in the same behaviour test (a "thank you for your payment" draft on a shipped event is held; nothing is sent; a person is told). |
 | S2-2 R5.6 VERIFIED COMPLETE for a design | **Restated** PARTIALLY COMPLETE. |
 | S2-3 the model workflow's green run that ran no model; BLOCKED rows naming the key | **Fixed.** PR #319 (runner registers every model; pipefail on both stages) is open and the run on the fixed branch is in progress; R5.2, R4.10, UNFINISHED, OWNER_ACTIONS and RELEASE_READINESS now say so. |
-| S3 W2-3 question-only half | **Fixed** (test on "Where is your shop?"). |
+| S3 W2-3 question-only half | ~~**Fixed** (test on "Where is your shop?")~~ — **that fix was ineffective**: "shop" is in `cooling._BUY_RE`, so the test still passed through the buying-signal branch and M6 survived. Fixed in slice 5 (2026-11-06) with "Are you there?" (no buying word); M6 killed. |
 | S3 pass-3b #6 and #8 absent from UNFINISHED | **Recorded.** |
 | S3 R2.8 cites scratchpad-only reports | **Fixed.** The eleven Stage and audit reports are now under `docs/intelligence/reports/`. |
 | S3 EXCELLENCE method text / `--held-out` commands / INTERNATIONAL wording / R6.5 wording | **Fixed** (blind set everywhere a report is meant; the language GUESS named as such). |

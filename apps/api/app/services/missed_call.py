@@ -75,7 +75,7 @@ async def _follow_up(redis, call_id: str) -> bool:
                     (Conversation.wa_id == handle) if channel == "whatsapp"
                     else ((Conversation.channel == channel) & (Conversation.external_id == handle))
                 ))).scalars().first()
-                if conv is not None and await opted_out(db, redis, conv):
+                if conv is not None and await opted_out(db, redis, conv, fail_closed=True):
                     _log.info("missed-call message skipped for …%s: opted out", str(handle)[-4:])
                     return False
             except Exception:

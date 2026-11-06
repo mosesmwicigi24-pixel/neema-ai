@@ -728,7 +728,16 @@ async def process_due(db, redis, *, now: datetime | None = None, limit: int = 10
                 continue
             # The customer asked not to be messaged: routine rows end here;
             # a promise or care row waits for a person's judgement.
-            if await _intent.opted_out(db, redis, conv):
+            _oo = await _intent.opt_out_state(db, redis, conv)
+            if _oo == _intent.OPT_OUT_UNKNOWN:
+                # The preference could not be read this tick: nothing is
+                # sent on a guess, and nothing is vetoed on one either — the
+                # row stays planned for the next tick (2026-11-06).
+                ol.decision("actions", conv.channel, who, "defer",
+                            "opt-out preference could not be read; row kept for the next tick",
+                            kind=getattr(action, "kind", None), action=getattr(action, "id", None))
+                continue
+            if _oo == _intent.OPT_OUT_YES:
                 if message_class(action) == ol.ROUTINE:
                     if await claim(db, action, ("planned",), "vetoed"):
                         await finish(db, action, "vetoed",

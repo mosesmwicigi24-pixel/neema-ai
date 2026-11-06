@@ -334,6 +334,13 @@ def _action_world(monkeypatch, *, tries_burned: int):
     db = _FakeDB([_Res(many=[action])], gets={"Conversation": conv, "Deal": None})
 
     monkeypatch.setattr(hub_events, "is_quiet_hours", lambda *a, **k: False)
+    # The opt-out preference is readable and "no" in this world: an unreadable
+    # one now defers the row instead of sending (slice 5, 2026-11-06).
+    from app.services import identity as _identity
+
+    async def _no_identity(db, channel, external_id):
+        return None
+    monkeypatch.setattr(_identity, "_select_identity", _no_identity)
 
     async def _in_window(*a, **k):
         return True

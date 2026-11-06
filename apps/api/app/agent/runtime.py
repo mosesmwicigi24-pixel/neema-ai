@@ -1370,6 +1370,23 @@ def _attach_turn_notes(messages: list, notes: list[str]) -> str:
     return text
 
 
+async def _comment_dm_allowed(redis, channel: str, ext: str) -> bool:
+    """May a comment be answered with a private message? Only when the
+    durable opt-out read says "not opted out". One posture for every failure
+    (no session, a query error): no DM on a guess — before 2026-11-06 a query
+    error sent the DM and a session error skipped it (UNFINISHED)."""
+    from app.services.intent import opted_out as _opted
+    from app.database import AsyncSessionLocal as _Sess
+    synthetic = types.SimpleNamespace(channel=channel, wa_id=None, external_id=ext, person_id=None)
+    try:
+        async with _Sess() as odb:                    # durable read through the identity (1.3)
+            return not await _opted(odb, redis, synthetic, fail_closed=True)
+    except Exception as exc:
+        _log.warning("comment DM for %s/…%s: opt-out could not be read (%s) — not sent",
+                     channel, str(ext)[-4:], exc)
+        return False
+
+
 async def _reply_in_words(llm, sys_blocks, messages: list, tools: list) -> str:
     """The reply itself, in words, from what the turn has already gathered:
     one call on the loop's own cached prefix, tools present but not callable
@@ -1392,7 +1409,18 @@ async def _reply_in_words(llm, sys_blocks, messages: list, tools: list) -> str:
         else:
             msgs.append(nudge)
         resp = await llm.complete(system=sys_blocks, messages=msgs, **_kw)
-        return (resp.text or "").strip()
+        text = (resp.text or "").strip()
+        if text and getattr(resp, "stop_reason", "") == "max_tokens":
+            # The once-more ask hit the ceiling too: it must not go out
+            # mid-sentence just because it was the retry (UNFINISHED,
+            # 2026-11-06). Cut to the last whole sentence; nothing to keep →
+            # the draft as written, as _settle_truncated's "kept".
+            cut, was_cut = trim_truncated(text)
+            _log.warning("reply-in-words hit max_tokens too — %s",
+                         "cut back to its last whole sentence" if was_cut
+                         else "no whole sentence to keep; kept as written")
+            return cut if was_cut else text
+        return text
     except Exception as exc:
         _log.info("reply-in-words call failed: %s", exc)
         return ""
@@ -6141,12 +6169,7 @@ async def _run_comment_engage(redis, channel: str, comment: dict, own_pages: set
         try:
             # A contact who asked not to be messaged gets the public reply
             # only — never a DM (audit verification, 2026-11-06).
-            from app.services.intent import opted_out as _opted
-            from app.database import AsyncSessionLocal as _Sess
-            _synthetic = types.SimpleNamespace(channel=channel, wa_id=None, external_id=ext, person_id=None)
-            async with _Sess() as _odb:               # durable read through the identity (1.3)
-                _no_dm = await _opted(_odb, redis, _synthetic)
-            if _no_dm:
+            if not await _comment_dm_allowed(redis, channel, ext):
                 raise _OptedOut()
             await send_private_reply(cid, dm_text, page_id=comment.get("page_id"),
                                      channel=channel)

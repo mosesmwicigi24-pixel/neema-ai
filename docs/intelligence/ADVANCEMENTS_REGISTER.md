@@ -162,6 +162,47 @@ explicit word.
 - The first cut returned None on any exception, which also muted every unit test whose fake session raises an AttributeError. The takeover re-check now fails closed on `SQLAlchemyError`, `OSError` and timeouts (what a database outage raises) and assumes AI on a programming error inside the check, with a warning. Both branches tested.
 
 
+## Slice 5 (2026-11-06) · model-independent reliability defects from the registers
+
+Six open rows that needed neither the model run nor an owner decision, each
+taken through investigate → smallest change → behaviour test → mutation
+check (harness `v5-mutate.py`, 12 mutants, 12 killed).
+
+### S1 · Turn failures are classified by exception type before text
+
+- **Change:** `agent_health.classify` checks the exception's type first: SQLAlchemy, asyncpg and psycopg errors → `database`; the gate's `RuntimeError("reply gate error: …")` → `gate`. Neither is ACTIONABLE or AI_DOWN, so a database outage no longer reads as "check ANTHROPIC_API_KEY" on health or pauses the missed-reply sweep for an hour; each has its own operator line.
+- **Status:** VERIFIED COMPLETE — `test_a_database_error_is_never_read_as_the_ai_account` (an OperationalError whose text says "permission denied" and a ProgrammingError saying "does not exist"), `test_a_driver_error_counts_as_database_by_module`, `test_the_gate_s_own_error_is_named_gate_not_other`; mutants S1, S1b killed.
+
+### S2 · The opt-out read has three answers; unprompted senders never send on a guess
+
+- **Change:** `intent.opt_out_state` returns yes / no / unknown ("unknown" = the durable read could not be made: no session or a database error). `opted_out(…, fail_closed=True)` maps unknown to True and is passed by every Neema-initiated sender (cart recovery, seasonal, payment follow-up, the sweeper's cross-channel bridge, hub-event celebrations, missed-call text, recording notice). The dispatcher (`actions.process_due`) reads the three-state form and **defers** an unreadable row to the next tick — it is neither sent nor vetoed nor parked on a guess. Doors that only decide whether to re-acknowledge keep the fail-open default.
+- **Status:** VERIFIED COMPLETE — `test_an_unreadable_preference_is_unknown_not_no`, `test_a_readable_no_is_still_no_for_a_sender`, `test_cart_recovery_skips_the_nudge_when_the_preference_cannot_be_read` (query error and no-session), `test_the_dispatcher_defers_a_row_it_cannot_read_the_preference_for` (through `process_due`: status stays `planned`, nothing composed or sent), `test_every_unprompted_sender_reads_the_opt_out_fail_closed`; mutants S2, S6, S6b, S7 killed. Three Stage 1 / Stage 7 tests and the circuit-breaker world were updated to supply a readable "no" (their fakes could not be read at all, which is now a deferral, not a send).
+
+### S3 · The comment-DM gate fails closed on any read failure
+
+- **Change:** `_comment_dm_allowed(redis, channel, ext)` — one helper the comment flow must pass before `send_private_reply`; a query error, a session error or an unreadable preference all mean no DM (before: a query error sent it, a session error skipped it).
+- **Status:** VERIFIED COMPLETE — `test_the_comment_dm_gate_fails_closed_on_any_read_failure` (query error → no; session error → no; readable no → yes; the flow calls the helper above the send); mutants S3, S3b killed.
+
+### S4 · The once-more draft re-checks its own token ceiling
+
+- **Change:** `_reply_in_words` reads `stop_reason`; on `max_tokens` the retry is cut to its last whole sentence (nothing to keep → as written), the same settlement the first draft gets.
+- **Status:** VERIFIED COMPLETE — `test_the_once_more_draft_is_cut_to_a_whole_sentence_when_it_hits_the_ceiling`; mutant S4 killed.
+
+### S5 · The opt-out resolver shares the WhatsApp door's phone predicate
+
+- **Change:** `record_opt_out` resolves a WhatsApp person only when `is_plausible_phone` accepts the `+`-stripped key (the door's own check in `provision_user`), resolving with the normalised key; a key that cannot resolve logs "redis only".
+- **Status:** VERIFIED COMPLETE — `test_the_opt_out_resolver_uses_the_door_s_phone_predicate` ("+254…" resolves as "254…"; "web_…" and a 17-digit Meta id never do); mutants S5, S5b killed.
+
+### S6 · W2-3's question half is now proven
+
+- **Change:** none to production; the pass-4 "fix" used "Where is your shop?", which `cooling._BUY_RE` matches on `shop`, so M6 (the `"?"` branch) survived. The new test uses "Are you there?" (no buying word) through `customer_state.apply`.
+- **Status:** VERIFIED COMPLETE — `test_a_bare_question_with_no_buying_word_lifts_a_hold`; mutant M6 killed.
+
+### S7 · CI apt step bounded for its real worst case
+
+- **Change:** `timeout-minutes: 16` (three attempts × ~305 s) and `sudo dpkg --configure -a || true` before each attempt, in both jobs that install ffmpeg. The 8-minute bound was hit again on PR #321 (docs-only; a stalled mirror; the re-run passed).
+- **Status:** IMPLEMENTED BUT NOT VERIFIED — proven only by the next stalled-mirror run.
+
 ## Verification pass 1 — further repairs (2026-11-06)
 
 - **W1-5 (sync channels):** web chat and the ManyChat relay re-check the takeover after composing and return the human line if a colleague took the thread.
