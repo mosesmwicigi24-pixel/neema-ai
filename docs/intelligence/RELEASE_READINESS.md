@@ -7,9 +7,11 @@ on the owner's word ("merge and deploy when green"), after the full suite
 in shadow mode with no enforced rules. The first main build hung 24 minutes
 on the runner's apt step before any test ran; it was cancelled and re-run.
 The verification pass's S1/S2 findings are fixed or recorded
-(VERIFICATION_PASS_1 response table). Slice 2 (PR #317: behaviour tests for
-the downgraded rows, the length-scorer correction, blind set out of the
-sweep) is green and merges next under the same word.
+(VERIFICATION_PASS_1 response table). Slices 2–3 (PR #317) merged as `34d371e` at 18:53 UTC after verification
+passes 2 and 2b (every S1/S2 fixed) and green CI; deploy in flight. Slice 4
+(PR #318: durable opt-out without a person, held draft never promised to
+nobody, dated facts, rule-proposals card) is open, with verification pass 3
+running.
 
 ## Measured improvement
 

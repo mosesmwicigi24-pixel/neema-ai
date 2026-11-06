@@ -16,6 +16,7 @@ ff8c3b5).
 | Full API suite on 111ee6e (verification repairs) | `pytest tests` | 1 failed (`test_spend_meter`, passes alone — a second suite was running concurrently against the same services), 3,288 passed, 1 xpassed |
 | Full API suite on bbe48cf (= af34fcf code: initiated-message rules, doors; merged as c8c3356) | `pytest tests` | 3,294 passed, 1 xpassed, 0 failed (10 min 18 s) |
 | CI on 8cae9b7 (slice 2: behaviour tests, length scorer, blind exclusion, timing tests stub the hub) | GitHub Actions | CI and Build & Push green; the first head (ede8dee) failed only `test_a_fast_request_stays_quiet` (health waited 15 s on the hub from the runner — pre-existing, now stubbed) |
+| CI on 4db8f55 (slices 2–3 final head, merged as 34d371e) | GitHub Actions | CI and Build & Push green |
 | Production after c8c3356 (~17:52 UTC) | `/api/health` from outside | status ok, replies ok, review tallies populated, outreach shadow with no enforced rules |
 | Web | `pnpm exec tsc --noEmit` + `pnpm build` | passed (agent report) |
 | Lint | `ruff check app tests` | 96 findings = the committed baseline (CI ratchet 115) |
