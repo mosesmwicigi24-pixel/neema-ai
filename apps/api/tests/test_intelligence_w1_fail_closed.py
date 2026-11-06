@@ -61,14 +61,27 @@ def test_the_gate_call_site_no_longer_falls_through_to_the_send():
 # ── the takeover re-check ────────────────────────────────────────────────────
 
 def test_the_takeover_check_returns_none_when_it_cannot_read_the_thread(monkeypatch):
+    from sqlalchemy.exc import OperationalError
+
     class _Boom:
         async def __aenter__(self):
-            raise RuntimeError("db down")
+            raise OperationalError("SELECT 1", {}, Exception("connection refused"))
         async def __aexit__(self, *a):
             return False
     import app.database as _db
     monkeypatch.setattr(_db, "AsyncSessionLocal", lambda: _Boom())
     assert asyncio.run(rt._still_ai("whatsapp", "2547000")) is None
+
+
+def test_a_programming_error_in_the_takeover_check_does_not_mute_the_agent(monkeypatch):
+    class _Odd:
+        async def __aenter__(self):
+            raise AttributeError("fake session")
+        async def __aexit__(self, *a):
+            return False
+    import app.database as _db
+    monkeypatch.setattr(_db, "AsyncSessionLocal", lambda: _Odd())
+    assert asyncio.run(rt._still_ai("whatsapp", "2547000")) is True
 
 
 def test_both_senders_treat_an_unverifiable_takeover_as_not_sent():

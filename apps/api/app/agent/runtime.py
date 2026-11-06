@@ -13,6 +13,7 @@ import types
 from datetime import datetime, timezone
 
 from sqlalchemy import func as sa_func, select
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agent.llm import LLM, LLMResponse, TURN_NOTE_HEADER
@@ -2372,7 +2373,10 @@ async def run_turn(db: AsyncSession, redis, wa_id: str, user_text: str, llm: LLM
         except Exception:
             pass
 
-    _served = getattr(llm, "_model", None) or settings.tier2_model
+    # the model that ANSWERED — after a fallback `last_model` differs from the
+    # configured `_model` (W10, 2026-11-06: the usage split was the configured name)
+    _served = (getattr(llm, "last_model", None) or getattr(llm, "_model", None)
+               or settings.tier2_model)
     # The daily breaker is fed by the LLM client itself, call by call and by
     # purpose (services/ai_budget.meter) — the reviewer, the rewrite and every
     # vision read included — so nothing is metered twice here.
@@ -2652,9 +2656,14 @@ async def _still_ai(channel: str, key: str) -> bool | None:
                 or_(Conversation.external_id == key, Conversation.wa_id == key))
             )).scalars().first()
         return mode is None or mode == InterceptMode.ai
-    except Exception as exc:
+    except (SQLAlchemyError, OSError, asyncio.TimeoutError) as exc:
+        # the database could not be asked: fail CLOSED (W1, 2026-11-06)
         _log.warning("takeover check failed for %s/…%s — not sending: %s", channel, str(key)[-4:], exc)
         return None
+    except Exception as exc:
+        # a programming error inside the check is not a reason to mute the agent
+        _log.warning("takeover check raised for %s/…%s — assuming AI: %s", channel, str(key)[-4:], exc)
+        return True
 
 
 async def _run_and_send(redis, wa_id: str, text: str, media: dict | None = None,

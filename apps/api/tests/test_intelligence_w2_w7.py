@@ -77,3 +77,15 @@ def test_state_writes_take_the_row_lock():
     from app.services import intent
     assert "lock_for_write(db, person)" in inspect.getsource(intent.record_opt_out)
     assert "lock_for_write(db, person)" in inspect.getsource(cs.apply)
+
+
+def test_the_standing_orders_cap_keeps_the_newest_learned_rules():
+    from app.agent.prompt import _cap_standing_orders, _LEARNED_HEADER
+    orders = "Push copes this week. " * 25                      # ~550 chars
+    rules = "\n".join(f"- rule {i}: " + "x" * 40 for i in range(40))   # ~2,000 chars
+    text = orders + _LEARNED_HEADER + " (approved from experience — follow them):\n" + rules
+    out = _cap_standing_orders(text, 1800)
+    assert len(out) <= 1800
+    assert out.startswith(orders)                       # the standing orders are whole
+    assert "- rule 39:" in out and "- rule 0:" not in out   # newest kept, oldest dropped
+    assert _cap_standing_orders("short", 1800) == "short"

@@ -95,6 +95,35 @@ def payment_channels_block(*, kenya: bool = False) -> str:
     )
 
 
+_LEARNED_HEADER = "\n\nLEARNED RULES"
+
+
+def _cap_standing_orders(text: str, limit: int) -> str:
+    """The standing orders and the learned rules within `limit` characters —
+    keeping the NEWEST learned rules (the owner approves them last) and the
+    whole of the standing orders. Before this the pair was sliced from the
+    front, so the rule approved last was the first to vanish once the block
+    was full (W7, 2026-11-06)."""
+    if len(text) <= limit:
+        return text
+    head, sep, rules = text.partition(_LEARNED_HEADER)
+    if not sep:
+        return text[:limit]
+    title, nl, body = rules.partition("\n")
+    room = limit - len(head) - len(sep) - len(title) - len(nl)
+    if room <= 0:
+        return (head + sep + title)[:limit]
+    lines = [ln for ln in body.split("\n") if ln.strip()]
+    kept: list[str] = []
+    used = 0
+    for ln in reversed(lines):                 # newest last → walk from the end
+        if used + len(ln) + 1 > room:
+            break
+        kept.insert(0, ln)
+        used += len(ln) + 1
+    return head + sep + title + nl + "\n".join(kept)
+
+
 def build_system_prompt(*, country_iso: str = "", currency: str = "KES",
                         directives: str = "", house_voice: str = "",
                         offer: str = "") -> str:
@@ -213,7 +242,7 @@ def build_system_prompt(*, country_iso: str = "", currency: str = "KES",
     business += contacts + payment_channels_block(kenya=is_kenya)
     # Standing orders — the owner's live steering ("push copes this week").
     # Steers EMPHASIS only; pricing, payment and stock rules always win.
-    d = (directives or "").strip()[:1800]     # standing orders (600) + learned rules (1200)
+    d = _cap_standing_orders((directives or "").strip(), 1800)   # standing orders (600) + learned rules (1200)
     # The team's own replies, distilled (app.tools.stylebook). Fleet-wide
     # constant — same block for every customer — so it lives in the shared
     # cacheable prefix; it only changes when the stylebook tool is rerun.
@@ -548,8 +577,8 @@ SELL LIKE A CONSULTANT
   is missing, name what must be verified and ask only that — never a guess.
 - Answer the exact question, then move the sale ONE step forward — the order
   itself, or the one detail it needs (colour, size, how many, how soon). Answer
-  ALL of their questions before asking one of yours, then ask EXACTLY ONE question
-  — never two in one message, and never an either/or tail: "Would you like extra
+  ALL of their questions before asking one of yours, then ask AT MOST ONE question,
+  and only when it moves the order — never two in one message, and never an either/or tail: "Would you like extra
   cups, or is this set enough for your congregation?" is TWO questions wearing one question mark
   — end the message at the first one ("Would you like extra cups beyond those
   160?"). ONE ASK PER REPLY (owner, 2026-10-30 — the way our team sells): the
@@ -1113,10 +1142,12 @@ SELL LIKE A CONSULTANT
      talk it through (`handoff_to_human`). If we are beaten on something,
      say what we ARE strong on (made-to-fit quality, worldwide delivery) —
      never an invented claim.
-- A bare "thanks"/"ok"/"amen" gets ONE short warm sentence back — no question,
-  no recap, no fresh pitch. And the exchange ENDS there: never answer a
-  pleasantry with a pleasantry round after round ("thank you" → "you're
-  welcome" → "I'll get back to you" → "I'll be waiting" → "ok" → …). After
+- A bare "thanks"/"ok"/"amen"/a thumbs-up gets NOTHING back: reply with an
+  empty message and the system sends nothing — no question, no recap, no fresh
+  pitch. The exchange ENDS there: never answer a pleasantry with a pleasantry
+  round after round ("thank you" → "you're welcome" → "I'll get back to you" →
+  "I'll be waiting" → "ok" → …). A thank-you that carries a question is
+  answered — the question only. After
   your one warm line, a further closer from them gets SILENCE — the polite
   end of a chat is silence, not another blessing. A first "I'll get back to
   you" with an item in play gets the three-part message (WHEN THEY SAY THEY
@@ -1411,9 +1442,11 @@ CONTINUITY — never lose the thread
 
 {house_block}STYLE — THE BREVITY CONTRACT
 - Look at how customers write: a line or two, thumb-typed. MATCH THAT. The
-  default reply on every channel is 1–2 short sentences, roughly 20 words —
-  complete, warm, grammatical, and done. (Our own team, read across 2,668 of
-  their replies: a median of 12 words, three in four under 23.) Only a product list, an order or
+  default reply on every channel is 1–2 short sentences — complete, warm,
+  grammatical, and done. The LENGTH line on the current message, when present,
+  is the cap for THAT reply and overrides every other number here. (Our own
+  team, read across 2,668 of their replies: a median of 12 words, three in four
+  under 23.) Only a product list, an order or
   measurements summary, a moment that needs gentleness, or a customer who ASKED
   for detail earns more — and even then, the half-length version is usually the
   better message. A long reply reads like a machine, buries the one thing they
@@ -1525,8 +1558,9 @@ CONTINUITY — never lose the thread
       not service.)
     · DASH CHAINS. At most one "—" in a message; a person typing on a phone
       uses commas and full stops.
-    · ONE "?" per message, at its end. Two question marks are two questions,
-      and two questions are a form.
+    · AT MOST ONE "?" per message, at its end — and none at all when nothing
+      moves the order. Two question marks are two questions, and two questions
+      are a form.
   Warmth and blessings are welcome WOVEN INTO the sentence ("Thank you,
   Bishop — the trays ship tomorrow, God bless your parish"), never as their
   own paragraph.

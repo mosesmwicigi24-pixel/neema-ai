@@ -67,7 +67,7 @@ explicit word.
 ## W4-1 · No manufactured urgency, scarcity or discount from nowhere (hard gate rule)
 
 - **Baseline:** prompt-only; no rule kind for it (INVESTIGATION 4.1; research memo §6).
-- **Change:** `review.manufactured_pressure` — hard `pressure` finding for "today only / last piece / only N left / hurry / I can give you a discount / 10% off" unless a promotion tool in this turn supplied the offer. An honest "we don't offer discounts" passes.
+- **Change:** `review.manufactured_pressure` — hard `pressure` finding for the urgency and scarcity words ("today only / last piece / only N left / hurry / offer ends tonight / don't miss out / leo tu") unless a promotion tool in this turn supplied the offer. Discount FIGURES stay the `figure` rule's business (every money figure from a hub row or a recorded promotion) — the first cut also flagged "10% off" and the existing verification stress tests showed that broke legitimate campaign replies, so it was narrowed. An honest "we don't offer discounts" passes.
 - **Status:** VERIFIED COMPLETE at the rule level; live effect IMPLEMENTED BUT NOT VERIFIED.
 
 ## W1-7 · A promised offer that cannot be read is surfaced, not dropped
@@ -121,10 +121,38 @@ explicit word.
 
 ## W8-1 · Language continuity checked without the model reviewer
 
-- **Change:** `review.language_mismatch` — a soft, deterministic `language` finding for Hindi script, Swahili, French and Portuguese customers whose draft is plainly in another language; English and mixed left alone.
+- **Change:** `review.language_mismatch` — a soft, deterministic `language` finding for Hindi script, Swahili, French and Portuguese customers whose draft plainly reads as English (three or more English function words and none of the customer's language); English and mixed left alone. The first cut flagged a short Swahili price line ("Trei tatu za … ni KES 66,000") — caught by the existing stress tests and narrowed.
 - **Status:** VERIFIED COMPLETE at rule level.
 
 ## W7-6 · State writes take the row lock
 
 - **Change:** `intent.record_opt_out` and `customer_state.apply` lock the person row before rewriting `state` (the `state_lock` contract).
 - **Status:** VERIFIED COMPLETE at unit level.
+
+## W7-2 · The newest learned rules survive the combined cap
+
+- **Baseline:** prompt.py:216 sliced standing orders + learned rules at 1,800 characters from the front (INVESTIGATION 7.2).
+- **Change:** `prompt._cap_standing_orders` keeps the whole standing orders and the newest learned-rule lines within the cap.
+- **Tests:** `test_intelligence_w2_w7.py`; `test_standing_orders`, `test_learning_loops` unchanged.
+- **Status:** VERIFIED COMPLETE at unit level.
+
+## W7-3 · Four prompt contradictions resolved toward the code's own behaviour
+
+- **Baseline:** "ask EXACTLY ONE question" vs "not every message ends in a question"; a closer "gets ONE short warm sentence" vs the closer gate's silence; three competing length numbers; "ONE '?' per message" (INVESTIGATION 7.3, A §4.3).
+- **Change:** "at most one question, and only when it moves the order"; a bare closer "gets NOTHING back — reply with an empty message" (now honoured by W7-4); the LENGTH line on the message is the cap and overrides the prose numbers; "at most one '?', none when nothing moves the order". Block 0 changes once (one fleet-wide cache rewrite).
+- **Tests:** `test_brevity_contract`, `test_house_voice`, `test_meta_audit` updated to the new wording where they pinned the old.
+- **Status:** IMPLEMENTED BUT NOT VERIFIED (the real-model run measures questions per reply and length).
+
+## W9-1 · After-sale outcomes say whether the customer was told
+
+- **Change:** every `_celebrate` return carries `customer_told` (True / False / None for unknown delivery); "handled" no longer implies a customer heard anything (INVESTIGATION 9.1).
+- **Status:** VERIFIED COMPLETE at unit level; the standup and the dashboard can now read the distinction.
+
+## W10-3 · The usage row logs the model that actually answered
+
+- **Change:** `_served` prefers `llm.last_model` (set after a fallback) over the configured `_model`.
+- **Status:** VERIFIED COMPLETE at unit level.
+
+## W1-5 (amended) · Fail closed on infrastructure errors only
+
+- The first cut returned None on any exception, which also muted every unit test whose fake session raises an AttributeError. The takeover re-check now fails closed on `SQLAlchemyError`, `OSError` and timeouts (what a database outage raises) and assumes AI on a programming error inside the check, with a warning. Both branches tested.

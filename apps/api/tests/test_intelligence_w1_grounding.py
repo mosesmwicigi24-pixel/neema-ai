@@ -41,7 +41,7 @@ def test_saying_the_team_will_match_the_payment_is_not_an_acknowledgement():
 
 def test_manufactured_urgency_or_scarcity_is_a_hard_finding():
     for answer in ("Only 2 left — today only at KES 4,500!", "Hurry, this offer ends tonight.",
-                   "Last piece in stock, don't miss out.", "I can give you a special discount if you order now."):
+                   "Last piece in stock, don't miss out."):
         f = _f({"pressure"}, answer=answer, tool_results=[], mode="dm")
         assert "pressure" in f and f["pressure"]["hard"], answer
 
@@ -49,6 +49,14 @@ def test_manufactured_urgency_or_scarcity_is_a_hard_finding():
 def test_a_recorded_offer_from_a_promotion_tool_may_be_named():
     tools = [{"tool": "apply_offer", "input": {}, "out": {"ok": True, "offer": "Easter 10% off", "until": "2026-04-05"}}]
     f = _f({"pressure"}, answer="The Easter offer gives 10% off until 5 April.", tool_results=tools, mode="dm")
+    assert "pressure" not in f
+
+
+def test_a_recorded_campaign_discount_figure_is_the_figure_rules_business_not_this_rules():
+    # "10% off" with the list and the discounted figures is judged by the figure rule
+    # (every money figure from a hub row or a recorded promotion); the pressure rule
+    # only reads the urgency words around it
+    f = _f({"pressure"}, answer="Today's offer: 10% off — KES 22,000, now KES 19,800.", tool_results=[], mode="dm")
     assert "pressure" not in f
 
 

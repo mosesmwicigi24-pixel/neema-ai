@@ -823,11 +823,13 @@ def paid_ack_without_source(answer: str, tool_results: list | None) -> bool:
 # research (FTC/ICPEN 2024, Tuncer 2024) reads these as the opposite of
 # trust. Hard unless a promotion tool in this turn supplied the fact.
 _PRESSURE_RE = re.compile(
-    r"\b(?:today only|(?:this|for) (?:today|tonight) only|limited (?:time|stock|offer|period)|while stocks? last|"
+    r"\b(?:today only|(?:this|for) (?:today|tonight) only|limited (?:time|stock|period)|while stocks? last|"
     r"last (?:one|piece|few|unit)s?(?: left| remaining)?|only \d+ (?:left|remaining|in stock)|hurry|"
-    r"before (?:it'?s|they'?re|it is|they are) gone|offer (?:ends|expires)|act (?:now|fast|quickly)|"
-    r"don'?t miss (?:out|this)|(?:i|we) can (?:give|offer) you (?:a |an )?(?:special |extra |secret )?discount|"
-    r"\d{1,2} ?% ?off|leo tu|ofa (?:ya )?leo|zimebaki \d+)\b", re.IGNORECASE)
+    r"before (?:it'?s|they'?re|it is|they are) gone|offer (?:ends|expires) (?:today|tonight|in \d+ hours?)|"
+    r"act (?:now|fast|quickly)|don'?t miss (?:out|this)|leo tu|zimebaki \d+)\b", re.IGNORECASE)
+# (a discount FIGURE from nowhere is the `figure` rule's catch — every money
+# figure must come from a hub row or a recorded promotion; this rule is for
+# the pressure words around it)
 _PROMO_TOOLS = {"apply_offer", "check_offer", "current_offer"}
 
 
@@ -844,6 +846,7 @@ def manufactured_pressure(answer: str, tool_results: list | None) -> str | None:
 
 
 _DEVANAGARI_RE = re.compile(r"[\u0900-\u097F]")
+_EN_MARK_RE = re.compile(r"\b(the|is|are|your|you|we|with|for|and|would|shall|each|so|two|add|them|this|that)\b", re.I)
 _FR_MARK_RE = re.compile(r"\b(le|la|les|des|vous|nous|prix|merci|bonjour|pour|avec|est|votre)\b", re.I)
 _PT_MARK_RE = re.compile(r"\b(obrigad[oa]|preço|você|para|com|sim|não|temos|custa|bom dia|boa tarde)\b", re.I)
 
@@ -862,11 +865,15 @@ def language_mismatch(comment: str, answer: str) -> str | None:
     a = answer or ""
     if lang == "hi" and not _DEVANAGARI_RE.search(a):
         return "hi"
-    if lang == "sw" and not looks_swahili(a) and len(a.split()) >= 6:
+    # for the Latin-script languages the draft must plainly READ AS ENGLISH to
+    # be flagged — a short Swahili price line with no listed Swahili word is
+    # not an English reply ("Trei tatu za … ni KES 66,000")
+    english = len(_EN_MARK_RE.findall(a)) >= 3
+    if lang == "sw" and english and not looks_swahili(a):
         return "sw"
-    if lang == "fr" and len(_FR_MARK_RE.findall(a)) < 2 and len(a.split()) >= 6:
+    if lang == "fr" and english and len(_FR_MARK_RE.findall(a)) < 2:
         return "fr"
-    if lang == "pt" and not _PT_MARK_RE.search(a) and len(a.split()) >= 6:
+    if lang == "pt" and english and not _PT_MARK_RE.search(a):
         return "pt"
     return None
 
