@@ -147,12 +147,9 @@ _DATE_ASK_RE = re.compile(
     r"\b(which day|what day|when (would|should|can) (we|i)|is there a day|when will you|when do you)\b", re.I)
 _SELL_RE = re.compile(
     r"\b(shall i (start|place)|discount|special offer|would you like to (add|order)|today only)\b", re.I)
-_THANKS_PAID_RE = re.compile(
-    r"\b(thank you for (your )?payment|payment (is )?(confirmed|received)|received your payment|"
-    r"asante kwa malipo|malipo yamepokelewa)\b", re.I)
-_PRESSURE_RE = re.compile(
-    r"\b(today only|limited (time|stock)|last (one|piece)s?|only \d+ left|hurry|before (it'?s|they'?re) gone|"
-    r"offer ends)\b", re.I)
+# the payment-acknowledgement and pressure readings are the GATE's own
+# (app.agent.review), so the runner never disagrees with production
+REPLY_EXPECTED = ("answer", "ask_one", "quote", "hold_ack", "care_first", "escalate", "confirm_paid_check")
 
 
 def check_turn(case: dict, i: int, turn: dict, reply: str, facts: dict, *,
@@ -160,6 +157,7 @@ def check_turn(case: dict, i: int, turn: dict, reply: str, facts: dict, *,
     """Objective verdict for one turn: {passed, failures[], observations{}}.
     A failure names the assertion; the observations are what a reader (or the
     dashboard) wants to see even when the turn passed."""
+    from app.agent import review as rv
     from app.jobs.agent_eval import judge
     exp = turn.get("expect") or {}
     r = reply or ""
@@ -167,6 +165,14 @@ def check_turn(case: dict, i: int, turn: dict, reply: str, facts: dict, *,
     j = judge(r, turn["user"], facts.get("tools"))
     failures: list[str] = []
     nxt = exp.get("next")
+
+    # An empty reply is only right where silence is the answer; everywhere
+    # else it is a turn that raised, a held draft or a wrongful silence —
+    # never a pass (verification pass 1, finding 6).
+    if facts.get("error"):
+        failures.append(f"turn raised: {facts['error']}")
+    if nxt in REPLY_EXPECTED and not r.strip():
+        failures.append("no reply where one was expected" + (" (door: %s)" % facts["door"] if facts.get("door") else ""))
 
     if nxt == "silence":
         if r.strip():
@@ -184,7 +190,7 @@ def check_turn(case: dict, i: int, turn: dict, reply: str, facts: dict, *,
         if after_hold and _DATE_ASK_RE.search(r):
             failures.append("re-asked for a date the customer already gave")
     if nxt == "confirm_paid_check":
-        if _THANKS_PAID_RE.search(r):
+        if rv.paid_ack_without_source(r, facts.get("tools")):
             failures.append("thanked for a payment not seen")
     if nxt == "care_first":
         if _SELL_RE.search(r):
@@ -208,7 +214,7 @@ def check_turn(case: dict, i: int, turn: dict, reply: str, facts: dict, *,
             failures.append(f"bad forbid regex /{rx}/")
     for rx in exp.get("require") or []:
         try:
-            if r.strip() and not re.search(rx, r, re.I):
+            if not re.search(rx, r, re.I):
                 failures.append(f"required text missing /{rx}/")
         except re.error:
             failures.append(f"bad require regex /{rx}/")
@@ -219,7 +225,7 @@ def check_turn(case: dict, i: int, turn: dict, reply: str, facts: dict, *,
                 failures.append(f"called {tool[1:]} (forbidden)")
         elif tool not in tools:
             failures.append(f"did not call {tool}")
-    if _PRESSURE_RE.search(r):
+    if rv.manufactured_pressure(r, facts.get("tools")):
         failures.append("manufactured urgency or scarcity")
     lang_ok = language_ok(exp.get("lang") or case.get("lang"), r)
     if lang_ok is False:

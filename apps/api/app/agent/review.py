@@ -807,10 +807,33 @@ def _result_says_paid(out) -> bool:
     return False
 
 
+_PAID_ACK_NEG = frozenset("""
+    not n't never haven't hasn't havent hasnt yet once when until after if before pending awaiting
+    unless as soon upon confirm confirms confirmed? will
+""".split())
+
+
+def _conditional_or_negated(text: str, m) -> bool:
+    """The eight words around the match carry a negation or a condition —
+    "we have NOT received your payment yet", "ONCE your payment is
+    confirmed", "ships AS SOON AS the payment has been received"."""
+    words = re.findall(r"[a-z']+", text.lower())
+    pre = " ".join(re.findall(r"[a-z']+", text[:m.start()].lower())[-8:])
+    post = " ".join(re.findall(r"[a-z']+", text[m.end():m.end() + 40].lower())[:4])
+    around = f"{pre} {post}"
+    if re.search(r"\b(?:not|n't|never|haven't|hasn't|havent|hasnt|yet to|once|when|until|after|if|before|pending|"
+                 r"awaiting|unless|as soon as|upon)\b", around):
+        return True
+    return bool(re.search(r"\bnot yet\b|\bnot (?:yet )?(?:come|arrived|reflected|seen)\b", post)) or not words
+
+
 def paid_ack_without_source(answer: str, tool_results: list | None) -> bool:
-    """True when the draft acknowledges a payment and no order tool in this
-    turn reported a paid state."""
-    if not _PAID_ACK_RE.search(answer or ""):
+    """True when the draft acknowledges a payment as received and no order
+    tool in this turn reported a paid state. A negated or conditional
+    mention ("not received yet", "once it is confirmed") is not an
+    acknowledgement."""
+    m = _PAID_ACK_RE.search(answer or "")
+    if not m or _conditional_or_negated(answer or "", m):
         return False
     for e in tool_results or []:
         if str((e or {}).get("tool") or "") in _ORDER_TOOLS and _result_says_paid((e or {}).get("out")):
@@ -823,26 +846,54 @@ def paid_ack_without_source(answer: str, tool_results: list | None) -> bool:
 # research (FTC/ICPEN 2024, Tuncer 2024) reads these as the opposite of
 # trust. Hard unless a promotion tool in this turn supplied the fact.
 _PRESSURE_RE = re.compile(
-    r"\b(?:today only|(?:this|for) (?:today|tonight) only|limited (?:time|stock|period)|while stocks? last|"
-    r"last (?:one|piece|few|unit)s?(?: left| remaining)?|only \d+ (?:left|remaining|in stock)|hurry|"
-    r"before (?:it'?s|they'?re|it is|they are) gone|offer (?:ends|expires) (?:today|tonight|in \d+ hours?)|"
-    r"act (?:now|fast|quickly)|don'?t miss (?:out|this)|leo tu|zimebaki \d+)\b", re.IGNORECASE)
+    r"\b(?:today only|(?:this|for) (?:today|tonight) only|limited (?:time|stock|period) (?:only|offer)?|while stocks? last|"
+    r"last (?:one|piece|few|unit)s? (?:left|remaining|in stock|available)|only \d+ (?:left|remaining|in stock)|"
+    r"(?:^|[.!?]\s*|please\s+|so\s+)hurry(?: up)?\b|"
+    r"before (?:it'?s|they'?re|it is|they are) (?:all )?gone|offer (?:ends|expires) (?:today|tonight|in \d+ hours?)|"
+    r"act (?:now|fast|quickly)|don'?t miss (?:out|this)|leo tu|zimebaki \d+ tu)\b", re.IGNORECASE)
+_PRESSURE_NEG_RE = re.compile(r"\b(?:no|not|don'?t|do not|never|without|needn'?t|need not)\s+(?:\w+\s+){0,2}hurry", re.IGNORECASE)
 # (a discount FIGURE from nowhere is the `figure` rule's catch — every money
 # figure must come from a hub row or a recorded promotion; this rule is for
 # the pressure words around it)
-_PROMO_TOOLS = {"apply_offer", "check_offer", "current_offer"}
+_PROMO_TOOLS = {"apply_offer"}
+
+
+def _stock_figures(tool_results: list | None) -> set[int]:
+    """Quantities a tool reported this turn (stock, quantity, available, left)."""
+    out: set[int] = set()
+
+    def walk(v):
+        if isinstance(v, dict):
+            for k, x in v.items():
+                if str(k).lower() in ("stock", "quantity", "available", "in_stock", "left", "remaining", "qty") \
+                        and isinstance(x, (int, float)):
+                    out.add(int(x))
+                walk(x)
+        elif isinstance(v, list):
+            for x in v:
+                walk(x)
+    for e in tool_results or []:
+        walk((e or {}).get("out"))
+    return out
 
 
 def manufactured_pressure(answer: str, tool_results: list | None) -> str | None:
+    """The urgency or scarcity phrase the draft invented, or None: a recorded
+    offer (apply_offer) or a stock figure a tool returned ("only 2 left" with
+    a row saying stock: 2) is a fact, not pressure; "no hurry" is kindness."""
     m = _PRESSURE_RE.search(answer or "")
-    if not m:
+    if not m or _PRESSURE_NEG_RE.search(answer or ""):
         return None
+    phrase = m.group(0).strip(" .!?")
     for e in tool_results or []:
         out = (e or {}).get("out")
         if str((e or {}).get("tool") or "") in _PROMO_TOOLS and isinstance(out, dict) and (
                 out.get("offer") or out.get("ok") or out.get("campaign")):
             return None
-    return m.group(0)
+    nums = [int(n) for n in re.findall(r"\d+", phrase)]
+    if nums and set(nums) & _stock_figures(tool_results):
+        return None
+    return phrase
 
 
 _DEVANAGARI_RE = re.compile(r"[\u0900-\u097F]")
@@ -1222,14 +1273,16 @@ def rule_findings(comment: str, answer: str, seen: list,
         out.append({"kind": "language", "hard": False,
                     "text": f"they wrote in {_name} and the draft is not — answer in {_name}, "
                     "the same facts, the same length"})
-    if mode == "dm" and paid_ack_without_source(answer, tool_results):
+    if paid_ack_without_source(answer, tool_results):
         out.append({"kind": "paid_ack", "hard": True,
                     "text": "it thanks for or confirms a payment the hub has not shown as paid in this "
                     "turn — a payment is a claim until check_order_status says paid: say the team "
                     "will match it to the order, never that it was received"})
     _pressure = manufactured_pressure(answer, tool_results)
     if _pressure:
-        out.append({"kind": "pressure", "hard": True,
+        # SOFT for now (verification pass 1): one rewrite removes the words;
+        # it becomes hard once the live tally shows no false findings
+        out.append({"kind": "pressure", "hard": False,
                     "text": f"manufactured urgency, scarcity or a discount from nowhere (\"{_pressure}\") — "
                     "nothing is 'last' or 'today only' unless a tool said so; discounts come only from "
                     "a recorded offer"})

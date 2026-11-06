@@ -232,9 +232,15 @@ async def web_chat(body: WebChatIn, request: Request, db: AsyncSession = Depends
             await db.commit()
         return {"reply": ack, "session_id": sid, "handled_by": "ai"}
 
-    from app.agent.runtime import run_turn, build_llm, route_model, _hold_line
+    from app.agent.runtime import run_turn, build_llm, route_model, _hold_line, _still_ai
     try:
         reply = await run_turn(db, redis, wa_id, text, build_llm(model=route_model(text), purpose="web"))
+        # A colleague who took the chat while the turn composed is not talked
+        # over (the async channels re-check before sending; this one returns
+        # the reply in the response, so it re-checks here — W1, verification 1).
+        if await _still_ai("whatsapp", wa_id) is False:
+            return {"reply": "Thanks — one of our team will reply here shortly.",
+                    "session_id": sid, "handled_by": "human"}
         # An empty reply is the verifier holding a reply to an acknowledgement
         # (owner, 2026-09-25): on the website that is a folded-hands, never an
         # empty bubble.

@@ -182,3 +182,20 @@ def test_the_rater_packet_lists_only_judged_turns(tmp_path):
     eval_run.write_packet(record, str(path))
     text = path.read_text(encoding="utf-8")
     assert "Item 1 — c-1 turn 1" in text and "emotion: ___" in text and "Item 2" not in text
+
+
+def test_an_empty_reply_never_passes_where_a_reply_was_expected():
+    case = {"id": "c", "lang": "en", "categories": ["simple-enquiry"]}
+    for nxt in eval_run.REPLY_EXPECTED:
+        v = eval_run.check_turn(case, 0, _turn(nxt), "", {"tools": [], "review": None},
+                                opted_out=(nxt == "stop_ack"), intercept_mode="ai", after_hold=False)
+        assert not v["passed"] and any("no reply where one was expected" in f for f in v["failures"]), nxt
+    v = eval_run.check_turn(case, 0, _turn("answer", require=["stole"]), "", {"tools": [], "review": None},
+                            opted_out=False, intercept_mode="ai", after_hold=False)
+    assert any("required text missing" in f for f in v["failures"])
+    v = eval_run.check_turn(case, 0, _turn("answer"), "", {"tools": [], "review": None, "error": "boom"},
+                            opted_out=False, intercept_mode="ai", after_hold=False)
+    assert any("turn raised" in f for f in v["failures"])
+    v = eval_run.check_turn(case, 0, _turn("silence"), "", {"tools": [], "review": None},
+                            opted_out=False, intercept_mode="ai", after_hold=False)
+    assert v["passed"]

@@ -145,7 +145,7 @@ async def manychat_webhook(body: ManyChatIn, request: Request,
         return {"reply": reply, "handled_by": "human"}
 
     from app.agent.runtime import (run_turn, build_llm, route_model, _hold_line,
-                                   closer_gate, mark_closer_answered)
+                                   closer_gate, mark_closer_answered, _still_ai)
     # "Stop messaging me" is recorded and acknowledged once (W1, 2026-11-06 —
     # the relay had no opt-out check).
     from app.services import intent as _intent
@@ -173,6 +173,9 @@ async def manychat_webhook(body: ManyChatIn, request: Request,
                      channel=CHANNEL, external_id=sub_id),
             timeout=settings.manychat_reply_budget_s)
         await mark_closer_answered(redis, CHANNEL, sub_id, text)
+        if await _still_ai(CHANNEL, sub_id) is False:
+            # a colleague took the thread while the turn composed
+            return {"reply": _HUMAN_LINE, "handled_by": "human"}
     except asyncio.TimeoutError:
         # ManyChat is about to give up — hand back the resend line while the
         # cancelled turn's tool work (cart, captured facts) stays committed, so

@@ -699,7 +699,10 @@ _ACK_RE = re.compile(
     r"ok(?:ay)? now i (?:understand|get it|see)|understood|got it)[,.!\s]+)?"
     r"(?:(?:i'?m|i\s*am|am|just|i)\s*(?:saying|said|say)\s*)?"
     r"(thanks?(?:\s*(?:a\s*lot|so\s*much|a\s*million|very\s*much))?|thank\s*you(?:\s*(?:very\s*much|so\s*much|a\s*lot))?|"
-    r"thanks?\s*for\s*(?:the|your|that|this)?\s*\w+|much\s*appreciated|noted\s*with\s*thanks|cheers|"
+    r"thanks?\s*for\s*(?:the|your|that|this)?\s*(?:help|helping|understanding|info|information|invoice|quote|quotation|"
+    r"reply|replying|response|update|time|patience|support|price|prices|details|clarification|explanation|"
+    r"photos?|pictures?|pics|link|answer|quick\s*(?:reply|response)|prompt\s*(?:reply|response))|"
+    r"much\s*appreciated|noted\s*with\s*thanks|cheers|"
     r"asante(\s*sana)?([,\s]*mwanangu)?|shukran|merci(\s*beaucoup)?|obrigad[oa]|murakoze|mungu\s*akubariki(\s*sana)?([,\s]*mwanangu)?|"
     r"god\s*bless(\s*you)?|que\s*dieu\s*vous\s*(?:b[ée]nisse|garde)|deus\s*aben[çc]oe|fique\s*com\s*deus|thank\s*you\s*ji|"
     r"thx|ty|amen|ok(?:ay|ey|k)?|kk|sawa(?:\s*sawa)?|poa|"
@@ -1223,6 +1226,13 @@ async def _gate_failed_closed(reply: str, *, db, redis, channel: str, key: str,
         from app.agent import review as _rv
         await _rv.record_verdict(redis, "held", kinds=["gate_error"],
                                  model=getattr(settings, "review_model_light", "") or "")
+    except Exception:
+        pass
+    try:
+        # the health endpoint and the standup see it as a failing turn — loud,
+        # so a bug in rule code cannot hold replies fleet-wide in silence
+        from app.services.agent_health import record_turn_failure
+        await record_turn_failure(redis, key, RuntimeError(f"reply gate error: {error}"))
     except Exception:
         pass
     if public_comment or closer:
@@ -2691,6 +2701,7 @@ async def _run_and_send(redis, wa_id: str, text: str, media: dict | None = None,
                     # A decision, not a miss: the missed-reply sweep leaves it be
                     # (as on Messenger) instead of re-running the silence.
                     await _mark_silenced(redis, "whatsapp", wa_id)
+                    await mark_closer_answered(redis, "whatsapp", wa_id, text)   # silence IS the answer
                     return False
                 if await _is_echo(db, "whatsapp", wa_id, reply):
                     _log.info("echo guard: identical reply within minutes suppressed for %s", wa_id)
@@ -3019,6 +3030,7 @@ async def _run_and_send_meta(redis, channel: str, external_id: str, text: str,
                     _log.info("silence on %s for %s: nothing to send (a closer, or a held "
                               "acknowledgement)", channel, external_id)
                     await _mark_silenced(redis, channel, external_id)
+                    await mark_closer_answered(redis, channel, external_id, text)
                     return True
                 if await _is_echo(db, channel, external_id, reply):
                     _log.info("echo guard: identical reply within minutes suppressed for %s/%s",

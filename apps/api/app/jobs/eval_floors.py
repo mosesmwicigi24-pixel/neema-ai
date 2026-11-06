@@ -110,13 +110,14 @@ def _cli() -> None:
     g.add_argument("--held-out", action="store_true", help="the held-out half only (reporting)")
     g.add_argument("--dev", action="store_true", help="the development half only")
     g.add_argument("--all", action="store_true", help="every case (default)")
+    ap.add_argument("--file", help="score one case file only (e.g. blind_heldout.jsonl), ignoring the split")
     ap.add_argument("--json", help="write the full result here")
     ap.add_argument("--misses", action="store_true", help="print every miss")
     args = ap.parse_args()
-    cases = eval_cases.load()
+    cases = eval_cases.load(args.file) if args.file else eval_cases.load()
     dev, held = eval_cases.split(cases)
-    chosen = held if args.held_out else dev if args.dev else cases
-    label = "held-out" if args.held_out else "dev" if args.dev else "all"
+    chosen = cases if args.file else held if args.held_out else dev if args.dev else cases
+    label = f"file:{args.file}" if args.file else "held-out" if args.held_out else "dev" if args.dev else "all"
     cov = eval_cases.coverage(chosen)
     res = score(chosen)
     print(f"case set: {cov['cases']} cases / {cov['turns']} turns ({label}); "

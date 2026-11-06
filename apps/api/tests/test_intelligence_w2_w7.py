@@ -5,6 +5,8 @@ a photo stays in history, a complaint earns the care-first length, language
 continuity has a deterministic check, state writes take the lock."""
 from __future__ import annotations
 
+import pytest
+
 import inspect
 
 from app.agent import review as rv
@@ -89,3 +91,20 @@ def test_the_standing_orders_cap_keeps_the_newest_learned_rules():
     assert out.startswith(orders)                       # the standing orders are whole
     assert "- rule 39:" in out and "- rule 0:" not in out   # newest kept, oldest dropped
     assert _cap_standing_orders("short", 1800) == "short"
+
+
+@pytest.mark.asyncio
+async def test_apply_lifts_a_hold_when_the_customer_asks_a_question():
+    """Behaviour, not source: a deal on hold, a real question, the hold is gone."""
+    import types
+
+    class _DB:
+        async def commit(self):
+            pass
+    deal = types.SimpleNamespace(next_action={"kind": "follow_up", "hold": {"until": "2026-11-13T07:00:00", "said": "needs_time"}},
+                                 blocking="Asked for time — until 13 Nov")
+    conv = types.SimpleNamespace(person_id=None)
+    changed = await cs.apply(_DB(), conv, deal, {"customer_said": "none"}, source="floor",
+                             inbound_text="How much is the stole?")
+    assert changed.get("hold_cleared") is True
+    assert "hold" not in (deal.next_action or {}) and deal.blocking is None

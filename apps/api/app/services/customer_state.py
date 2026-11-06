@@ -45,19 +45,27 @@ _HOLD_LABEL = {"needs_time": "Asked for time", "comparing": "Comparing prices",
 # ── the floor ────────────────────────────────────────────────────────────────
 _NEEDS_TIME_RE = re.compile(
     r"\b(?:get back to you|come back to you|let you know|let me think|think about it|"
-    r"not (?:yet )?ready|not now|not today|later on|no rush|give me (?:some )?time|"
+    r"not (?:yet )?ready|not now|later on|give me (?:some )?time|"
     r"i(?:'ll| will) (?:revert|decide|come back|be back|get back|sort it|arrange)|we(?:'ll| will) (?:revert|come back|get back)|"
-    r"let me (?:revert|pray|sleep on it|arrange|organi[sz]e|think|sort|confirm|check)\b[^.?!\n]{0,40}|"
-    r"(?:contact|call|message|text|ping|reach|get back to|check with) (?:me|us)\b[^.?!\n]{0,24}?\b(?:on|tomorrow|next|after|later|in|by|around|at|when|once)\b|"
-    r"(?:wait|hold on|hold)\b[^.?!\n]{0,20}?\b(?:till|until|after|for now)|hold on|on second thoughts?|"
+    r"let me (?:revert|pray(?: about| over)?|sleep on it|think(?: about| it over)?|arrange the (?:money|funds|cash)|"
+    r"organi[sz]e the (?:money|funds|cash)|sort out the (?:money|funds|cash))\b|"
+    r"(?:contact|call|message|text|ping|reach|get back to|check with) (?:me|us)\b[^.?!\n]{0,24}?"
+    r"\b(?:tomorrow|tonight|next (?:week|month|year|monday|tuesday|wednesday|thursday|friday|saturday|sunday)|"
+    r"after (?:the |our )?(?:service|meeting|church|committee|easter|christmas|lent|\d{1,2} ?(?:am|pm)|lunch|work)|"
+    r"later (?:today|this week|in the (?:week|month|day))|in (?:a|an|\d+|two|three|four) (?:day|week|month|hour)s?|"
+    r"on (?:monday|tuesday|wednesday|thursday|friday|saturday|sunday|the \d{1,2}(?:st|nd|rd|th)?)|"
+    r"by (?:monday|tuesday|wednesday|thursday|friday|saturday|sunday|the \d{1,2}(?:st|nd|rd|th)?|end of)|"
+    r"when (?:we|i|the|it)|once (?:we|i|the|it))\b|"
+    r"(?:wait|hold on|hold)\b[^.?!\n]{0,20}?\b(?:till|until|after|for now)|on second thoughts?|"
     r"(?:away|out|travell?ing|abroad) (?:till|until)|(?:later|next) (?:in the year|month|year|term|quarter)|"
-    r"nitakujulisha|nitarudi|nitakuambia|nitawasiliana|nipe muda|si sasa|baadaye|mwakani|ngoja|subiri|"
+    r"nitakujulisha|nitarudi|nitakuambia|nitawasiliana|nipe muda|si sasa|baadaye|mwakani|"
     r"je reviens vers vous|je vous tiens au courant|je vous recontacte|laissez[- ]moi r[ée]fl[ée]chir|pas (?:encore|maintenant)|"
     r"on va voir|vamos ver|depois (?:eu )?aviso|mais tarde|"
     r"(?:^|\b)will (?:revert|come back|get back|confirm|update you|let you know)|"
     r"je (?:vous )?(?:reviens|reviendrai|r[ée]fl[ée]chis|vous [ée]cris demain)|volto a falar|vou pensar|"
     r"soch ke|sochta hoon|soch kar|don'?t send (?:it|them|anything) yet|not yet,? (?:i|we) need to|"
-    r"(?:fundrais|raising (?:the )?(?:money|funds)|collecting (?:the )?money))\b",
+    r"(?:fundrais|raising (?:the )?(?:money|funds)|collecting (?:the )?money)|"
+    r"(?:budget|funds|money) (?:is |are )?not (?:yet )?(?:approved|ready|available|in|released))\b",
     re.IGNORECASE)
 _COMPARING_RE = re.compile(
     r"\b(?:compar\w*|other (?:supplier|shop|price|quot\w+)s?|check (?:other )?prices|shop around|"
@@ -65,20 +73,23 @@ _COMPARING_RE = re.compile(
     r"wanaouza|maduka mengine|comparer|d'autres (?:prix|fournisseurs))\b",
     re.IGNORECASE)
 _CONSULT_BODY = (
-    r"(?:bishop|pastor|reverend|priest|father|husband|wife|spouse|committee|board|council|church|parish|"
-    r"team|family|boss|director|treasurer|elders?|deacons?|vestry|pcc|synod|diocese|chairman|chairperson|"
-    r"chair|choir|leadership|leaders|management|archdeacon|dean|secretary|congregation|members|finance|"
-    r"askofu|mchungaji|padri|mume|mke|kamati|kanisa|familia|bodi|wazee|viongozi|uongozi|mwenyekiti|kwaya|"
+    r"(?:bishop|pastor|reverend|priest|father|husband|wife|spouse|committee|board|council|parish|"
+    r"boss|director|treasurer|elders?|deacons?|vestry|pcc|synod|diocese|chairman|chairperson|"
+    r"chair|choir(?: master| leader)?|leadership|leaders|management|archdeacon|dean|secretary|congregation|finance|"
+    r"askofu|mchungaji|padri|mume|mke|kamati|familia|bodi|wazee|viongozi|uongozi|mwenyekiti|kwaya|"
     r"[ée]v[êe]que|pasteur|abb[ée]|cur[ée]|monseigneur|mari|femme|comit[ée]|paroisse|conseil(?: paroissial)?|"
-    r"bispo|padre|comiss[ãa]o|conselho|igreja|his lordship|his grace|the reverend|mkutano|wakubwa|him|her|them)"
+    r"bispo|padre|comiss[ãa]o|conselho|igreja|his lordship|his grace|the reverend|mkutano|wakubwa)"
 )
 _CONSULTING_RE = re.compile(
     r"\b(?:consult|ask|discuss(?: it| this)? with|talk (?:to|with)|check with|confirm with|present (?:it |this |to )?to|"
-    r"take (?:it|this) to|tell|inform|pass (?:it|this) on to|run (?:it|this) by|share (?:it|this) with|bring (?:it|this) to|"
-    r"wait(?:ing)? for|needs? (?:the )?(?:approval|sign[- ]?off|blessing) (?:of|from)|see what|hear from|"
+    r"take (?:it|this) to (?:the |our |my )?|pass (?:it|this) on to|run (?:it|this) by|share (?:it|this) with|"
+    r"needs? (?:the )?(?:approval|sign[- ]?off|blessing) (?:of|from)|see what|hear from|"
     r"nimuulize|nitamuuliza|niulize|nimwambie|niwaambie|nipeleke|nitamshow|nimshow|tuzungumze na|niongee na|baada ya|"
     r"demander [àa]|en parler [àa]|je vais en parler|consulter|je transmets [àa]|je dois consulter|vou falar com|falar com|perguntar ao)\b"
     r"[^.?!\n]{0,40}?\b" + _CONSULT_BODY + r"\b"
+    # "check with him / discuss it with them / ask my wife": a person, by pronoun or kin
+    r"|\b(?:consult|ask|discuss(?: it| this)? with|talk (?:to|with)|check with|confirm with|run (?:it|this) by)\s+"
+    r"(?:him|her|them|my (?:wife|husband|family|team|boss|people)|the (?:team|family|church|others))\b"
     # the body first: "the committee will decide", "bishop anasema tungoje"
     r"|\b(?:the |our |my )?" + _CONSULT_BODY + r"\b[^.?!\n]{0,30}?\b(?:will|must|has to|have to|needs? to|is yet to|are yet to|"
     r"wata|ata|ana|anasema|wanasema|itabidi|doit|doivent|vai|vão) (?:decide|approve|confirm|meet|discuss|sign|see|review|"
@@ -89,12 +100,17 @@ _PAID_RE = re.compile(
     r"\b(?:i(?:'ve| have)? (?:already |just )?paid|(?:just )?paid (?:by|via|with|through|using) \w+|"
     r"payment (?:is )?(?:done|made|sent|complete[d]?|went through)|(?:i )?sent the money|money sent|"
     r"(?:m-?pesa|airtel(?: money)?|mobile money) (?:deducted|went through|is done|has gone)|"
-    r"(?:here(?:'s| is)|see|attached) (?:the |my )?(?:m-?pesa |payment |transfer )?(?:screenshot|receipt|confirmation)|"
+    r"(?:here(?:'s| is)|see|attached) (?:the |my )?(?:m-?pesa|payment|transfer|transaction) (?:screenshot|receipt|confirmation|message|sms)|"
+    r"(?:screenshot|receipt) of (?:the |my )?(?:payment|m-?pesa|transfer|transaction)|"
     r"nimelipa|nimeshalipa|nimetuma pesa|tumelipa|j'ai (?:d[ée]j[àa] )?pay[ée]|paiement effectu[ée]|"
-    r"j[áa] paguei|paguei|(?:has|have) paid|(?:i(?:'ve| have) )?sent (?:the |my )?(?:half|deposit|balance|full amount|money|cash|payment|\d[\d,]*)|"
-    r"sent (?:via|through|by) \w+|nimetuma|tumetuma|nimeshatuma)\b"
-    # a message that IS the claim: "Paid", "Done, paid", "Paid. Mpesa ref …", "sent", "nimetuma"
-    r"|^(?:ok(?:ay)?[,.!]? |done[,.!]? |yes[,.!]? )?(?:paid|sent|nimelipa|nimetuma|pay[ée]|paguei|enviado|envoy[ée])\b",
+    r"j[áa] paguei|paguei|(?:has|have) paid|(?:i(?:'ve| have) )?sent (?:the |my )?(?:half|deposit|balance|full amount|money|cash|payment|\d[\d,]*)\b|"
+    r"sent (?:it |the money |\d[\d,]* )?(?:via|through|by) (?:m-?pesa|mukuru|western ?union|moneygram|airtel|bank|card|paybill|till)|"
+    r"nimetuma (?:pesa|hela|malipo|m-?pesa)|tumetuma (?:pesa|hela|malipo)|nimeshatuma (?:pesa|hela)|"
+    r"(?:received|got|seen) my (?:payment|money|m-?pesa|transfer))\b"
+    # a message that IS the claim: "Paid", "Done, paid", "Paid. Mpesa ref …", "Sent 2500", "nimetuma"
+    r"|^(?:ok(?:ay)?[,.!]? |done[,.!]? |yes[,.!]? )?paid\b"
+    r"|^(?:ok(?:ay)?[,.!]? |done[,.!]? )?sent (?:\d|the money|the payment|the deposit|the half|via|by|through)"
+    r"|^(?:ok(?:ay)?[,.!]? |done[,.!]? |yes[,.!]? )?(?:sent|nimetuma|nimelipa|pay[ée]|paguei|enviado|envoy[ée])[.!,]*(?:\s*(?:cheki|check))?[.!]*$",
     re.IGNORECASE)
 # "I will pay tomorrow", "I have not paid yet", "sijalipa": not a claim.
 _PAID_NEG_RE = re.compile(
@@ -104,16 +120,22 @@ _PAID_NEG_RE = re.compile(
     re.IGNORECASE)
 _READY_RE = re.compile(
     r"\b(?:go ahead|proceed|place the order|i(?:'ll| will) take (?:it|them|one|two|three|\d+|the|that|this|both)|"
-    r"let's do it|confirm(?:ed)? the order|go for it|continue|invoice me|send (?:me )?(?:the |an |a )?(?:invoice|pro ?forma)|"
-    r"approved|i(?:'ll| will) pay (?:now|today|via|by|through|with)|paying now|sending (?:the money |it )?now|"
+    r"let's do it|confirm(?:ed)? the order|go for it|invoice me|send (?:me )?(?:the |an |a )?(?:invoice|pro ?forma)|"
+    r"^(?:ok(?:ay)?[,.!]? |yes[,.!]? )?approved\b|(?:it(?:'s| is)|has been|budget(?: is)?|order(?: is)?|they(?:'ve| have)|he has|she has) approved|"
+    r"i(?:'ll| will) pay (?:now|today|via|by|through|with)|paying now|sending (?:the money |it )?now|"
     r"sort me out|i(?:'ll| will) order|we(?:'ll| will) (?:take|order|go with)|book (?:it|them|one)|"
     r"endelea|nachukua|tuendelee|weka oda|nitume (?:m-?pesa|pesa)|natuma|tuma (?:details|namba|maelezo)|"
     r"(?:send|tuma) (?:me )?(?:the |your )?(?:till|paybill|pay ?bill|account|m-?pesa) ?(?:number|no\.?|details)?|nilipe|"
     r"allons-y|je (?:le |la |les )?prends|je confirme|c'est bon pour moi|pode (?:mandar|enviar|fazer)|vamos fechar|fechado)\b",
     re.IGNORECASE)
 # readiness that stands even beside a question ("Approved. How do we pay?")
+# or a courtesy ("No rush, go ahead and make it")
 _READY_STRONG_RE = re.compile(
-    r"\b(?:approved|go ahead|place the order|i(?:'ll| will) take (?:it|them|one|\d+)|proceed|confirm(?:ed)? the order)\b",
+    r"^(?:ok(?:ay)?[,.!]? |yes[,.!]? )?approved\b|\b(?:go ahead|place the order|i(?:'ll| will) take (?:it|them|one|\d+)|proceed|confirm(?:ed)? the order)\b",
+    re.IGNORECASE)
+# "not approved yet", "once the bishop approves", "send the invoice when approved": not readiness
+_READY_NEG_RE = re.compile(
+    r"\b(?:not|hasn'?t|haven'?t|isn'?t|yet to be|once|when|if|after|until|unless|before)\b[^.?!\n]{0,24}\bapprov",
     re.IGNORECASE)
 _COMPLAINT_RE = re.compile(
     r"\b(?:complain\w*|disappoint\w*|refund|late|poor quality|imechelewa|kuchelewa|r[ée]clamation|rembours\w+|"
@@ -122,14 +144,20 @@ _COMPLAINT_RE = re.compile(
 _COMPLAINT_STRONG_RE = re.compile(
     r"\b(?:wrong (?:one|item|size|colour|color|product|order)|damaged|torn|broken|cracked|crushed|bent|stained|faded|"
     r"coming off|falling apart|never (?:arrived|came)|hasn'?t arrived|not (?:yet )?(?:arrived|received|delivered)|"
-    r"still waiting|been waiting|waiting since|nobody (?:replies|answers|responds)|no ?one (?:replies|answers|responds)|"
+    r"still waiting for (?:my|the) (?:order|parcel|delivery|reply|answer|refund|goods)|"
+    r"been waiting (?:for|since) (?:a reply|an answer|my order|the order|\d+ (?:days|weeks|hours|months))|"
+    r"waiting since (?:morning|yesterday|monday|tuesday|wednesday|thursday|friday|saturday|sunday|last week)|"
+    r"nobody (?:replies|answers|responds)|no ?one (?:replies|answers|responds)|"
     r"is anyone there|expected better|rude|ridiculous|unacceptable|disgrace\w*|came without|is missing|"
-    r"(?:has|have) not moved|hasn'?t moved|supposed to (?:come|arrive|be here)|i ordered \w+(?: \w+)? (?:but|and) (?:you|got|received|they|it)|"
+    r"(?:has|have) not moved|hasn'?t moved|supposed to (?:come|arrive|be here)|"
+    r"i ordered \w+(?: \w+)? (?:but|and) (?:you sent|got|received|they sent|it (?:came|arrived|is))|"
     r"still (?:isn'?t|is not|hasn'?t|has not) (?:here|arrived|come)|(?:n'?t|not) fair|useless|hopeless|pathetic|"
     r"you sent (?:a|an|the|me) \w+[^.!?\n]{0,40}\bi ordered\b|instead of (?:the|what) \w+[^.!?\n]{0,30}\b(?:ordered|asked|paid)|"
-    r"(?:the )?box (?:has|had|contains) (?:only )?\d+|(?:only|just) \d+ (?:arrived|came|delivered)|"
+    r"box (?:has|had|contains) only \d+|only \d+ (?:arrived|came|were delivered|in the box)|short by \d+|\d+ (?:are|is) missing|"
+    r"ordered \d+ [^.!?\n]{0,40}\b(?:box|carton|parcel|package) (?:has|had|contains|came with) (?:only )?\d+|"
     r"(?:are|is|came|arrived|got|received) [^.!?\n]{0,40}, (?:but )?i ordered\b|"
-    r"you said you(?:'d| would) [^.!?\n]{0,40}\b(?:by|before) (?:yesterday|today|now|\w+day)|third time|3rd time|"
+    r"you said you(?:'d| would) [^.!?\n]{0,40}\b(?:by|before) (?:yesterday|today|now|\w+day)|"
+    r"(?:third|3rd|second|2nd|fourth|4th|fifth) time (?:i(?:'m| am) |i have |we have |of )?(?:asking|writing|messaging|complaining|following up|calling)|"
     r"haijafika|hajafika|sijapokea|imevunjika|mbovu|imeharibika|d[ée]çu|cass[ée]|pas reçu|toujours pas|"
     r"n'ai rien reçu|inadmissible|inacceptable|quebrad\w*|n[ãa]o recebi|ainda n[ãa]o chegou)\b", re.IGNORECASE)
 
@@ -144,11 +172,15 @@ def floor(text: str | None, *, now: datetime | None = None) -> dict | None:
     from app.services.intent import is_opt_out
     if is_opt_out(t):
         return {"customer_said": "stop", "matched": "opt-out"}
+    paid = _PAID_RE.search(t) if not _PAID_NEG_RE.search(t) else None
     strong = _COMPLAINT_STRONG_RE.search(t)
-    if strong:
+    if strong and not (paid and "?" in t):        # "Have you not received my payment?" is a claim
         return {"customer_said": "complaint", "matched": strong.group(0)}
-    if _PAID_RE.search(t) and not _PAID_NEG_RE.search(t):
-        return {"customer_said": "paid_claim", "matched": _PAID_RE.search(t).group(0)}
+    if paid:
+        return {"customer_said": "paid_claim", "matched": paid.group(0)}
+    if _READY_STRONG_RE.search(t) and not _READY_NEG_RE.search(t) and not _CONSULTING_RE.search(t):
+        # "No rush, go ahead and make it": the courtesy does not undo the go-ahead
+        return {"customer_said": "ready", "matched": _READY_STRONG_RE.search(t).group(0)}
     if _COMPLAINT_RE.search(t) and "?" not in t:
         return {"customer_said": "complaint", "matched": _COMPLAINT_RE.search(t).group(0)}
     until = None
@@ -162,11 +194,14 @@ def floor(text: str | None, *, now: datetime | None = None) -> dict | None:
     for state, rx in (("consulting", _CONSULTING_RE), ("comparing", _COMPARING_RE),
                       ("needs_time", _NEEDS_TIME_RE)):
         m = rx.search(t)
-        # "if I compare two sizes?" / "can you call me tomorrow?" ask us something
-        if m and not (state in ("comparing", "needs_time") and "?" in t and until is None):
+        # "if I compare two sizes?" / "can you call me tomorrow?" / "what do I
+        # tell the bishop?" ask us something
+        if m and not ("?" in t and until is None):
             return {"customer_said": state, "matched": m.group(0),
                     "hold_until": until.isoformat() if until else None}
     ready = _READY_RE.search(t)
+    if ready and _READY_NEG_RE.search(t):
+        ready = None
     if ready and ("?" not in t or _READY_STRONG_RE.search(t)):
         return {"customer_said": "ready", "matched": ready.group(0),
                 "hold_until": until.isoformat() if until else None}
@@ -219,6 +254,10 @@ _FR_WORDS = frozenset("""
     monseigneur transmets arrête arrêtez m'écrire blanc noir rouge vert violet total garde dieu
 """.split())
 _NEUTRAL_WORDS = frozenset("ok okay k kk yes no hi hello hey noted amen sawa poa".split())
+_SHOP_NOUNS = frozenset("""
+    size colour color white black purple red green blue gold silver delivery pickup collect pay paid payment
+    price order invoice till paybill mpesa thika nairobi mombasa kisumu nakuru eldoret
+""".split())
 _EN_WORDS = frozenset("""
     the is how much price do you have want need please order can i my for and what when will thanks
     thank ok okay noted call me we be blessed bless god too expensive yes no not send let know after
@@ -248,8 +287,10 @@ def guess_language(text: str | None) -> str | None:
     en = toks & _EN_WORDS
     # Swahili by its verb shape (ni-ta-kujulisha, tu-me-pata) and its calendar
     # words — the short word list in voice.py misses a sentence with no price in it.
+    # Product nouns a Swahili speaker borrows ("Sawa size 42", "Nitachukua 2,
+    # black", "Asante, delivery Thika") are not evidence of English.
     sw_shape = sum(1 for w in toks if _SW_VERB_RE.match(w) or w in _SW_EXTRA)
-    if sw_shape >= 1 and (sw_shape >= 2 or not en):
+    if sw_shape >= 1 and (sw_shape >= 2 or not (en - _SHOP_NOUNS)):
         return "sw"
     fr, pt, hi = toks & _FR_WORDS, toks & _PT_WORDS, toks & _HI_ROMAN
     # romanised Hindi/Hinglish: "chasuble ka price kya hai"

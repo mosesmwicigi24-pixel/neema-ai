@@ -6,6 +6,8 @@ from __future__ import annotations
 
 import inspect
 
+import pytest
+
 from app.agent import review as rv
 
 
@@ -39,11 +41,11 @@ def test_saying_the_team_will_match_the_payment_is_not_an_acknowledgement():
     assert "paid_ack" not in f
 
 
-def test_manufactured_urgency_or_scarcity_is_a_hard_finding():
+def test_manufactured_urgency_or_scarcity_is_a_finding():
     for answer in ("Only 2 left — today only at KES 4,500!", "Hurry, this offer ends tonight.",
                    "Last piece in stock, don't miss out."):
         f = _f({"pressure"}, answer=answer, tool_results=[], mode="dm")
-        assert "pressure" in f and f["pressure"]["hard"], answer
+        assert "pressure" in f and f["pressure"]["hard"] is False, answer     # soft until the live tally is clean
 
 
 def test_a_recorded_offer_from_a_promotion_tool_may_be_named():
@@ -78,3 +80,42 @@ def test_the_meta_door_answers_502_when_capture_fails():
     src = inspect.getsource(mw.receive_webhook)
     assert "acking anyway" not in src.split("_capture_comment_events")[0]
     assert "return Response(status_code=502)" in src
+
+
+# ── verification pass 1: correct replies are not held ───────────────────────
+
+@pytest.mark.parametrize("answer", [
+    "We have not received your payment yet — could you share the M-Pesa code?",
+    "Once your payment is confirmed, we start production.",
+    "Your order ships as soon as the payment has been received.",
+    "We received your M-Pesa? Not yet — the team checks and confirms here.",
+])
+def test_a_negated_or_conditional_payment_mention_is_not_an_acknowledgement(answer):
+    assert not rv.paid_ack_without_source(answer, []), answer
+
+
+def test_the_paid_acknowledgement_rule_runs_in_comment_mode_too():
+    f = _f({"paid_ack"}, answer="Thank you for your payment, we start the work!", tool_results=[], mode="comment")
+    assert "paid_ack" in f
+
+
+@pytest.mark.parametrize("answer", [
+    "No hurry, take your time.", "Please do not hurry, the offer is open all month.",
+    "The last one we sent you was purple, same again?", "In the last few days we restocked the gold cope.",
+    "The last unit of the previous batch was sold; a new batch arrives Monday.",
+])
+def test_kindness_and_plain_facts_are_not_pressure(answer):
+    assert rv.manufactured_pressure(answer, []) is None, answer
+
+
+def test_a_stock_figure_a_tool_returned_is_a_fact_not_pressure():
+    rows = [{"tool": "search_catalog", "input": {}, "out": {"results": [{"name": "Cassock", "stock": 2}]}}]
+    assert rv.manufactured_pressure("Only 2 left in stock in size 46.", rows) is None
+    assert rv.manufactured_pressure("Only 2 left in stock in size 46.", []) == "Only 2 left"
+
+
+def test_pressure_is_soft_for_now_and_the_exemption_list_names_real_tools():
+    f = _f({"pressure"}, answer="Hurry, only 3 left!", tool_results=[], mode="dm")
+    assert "pressure" in f and f["pressure"]["hard"] is False
+    from app.agent import tools as t
+    assert rv._PROMO_TOOLS <= set(t._HANDLERS)

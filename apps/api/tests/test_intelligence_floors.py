@@ -39,7 +39,7 @@ def test_a_future_or_negated_payment_is_not_a_claim(text):
 
 
 @pytest.mark.parametrize("text", [
-    "I'll take one. Delivery to Thika town", "Ok go for it", "Size 42 is right, continue",
+    "I'll take one. Delivery to Thika town", "Ok go for it",
     "Please invoice me for the cassock", "Approved! send invoice", "Approved. How do we pay from Nigeria?",
     "ok sort me out, I'll pay via Mpesa", "sawa, nitume mpesa", "sawa, tuma till number", "Yes that one. Send the till.",
     "Je confirme, je paie par Western Union demain.",
@@ -173,3 +173,56 @@ def test_the_developer_negatives_file_has_no_misses():
     from app.jobs import eval_cases, eval_floors
     res = eval_floors.score(eval_cases.load("developer_negatives.jsonl"))
     assert res["misses"] == [], res["misses"]
+
+
+# ── verification pass 1: the misfires it reproduced must stay fixed ─────────
+
+@pytest.mark.parametrize("text", [
+    "Hold on, I am sending the photo now", "Ngoja nitume picha", "Subiri kidogo",
+    "Let me check the colour options you have", "Let me confirm the address: it is Thika",
+    "Call me on 0722123456", "Text me the details on WhatsApp", "Message me in English please",
+    "Not today, tomorrow please", "Continue with the gold trim", "Sent you the measurements",
+    "Here is the screenshot of the cassock I want", "Nimetuma picha ya kasoki", "Tell them the price is fine",
+    "Please tell him I will collect on Monday", "Take it to the church office", "Waiting for the church van to collect",
+    "What do I tell the bishop about delivery?", "I have been waiting to buy this for years!",
+    "The box has 50 wafers, I need 2 boxes", "This is the third time I am ordering from you, love it",
+    "I ordered last year and you delivered on time, I want the same",
+])
+def test_ordinary_buying_messages_are_not_holds_claims_or_complaints(text):
+    assert said(text) is None, (text, said(text))
+
+
+def test_a_courtesy_does_not_undo_a_go_ahead():
+    assert said("No rush, go ahead and make it") == "ready"
+    assert said("No rush on the delivery, I will take 2") == "ready"
+
+
+def test_an_unapproved_budget_is_not_readiness():
+    assert said("The budget is not approved yet") != "ready"
+    assert said("The bishop has not approved it") != "ready"
+    assert said("Send me the invoice once the bishop approves") != "ready"
+
+
+def test_a_question_about_our_receipt_of_their_payment_is_a_claim():
+    assert said("Have you not received my payment?") == "paid_claim"
+
+
+@pytest.mark.parametrize("text", ["Please stop messaging me about the cups, I want the trays", "Remove me from the group",
+                                  "Remove me from the group chat about the choir"])
+def test_an_opt_out_needs_the_messaging_object_not_a_topic(text):
+    assert not is_opt_out(text), text
+
+
+@pytest.mark.parametrize("text", ["Remove me from your list", "Remove my number please", "Stop messaging me, please"])
+def test_a_real_removal_request_is_still_an_opt_out(text):
+    assert is_opt_out(text), text
+
+
+@pytest.mark.parametrize("text", ["Thanks for the delay", "Thanks for nothing", "Thanks for nothing, still waiting"])
+def test_sarcastic_thanks_is_not_a_closer(text):
+    assert not is_closer(text), text
+
+
+@pytest.mark.parametrize("text", ["Sawa size 42", "Nitachukua 2, black", "Asante, delivery Thika"])
+def test_swahili_with_borrowed_shop_nouns_stays_swahili(text):
+    assert guess_language(text) == "sw", text

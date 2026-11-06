@@ -1596,6 +1596,16 @@ async def _create_order(args: dict, ctx: ToolContext) -> dict:
     }
     if _promise_unread:
         result["offer_unverified"] = True
+        try:
+            await _team_note(ctx, kind="offer_unverified",
+                             title="⚠️ Promised offer could not be applied — confirm the amount",
+                             text=(f"⚠️ ORDER #{pushed.get('order_number')} placed WITHOUT checking the offer this "
+                                   "customer was promised (the offer store was unreachable). Please confirm any "
+                                   "discount with them before invoicing; Neema has told them a colleague confirms "
+                                   "the final amount."),
+                             body=f"order #{pushed.get('order_number')} — {ctx.wa_id}")
+        except Exception as exc:
+            _log.warning("offer-unverified team note failed for %s: %s", ctx.wa_id, exc)
         result["next_step"] = ("Say the order is placed and that a colleague will confirm the final "
                                "amount with them (an offer they were promised could not be applied "
                                "automatically) — never state the total as final.")
