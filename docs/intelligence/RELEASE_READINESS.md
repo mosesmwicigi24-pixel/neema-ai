@@ -11,9 +11,11 @@ The verification pass's S1/S2 findings are fixed or recorded
 passes 2 and 2b (every S1/S2 fixed) and green CI; **live on the box at
 ~19:22 UTC** (replies ok, outreach still shadow; the first main build hung
 on the runner's apt step and was re-run). Slice 4
-(PR #318: durable opt-out without a person, held draft never promised to
-nobody, dated facts, rule-proposals card) is open, with verification pass 3
-running.
+(PR #318: durable opt-out without a person, an unowned hold left to the
+sweep, dated facts, Meta receipts, figure facts, rule-proposals card, the
+one-step real-model run) merged as `d084e91` at 19:44 UTC after
+verification passes 3 and 3b (every S1/S2 fixed, two test gaps closed) and
+green CI; deploy in flight.
 
 ## Measured improvement
 
