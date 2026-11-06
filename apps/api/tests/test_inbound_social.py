@@ -119,3 +119,37 @@ def test_wordless_comment_is_stored_with_words_and_engage_keeps_the_empty_text(m
     assert m.raw_meta == {"v": 1, "type": "comment", "kind": "comment_media",
                           "photo": "https://scontent.xx/c9.jpg"}
     assert engaged and engaged[0]["text"] == ""      # the public-reply path is unchanged
+
+
+def test_a_redelivered_comment_is_not_answered_twice_without_redis(monkeypatch):
+    """Verification 1.6: a 502 on the DM capture makes Meta redeliver the whole
+    payload, comments included, and the redis mark is best-effort. The comment
+    row's own id is the durable dedupe — with no redis at all, a comment whose
+    row exists is neither stored again nor engaged."""
+    from app.core.config import settings
+    monkeypatch.setattr(settings, "meta_comment_reply", True, raising=False)
+    monkeypatch.setattr(settings, "meta_page_id", "PAGE1", raising=False)
+    calls: dict = {}
+    _patch(monkeypatch, calls)
+
+    async def no_ctx(post_id, redis=None, channel="facebook"):
+        return {}
+    monkeypatch.setattr(mw, "_post_context", no_ctx)
+
+    async def not_live(redis):
+        return set()
+    monkeypatch.setattr("app.services.meta_send.live_video_ids", not_live)
+    engaged = []
+    monkeypatch.setattr("app.agent.runtime.schedule_comment_engage",
+                        lambda redis, ch, c, own: engaged.append(c))
+    payload = {"object": "page", "entry": [{"id": "PAGE1", "changes": [{"field": "feed", "value": {
+        "item": "comment", "verb": "add", "comment_id": "c9", "post_id": "p9",
+        "from": {"id": "U9", "name": "Mary"}, "message": "how much?"}}]}]}
+    db = _FakeDB(existing_mid="c9")            # the row for c9 already exists
+    asyncio.run(mw._capture_comment_events(db, "messenger", payload, redis=None))
+    assert not engaged and not any(isinstance(o, Message) for o in db.added)
+    assert db.commits == 0
+    # and a comment with no row goes through as before
+    db2 = _FakeDB()
+    asyncio.run(mw._capture_comment_events(db2, "messenger", payload, redis=None))
+    assert engaged and any(isinstance(o, Message) for o in db2.added)
