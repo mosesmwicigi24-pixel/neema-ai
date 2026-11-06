@@ -2312,7 +2312,20 @@ async def _handoff_to_human(args: dict, ctx: ToolContext) -> dict:
                 "note": "conversation not found — tell the customer a colleague will follow up"}
     conv.intercept_mode = InterceptMode.human
     await ctx.db.commit()
-    return {"ok": True, "reason": args.get("reason")}
+    # Three other hand-over paths flag and ring the team; this one set the
+    # mode and fell silent (W9, 2026-11-06). Best-effort, never on a draft.
+    told = False
+    if not ctx.read_only:
+        try:
+            told = await _team_note(
+                ctx, kind="handoff",
+                title="🙋 Neema handed a chat to the team",
+                text=("🙋 HANDED TO THE TEAM — " + (reason or "the customer needs a person")
+                      + ". Neema has stepped back; the next reply here is yours."),
+                body=f"{_channel_label(ctx)} {ctx.wa_id} — {reason or 'handoff'}")
+        except Exception as exc:
+            _log.warning("handoff ring failed for %s: %s", ctx.wa_id, exc)
+    return {"ok": True, "reason": args.get("reason"), "team_told": told}
 
 
 async def _raise_complaint(args: dict, ctx: ToolContext) -> dict:

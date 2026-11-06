@@ -843,6 +843,34 @@ def manufactured_pressure(answer: str, tool_results: list | None) -> str | None:
     return m.group(0)
 
 
+_DEVANAGARI_RE = re.compile(r"[\u0900-\u097F]")
+_FR_MARK_RE = re.compile(r"\b(le|la|les|des|vous|nous|prix|merci|bonjour|pour|avec|est|votre)\b", re.I)
+_PT_MARK_RE = re.compile(r"\b(obrigad[oa]|preço|você|para|com|sim|não|temos|custa|bom dia|boa tarde)\b", re.I)
+
+
+def language_mismatch(comment: str, answer: str) -> str | None:
+    """The customer wrote in a language the floor can place (Hindi script,
+    Swahili, French, Portuguese) and the draft is plainly not in it — the
+    language the reply should be in, else None. Deterministic, so continuity
+    no longer depends on the model reviewer running (W8, 2026-11-06). English
+    and mixed messages are left alone: Kenyan customers switch freely."""
+    from app.agent.voice import looks_swahili
+    from app.services.customer_state import guess_language
+    if not (answer or "").strip():
+        return None
+    lang = guess_language(comment or "")
+    a = answer or ""
+    if lang == "hi" and not _DEVANAGARI_RE.search(a):
+        return "hi"
+    if lang == "sw" and not looks_swahili(a) and len(a.split()) >= 6:
+        return "sw"
+    if lang == "fr" and len(_FR_MARK_RE.findall(a)) < 2 and len(a.split()) >= 6:
+        return "fr"
+    if lang == "pt" and not _PT_MARK_RE.search(a) and len(a.split()) >= 6:
+        return "pt"
+    return None
+
+
 def status_without_source(answer: str, tool_results: list | None, transcript: list | None) -> bool:
     if not _STATUS_CLAIM_RE.search(answer or ""):
         return False
@@ -1181,6 +1209,12 @@ def rule_findings(comment: str, answer: str, seen: list,
         out.append({"kind": "status", "hard": True,
                     "text": "an order-status claim (shipped / on its way / delivered) with no "
                     "check_order_status behind it — check the order, never assume"})
+    _lang = language_mismatch(comment, answer) if mode == "dm" else None
+    if _lang:
+        _name = {"hi": "Hindi", "sw": "Swahili", "fr": "French", "pt": "Portuguese"}[_lang]
+        out.append({"kind": "language", "hard": False,
+                    "text": f"they wrote in {_name} and the draft is not — answer in {_name}, "
+                    "the same facts, the same length"})
     if mode == "dm" and paid_ack_without_source(answer, tool_results):
         out.append({"kind": "paid_ack", "hard": True,
                     "text": "it thanks for or confirms a payment the hub has not shown as paid in this "

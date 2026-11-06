@@ -103,6 +103,11 @@ async def record_opt_out(db, redis, conv, text: str, *, channel: str, key: str) 
             from app.models.person import Person
             person = await db.get(Person, pid)
             if person is not None:
+                try:
+                    from app.services.state_lock import lock_for_write
+                    person = await lock_for_write(db, person)
+                except Exception:
+                    pass                        # unlocked write beats a lost opt-out
                 state = dict(person.state or {})
                 prefs = dict(state.get("contact_preferences") or {})
                 prefs["opt_out"] = {"at": now, "channel": channel, "said": text[:160]}

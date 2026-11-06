@@ -86,3 +86,45 @@ explicit word.
 - **Finding:** `send_product_cards`, `send_measurement_guide` and `create_order` act during the tool loop, before the words are reviewed (B §5).
 - **Decision:** cards and the guide carry hub data only (grounded by construction); deferring their sends until after the gate would create a worse failure (words promising cards that then fail to send, which the `photos` rule cannot see). Order creation keeps its own guards and the held path flags the colleague with the draft and the order. Recorded as an accepted, reasoned limitation; revisit if the real-model run shows held replies following sent cards.
 - **Status:** NOT APPLICABLE (by decision), evidence recorded.
+
+## W7-4 · An empty reply is silence when the turn was told silence is right
+
+- **Baseline:** the loop turned any empty text into a nudge call and then "One moment — let me check on that for you.", the line the prompt bans (INVESTIGATION 7.4; A §0.1).
+- **Change:** when the overlap note was attached or the inbound is a closer, an empty reply ends the turn as silence; the words-only nudge and the stall line remain the last resort for a real question.
+- **Status:** IMPLEMENTED BUT NOT VERIFIED (real-model run shows it as `silent` turns).
+
+## W2-3 · A hold lifts when the customer comes back
+
+- **Baseline:** only model-note states cleared a hold; the floor never returns them (INVESTIGATION 2.3).
+- **Change:** `customer_state._buying_message` — a question or a buying signal from a customer on hold lifts the hold.
+- **Status:** VERIFIED COMPLETE at unit level.
+
+## W2-4 · The scribe never erases a team check or a hold
+
+- **Change:** `deals._merge_next_action` — an open team check keeps its kind and tucks the new intent under `then`; a hold survives.
+- **Status:** VERIFIED COMPLETE at unit level.
+
+## W9-2 · `handoff_to_human` rings the team
+
+- **Change:** the tool now files the same team note the other hand-over paths file (`_team_note`), never on a draft; result carries `team_told`.
+- **Status:** IMPLEMENTED BUT NOT VERIFIED.
+
+## W5-2 · A caption-less photo stays a turn in history
+
+- **Change:** history renders an inbound image/video row with no text as "[the customer sent a photo]" instead of dropping it.
+- **Status:** IMPLEMENTED BUT NOT VERIFIED.
+
+## W3-1 · A complaint earns the care-first length
+
+- **Change:** the length target's `negative` flag also reads the customer-state floor's `complaint`.
+- **Status:** VERIFIED COMPLETE at unit level (target computed); effect on replies needs the model run.
+
+## W8-1 · Language continuity checked without the model reviewer
+
+- **Change:** `review.language_mismatch` — a soft, deterministic `language` finding for Hindi script, Swahili, French and Portuguese customers whose draft is plainly in another language; English and mixed left alone.
+- **Status:** VERIFIED COMPLETE at rule level.
+
+## W7-6 · State writes take the row lock
+
+- **Change:** `intent.record_opt_out` and `customer_state.apply` lock the person row before rewriting `state` (the `state_lock` contract).
+- **Status:** VERIFIED COMPLETE at unit level.

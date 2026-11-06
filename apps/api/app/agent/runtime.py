@@ -1006,7 +1006,13 @@ async def _history(db: AsyncSession, key: str, limit: int = 20,
         # it can't listen to audio (services/voice_notes).
         text = (_voice_line(m) or m.text or "").strip()
         if not text:
-            continue
+            # A caption-less photo or video the customer sent is a turn, not
+            # a gap: without this line the model never knew it happened
+            # (W5, 2026-11-06). Outbound empty rows stay out.
+            if m.direction == MsgDirection.inbound and (m.media_type or "") in ("image", "video"):
+                text = "[the customer sent a photo]" if m.media_type == "image" else "[the customer sent a video]"
+            else:
+                continue
         role = "user" if m.direction == MsgDirection.inbound else "assistant"
         # A HUMAN colleague's reply must be recognisable as such (owner,
         # 2026-08-19): Moses answered Mestowt's shipping question by hand —
@@ -1652,6 +1658,7 @@ async def run_turn(db: AsyncSession, redis, wa_id: str, user_text: str, llm: LLM
     # 2026-10-21: cache WRITES were over half of a $24 day). The reply gate
     # still counts these as known facts (`extra_known`).
     turn_notes: list[str] = []
+    _overlap_noted = False
 
     # 40 messages of context (was 20): re-asking an answered question is the
     # most robotic failure there is, and it usually happened because the answer
@@ -1673,6 +1680,7 @@ async def run_turn(db: AsyncSession, redis, wa_id: str, user_text: str, llm: LLM
         try:
             if await _answered_after(db, key, channel, inbound_ids):
                 turn_notes.append(OVERLAP_NOTE)
+                _overlap_noted = True
         except Exception as exc:
             _log.info("overlap check skipped for %s: %s", key, exc)
 
@@ -2073,10 +2081,14 @@ async def run_turn(db: AsyncSession, redis, wa_id: str, user_text: str, llm: LLM
     _len_target: dict = {}
     try:
         from app.agent import reply_length as _rl
+        from app.services.customer_state import floor as _cs_floor
         _len_target = _rl.target_for(
             user_text or "", closer=is_closer(user_text or ""),
             greeting=bool(_GREETING_RE.match((user_text or "").strip())),
-            negative=looks_negative(user_text or ""))
+            # a complaint earns the care-first length whether the comment
+            # detector or the customer-state floor read it (W3, 2026-11-06)
+            negative=looks_negative(user_text or "")
+            or (_cs_floor(user_text) or {}).get("customer_said") == "complaint")
         if not scribe_only and not read_only:
             _len_note = _rl.note(_len_target)
             if _len_note:
@@ -2195,6 +2207,13 @@ async def run_turn(db: AsyncSession, redis, wa_id: str, user_text: str, llm: LLM
 
         if not resp.tool_calls:
             reply = resp.text or ""
+            if not reply and (_overlap_noted or is_closer(user_text or "")):
+                # The contract the turn was given: an empty reply SENDS NOTHING
+                # when the message was already answered (OVERLAP_NOTE) or was
+                # a bare closer — never the stall line the prompt itself bans
+                # (W7, 2026-11-06).
+                _log.info("empty reply honoured as silence for %s (overlap=%s)", key, _overlap_noted)
+                break
             if not reply:
                 # NEVER A GENERIC HOLD (owner, 2026-09-26): the writer ended
                 # with no words — ask once for the reply itself, in words,
@@ -2246,6 +2265,7 @@ async def run_turn(db: AsyncSession, redis, wa_id: str, user_text: str, llm: LLM
     # flagged with the reasons). Real turns only: a draft or a scribe pass
     # is not sent to anyone.
     _gate_outcome, _held = "skipped", []
+    reply = reply or ""
     if reply and not read_only and not scribe_only and _gate_applies(user_text):
         try:
             reply, _held, _gate_outcome = await _gate_turn_reply(

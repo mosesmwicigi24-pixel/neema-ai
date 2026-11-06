@@ -381,6 +381,11 @@ async def apply(db, conv, deal, reading: dict, *, source: str, inbound_text: str
         from app.models.person import Person
         person = await db.get(Person, conv.person_id)
     if person is not None:
+        try:
+            from app.services.state_lock import lock_for_write
+            person = await lock_for_write(db, person)
+        except Exception:
+            pass
         state = dict(person.state or {})
         prefs = dict(state.get("contact_preferences") or {})
         lang = reading.get("language") or guess_language(inbound_text)
@@ -416,7 +421,8 @@ async def apply(db, conv, deal, reading: dict, *, source: str, inbound_text: str
             if not (nxt.get("kind") == "team_check"):
                 deal.blocking = f"{_HOLD_LABEL[said]} — until {(until + timedelta(hours=3)).strftime('%d %b')}"
             changed["hold_until"] = nxt["hold"]["until"]
-        elif said in ("exploring", "quoting", "ready") and (inbound_text or "").strip() and nxt.get("hold"):
+        elif nxt.get("hold") and (inbound_text or "").strip() and (
+                said in ("exploring", "quoting", "ready") or _buying_message(inbound_text)):
             # They came back with a real message: the time they asked for is over.
             nxt.pop("hold", None)
             deal.next_action = nxt or None
@@ -435,6 +441,23 @@ async def apply(db, conv, deal, reading: dict, *, source: str, inbound_text: str
             pass
     await db.commit()
     return changed
+
+
+def _buying_message(text: str) -> bool:
+    """A question or a buying signal from a customer on hold: the time they
+    asked for is over, whatever the floor read (W2, 2026-11-06). The floor
+    never returns exploring/quoting, so before this a hold outlived the
+    customer's return whenever the model note was off."""
+    t = (text or "").strip()
+    if not t:
+        return False
+    if "?" in t:
+        return True
+    try:
+        from app.agent.cooling import buying_signal
+        return bool(buying_signal(t))
+    except Exception:
+        return False
 
 
 def language_of(person) -> str | None:

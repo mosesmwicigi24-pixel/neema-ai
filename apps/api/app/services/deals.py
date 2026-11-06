@@ -128,6 +128,23 @@ def detect_customer_promise(text: str, *, now: datetime | None = None) -> tuple[
     return due_nbo - timedelta(hours=3), hint
 
 
+def _merge_next_action(current, new: dict) -> dict:
+    """The scribe's new intent on top of what the deal already carries: an
+    open team check keeps its kind (the dispatcher waits on it) and tucks the
+    new intent under "then"; a customer's hold survives either way (W2,
+    2026-11-06 — before this the promise branch assigned wholesale and could
+    erase a team check opened in the same turn)."""
+    cur = dict(current or {}) if isinstance(current, dict) else {}
+    out = dict(new)
+    if cur.get("hold"):
+        out["hold"] = cur["hold"]
+    if cur.get("kind") == "team_check":
+        keep = {k: v for k, v in cur.items() if k != "then"}
+        keep["then"] = new
+        return keep
+    return out
+
+
 def derive_stage(cart_items: int, current: str) -> str:
     """Forward-only derivation (won/lost are terminal; operator edits win)."""
     if current in ("won", "lost", "proposal"):
@@ -242,15 +259,16 @@ async def scribe_update(db, key: str, channel: str, reply: str,
         if promise:
             due = datetime.now(timezone.utc) + timedelta(hours=PROMISE_FOLLOW_UP_HOURS)
             deal.blocking = f"Neema owes the customer: {promise[:200]}"
-            deal.next_action = {"kind": "follow_up", "owner": "ai",
-                                "due_at": due.isoformat(), "note": promise[:200]}
+            deal.next_action = _merge_next_action(deal.next_action, {
+                "kind": "follow_up", "owner": "ai", "due_at": due.isoformat(), "note": promise[:200]})
             await upsert_follow_up(db, deal, due_at=due, kind="follow_up",
                                    reason=f"Neema promised: {promise}")
         elif cust:
             due, hint = cust
             deal.blocking = f"Waiting on the customer ({hint})"
-            deal.next_action = {"kind": "customer_promise", "owner": "ai",
-                                "due_at": due.isoformat(), "note": f"they said: {hint}"}
+            deal.next_action = _merge_next_action(deal.next_action, {
+                "kind": "customer_promise", "owner": "ai", "due_at": due.isoformat(),
+                "note": f"they said: {hint}"})
             await upsert_follow_up(db, deal, due_at=due, kind="customer_promise",
                                    reason=f"Customer said they'd respond ({hint}) — "
                                           "warm check-in if they haven't")
