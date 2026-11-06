@@ -254,3 +254,18 @@ def test_the_runner_process_can_configure_every_mapper():
     importlib.import_module("app.jobs.agent_eval")
     configure_mappers()                      # raises NoReferencedTableError when a model is missing
     assert clear_mappers is not None
+
+
+def test_a_run_record_is_checkpointed_as_partial_and_finalised_clean(tmp_path):
+    """CI, 2026-11-06: a 30-minute limit killed the first real-model run with
+    nothing written. The runner now checkpoints after every case, marked
+    partial with its progress, and the final write drops the mark."""
+    import json
+    out = tmp_path / "run.json"
+    rec = {"results": [{"id": "x"}], "selection": "file:blind_heldout.jsonl"}
+    eval_run._write_record(rec, str(out), partial=True, done=1, of=360)
+    got = json.loads(out.read_text())
+    assert got["partial"]["done"] == 1 and got["partial"]["of"] == 360 and got["results"] == [{"id": "x"}]
+    eval_run._write_record(rec, str(out), partial=False)
+    assert "partial" not in json.loads(out.read_text())
+    assert not (tmp_path / "run.json.tmp").exists()
