@@ -1206,6 +1206,33 @@ async def _facts_for_ask(ctx, user_text: str, tool_log: list) -> list:
         return []
 
 
+async def _gate_failed_closed(reply: str, *, db, redis, channel: str, key: str,
+                              public_comment: bool, closer: bool, swahili: bool,
+                              error: str) -> tuple[str, list, str]:
+    """What a draft becomes when the gate itself breaks: the held outcome.
+    Best-effort on the flag and the tally (they must not break the hold)."""
+    issues = [f"reply gate could not run ({error})"]
+    try:
+        from app.agent import review as _rv
+        await _rv.record_verdict(redis, "held", kinds=["gate_error"],
+                                 model=getattr(settings, "review_model_light", "") or "")
+    except Exception:
+        pass
+    if public_comment or closer:
+        return "", issues, "held"
+    try:
+        await _flag_held_reply(db, channel, key, issues, reply, redis=redis)
+    except Exception as exc:
+        _log.warning("could not flag the held draft for %s: %s", key, exc)
+    try:
+        from app.agent import review as _rv
+        if await _rv.held_recently(redis, channel, key):
+            return "", issues, "held"
+    except Exception:
+        pass
+    return (_SW_REVIEW_HOLD_DM if swahili else _REVIEW_HOLD_DM), issues, "held"
+
+
 async def _flag_held_reply(db, channel: str, key: str, issues: list, draft: str,
                            redis=None) -> None:
     """A held private reply is a colleague's to answer: the conversation is
@@ -2235,7 +2262,15 @@ async def run_turn(db: AsyncSession, redis, wa_id: str, user_text: str, llm: LLM
                 greeting=bool(_GREETING_RE.match((user_text or "").strip())),
                 allow=_campaign_allow, extra_known=_turn_note)
         except Exception as exc:
-            _log.warning("reply gate failed open for %s: %s", key, exc)
+            # FAIL CLOSED (intelligence programme W1, 2026-11-06): a gate that
+            # cannot run is a draft nobody verified. It is treated exactly as
+            # a held draft — silence on a closer or a public comment, the
+            # holding line and a flagged colleague otherwise — never sent.
+            _log.warning("reply gate failed for %s — holding the draft, not sending it: %s", key, exc)
+            reply, _held, _gate_outcome = await _gate_failed_closed(
+                reply, db=db, redis=redis, channel=channel, key=key, public_comment=public_comment,
+                closer=is_closer(user_text or ""), swahili=looks_swahili(user_text or ""),
+                error=str(exc)[:200])
     if _photo_refer is not None and reply:
         # A referred photo is never priced, whatever the draft says: a money
         # figure swaps the reply for the plain hand-over line. Then a person
@@ -2582,9 +2617,11 @@ async def in_flight(redis, channel: str, key: str) -> bool:
         return False
 
 
-async def _still_ai(channel: str, key: str) -> bool:
+async def _still_ai(channel: str, key: str) -> bool | None:
     """Re-read the thread's mode right before a send: a colleague who took
-    the chat while the turn composed is not talked over. Fail-open."""
+    the chat while the turn composed is not talked over. True → send; False →
+    a colleague holds it; None → the check itself failed (fail CLOSED: the
+    caller does not send and leaves the turn unhandled so the sweeper retries)."""
     from sqlalchemy import or_
     from app.database import AsyncSessionLocal
     from app.models.conversation import Conversation, InterceptMode
@@ -2595,8 +2632,9 @@ async def _still_ai(channel: str, key: str) -> bool:
                 or_(Conversation.external_id == key, Conversation.wa_id == key))
             )).scalars().first()
         return mode is None or mode == InterceptMode.ai
-    except Exception:
-        return True
+    except Exception as exc:
+        _log.warning("takeover check failed for %s/…%s — not sending: %s", channel, str(key)[-4:], exc)
+        return None
 
 
 async def _run_and_send(redis, wa_id: str, text: str, media: dict | None = None,
@@ -2629,7 +2667,10 @@ async def _run_and_send(redis, wa_id: str, text: str, media: dict | None = None,
                     _log.info("echo guard: identical reply within minutes suppressed for %s", wa_id)
                     await _mark_silenced(redis, "whatsapp", wa_id)
                     return False
-            if not await _still_ai("whatsapp", wa_id):
+            _ai = await _still_ai("whatsapp", wa_id)
+            if _ai is None:
+                return False                       # unverifiable: the sweeper retries
+            if not _ai:
                 _log.info("a colleague took %s while the turn composed — not sent", wa_id)
                 return False
             unknown = None
@@ -2955,7 +2996,10 @@ async def _run_and_send_meta(redis, channel: str, external_id: str, text: str,
                               channel, external_id)
                     await _mark_silenced(redis, channel, external_id)
                     return True
-            if not await _still_ai(channel, external_id):
+            _ai = await _still_ai(channel, external_id)
+            if _ai is None:
+                return False                       # unverifiable: the sweeper retries
+            if not _ai:
                 _log.info("a colleague took %s/%s while the turn composed — not sent", channel, external_id)
                 return True
             unknown = None
@@ -3023,6 +3067,12 @@ async def schedule_meta_reply(redis, channel: str, external_id: str, text: str,
     redelivered webhook never double-replies."""
     if await _is_paused(redis, channel, external_id, text):
         return False
+    # The same door WhatsApp has (W1, 2026-11-06): "stop messaging me" on
+    # Messenger, Instagram or TikTok is recorded for good and answered once.
+    from app.services import intent as _intent
+    if media is None and _intent.is_opt_out(text):
+        await _handle_opt_out(redis, channel, external_id, text)
+        return True
     if media is None and await closer_gate(redis, channel, external_id, text):
         return False
     if redis is not None and dedup_id:

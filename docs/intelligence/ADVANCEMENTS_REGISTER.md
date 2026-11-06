@@ -33,3 +33,25 @@ explicit word.
 - **Status:** VERIFIED COMPLETE (model-free layer). The effect on live replies
   (holds, paid-claim notes, closer silence) is IMPLEMENTED BUT NOT VERIFIED
   until the real-model run.
+
+## W1-1 · The reply gate fails closed
+
+- **Baseline:** runtime.py:2214–2231 sent the unverified draft on any gate exception; no test covered the branch (INVESTIGATION 1.1).
+- **Change:** `_gate_failed_closed()` — a gate error is the held outcome: silence on a closer or a public comment, otherwise the holding line, the colleague flagged with the error, the verdict tallied as `held/gate_error`.
+- **Extends:** the existing held path (`_flag_held_reply`, `held_recently`, the hold lines). **Rejected:** retrying the gate (a second failure in the same turn is likely; the customer would wait twice).
+- **Tests:** `test_intelligence_w1_fail_closed.py` (held outcome, silence cases, call-site assertion).
+- **Status:** IMPLEMENTED BUT NOT VERIFIED in production (needs a gate error to occur; the eval records `review=held` when it does).
+
+## W1-2 · The opt-out door on every inbound channel
+
+- **Baseline:** only `schedule_reply` (WhatsApp) called `_handle_opt_out`; Messenger, Instagram, TikTok (native and relay) and web chat had no recogniser (INVESTIGATION 1.2, D §9 #1).
+- **Change:** `schedule_meta_reply` has the same door; web chat and the ManyChat relay record the preference and acknowledge once; the sweeper's cross-channel bridge checks `opted_out` before composing.
+- **Extends:** `intent.record_opt_out` / `acknowledgement` / `opted_out` — no new store.
+- **Tests:** same file (door placement before the closer gate and the model turn; the Meta door exercised with a fake).
+- **Status:** IMPLEMENTED BUT NOT VERIFIED on Meta in production (`meta_agent_reply` flag value unknown).
+
+## W1-5 · The takeover re-check fails closed without losing the reply
+
+- **Baseline:** `_still_ai` returned True on a DB error (talk over a colleague).
+- **Change:** returns None on error; both senders then do not send and return "not handled", so the missed-reply sweeper retries later.
+- **Status:** IMPLEMENTED BUT NOT VERIFIED (DB-error path).

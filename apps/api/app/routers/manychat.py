@@ -146,6 +146,22 @@ async def manychat_webhook(body: ManyChatIn, request: Request,
 
     from app.agent.runtime import (run_turn, build_llm, route_model, _hold_line,
                                    closer_gate, mark_closer_answered)
+    # "Stop messaging me" is recorded and acknowledged once (W1, 2026-11-06 —
+    # the relay had no opt-out check).
+    from app.services import intent as _intent
+    if _intent.is_opt_out(text):
+        ack = ""
+        try:
+            already = await _intent.opted_out(db, redis, conv)
+            await _intent.record_opt_out(db, redis, conv, text, channel=CHANNEL, key=sub_id)
+            await db.commit()
+            ack = "" if already else _intent.acknowledgement(text)
+        except Exception:
+            _log.exception("manychat opt-out could not be recorded for %s", sub_id)
+            ack = _intent.acknowledgement(text)
+        if ack:
+            await _save_reply(db, redis, sub_id, ack)
+        return {"reply": ack, "handled_by": "ai"}
     # Politeness ping-pong ends in silence, not another blessing — on TikTok
     # that silence is also a saved reply from the 10-per-48h budget.
     if await closer_gate(redis, CHANNEL, sub_id, text):

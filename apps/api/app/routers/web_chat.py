@@ -213,6 +213,25 @@ async def web_chat(body: WebChatIn, request: Request, db: AsyncSession = Depends
         return {"reply": "Thanks — one of our team will reply here shortly.",
                 "session_id": sid, "handled_by": "human"}
 
+    # "Stop messaging me" is recorded and acknowledged once, never argued with
+    # (W1, 2026-11-06 — the web door had no opt-out check).
+    from app.services import intent as _intent
+    if _intent.is_opt_out(text):
+        ack = ""
+        try:
+            already = await _intent.opted_out(db, redis, conv)
+            await _intent.record_opt_out(db, redis, conv, text, channel="whatsapp", key=wa_id)
+            await db.commit()
+            ack = "" if already else _intent.acknowledgement(text)
+        except Exception:
+            _log.exception("web opt-out could not be recorded for %s", wa_id)
+            ack = _intent.acknowledgement(text)
+        if ack:
+            db.add(Message(wa_id=wa_id, conversation_id=conv.id, person_id=conv.person_id,
+                           direction=MsgDirection.outbound, sender=MsgSender.ai, text=ack))
+            await db.commit()
+        return {"reply": ack, "session_id": sid, "handled_by": "ai"}
+
     from app.agent.runtime import run_turn, build_llm, route_model, _hold_line
     try:
         reply = await run_turn(db, redis, wa_id, text, build_llm(model=route_model(text), purpose="web"))
