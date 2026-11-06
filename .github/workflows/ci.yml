@@ -57,7 +57,19 @@ jobs:
       # The transcription engine decodes real audio with ffmpeg (as the API
       # image does — apps/api/Dockerfile installs it); its tests skip without.
       - name: Install ffmpeg
-        run: command -v ffmpeg || (sudo apt-get update -q && sudo apt-get install -y -q --no-install-recommends ffmpeg)
+        # Bounded: this apt step hung for 20+ minutes twice on 2026-11-06
+        # (a stalled mirror), holding the whole deploy. A retry with a
+        # time limit beats an unbounded wait before any test has run.
+        timeout-minutes: 8
+        run: |
+          command -v ffmpeg && exit 0
+          for i in 1 2 3; do
+            sudo timeout 150 apt-get update -q -o Acquire::Retries=3 \
+              && sudo timeout 150 apt-get install -y -q --no-install-recommends -o Acquire::Retries=3 ffmpeg \
+              && exit 0
+            echo "apt attempt $i failed or stalled; retrying"; sleep 5
+          done
+          exit 1
 
       # `python -m pytest`, never bare `pytest`: there is no pyproject/pytest.ini
       # and no conftest.py, so only the `-m` form puts apps/api on sys.path.
@@ -142,7 +154,19 @@ jobs:
       # The voice-note battery decodes real audio (as the API image does); the
       # step below fails on any skip, so ffmpeg must be here too.
       - name: Install ffmpeg
-        run: command -v ffmpeg || (sudo apt-get update -q && sudo apt-get install -y -q --no-install-recommends ffmpeg)
+        # Bounded: this apt step hung for 20+ minutes twice on 2026-11-06
+        # (a stalled mirror), holding the whole deploy. A retry with a
+        # time limit beats an unbounded wait before any test has run.
+        timeout-minutes: 8
+        run: |
+          command -v ffmpeg && exit 0
+          for i in 1 2 3; do
+            sudo timeout 150 apt-get update -q -o Acquire::Retries=3 \
+              && sudo timeout 150 apt-get install -y -q --no-install-recommends -o Acquire::Retries=3 ffmpeg \
+              && exit 0
+            echo "apt attempt $i failed or stalled; retrying"; sleep 5
+          done
+          exit 1
 
       # The cycle-10 journeys feed the API's JSON to the web's own .ts card
       # code (lib/callCard.ts, lib/messageKinds.ts); Node >= 22.18 runs it
