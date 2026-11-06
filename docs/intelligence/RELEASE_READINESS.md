@@ -8,7 +8,9 @@ in shadow mode with no enforced rules. The first main build hung 24 minutes
 on the runner's apt step before any test ran; it was cancelled and re-run.
 The verification pass's S1/S2 findings are fixed or recorded
 (VERIFICATION_PASS_1 response table). Slices 2–3 (PR #317) merged as `34d371e` at 18:53 UTC after verification
-passes 2 and 2b (every S1/S2 fixed) and green CI; deploy in flight. Slice 4
+passes 2 and 2b (every S1/S2 fixed) and green CI; **live on the box at
+~19:22 UTC** (replies ok, outreach still shadow; the first main build hung
+on the runner's apt step and was re-run). Slice 4
 (PR #318: durable opt-out without a person, held draft never promised to
 nobody, dated facts, rule-proposals card) is open, with verification pass 3
 running.
