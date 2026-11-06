@@ -20,6 +20,8 @@ ff8c3b5).
 | CI on 16e7a17 (slice 4 final head, merged as d084e91) | GitHub Actions | CI and Build & Push green |
 | Full API suite on the merged main d084e91 (slices 1–4) | `pytest tests` | 3,313 passed, 1 xpassed, 0 failed (10 min 8 s) |
 | CI on 6954268 (PR #319 final head, merged as c6455d8) | GitHub Actions | CI and Build & Push green |
+| CI on 81f67db (PR #320 final head, merged as 7670de1) | GitHub Actions | CI and Build & Push green |
+| Production after 7670de1 (~20:48 UTC) | `/api/health` from outside | status ok, replies ok, outreach shadow with no enforced rules |
 | Production after c6455d8 (~20:27 UTC) | `/api/health` from outside | status ok, replies ok, outreach shadow with no enforced rules |
 | Production after d084e91 (~19:55 UTC) | `/api/health` from outside | status ok, replies ok, review tallies populated, outreach shadow with no enforced rules |
 | Production after 34d371e (~19:22 UTC) | `/api/health` from outside | status ok, replies ok, review tallies populated, outreach shadow with no enforced rules |
