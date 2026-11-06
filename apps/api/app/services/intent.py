@@ -28,14 +28,20 @@ OPT_OUT_TTL = 365 * 86400
 _OPT_OUT_RE = re.compile(
     r"(?:"
     # English
-    r"\b(?:please\s+)?(?:stop|quit|cease)\s+(?:sending|messaging|texting|contacting|writing)(?:\s+(?:me|us))?\b"
+    r"\b(?:please\s+)?(?:stop|quit|cease)\s+(?:messaging|texting|contacting|writing(?:\s+to)?|calling)(?:\s+(?:me|us))?\b"
+    # "stop sending" only when what is sent is messages — "stop sending the trays" is an order change
+    r"|\b(?:please\s+)?(?:stop|quit)\s+sending\s+(?:me\s+|us\s+)?(?:(?:these\s+|those\s+|the\s+|any\s+)?(?:messages|texts|sms|msgs|stuff|things|anything|ads|promotions|offers)\b|(?=(?:\s*[.!,]|\s+(?:again|anymore|any more|please|now|pls))?\s*$))"
+    r"|^(?:please\s+)?stop[.!\s]*$"
+    r"|\bwrong number\b.{0,40}\bstop\b|\bstop\b.{0,40}\bwrong number\b"
     r"|\b(?:stop|no more)\s+(?:these\s+|the\s+)?(?:messages|texts|sms|follow[- ]?ups?|reminders|notifications)\b"
     r"|\bdo(?:n'?t| not)\s+(?:message|text|contact|write to|call)\s+(?:me|us)\s+(?:again|anymore|any more)\b"
     r"|\b(?:unsubscribe|opt\s*out|remove\s+(?:me|my number)|take me off|leave me alone)\b"
     r"|\bnot interested\b.{0,30}\b(?:stop|don'?t)\b"
     # Swahili
     r"|\b(?:acha|wacha|usi)\w*\s+(?:kunitumia|kuni\w*\s+ujumbe|kunitext|kuniandikia|kunisumbua)\b"
-    r"|\businitumie\s+(?:ujumbe|meseji|message)"
+    r"|\businitumie\s+(?:ujumbe|meseji|message|tena)"
+    r"|\businitumie\b.{0,20}\bsitaki\b|\bsitaki\b.{0,20}\businitumie\b"
+    r"|\bwacha\s+kunitext\b|\bacha\s+kunitext\b"
     r"|\bsitaki\s+(?:ujumbe|meseji|messages?)\b"
     # French
     r"|\b(?:arr[êe]tez|arrete[sz]?|cessez)\s+de\s+(?:m'?[ée]crire|m'?envoyer|me\s+contacter|me\s+relancer)\b"
@@ -57,13 +63,20 @@ _OPT_OUT_RE = re.compile(
     r")",
     re.IGNORECASE)
 _QUESTION_RE = re.compile(r"\?")
+# An opt-out so explicit that a trailing question does not soften it:
+# "I told you on Facebook to stop messaging me. Why are you now on my WhatsApp?"
+_OPT_OUT_EXPLICIT_RE = re.compile(
+    r"\b(?:stop\s+(?:messaging|texting|contacting)\s+(?:me|us)|unsubscribe|remove\s+(?:me|my number)|"
+    r"do(?:n'?t| not)\s+(?:message|text|contact)\s+(?:me|us)\s+again|usinitumie)\b", re.IGNORECASE)
 
 
 def is_opt_out(text: str | None) -> bool:
     """True when this customer message clearly asks us to stop messaging."""
     t = " ".join((text or "").split())
-    if not t or len(t) > 240 or _QUESTION_RE.search(t):
+    if not t or len(t) > 240:
         return False
+    if _QUESTION_RE.search(t):
+        return bool(_OPT_OUT_EXPLICIT_RE.search(t))
     return bool(_OPT_OUT_RE.search(t))
 
 

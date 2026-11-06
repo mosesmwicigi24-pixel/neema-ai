@@ -42,12 +42,21 @@ _CUSTOMER_PROMISE_RE = re.compile(
     r"\b(?:i(?:'ll| will)|we(?:'ll| will)|nita|tuta)\s?"
     r"(?:confirm|get back|let you know|revert|respond|reply|check|decide|send|pay"
     r"|need|order|buy|take|contact|call|message|text|write|remind|communicate"
-    r"|come back|be in touch|consult|ask|discuss|talk|wasiliana|piga)",
+    r"|come back|be in touch|consult|ask|discuss|talk|sort|arrange"
+    r"|wasiliana|piga|lipa|tuma|rudi|julisha|kujulisha|amua|thibitisha|jibu|kuja|fika)"
+    # the imperative: "contact me on Thursday", "call me after 4pm", "let's talk next week"
+    r"|\b(?:contact|call|message|text|ping|reach|remind|get back to|check with)\s+(?:me|us)\b"
+    r"|\blet(?:'s| us)\s+(?:talk|speak|discuss|meet)\b"
+    r"|\b(?:je reviens|je vous (?:recontacte|tiens au courant)|je vais en parler|on se reparle|je (?:confirme|décide|paie))\b"
+    r"|\b(?:volto a falar|eu aviso|dou retorno|vou (?:confirmar|decidir|pagar|falar))\b",
     re.IGNORECASE)
 _TIME_HINT_RE = re.compile(
     r"\b(tomorrow|kesho|tonight|this evening|later today|"
     r"after (?:the |our )?(?:meeting|service|church|committee)|"
     r"next week|weekend|monday|tuesday|wednesday|thursday|friday|saturday|sunday|"
+    r"after \d{1,2} ?(?:am|pm)|after (?:easter|christmas|lent|pentecost|the holidays?)|next year|mwakani|"
+    r"kesho asubuhi|kesho jioni|demain|la semaine prochaine|lundi|mardi|mercredi|jeudi|vendredi|samedi|dimanche|"
+    r"amanh[ãa]|semana que vem|pr[óo]xima semana|"
     # Replenishment timelines ("we'll need them in two weeks", "wiki mbili")
     r"in (?:a|one|two|three|1|2|3) weeks?|after (?:a|one|two|three|1|2|3) weeks?|"
     r"wiki (?:moja|mbili|tatu)|in (?:a|one|1) month|next month|end (?:of )?month|month end)\b",

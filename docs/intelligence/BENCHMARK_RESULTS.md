@@ -50,6 +50,41 @@ paths directly: a missed `paid_claim` means the dispatcher does not hold a
 payment reminder; a missed opt-out means the door does not record it; a
 false opt-out silences a customer.
 
+## After W2 (the floor reads what customers write) — same day, same case set
+
+Files: `results/floors-after-{all,dev,held-out}.json`. Tuned on the
+development half only; the held-out half is the report.
+
+| Metric (floors) | Held-out before | Held-out after | Dev after (tuned) |
+|---|---|---|---|
+| customer state | 137/254 = 0.539 [0.478, 0.600] | **200/254 = 0.787 [0.733, 0.833]** | 204/214 = 0.953 |
+| language guess | 111/149 = 0.745 [0.669, 0.808] | **136/149 = 0.913 [0.856, 0.948]** | 182/183 = 0.995 |
+| opt-out recognition | 22/29 = 0.759 [0.579, 0.878] | **28/29 = 0.966 [0.828, 0.994]** | 10/11 = 0.909 |
+| developer negatives (20) | 2 misses (one false opt-out) | **0 misses** | — |
+
+The held-out intervals before and after do not overlap on any of the three.
+The gap between dev (0.95) and held-out (0.79) on customer state is the honest
+measure of how much the tuning fitted the development phrasings; the
+remaining held-out misses are listed in the JSON and are mostly phrasings the
+regex has not seen plus a minority of rater disagreements (whether "the
+committee meets next Tuesday" is consulting or a request for time).
+
+What changed (apps/api): `services/customer_state.py` (paid, ready,
+consulting, needs-time and complaint readings; the language guesser gains
+Portuguese, romanised Hindi, more French and Swahili, and an English default
+for plain text; bare acknowledgements stay language-neutral),
+`services/intent.py` (bare STOP, Swahili "usinitumie tena", the cross-channel
+opt-out with a question, and the "stop sending the trays" false positive
+fixed), `services/deals.py` (the customer's own timeline in the imperative and
+in Swahili, French, Portuguese), `agent/runtime.py` (long thank-yous and
+blessings in five languages are closers), `agent/voice.py` ("je" no longer
+reads as Swahili). Tests: `tests/test_intelligence_floors.py` (one test per
+phrasing family, every negative), plus the existing stage 1/3/7, cooling,
+review and time-math suites unchanged.
+
+Not changed: the reply-length kind (0.55 on both halves) — a vocabulary
+disagreement, taken to W9.
+
 ## Real-model baseline — NOT MEASURED
 
 Command, once a key exists on the box or as the `ANTHROPIC_API_KEY`

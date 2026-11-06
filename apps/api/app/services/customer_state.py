@@ -45,34 +45,93 @@ _HOLD_LABEL = {"needs_time": "Asked for time", "comparing": "Comparing prices",
 # ── the floor ────────────────────────────────────────────────────────────────
 _NEEDS_TIME_RE = re.compile(
     r"\b(?:get back to you|come back to you|let you know|let me think|think about it|"
-    r"not (?:yet )?ready|not now|later on|give me (?:some )?time|i(?:'ll| will) (?:revert|decide)|"
-    r"nitakujulisha|nitarudi|nitakuambia|nitawasiliana|nipe muda|si sasa|baadaye|"
-    r"je reviens vers vous|je vous tiens au courant|laissez[- ]moi r[ée]fl[ée]chir|pas (?:encore|maintenant))\b",
+    r"not (?:yet )?ready|not now|not today|later on|no rush|give me (?:some )?time|"
+    r"i(?:'ll| will) (?:revert|decide|come back|be back|get back|sort it|arrange)|we(?:'ll| will) (?:revert|come back|get back)|"
+    r"let me (?:revert|pray|sleep on it|arrange|organi[sz]e|think|sort|confirm|check)\b[^.?!\n]{0,40}|"
+    r"(?:contact|call|message|text|ping|reach|get back to|check with) (?:me|us)\b[^.?!\n]{0,24}?\b(?:on|tomorrow|next|after|later|in|by|around|at|when|once)\b|"
+    r"(?:wait|hold on|hold)\b[^.?!\n]{0,20}?\b(?:till|until|after|for now)|hold on|on second thoughts?|"
+    r"(?:away|out|travell?ing|abroad) (?:till|until)|(?:later|next) (?:in the year|month|year|term|quarter)|"
+    r"nitakujulisha|nitarudi|nitakuambia|nitawasiliana|nipe muda|si sasa|baadaye|mwakani|ngoja|subiri|"
+    r"je reviens vers vous|je vous tiens au courant|je vous recontacte|laissez[- ]moi r[ée]fl[ée]chir|pas (?:encore|maintenant)|"
+    r"on va voir|vamos ver|depois (?:eu )?aviso|mais tarde|"
+    r"(?:^|\b)will (?:revert|come back|get back|confirm|update you|let you know)|"
+    r"je (?:vous )?(?:reviens|reviendrai|r[ée]fl[ée]chis|vous [ée]cris demain)|volto a falar|vou pensar|"
+    r"soch ke|sochta hoon|soch kar|don'?t send (?:it|them|anything) yet|not yet,? (?:i|we) need to|"
+    r"(?:fundrais|raising (?:the )?(?:money|funds)|collecting (?:the )?money))\b",
     re.IGNORECASE)
 _COMPARING_RE = re.compile(
     r"\b(?:compar\w*|other (?:supplier|shop|price|quot\w+)s?|check (?:other )?prices|shop around|"
     r"look around|see (?:elsewhere|other options)|kulinganisha|bei (?:nyingine|za wengine)|"
     r"wanaouza|maduka mengine|comparer|d'autres (?:prix|fournisseurs))\b",
     re.IGNORECASE)
+_CONSULT_BODY = (
+    r"(?:bishop|pastor|reverend|priest|father|husband|wife|spouse|committee|board|council|church|parish|"
+    r"team|family|boss|director|treasurer|elders?|deacons?|vestry|pcc|synod|diocese|chairman|chairperson|"
+    r"chair|choir|leadership|leaders|management|archdeacon|dean|secretary|congregation|members|finance|"
+    r"askofu|mchungaji|padri|mume|mke|kamati|kanisa|familia|bodi|wazee|viongozi|uongozi|mwenyekiti|kwaya|"
+    r"[ée]v[êe]que|pasteur|abb[ée]|cur[ée]|monseigneur|mari|femme|comit[ée]|paroisse|conseil(?: paroissial)?|"
+    r"bispo|padre|comiss[ãa]o|conselho|igreja|his lordship|his grace|the reverend|mkutano|wakubwa|him|her|them)"
+)
 _CONSULTING_RE = re.compile(
-    r"\b(?:consult|ask|discuss(?: it)? with|talk (?:to|with)|check with|confirm with|"
-    r"nimuulize|nitamuuliza|niulize|tuzungumze na|niongee na|demander [àa]|en parler [àa]|consulter)\b"
-    r"[^.?!\n]{0,40}?\b(?:bishop|pastor|reverend|priest|father|husband|wife|spouse|committee|"
-    r"board|council|church|parish|team|family|boss|director|treasurer|elders?|"
-    r"askofu|mchungaji|padri|mume|mke|kamati|kanisa|familia|bodi|"
-    r"[ée]v[êe]que|pasteur|mari|femme|comit[ée]|paroisse)\b",
+    r"\b(?:consult|ask|discuss(?: it| this)? with|talk (?:to|with)|check with|confirm with|present (?:it |this |to )?to|"
+    r"take (?:it|this) to|tell|inform|pass (?:it|this) on to|run (?:it|this) by|share (?:it|this) with|bring (?:it|this) to|"
+    r"wait(?:ing)? for|needs? (?:the )?(?:approval|sign[- ]?off|blessing) (?:of|from)|see what|hear from|"
+    r"nimuulize|nitamuuliza|niulize|nimwambie|niwaambie|nipeleke|nitamshow|nimshow|tuzungumze na|niongee na|baada ya|"
+    r"demander [àa]|en parler [àa]|je vais en parler|consulter|je transmets [àa]|je dois consulter|vou falar com|falar com|perguntar ao)\b"
+    r"[^.?!\n]{0,40}?\b" + _CONSULT_BODY + r"\b"
+    # the body first: "the committee will decide", "bishop anasema tungoje"
+    r"|\b(?:the |our |my )?" + _CONSULT_BODY + r"\b[^.?!\n]{0,30}?\b(?:will|must|has to|have to|needs? to|is yet to|are yet to|"
+    r"wata|ata|ana|anasema|wanasema|itabidi|doit|doivent|vai|vão) (?:decide|approve|confirm|meet|discuss|sign|see|review|"
+    r"amua|kubali|tungoje|décider|approuver|decidir|aprovar)\b"
+    r"|\b(?:committee|board|council|elders|kamati|bodi|wazee) (?:meets?|sits?|inakaa|itakaa|will meet|will sit)\b",
     re.IGNORECASE)
 _PAID_RE = re.compile(
-    r"\b(?:i(?:'ve| have)? (?:already )?paid|payment (?:is )?(?:done|made|sent)|(?:i )?sent the money|"
-    r"money sent|nimelipa|nimeshalipa|nimetuma pesa|j'ai (?:d[ée]j[àa] )?pay[ée]|paiement effectu[ée])\b",
+    r"\b(?:i(?:'ve| have)? (?:already |just )?paid|(?:just )?paid (?:by|via|with|through|using) \w+|"
+    r"payment (?:is )?(?:done|made|sent|complete[d]?|went through)|(?:i )?sent the money|money sent|"
+    r"(?:m-?pesa|airtel(?: money)?|mobile money) (?:deducted|went through|is done|has gone)|"
+    r"(?:here(?:'s| is)|see|attached) (?:the |my )?(?:m-?pesa |payment |transfer )?(?:screenshot|receipt|confirmation)|"
+    r"nimelipa|nimeshalipa|nimetuma pesa|tumelipa|j'ai (?:d[ée]j[àa] )?pay[ée]|paiement effectu[ée]|"
+    r"j[áa] paguei|paguei|(?:has|have) paid|(?:i(?:'ve| have) )?sent (?:the |my )?(?:half|deposit|balance|full amount|money|cash|payment|\d[\d,]*)|"
+    r"sent (?:via|through|by) \w+|nimetuma|tumetuma|nimeshatuma)\b"
+    # a message that IS the claim: "Paid", "Done, paid", "Paid. Mpesa ref …", "sent", "nimetuma"
+    r"|^(?:ok(?:ay)?[,.!]? |done[,.!]? |yes[,.!]? )?(?:paid|sent|nimelipa|nimetuma|pay[ée]|paguei|enviado|envoy[ée])\b",
+    re.IGNORECASE)
+# "I will pay tomorrow", "I have not paid yet", "sijalipa": not a claim.
+_PAID_NEG_RE = re.compile(
+    r"\b(?:not paid|haven'?t paid|have not paid|didn'?t pay|yet to pay|will pay|i'll pay|gonna pay|"
+    r"going to pay|about to pay|can i pay|how (?:do|can|to) (?:i |we )?pay|pay on delivery|"
+    r"sija(?:lipa|tuma)|bado sija|nitalipa|tutalipa|pas encore pay|ainda n[ãa]o pag|vou pagar)\b",
     re.IGNORECASE)
 _READY_RE = re.compile(
-    r"\b(?:go ahead|proceed|place the order|i(?:'ll| will) take (?:it|them)|let's do it|confirm(?:ed)? the order|"
-    r"endelea|nachukua|tuendelee|weka oda|allons-y|je (?:le |la |les )?prends)\b", re.IGNORECASE)
+    r"\b(?:go ahead|proceed|place the order|i(?:'ll| will) take (?:it|them|one|two|three|\d+|the|that|this|both)|"
+    r"let's do it|confirm(?:ed)? the order|go for it|continue|invoice me|send (?:me )?(?:the |an |a )?(?:invoice|pro ?forma)|"
+    r"approved|i(?:'ll| will) pay (?:now|today|via|by|through|with)|paying now|sending (?:the money |it )?now|"
+    r"sort me out|i(?:'ll| will) order|we(?:'ll| will) (?:take|order|go with)|book (?:it|them|one)|"
+    r"endelea|nachukua|tuendelee|weka oda|nitume (?:m-?pesa|pesa)|natuma|tuma (?:details|namba|maelezo)|"
+    r"(?:send|tuma) (?:me )?(?:the |your )?(?:till|paybill|pay ?bill|account|m-?pesa) ?(?:number|no\.?|details)?|nilipe|"
+    r"allons-y|je (?:le |la |les )?prends|je confirme|c'est bon pour moi|pode (?:mandar|enviar|fazer)|vamos fechar|fechado)\b",
+    re.IGNORECASE)
+# readiness that stands even beside a question ("Approved. How do we pay?")
+_READY_STRONG_RE = re.compile(
+    r"\b(?:approved|go ahead|place the order|i(?:'ll| will) take (?:it|them|one|\d+)|proceed|confirm(?:ed)? the order)\b",
+    re.IGNORECASE)
 _COMPLAINT_RE = re.compile(
-    r"\b(?:complain\w*|disappoint\w*|refund|wrong (?:item|size|colour|color)|damaged|torn|late|"
-    r"never arrived|not (?:yet )?received|poor quality|sijapokea|imechelewa|imeharibika|"
-    r"r[ée]clamation|rembours\w+|d[ée]çu)\b", re.IGNORECASE)
+    r"\b(?:complain\w*|disappoint\w*|refund|late|poor quality|imechelewa|kuchelewa|r[ée]clamation|rembours\w+|"
+    r"en retard|atrasad\w*)\b", re.IGNORECASE)
+# markers that make a complaint even when the message also asks a question
+_COMPLAINT_STRONG_RE = re.compile(
+    r"\b(?:wrong (?:one|item|size|colour|color|product|order)|damaged|torn|broken|cracked|crushed|bent|stained|faded|"
+    r"coming off|falling apart|never (?:arrived|came)|hasn'?t arrived|not (?:yet )?(?:arrived|received|delivered)|"
+    r"still waiting|been waiting|waiting since|nobody (?:replies|answers|responds)|no ?one (?:replies|answers|responds)|"
+    r"is anyone there|expected better|rude|ridiculous|unacceptable|disgrace\w*|came without|is missing|"
+    r"(?:has|have) not moved|hasn'?t moved|supposed to (?:come|arrive|be here)|i ordered \w+(?: \w+)? (?:but|and) (?:you|got|received|they|it)|"
+    r"still (?:isn'?t|is not|hasn'?t|has not) (?:here|arrived|come)|(?:n'?t|not) fair|useless|hopeless|pathetic|"
+    r"you sent (?:a|an|the|me) \w+[^.!?\n]{0,40}\bi ordered\b|instead of (?:the|what) \w+[^.!?\n]{0,30}\b(?:ordered|asked|paid)|"
+    r"(?:the )?box (?:has|had|contains) (?:only )?\d+|(?:only|just) \d+ (?:arrived|came|delivered)|"
+    r"(?:are|is|came|arrived|got|received) [^.!?\n]{0,40}, (?:but )?i ordered\b|"
+    r"you said you(?:'d| would) [^.!?\n]{0,40}\b(?:by|before) (?:yesterday|today|now|\w+day)|third time|3rd time|"
+    r"haijafika|hajafika|sijapokea|imevunjika|mbovu|imeharibika|d[ée]çu|cass[ée]|pas reçu|toujours pas|"
+    r"n'ai rien reçu|inadmissible|inacceptable|quebrad\w*|n[ãa]o recebi|ainda n[ãa]o chegou)\b", re.IGNORECASE)
 
 
 def floor(text: str | None, *, now: datetime | None = None) -> dict | None:
@@ -85,7 +144,10 @@ def floor(text: str | None, *, now: datetime | None = None) -> dict | None:
     from app.services.intent import is_opt_out
     if is_opt_out(t):
         return {"customer_said": "stop", "matched": "opt-out"}
-    if _PAID_RE.search(t):
+    strong = _COMPLAINT_STRONG_RE.search(t)
+    if strong:
+        return {"customer_said": "complaint", "matched": strong.group(0)}
+    if _PAID_RE.search(t) and not _PAID_NEG_RE.search(t):
         return {"customer_said": "paid_claim", "matched": _PAID_RE.search(t).group(0)}
     if _COMPLAINT_RE.search(t) and "?" not in t:
         return {"customer_said": "complaint", "matched": _COMPLAINT_RE.search(t).group(0)}
@@ -100,13 +162,16 @@ def floor(text: str | None, *, now: datetime | None = None) -> dict | None:
     for state, rx in (("consulting", _CONSULTING_RE), ("comparing", _COMPARING_RE),
                       ("needs_time", _NEEDS_TIME_RE)):
         m = rx.search(t)
-        if m and not (state == "comparing" and "?" in t):      # "if I compare two sizes?" asks us
+        # "if I compare two sizes?" / "can you call me tomorrow?" ask us something
+        if m and not (state in ("comparing", "needs_time") and "?" in t and until is None):
             return {"customer_said": state, "matched": m.group(0),
                     "hold_until": until.isoformat() if until else None}
+    ready = _READY_RE.search(t)
+    if ready and ("?" not in t or _READY_STRONG_RE.search(t)):
+        return {"customer_said": "ready", "matched": ready.group(0),
+                "hold_until": until.isoformat() if until else None}
     if until is not None:
         return {"customer_said": "needs_time", "matched": "named a time", "hold_until": until.isoformat()}
-    if _READY_RE.search(t) and "?" not in t:
-        return {"customer_said": "ready", "matched": _READY_RE.search(t).group(0)}
     try:
         from app.agent.runtime import is_closer
         if is_closer(t):
@@ -121,6 +186,45 @@ _SW_EXTRA = frozenset("""
     jumatatu jumanne jumatano alhamisi ijumaa jumamosi jumapili wiki mwezi baadaye kwanza
     bado tena ujumbe asante sawa habari karibu pole ndugu mchungaji askofu kanisa bei
     nitakujulisha nitarudi nitawasiliana nimelipa nimeshalipa
+    mungu akubariki akubarikie mko wapi niko tuko kesho leo sasa jioni asubuhi ngapi shilingi
+    nimesikia nitalipa tutalipa ngoja subiri sitaki nataka nahitaji tunahitaji kiasi gani
+    unipunguzie punguza mambo niaje poa haya hapana ndiyo ndio sana rangi nyeupe nyeusi
+    kitambaa nakshi kushonwa imeshonwa mwakani mzee baba mama bwana bibi mkuu kwaya
+""".split())
+_PT_WORDS = frozenset("""
+    obrigado obrigada preço preços quanto custa custam você vocês senhor senhora bom dia boa tarde
+    noite por favor quero gostaria queria encomenda pagamento entrega não sim temos tem é está fazer
+    enviar mandar pode podem posso bispo padre igreja batina casula estola cálice vamos ver depois
+    aviso tenho preciso precisamos aqui também ainda já muito olá vendem vende aceitam aceita cartão
+    ou só unção velas altar bom boa fique deus abençoe quero queria volto falar está bem
+""".split())
+_HI_ROMAN = frozenset("""
+    kya hai hain mein main ka ki ke hoon hun batata soch nahi nahin haan ji kitna kitne chahiye bhej
+    karo kijiye dhanyavad namaste aap aapka hum humko mujhe kripya theek thik bata dena kar
+""".split())
+_FR_STRONG = frozenset("""
+    merci bonjour bonsoir d'accord monseigneur arrête arrêtez arrete arretez m'écrire transmets
+    beaucoup infiniment remercie reviendrai j'attends dites-moi s'il plaît voudrais aimerais coûte
+    livraison paiement combien étoles évêque paroisse abbé
+""".split())
+_PT_STRONG = frozenset("""
+    obrigado obrigada olá vendem vende aceitam aceita cartão unção velas preço preços você vocês
+    senhor senhora encomenda pagamento entrega batina casula estola bispo igreja abençoe
+""".split())
+_FR_WORDS = frozenset("""
+    bonjour bonsoir merci je vous votre vos est combien prix avec pour voulez souhaitez commande oui
+    nous les des une sur c'est j'ai s'il plaît voudrais aimerais coûte le la et du paiement comment
+    depuis quand livraison dites-moi j'attends possible payer carte étoles couleurs chasuble évêque
+    abbé paroisse bien d'accord reviens parler aussi encore très beaucoup infiniment remercie reviendrai
+    monseigneur transmets arrête arrêtez m'écrire blanc noir rouge vert violet total garde dieu
+""".split())
+_NEUTRAL_WORDS = frozenset("ok okay k kk yes no hi hello hey noted amen sawa poa".split())
+_EN_WORDS = frozenset("""
+    the is how much price do you have want need please order can i my for and what when will thanks
+    thank ok okay noted call me we be blessed bless god too expensive yes no not send let know after
+    still waiting shall see cheers hi hello good morning afternoon evening dear sir madam kindly same
+    it that this with are am was in on at to of if but so now later tomorrow today sorry fine great
+    size colour color white black purple red green blue delivery pickup collect pay paid payment
 """.split())
 
 
@@ -140,20 +244,36 @@ def guess_language(text: str | None) -> str | None:
     from app.agent.voice import looks_swahili
     if looks_swahili(t):
         return "sw"
-    toks = set(re.findall(r"[a-zàâçéèêëîïôûùüÿœ']+", t.lower()))
-    en = {"the", "is", "how", "much", "price", "do", "you", "have", "want", "need", "please",
-          "order", "can", "i", "my", "for", "and", "what", "when", "will", "thanks", "thank"}
+    toks = set(re.findall(r"[a-zàâçéèêëîïôûùüÿœãõáíóúâêôç'-]+", t.lower()))
+    en = toks & _EN_WORDS
     # Swahili by its verb shape (ni-ta-kujulisha, tu-me-pata) and its calendar
     # words — the short word list in voice.py misses a sentence with no price in it.
     sw_shape = sum(1 for w in toks if _SW_VERB_RE.match(w) or w in _SW_EXTRA)
-    if sw_shape >= 1 and not (toks & en):
+    if sw_shape >= 1 and (sw_shape >= 2 or not en):
         return "sw"
-    fr = {"bonjour", "bonsoir", "merci", "je", "vous", "votre", "vos", "est", "combien", "prix",
-          "avec", "pour", "voulez", "souhaitez", "commande", "oui", "nous", "les", "des", "une",
-          "sur", "c'est", "j'ai", "s'il", "plaît", "voudrais", "aimerais", "coûte"}
-    if len(toks & fr) >= 2:
+    fr, pt, hi = toks & _FR_WORDS, toks & _PT_WORDS, toks & _HI_ROMAN
+    # romanised Hindi/Hinglish: "chasuble ka price kya hai"
+    if len(hi) >= 2 and len(hi) >= len(en - _NEUTRAL_WORDS):
+        return "hi"
+    # "por favor"/"não"/"obrigado" are not French; "vous"/"merci" are not Portuguese
+    if len(pt) >= 2 and len(pt) > len(fr):
+        return "pt"
+    if len(fr) >= 2 and len(fr) >= len(pt):
         return "fr"
-    if len(toks & en) >= 2:
+    if (toks & _PT_STRONG) and not fr:
+        return "pt"
+    if (toks & _FR_STRONG) and not pt:
+        return "fr"
+    if len(pt) >= 1 and not en and not fr:
+        return "pt"
+    # a bare "ok" / "yes" / "hi" belongs to every language: never let it
+    # overwrite the language a customer has already shown
+    if toks and toks <= _NEUTRAL_WORDS:
+        return None
+    if en - _NEUTRAL_WORDS:
+        return "en"
+    # plain ASCII with nothing of the other languages reads as English
+    if t.isascii() and len(toks) >= 2 and not sw_shape:
         return "en"
     return None
 

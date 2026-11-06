@@ -694,11 +694,18 @@ async def mark_closer_answered(redis, channel: str, key: str, inbound_text: str)
 
 
 _ACK_RE = re.compile(
-    r"^(?:(?:i'?m|i\s*am|am|just|i)\s*(?:saying|said|say)\s*)?"
-    r"(thanks?|thank\s*you|asante(\s*sana)?|thx|ty|amen|ok(?:ay|ey|k)?|kk|sawa(?:\s*sawa)?|poa|"
+    r"^(?:(?:hmm+|mmh+|mm+|well|ah+|oh+|great|perfect|wonderful|super|lovely|sawa|ok(?:ay)?|"
+    r"ok(?:ay)? now i (?:understand|get it|see)|understood|got it)[,.!\s]+)?"
+    r"(?:(?:i'?m|i\s*am|am|just|i)\s*(?:saying|said|say)\s*)?"
+    r"(thanks?(?:\s*(?:a\s*lot|so\s*much|a\s*million|very\s*much))?|thank\s*you(?:\s*(?:very\s*much|so\s*much|a\s*lot))?|"
+    r"thanks?\s*for\s*(?:the|your|that|this)?\s*\w+|much\s*appreciated|noted\s*with\s*thanks|cheers|"
+    r"asante(\s*sana)?([,\s]*mwanangu)?|shukran|merci(\s*beaucoup)?|obrigad[oa]|murakoze|mungu\s*akubariki(\s*sana)?([,\s]*mwanangu)?|"
+    r"god\s*bless(\s*you)?|que\s*dieu\s*vous\s*(?:b[ée]nisse|garde)|deus\s*aben[çc]oe|fique\s*com\s*deus|thank\s*you\s*ji|"
+    r"thx|ty|amen|ok(?:ay|ey|k)?|kk|sawa(?:\s*sawa)?|poa|"
     r"got\s*it|noted|alright|aight|cool|"
     r"👍+|🙏+|❤️*|😊+|👌+|🙌+|✅+)"
-    r"(?:[\s,]+(?:ok(?:ay)?|sawa|poa|thanks?|asante|noted|👍|🙏))*[\s!.,🙏👍❤😊👌🙌✅💯]*$",
+    r"(?:[\s,]+(?:ok(?:ay)?|sawa|poa|thanks?|thank\s*you|asante(\s*sana)?|noted|cheers|merci(\s*beaucoup)?|god\s*bless|"
+    r"que\s*dieu\s*vous\s*(?:b[ée]nisse|garde)|deus\s*aben[çc]oe|fique\s*com\s*deus|tutaongea|tutawasiliana|👍|🙏))*[\s!.,🙏👍❤😊👌🙌✅💯]*$",
     re.IGNORECASE,
 )
 # A thumbs-up, a folded hands, a heart — satisfaction, the end of the exchange

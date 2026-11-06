@@ -57,6 +57,24 @@ def contact_for(case: dict, idx: int) -> str:
 
 SANDBOXED = ("send_product_cards", "send_measurement_guide", "create_order")
 
+# Case authors name tools by intent; the runner maps those names onto the
+# registered tools so a label never depends on an internal name.
+TOOL_ALIASES = {
+    "check_payment": "check_order_status", "check_order": "check_order_status",
+    "payment_status": "check_order_status", "order_status": "check_order_status",
+    "search_catalogue": "search_catalog", "search": "search_catalog", "lookup": "search_catalog",
+    "handoff": "handoff_to_human", "escalate": "handoff_to_human", "quote": "prepare_quotation",
+    "quotation": "prepare_quotation", "place_order": "create_order", "order": "create_order",
+}
+
+
+def canonical_tool(name: str) -> str:
+    n = (name or "").strip()
+    bang = n.startswith("!")
+    core = n[1:] if bang else n
+    core = TOOL_ALIASES.get(core, core)
+    return ("!" + core) if bang else core
+
 
 class _Sandbox:
     """Swap the customer-reaching and hub-writing tool handlers for recorders
@@ -194,7 +212,7 @@ def check_turn(case: dict, i: int, turn: dict, reply: str, facts: dict, *,
                 failures.append(f"required text missing /{rx}/")
         except re.error:
             failures.append(f"bad require regex /{rx}/")
-    tool = exp.get("tool")
+    tool = canonical_tool(exp.get("tool") or "")
     if tool:
         if tool.startswith("!"):
             if tool[1:] in tools:

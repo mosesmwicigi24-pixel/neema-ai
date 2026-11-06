@@ -101,6 +101,17 @@ def test_turn_verdicts_catch_the_named_failures():
     assert "manufactured urgency or scarcity" in v["failures"]
 
 
+def test_tool_labels_are_mapped_onto_registered_tools():
+    assert eval_run.canonical_tool("check_payment") == "check_order_status"
+    assert eval_run.canonical_tool("!order") == "!create_order"
+    assert eval_run.canonical_tool("search_catalog") == "search_catalog"
+    case = {"id": "c", "lang": "en", "categories": ["payment"]}
+    v = eval_run.check_turn(case, 0, _turn("confirm_paid_check", tool="check_payment"), "Checking now.",
+                            {"tools": [{"tool": "check_order_status", "out": {}}], "review": "pass"},
+                            opted_out=False, intercept_mode="ai", after_hold=False)
+    assert v["passed"], v["failures"]
+
+
 def test_figures_must_come_from_this_turns_tools():
     case = {"id": "c", "lang": "en", "categories": ["payment"]}
     tools = [{"tool": "search_catalog", "input": {}, "out": {"results": [{"name": "Stole", "price": 2500}]}}]
