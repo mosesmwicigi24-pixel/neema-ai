@@ -1511,6 +1511,28 @@ async def _gate_turn_reply(reply: str, *, user_text: str, transcript: list, tool
     return (_SW_REVIEW_HOLD_DM if swahili else _REVIEW_HOLD_DM), all_issues, "held"
 
 
+_SENTENCE_END_RE = re.compile(r"[.!?…][\"'”’)\]]*(?=\s|$)")
+
+
+def trim_truncated(text: str) -> tuple[str, bool]:
+    """A reply the model could not finish (stop_reason max_tokens), cut back
+    to its last complete sentence. Returns (text, cut). Nothing is cut when
+    the text already ends a sentence, when it has no sentence boundary at
+    all, or when what would remain is too little to stand as the answer
+    (under 12 characters or under a third of the draft) — then the whole
+    draft goes on to the gate as written."""
+    t = (text or "").rstrip()
+    if not t:
+        return t, False
+    ends = [m.end() for m in _SENTENCE_END_RE.finditer(t)]
+    if not ends or ends[-1] == len(t):
+        return t, False
+    keep = ends[-1]
+    if keep < 12 or keep < len(t) // 3:
+        return t, False
+    return t[:keep].rstrip(), True
+
+
 def length_target_for(user_text: str | None) -> dict:
     """The reply-length target for one customer message, exactly as the live
     turn computes it: closer, greeting and negative flags from the same text,
@@ -2234,6 +2256,17 @@ async def run_turn(db: AsyncSession, redis, wa_id: str, user_text: str, llm: LLM
 
         if not resp.tool_calls:
             reply = resp.text or ""
+            if reply and getattr(resp, "stop_reason", "") == "max_tokens":
+                # The writer hit the token ceiling mid-sentence. A half-written
+                # sentence is never the answer: cut back to the last whole one
+                # when there is one worth keeping, and say so in the facts
+                # (W7-4, verification: stop_reason was never inspected).
+                reply, _cut = trim_truncated(reply)
+                _log.warning("reply for %s hit max_tokens — %s", key,
+                             "cut back to its last whole sentence" if _cut
+                             else "no sentence boundary to cut at; sent as written")
+                if turn_facts is not None:
+                    turn_facts["truncated"] = True
             if not reply and (_overlap_noted or is_closer(user_text or "")):
                 # The contract the turn was given: an empty reply SENDS NOTHING
                 # when the message was already answered (OVERLAP_NOTE) or was

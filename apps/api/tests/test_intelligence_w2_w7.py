@@ -221,3 +221,50 @@ def test_usage_logs_the_model_that_actually_served():
     assert rt.served_model(types.SimpleNamespace(_model="claude-a", last_model="claude-b")) == "claude-b"
     assert rt.served_model(types.SimpleNamespace(_model="claude-a", last_model=None)) == "claude-a"
     assert rt.served_model(types.SimpleNamespace()) == ""
+
+
+def test_a_draft_cut_by_the_token_ceiling_ends_on_a_whole_sentence():
+    """W7-4, second half (verification: stop_reason was never inspected)."""
+    cut = rt.trim_truncated
+    assert cut("The cope set is KES 45,000 and ships in a week. We also have the matching stole in purple, green and") \
+        == ("The cope set is KES 45,000 and ships in a week.", True)
+    assert cut("Karibu! Bei ya stola ni KES 2,500. Je, ungependa rangi gani? Tuna nyekundu, kijani na") \
+        == ("Karibu! Bei ya stola ni KES 2,500. Je, ungependa rangi gani?", True)
+    assert cut("Price is KES 2,500.\nShall I add") == ("Price is KES 2,500.", True)
+    assert cut('It costs "KES 2,500." Want it') == ('It costs "KES 2,500."', True)
+    # left alone: already whole, no boundary at all, or too little would remain
+    assert cut("The cope set is KES 45,000 and ships in a week.") == ("The cope set is KES 45,000 and ships in a week.", False)
+    assert cut("Thanks for your patience, the") == ("Thanks for your patience, the", False)
+    assert cut("Ok. " + "x" * 200) == ("Ok. " + "x" * 200, False)
+    assert cut("It is 2.5 metres long and") == ("It is 2.5 metres long and", False)   # a decimal is not a boundary
+    assert cut("") == ("", False)
+
+
+def test_the_turn_cuts_a_max_tokens_draft_and_records_it():
+    """Behaviour through run_turn: a writer that stops on max_tokens mid-sentence
+    has its draft cut back and the turn facts say so; end_turn is untouched."""
+    import asyncio
+    import types
+    from tests.test_agent_flow import _FakeDB, _Res
+
+    def llm(stop):
+        class _L:
+            async def complete(self, *, system, messages, tools, **kw):
+                return types.SimpleNamespace(
+                    text="The cope set is KES 45,000 and ships in a week. We also have the matching stole in",
+                    tool_calls=[], assistant_content=[], usage={}, stop_reason=stop)
+        return _L()
+
+    def db():
+        user = types.SimpleNamespace(name="Moses")
+        return _FakeDB([_Res(one=user), _Res(one=None), _Res(one=None), _Res(one=None), _Res(many=[])])
+
+    facts: dict = {}
+    out = asyncio.run(rt.run_turn(db(), None, "254700000001", "how much is the cope set?",
+                                  llm("max_tokens"), read_only=True, turn_facts=facts))
+    assert out == "The cope set is KES 45,000 and ships in a week."
+    assert facts.get("truncated") is True
+    facts2: dict = {}
+    out2 = asyncio.run(rt.run_turn(db(), None, "254700000001", "how much is the cope set?",
+                                   llm("end_turn"), read_only=True, turn_facts=facts2))
+    assert out2.endswith("the matching stole in") and "truncated" not in facts2
