@@ -320,7 +320,7 @@ def test_a_customer_who_wrote_after_planning_is_not_nudged_in_enforce_and_is_fla
     assert _tick(maker, r) == 1
     text, meta = _outbound(maker, cid)[-1]
     assert text.startswith("Habari") and meta["shadow"] == ["suppress: the customer wrote after this was planned — the live reply answered them"]
-    assert r.hashes[next(iter(r.hashes))] == {"suppress": 1}
+    assert r.hashes[next(iter(r.hashes))] == {"suppress": 1, "rule_customer_replied": 1}
 
     # enforce: the same situation ends in silence
     async def plan_again():
@@ -335,6 +335,7 @@ def test_a_customer_who_wrote_after_planning_is_not_nudged_in_enforce_and_is_fla
             await db.commit()
     run(plan_again())
     monkeypatch.setattr(settings, "outreach_mode", "enforce", raising=False)
+    r = _Redis()                      # the control is cached per redis; a fresh one reads the new default
     assert _tick(maker, r) == 0 and len(sent) == 1
     assert _rows(maker, cid)[-1][1] == "vetoed" and "customer wrote after this was planned" in _rows(maker, cid)[-1][4]
 

@@ -204,3 +204,115 @@ async def set_translate_enabled(db, redis, enabled: bool, updated_by=None) -> bo
             pass
     _log.info("team translation turned %s", "ON" if enabled else "OFF")
     return enabled
+
+
+# ── Outbound communication control (services/actions.py, Stage 5) ────────────
+# The shadow week ends with a decision per RULE, not one big switch: the two
+# "someone already answered" rules are near-certain and go first, the daily cap
+# trades recoveries for restraint and deserves its own week. `OUTREACH_MODE`
+# and `OUTREACH_ENFORCE_RULES` in the environment are the DEFAULTS; these rows
+# override them from the dashboard, between deploys, in seconds.
+
+OUTREACH_MODE_KEY = "outreach_mode"
+OUTREACH_RULES_KEY = "outreach_enforce_rules"
+OUTREACH_CACHE = "app:outreach_control"
+OUTREACH_MODES = ("shadow", "enforce")
+OUTREACH_RULES = ("customer_replied", "colleague_replied", "daily_cap")
+OUTREACH_RULE_LABELS = {
+    "customer_replied": "the customer wrote after the message was planned",
+    "colleague_replied": "a colleague replied after the message was planned",
+    "daily_cap": "one unprompted sales message per customer per day",
+}
+
+
+def parse_outreach_rules(text: str | None) -> list[str]:
+    """'customer_replied, daily_cap' → the known rules, in canonical order."""
+    wanted = {w.strip().lower() for w in (text or "").replace(";", ",").split(",") if w.strip()}
+    return [r for r in OUTREACH_RULES if r in wanted]
+
+
+def _default_outreach_control() -> dict:
+    from app.core.config import settings
+    mode = str(getattr(settings, "outreach_mode", "shadow") or "shadow").strip().lower()
+    return {"mode": mode if mode in OUTREACH_MODES else "shadow",
+            "rules": parse_outreach_rules(getattr(settings, "outreach_enforce_rules", ""))}
+
+
+def _decode_control(raw) -> dict | None:
+    import json
+    try:
+        data = json.loads(raw.decode() if isinstance(raw, bytes) else str(raw))
+    except (TypeError, ValueError):
+        return None
+    if not isinstance(data, dict) or data.get("mode") not in OUTREACH_MODES:
+        return None
+    return {"mode": data["mode"], "rules": parse_outreach_rules(",".join(data.get("rules") or []))}
+
+
+async def outreach_control_cached(redis) -> dict | None:
+    """The control from redis alone — None when the cache can't answer."""
+    if redis is None:
+        return None
+    try:
+        v = await redis.get(OUTREACH_CACHE)
+    except Exception:
+        return None
+    return _decode_control(v) if v is not None else None
+
+
+async def get_outreach_control(db, redis) -> dict:
+    """{'mode': shadow|enforce, 'rules': [enforced while in shadow]}.
+    Cache-first, DB fallback, the environment default on any failure."""
+    cached = await outreach_control_cached(redis)
+    if cached is not None:
+        return cached
+    default = _default_outreach_control()
+    try:
+        mode_v = (await get_value(db, OUTREACH_MODE_KEY) or "").strip().lower()
+        rules_v = await get_value(db, OUTREACH_RULES_KEY)
+    except Exception:
+        return default
+    ctrl = {"mode": mode_v if mode_v in OUTREACH_MODES else default["mode"],
+            "rules": parse_outreach_rules(rules_v) if (rules_v or "").strip() else default["rules"]}
+    if redis is not None:
+        try:
+            import json
+            await redis.set(OUTREACH_CACHE, json.dumps(ctrl), ex=300)
+        except Exception:
+            pass
+    return ctrl
+
+
+async def set_outreach_control(db, redis, *, mode: str | None = None, rules: list[str] | None = None,
+                               updated_by=None) -> dict:
+    """Change the mode and/or the enforced rules; the cache is written in the
+    same breath so the next dispatcher tick honours it."""
+    from app.models.app_setting import AppSetting
+    if mode is not None and mode not in OUTREACH_MODES:
+        raise ValueError(f"mode must be one of {', '.join(OUTREACH_MODES)}")
+    if rules is not None:
+        bad = [r for r in rules if r not in OUTREACH_RULES]
+        if bad:
+            raise ValueError(f"unknown rule(s): {', '.join(bad)}")
+    writes = {}
+    if mode is not None:
+        writes[OUTREACH_MODE_KEY] = mode
+    if rules is not None:
+        # an explicit empty list is stored as "-" so it overrides the environment default
+        writes[OUTREACH_RULES_KEY] = ",".join(parse_outreach_rules(",".join(rules))) or "-"
+    for key, val in writes.items():
+        row = (await db.execute(select(AppSetting).where(AppSetting.id == key))).scalar_one_or_none()
+        if row is None:
+            db.add(AppSetting(id=key, value=val, updated_by=updated_by))
+        else:
+            row.value = val
+            row.updated_by = updated_by
+    await db.commit()
+    if redis is not None:
+        try:
+            await redis.delete(OUTREACH_CACHE)
+        except Exception:
+            pass
+    ctrl = await get_outreach_control(db, redis)
+    _log.info("outreach control: mode=%s enforced=%s", ctrl["mode"], ",".join(ctrl["rules"]) or "-")
+    return ctrl

@@ -357,6 +357,29 @@ async def decide(db, conv, action, *, now: datetime) -> tuple[str, str]:
     return "go", ""
 
 
+def rule_of(why: str) -> str:
+    """Which contextual rule a decide() verdict came from — the unit the
+    rollout is switched on by (services/app_settings.OUTREACH_RULES)."""
+    w = (why or "").lower()
+    if "colleague" in w:
+        return "colleague_replied"
+    if "customer wrote" in w:
+        return "customer_replied"
+    if "a day" in w:
+        return "daily_cap"
+    return "other"
+
+
+async def _control(db, redis) -> dict:
+    """The rollout control: mode and the rules enforced while in shadow —
+    the dashboard's rows, else the environment."""
+    from app.services import app_settings
+    try:
+        return await app_settings.get_outreach_control(db, redis)
+    except Exception:
+        return app_settings._default_outreach_control()
+
+
 async def _shadow_count(redis, verdict: str) -> None:
     """The comparison week's tally, read by the 08:00 standup."""
     if redis is None:
@@ -659,6 +682,7 @@ async def process_due(db, redis, *, now: datetime | None = None, limit: int = 10
 
     done = 0
     spoken_to: set = set()          # conversations that got a message this tick
+    control = await _control(db, redis)
     for action in rows:
         try:
             conv = (await db.get(Conversation, action.conversation_id)
@@ -825,11 +849,13 @@ async def process_due(db, redis, *, now: datetime | None = None, limit: int = 10
                                 kind=getattr(action, "kind", None), action=getattr(action, "id", None))
                     await _shadow_count(redis, "park_language")
                 continue
-            # The contextual decision (shadow or enforce).
+            # The contextual decision (shadow or enforce — per rule, Stage 5).
             shadow_flags: list[str] = []
             verdict, why = await decide(db, conv, action, now=now)
             if verdict != "go":
-                if settings.outreach_mode == "enforce":
+                _rule = rule_of(why)
+                await _shadow_count(redis, f"rule_{_rule}")
+                if control["mode"] == "enforce" or _rule in control["rules"]:
                     if verdict == "suppress":
                         if await claim(db, action, ("planned",), "vetoed"):
                             await finish(db, action, "vetoed", reason=f"{action.reason or ''} [{why}]")
