@@ -145,3 +145,37 @@ async def test_the_opt_out_door_reads_the_words_even_with_a_photo_attached(monke
     out = await rt.schedule_meta_reply(None, "messenger", "psid-2", "Stop messaging me", dedup_id="m3",
                                        media={"type": "image", "url": "x"})
     assert out is True and calls[-1] == ("messenger", "psid-2")
+
+
+def test_the_hold_line_is_not_promised_when_nobody_could_be_told(monkeypatch):
+    """Verification 1.7: a gate error is most likely the database, which the
+    flag needs too. When the flag fails, the redis handover is tried; when
+    that fails as well, the turn is silent (the sweep owns it) rather than
+    promising a colleague nobody has heard of."""
+    from app.agent import review as rv
+
+    async def _record(redis, outcome, **kw): pass
+    async def _flag_boom(*a, **k): raise RuntimeError("db down")
+    monkeypatch.setattr(rv, "record_verdict", _record)
+    monkeypatch.setattr(rt, "_flag_held_reply", _flag_boom)
+
+    handed = []
+    async def _escalate_ok(channel, ext, note, draft=None, redis=None):
+        handed.append((channel, ext, note, draft))
+        return True
+    monkeypatch.setattr(rt, "escalate_to_human", _escalate_ok)
+    async def _not_recent(*a, **k): return False
+    monkeypatch.setattr(rv, "held_recently", _not_recent)
+    reply, issues, outcome = asyncio.run(rt._gate_failed_closed(
+        "The chasuble is KES 999,999.", db=None, redis=None, channel="whatsapp", key="2547000",
+        public_comment=False, closer=False, swahili=False, error="boom"))
+    assert outcome == "held" and reply == rt._REVIEW_HOLD_DM          # someone owns it: the promise stands
+    assert handed and handed[0][3] == "The chasuble is KES 999,999." and "gate could not run" in handed[0][2]
+
+    async def _escalate_fail(*a, **k): return False
+    monkeypatch.setattr(rt, "escalate_to_human", _escalate_fail)
+    reply, issues, outcome = asyncio.run(rt._gate_failed_closed(
+        "The chasuble is KES 999,999.", db=None, redis=None, channel="whatsapp", key="2547000",
+        public_comment=False, closer=False, swahili=False, error="boom"))
+    assert (reply, outcome) == ("", "held")                             # nobody told: silence, the sweep's
+    assert any("missed-reply sweep" in i for i in issues)

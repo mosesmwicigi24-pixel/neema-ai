@@ -1237,10 +1237,28 @@ async def _gate_failed_closed(reply: str, *, db, redis, channel: str, key: str,
         pass
     if public_comment or closer:
         return "", issues, "held"
+    owned = True
     try:
         await _flag_held_reply(db, channel, key, issues, reply, redis=redis)
     except Exception as exc:
         _log.warning("could not flag the held draft for %s: %s", key, exc)
+        # The likeliest cause of a gate error is the database — the same
+        # thing the flag needs. The hold line promises "one of our team will
+        # come back to you"; it must not go out when nobody has been told
+        # (verification 1.7). Second route: the redis-backed handover.
+        try:
+            owned = await escalate_to_human(channel, key, f"Reply held: {issues[0]}",
+                                            draft=reply, redis=redis)
+        except Exception:
+            owned = False
+        if not owned:
+            # Silence, not a promise: the customer's message stays the latest
+            # inbound, so the missed-reply sweep finds it, retries when the
+            # fault clears, and hands it to a person after three strikes.
+            _log.warning("held draft for %s could not be handed to anyone — silent, "
+                         "left to the missed-reply sweep", key)
+            issues.append("nobody could be told — left to the missed-reply sweep")
+            return "", issues, "held"
     try:
         from app.agent import review as _rv
         if await _rv.held_recently(redis, channel, key):
