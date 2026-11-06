@@ -372,7 +372,9 @@ async def record_meta_receipt(db, channel: str, external_id: str, status: str,
             await db.commit()
         return n
     except Exception as exc:
-        logging.getLogger("neema.meta").info("meta receipt not recorded for %s/%s: %s", channel, external_id[-4:], exc)
+        import logging as _logging
+        _logging.getLogger("neema.meta").info("meta receipt not recorded for %s/%s: %s",
+                                              channel, external_id[-4:], exc)
         try:
             await db.rollback()
         except Exception:
