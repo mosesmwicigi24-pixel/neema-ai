@@ -43,6 +43,8 @@ the precise dependency · status. Last update: 2026-11-06, end of session 1.
 | Context-engineering experiment (W7-1: structured state object vs raw history) | must be a controlled comparison on the held-out set; needs the model | INVESTIGATION 7.1 |
 | Prompt shortening / SELL LIKE A CONSULTANT rewrite (W4-3) | no blind cut; replay comparison first | INVESTIGATION 4.3 |
 | Delivery total consistency (W6-2), `payment_url` key rename (W6-1) | prompt/tool contract changes to be measured with the model | INVESTIGATION 6.1–6.2 |
+| Person-keyed `said_once` and product interest (W7-5, second half) | one identity lookup per turn on every channel; measure two-channel activity inside the TTL first | INVESTIGATION 7.5 |
+| One pause decision instead of four (W3-3) | a redesign; judge with the real-model run on `needs-silence`/`closing` cases | INVESTIGATION 3.3 |
 | Currency lock once a figure is quoted in a turn (W9-5) | `search_catalog`/`capture_contact` move the turn's currency on purpose (the customer's own words); a lock would delay that correction by a turn — measure with the model first | INVESTIGATION 9.5 |
 | Retiring the legacy bridge order path and the expiring receipt shortener (W9-4) | removes a code path hub events may still use; needs a production trace first | INVESTIGATION 9.4 |
 | Turn latency instrumentation, availability history, resolution definition | named on the dashboard as NOT YET MEASURED with what each needs | performance.py |

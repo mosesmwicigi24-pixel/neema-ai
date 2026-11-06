@@ -192,3 +192,39 @@ def test_a_messenger_turn_reads_the_linked_whatsapp_users_facts(monkeypatch):
     # a DB error on the lookup leaves the person's own facts, no exception
     ctx2 = asyncio.run(memory.build_memory_context(_RowDB(raise_on_execute=True), None, "PSID_1", channel="messenger"))
     assert "St Peter's" in ctx2 and "black cassocks" not in ctx2
+
+
+def test_a_fact_carries_the_day_it_was_noted_and_a_restatement_refreshes_it(monkeypatch):
+    """W5-3: sizes and parishes age. add_fact stamps the day; the context shows
+    it; saying the same fact again refreshes the day; a fact that falls off
+    the cap takes its day with it."""
+    from datetime import datetime, timezone
+    user = types.SimpleNamespace(state={"agent_memory": ["prefers black cassocks"]})
+
+    class _DB:
+        async def commit(self): pass
+
+    async def fake_store(db, key, channel="whatsapp", *, lock=False):
+        return user
+    monkeypatch.setattr(memory, "_load_store", fake_store)
+    monkeypatch.setattr(memory, "flag_modified", lambda *a, **k: None)
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+
+    asyncio.run(memory.add_fact(_DB(), "254700000001", "cassock size 42"))
+    assert user.state["agent_memory_at"] == {"cassock size 42": today}
+    assert "prefers black cassocks" not in user.state["agent_memory_at"]      # older row: no date, no crash
+    user.state["agent_memory_at"]["cassock size 42"] = "2025-01-15"
+    asyncio.run(memory.add_fact(_DB(), "254700000001", "Cassock Size 42"))    # restated → refreshed, not duplicated
+    assert user.state["agent_memory"].count("cassock size 42") == 1
+    assert user.state["agent_memory_at"]["cassock size 42"] == today
+
+    ctx = asyncio.run(memory.build_memory_context(_FakeDB([]), None, "254700000001", user=user))
+    assert f"- cassock size 42 (noted {today})" in ctx
+    assert "- prefers black cassocks\n" in ctx or ctx.endswith("- prefers black cassocks")
+    assert "confirm an old one" in ctx
+
+    for i in range(memory._MAX_FACTS + 2):                                     # over the cap: the oldest and its day go
+        asyncio.run(memory.add_fact(_DB(), "254700000001", f"fact {i}"))
+    assert "cassock size 42" not in user.state["agent_memory"]
+    assert "cassock size 42" not in user.state["agent_memory_at"]
+    assert set(user.state["agent_memory_at"]) <= {f.lower() for f in user.state["agent_memory"]}
