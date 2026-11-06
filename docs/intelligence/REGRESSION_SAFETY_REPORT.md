@@ -12,7 +12,9 @@ ff8c3b5).
 | Full API suite after the floor change (W2), Postgres down mid-run | `pytest tests` | 35 failed / 431 skipped — **invalid run** (local Postgres had stopped; repeated) |
 | Full API suite after W1 (gate/takeover/opt-out door) | `pytest tests` | 85 failed, 3,141 passed — **root cause found**: the takeover re-check failed closed on *any* exception, which muted every unit test whose fake session raises; narrowed to infrastructure errors (W1-5 amended); the 22 affected files re-run: 586 passed, 5 failed |
 | The 5 remaining | `test_verification_stress` | two new gate rules (pressure, language) produced false holds on legitimate Swahili price lines and campaign discount replies — **caught by the existing stress tests**, both rules narrowed; 204 passed on re-run |
-| Full API suite on the committed state (9bfaa59 + web) | `pytest tests` | **PENDING** — filled in below when the run completes |
+| Full API suite on 5cb9e2b (test pins) | `pytest tests` | 4 failed, 3,235 passed — the four (`test_verification_stress` ×3, `test_web_geo`) pass on their own on the next commit; attributed to running while files were being edited |
+| Full API suite on 111ee6e (verification repairs) | `pytest tests` | 1 failed (`test_spend_meter`, passes alone — a second suite was running concurrently against the same services), 3,288 passed, 1 xpassed |
+| Full API suite on af34fcf (initiated-message rules, doors) | `pytest tests` | **PENDING** — recorded when the run completes |
 | Web | `pnpm exec tsc --noEmit` + `pnpm build` | passed (agent report) |
 | Lint | `ruff check app tests` | 96 findings = the committed baseline (CI ratchet 115) |
 
