@@ -154,6 +154,19 @@ async def build_memory_context(db: AsyncSession, redis, wa_id: str, user: User |
         person = await db.get(Person, store.person_id)
         pfacts = read_memory(person.state if person else None)
         facts = facts + [f for f in pfacts if f not in facts]
+    elif isinstance(store, Person):
+        # The other direction (W7-5, 2026-11-06): a customer who started on
+        # WhatsApp carries facts on their USER row — surface them on
+        # Messenger/Instagram so that thread continues where WhatsApp left
+        # off. Best-effort: a failed lookup leaves the person's own facts.
+        try:
+            u = (await db.execute(
+                select(User).where(User.person_id == store.id).limit(1)
+            )).scalar_one_or_none()
+            ufacts = read_memory(getattr(u, "state", None) if u is not None else None)
+            facts = facts + [f for f in ufacts if f not in facts]
+        except Exception:
+            pass
     person_id = store.id if (channel != "whatsapp" and isinstance(store, Person)) else None
     orders = await _recent_orders_summary(db, wa_id, person_id=person_id)
     # Sizes already on file — so a returning customer is never re-measured. Read

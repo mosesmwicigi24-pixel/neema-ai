@@ -154,3 +154,27 @@ def test_remember_tool_requires_fact():
     ctx = ToolContext(db=None, redis=None, wa_id="254700000001")
     out = asyncio.run(run_tool("remember", {}, ctx))
     assert out == {"error": "fact is required"}
+
+
+def test_a_messenger_turn_reads_the_linked_whatsapp_users_facts(monkeypatch):
+    """W7-5 (investigation): facts live on the User for WhatsApp and on the
+    Person for Meta. The WhatsApp side already read the person's; the Meta
+    side never read the linked user's. Now both directions continue."""
+    import uuid
+    from app.models.person import Person
+
+    person = Person(id=uuid.uuid4(), state={"agent_memory": ["parish: St Peter's, Nakuru"]})
+
+    async def fake_store(db, key, channel="whatsapp", *, lock=False):
+        return person
+    monkeypatch.setattr(memory, "_load_store", fake_store)
+    wa_user = types.SimpleNamespace(state={"agent_memory": ["prefers black cassocks", "parish: St Peter's, Nakuru"]})
+    db = _FakeDB([_Res(one=wa_user)])     # the User lookup; the orders query then fails and is swallowed
+
+    ctx = asyncio.run(memory.build_memory_context(db, None, "PSID_1", channel="messenger"))
+    assert ctx is not None
+    assert "prefers black cassocks" in ctx and ctx.count("St Peter's") == 1
+    # no linked user: the person's facts alone, no error
+    db2 = _FakeDB([_Res(one=None)])
+    ctx2 = asyncio.run(memory.build_memory_context(db2, None, "PSID_1", channel="messenger"))
+    assert "St Peter's" in ctx2 and "black cassocks" not in ctx2
