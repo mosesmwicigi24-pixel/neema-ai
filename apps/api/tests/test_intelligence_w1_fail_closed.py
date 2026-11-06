@@ -3,6 +3,7 @@ used to fail open now fail closed, and the opt-out door exists on every
 channel that can receive a message."""
 from __future__ import annotations
 
+import app.main  # noqa: F401  — every model mapped (the flag reads Conversation)
 import asyncio
 import inspect
 
@@ -273,8 +274,11 @@ def test_a_web_chat_opt_out_never_mints_a_whatsapp_person(monkeypatch):
     import types
     from app.services import intent, identity
 
-    async def boom(*a, **k): raise AssertionError("resolver must not be called")
-    monkeypatch.setattr(identity, "resolve_or_create_person", boom)
+    resolved = []
+    async def recorder(db, channel, external_id, **kw):
+        resolved.append((channel, external_id))
+        return types.SimpleNamespace(person_id="phantom")
+    monkeypatch.setattr(identity, "resolve_or_create_person", recorder)
 
     class _DB:
         async def get(self, model, pk): return None
@@ -289,4 +293,83 @@ def test_a_web_chat_opt_out_never_mints_a_whatsapp_person(monkeypatch):
     r = _R()
     conv = types.SimpleNamespace(id="c-web", person_id=None, channel="whatsapp", external_id=None, wa_id="web_abc123")
     asyncio.run(intent.record_opt_out(_DB(), r, conv, "stop", channel="whatsapp", key="web_abc123"))
-    assert r.set_calls and conv.person_id is None
+    assert resolved == [] and r.set_calls and conv.person_id is None      # (pass 3b: a raising fake was swallowed)
+    # and a real number on the same channel IS resolved
+    conv2 = types.SimpleNamespace(id="c-wa", person_id=None, channel="whatsapp", external_id=None, wa_id="254700000001")
+    asyncio.run(intent.record_opt_out(_DB(), _R(), conv2, "stop", channel="whatsapp", key="254700000001"))
+    assert resolved == [("whatsapp", "254700000001")] and conv2.person_id == "phantom"
+
+
+def test_the_flag_reports_landed_only_after_the_commit(monkeypatch):
+    """Pass 3b: the flag's True/False is what decides the hold's owner, so
+    both ends are pinned: a thread found and committed → True; no thread →
+    False (a conversation row that does not exist cannot own a hold)."""
+    import types
+
+    class _Res:
+        def __init__(self, conv): self._c = conv
+        def scalars(self): return types.SimpleNamespace(first=lambda: self._c)
+
+    class _DB:
+        def __init__(self, conv): self.conv, self.added, self.commits = conv, [], 0
+        async def execute(self, stmt): return _Res(self.conv)
+        def add(self, o): self.added.append(o)
+        async def commit(self): self.commits += 1
+
+    async def quiet_alert(*a, **k): pass
+    monkeypatch.setattr(rt, "_alert_team", quiet_alert)
+    from app.models.conversation import InterceptMode
+    conv = types.SimpleNamespace(id="c1", intercept_mode=InterceptMode.ai, intercept_since=None)
+    db = _DB(conv)
+    assert asyncio.run(rt._flag_held_reply(db, "whatsapp", "2547000", ["why"], "draft", redis=None)) is True
+    assert db.commits == 1 and db.added and conv.intercept_mode == InterceptMode.human
+    assert asyncio.run(rt._flag_held_reply(_DB(None), "whatsapp", "2547000", ["why"], "draft", redis=None)) is False
+
+
+def test_both_senders_leave_an_unowned_hold_unmarked(monkeypatch):
+    """Pass 3b: through the real senders. An unowned hold returns False with
+    NO redis key written — no silenced stamp, no closer mark, no hold line —
+    on WhatsApp and on Messenger, even for a closer text; the missed-reply
+    sweep therefore still sees the inbound as unanswered."""
+    import types
+    import app.database as dbm
+
+    class _Redis:
+        def __init__(self): self.store = {}
+        async def set(self, k, v, ex=None, nx=False):
+            if nx and k in self.store: return None
+            self.store[k] = v; return True
+        async def get(self, k): return self.store.get(k)
+        async def delete(self, *k):
+            for x in k: self.store.pop(x, None)
+        async def incr(self, k): self.store[k] = int(self.store.get(k, 0)) + 1; return self.store[k]
+        async def expire(self, k, s): pass
+        async def exists(self, k): return 1 if k in self.store else 0
+
+    class _Sess:
+        async def __aenter__(self): return self
+        async def __aexit__(self, *a): return False
+        async def execute(self, *a, **k): raise RuntimeError("db down")
+        async def commit(self): pass
+        async def rollback(self): pass
+    monkeypatch.setattr(dbm, "AsyncSessionLocal", lambda: _Sess())
+
+    async def unowned_turn(db, redis, *a, **kw):
+        kw["turn_facts"]["unowned_hold"] = True          # what run_turn does on outcome "unowned"
+        return ""
+    monkeypatch.setattr(rt, "run_turn", unowned_turn)
+    async def no_echo(*a, **k): return False
+    monkeypatch.setattr(rt, "_is_echo", no_echo)
+    hold_lines = []
+    async def no_hold(redis, ch, key): hold_lines.append((ch, key))
+    monkeypatch.setattr(rt, "_send_hold_line", no_hold)
+    async def no_typing(*a, **k): pass
+    monkeypatch.setattr(rt, "send_typing_on", no_typing, raising=False)
+
+    for text in ("how much is the chasuble?", "thanks!"):
+        r = _Redis()
+        assert asyncio.run(rt._run_and_send(r, "254700000001", text, None)) is False
+        assert r.store == {} and hold_lines == []                         # nothing marked, nothing promised
+        r2 = _Redis()
+        assert asyncio.run(rt._run_and_send_meta(r2, "messenger", "PSID_1", text, None, None)) is False
+        assert r2.store == {} and hold_lines == []
