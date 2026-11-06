@@ -1149,6 +1149,62 @@ async def put_translation_setting(
     return {"ok": True, "enabled": enabled}
 
 
+# ── Audit read-outs (Stage 8): the trace and the prompt inputs, admin-only ───
+
+def _admin_only(agent) -> None:
+    if not (getattr(agent, "is_superuser", False) or str(agent.role) in ("admin", "AgentRole.admin")):
+        raise HTTPException(status_code=403, detail="Admin only")
+
+
+@router.get("/outreach/trace")
+async def outreach_trace_view(
+    handle: str,
+    request: Request,
+    days: int = 14,
+    db: AsyncSession = Depends(get_db),
+    agent: Agent = Depends(get_current_agent),
+):
+    """Why did Neema message this customer — or not? The read-only trace
+    (jobs/outreach_trace.collect) for one number, external id or conversation
+    id: the thread with each outbound row's origin and delivery status, every
+    planned action in every status, the deal's holds and team checks, the
+    person's preferences, the redis guards. Admin-only; nothing is written."""
+    _admin_only(agent)
+    from app.jobs.outreach_trace import collect
+    days = max(1, min(int(days or 14), 90))
+    out = await collect(db, getattr(request.app.state, "redis", None), handle.strip(), days)
+    if out is None:
+        raise HTTPException(status_code=404, detail="No conversation for that handle")
+    return out
+
+
+@router.get("/settings/prompt-inputs")
+async def prompt_inputs_view(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    agent: Agent = Depends(get_current_agent),
+):
+    """What the dashboard feeds into every live turn beside the prompt file:
+    the standing orders, the approved learned rules, the house voice — with
+    their sizes and caps — and the size of the assembled base prompt. Admin-only.
+    Lets an auditor compare the prompt the model receives with the file."""
+    _admin_only(agent)
+    from app.agent.prompt import build_system_prompt
+    from app.services.app_settings import (DIRECTIVES_MAX_CHARS, get_directives, get_house_voice,
+                                           get_learned_rules)
+    redis = getattr(request.app.state, "redis", None)
+    directives = await get_directives(db, redis)
+    learned = await get_learned_rules(db, redis)
+    house = await get_house_voice(db, redis)
+    base = build_system_prompt(country_iso="KE", currency="KES")
+    return {
+        "directives": {"text": directives, "chars": len(directives), "cap": DIRECTIVES_MAX_CHARS},
+        "learned_rules": {"text": learned, "chars": len(learned), "cap": 1800 - DIRECTIVES_MAX_CHARS},
+        "house_voice": {"text": house, "chars": len(house), "cap": None},
+        "base_prompt": {"chars": len(base), "approx_tokens": len(base) // 4},
+    }
+
+
 # ── Outbound communication control (services/actions.py, Stage 5) ───────────
 
 @router.get("/settings/outreach")
