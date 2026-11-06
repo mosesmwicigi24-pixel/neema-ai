@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import logging
 import re
+import types
 from datetime import datetime, timezone
 
 from sqlalchemy import func as sa_func, select
@@ -5619,6 +5620,10 @@ _SW_VERIFY_HOLD_POOL = [
 ]
 
 
+class _OptedOut(Exception):
+    """The contact asked not to be messaged — the DM leg stands down."""
+
+
 async def _run_comment_engage(redis, channel: str, comment: dict, own_pages: set) -> None:
     from app.database import AsyncSessionLocal
     from app.services import messaging as svc
@@ -5905,9 +5910,17 @@ async def _run_comment_engage(redis, channel: str, comment: dict, own_pages: set
     if answer and (plan["dm"] or product_link):
         dm_text = _dm_text(plain_public_voice(answer), product_link, ext, swahili=swahili)
         try:
+            # A contact who asked not to be messaged gets the public reply
+            # only — never a DM (audit verification, 2026-11-06).
+            from app.services.intent import opted_out as _opted
+            if await _opted(None, redis, types.SimpleNamespace(channel=channel, wa_id=None,
+                                                               external_id=ext, person_id=None)):
+                raise _OptedOut()
             await send_private_reply(cid, dm_text, page_id=comment.get("page_id"),
                                      channel=channel)
             dm_sent = True
+        except _OptedOut:
+            _log.info("comment DM skipped for %s/…%s: opted out", channel, str(ext)[-4:])
         except Exception as exc:
             # Now that the public comment is unconditionally link-free, the
             # private reply is the ONLY route the storefront link has. A failure

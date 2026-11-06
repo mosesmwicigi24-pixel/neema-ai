@@ -536,7 +536,7 @@ def test_withdraw_routine_leaves_promises_and_care_alone():
     db = _DB()
     # the query names only the routine kinds — a check-in or a fit check is never withdrawn
     src = inspect.getsource(withdraw_routine)
-    assert '("follow_up", "quote_follow_up")' in src
+    assert '("follow_up", "quote_follow_up", "buying_follow_up")' in src
     assert asyncio.run(withdraw_routine(db, "c1", why="a colleague replied")) == 2
     assert all(r.status == "vetoed" and "a colleague replied" in r.reason for r in rows) and db.commits == 1
 
@@ -648,6 +648,16 @@ def test_every_unprompted_sender_checks_the_opt_out_and_stamps_its_rows():
     assert "_stamp" in inspect.getsource(hub_events._celebrate)
     assert "opted_out(db, redis, conv)" in inspect.getsource(actions.process_due)
     assert "ol.stamp(" in inspect.getsource(actions._send)
+    # the event-driven and campaign paths the audit verification (2026-11-06)
+    # found without the check: seasonal campaign, missed-call text, recording
+    # notice, the comment-engagement DM
+    from app.jobs import seasonal_outreach
+    from app.services import missed_call, recording_notice
+    from app.agent import runtime
+    assert "opted_out(" in inspect.getsource(seasonal_outreach.run)
+    assert "opted_out(" in inspect.getsource(missed_call._follow_up)
+    assert "opted_out(" in inspect.getsource(recording_notice.send_for_call)
+    assert "_opted(" in inspect.getsource(runtime._run_comment_engage)
 
 
 # ── H. the trace reads what the stamps say ───────────────────────────────────

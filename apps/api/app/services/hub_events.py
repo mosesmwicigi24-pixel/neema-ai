@@ -214,6 +214,13 @@ async def _celebrate(db, redis, conv, event: dict) -> dict:
             await mark_won_for_conversation(db, conv.id)
         except Exception:
             pass
+        # After the yes, only service: every pending sales nudge is withdrawn
+        # with its reason (audit verification, 2026-11-06).
+        try:
+            from app.services.actions import withdraw_routine
+            await withdraw_routine(db, conv.id, why="order paid")
+        except Exception:
+            pass
 
     # The tailor's call-back: six days after delivery, ask how it fits. Planned
     # here (whatever send mode the delivery news itself takes) and executed by

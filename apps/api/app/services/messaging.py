@@ -1028,8 +1028,10 @@ async def _relay_order_confirmation(db, redis, wa_id, *, order_number, currency,
         conv.person_id = await resolve_person_id_for_wa_id(db, wa_id, source="whatsapp_receipt")
     if conv.channel is None:
         conv.channel = "whatsapp"
+    from app.services import outreach_log as _ol
     db.add(Message(
         wa_id=wa_id,
+        raw_meta=_ol.stamp("order_confirmation", _ol.TRANSACTIONAL, kind="order_confirmation"),
         conversation_id=conv.id,
         person_id=conv.person_id,
         channel="whatsapp",

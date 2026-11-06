@@ -40,6 +40,7 @@ _bg_tasks: set = set()
 # Outcomes (returned for tests; logged for the box).
 DISABLED, RECORDING_OFF, NO_RECIPIENT, OUTSIDE_WINDOW = "disabled", "recording_off", "no_recipient", "outside_window"
 ALREADY, SENT, FAILED = "already", "sent", "failed"
+OPTED_OUT = "opted_out"
 
 
 def notice_text() -> str:
@@ -108,6 +109,20 @@ async def send_for_call(call_id: str, redis=None) -> str:
             _log.info("recording notice skipped for %s %s (call %s): outside the 24 h window",
                       channel, recipient, call_id)
             return OUTSIDE_WINDOW
+        # Their "do not message me" covers the recording notice too
+        # (audit verification, 2026-11-06).
+        try:
+            from app.services.intent import opted_out
+            if conv is None and channel == "whatsapp":
+                from app.models.conversation import Conversation
+                conv = (await db.execute(select(Conversation).where(
+                    Conversation.wa_id == recipient))).scalars().first()
+            if conv is not None and await opted_out(db, redis, conv):
+                _log.info("recording notice skipped for %s …%s (call %s): opted out",
+                          channel, str(recipient)[-4:], call_id)
+                return OPTED_OUT
+        except Exception:
+            pass
         # Claim before sending: the primary key lets exactly one sender through.
         claimed = (await db.execute(
             insert(RecordingNotice).values(channel=channel, recipient=recipient, call_id=call_id)
