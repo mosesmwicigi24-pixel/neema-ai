@@ -728,6 +728,7 @@ async def process_due(db, redis, *, now: datetime | None = None, limit: int = 10
                                                          f"team still confirming: {_open_item}"))
                 ol.decision("actions", conv.channel, who, "hold",
                             f"team check open: {_open_item}", kind=getattr(action, "kind", None), action=getattr(action, "id", None))
+                await _shadow_count(redis, "hold_team_check")
                 continue
             # The deal may have closed since (paid, lost) — a follow-up on a
             # settled deal is noise, not initiative.
@@ -812,6 +813,7 @@ async def process_due(db, redis, *, now: datetime | None = None, limit: int = 10
                     ol.decision("actions", conv.channel, who, "hold",
                                 f"they asked for time ({_said}) — until {_until.date().isoformat()}",
                                 kind=getattr(action, "kind", None), action=getattr(action, "id", None))
+                    await _shadow_count(redis, "hold_customer")
                     continue
             _lang = await _cs.language_for(db, conv)
             if not _cs.automated_ok(_lang) and (message_class(action) == "routine"
@@ -821,6 +823,7 @@ async def process_due(db, redis, *, now: datetime | None = None, limit: int = 10
                                  reason=f"{action.reason or ''} [they write in '{_lang}' — a person should write this]")
                     ol.decision("actions", conv.channel, who, "park", f"language {_lang}",
                                 kind=getattr(action, "kind", None), action=getattr(action, "id", None))
+                    await _shadow_count(redis, "park_language")
                 continue
             # The contextual decision (shadow or enforce).
             shadow_flags: list[str] = []
@@ -869,6 +872,7 @@ async def process_due(db, redis, *, now: datetime | None = None, limit: int = 10
                                                          f"outside the 24h window — {exc}"))
                     ol.decision("actions", conv.channel, who, "hold", str(exc),
                                 kind=getattr(action, "kind", None), action=getattr(action, "id", None))
+                    await _shadow_count(redis, "park_template")
                     await _notify(redis, "⏳ Follow-up needs a person",
                                   f"{str(exc)[:100]} — {(action.reason or '')[:80]}", conv)
                     continue
@@ -946,6 +950,7 @@ async def process_due(db, redis, *, now: datetime | None = None, limit: int = 10
                                  action.reason, "sent? outcome unknown — check the thread before resending"))
                 ol.decision("actions", conv.channel, who, "hold", f"outcome unknown: {exc}",
                             kind=getattr(action, "kind", None), action=getattr(action, "id", None))
+                await _shadow_count(redis, "unknown_outcome")
                 spoken_to.add(conv.id)
                 continue
             except Exception:
