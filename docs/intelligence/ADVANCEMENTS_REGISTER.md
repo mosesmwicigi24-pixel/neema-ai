@@ -30,8 +30,8 @@ explicit word.
   REGRESSION_SAFETY_REPORT.
 - **Outcome (held-out):** state 0.787 [0.733, 0.833], language 0.913,
   opt-out 0.966, negatives 0 misses.
-- **Status:** VERIFIED COMPLETE (model-free layer). The effect on live replies
-  (holds, paid-claim notes, closer silence) is IMPLEMENTED BUT NOT VERIFIED
+- **Status:** PARTIALLY COMPLETE — the held-out claim was withdrawn after verification pass 1 (the tuning had seen held-out phrasings); the blind-set score is the measure. The first widening misfired on ordinary buying messages and was narrowed with the verifier's sentences as negatives (neg-021…043). Live effect IMPLEMENTED BUT NOT VERIFIED.
+
   until the real-model run.
 
 ## W1-1 · The reply gate fails closed
@@ -62,18 +62,21 @@ explicit word.
 - **Change:** `review.paid_ack_without_source` — a hard `paid_ack` finding unless a `check_order_status`/`create_order` result in this turn carries a paid-like state (the same vocabulary as `payment_followup.PAID_STATES`). "The team will match it to your order" passes.
 - **Extends:** `rule_findings` beside the `status` rule, same shape. **Rejected:** a model-only rule (that is what existed).
 - **Tests:** `test_intelligence_w1_grounding.py`; `test_reply_review`, `test_checker_rules`, `test_official_payment_lines` unchanged.
-- **Status:** VERIFIED COMPLETE at the rule level; live effect IMPLEMENTED BUT NOT VERIFIED (real-model run).
+- **Amended (verification 1):** the first cut flagged "we have not received your payment yet" and "once your payment is confirmed we start production"; now guarded against negation and condition, and it runs in every mode.
+- **Status:** VERIFIED COMPLETE at the rule level (behaviour tests incl. the verifier's four); live effect IMPLEMENTED BUT NOT VERIFIED.
 
 ## W4-1 · No manufactured urgency, scarcity or discount from nowhere (hard gate rule)
 
 - **Baseline:** prompt-only; no rule kind for it (INVESTIGATION 4.1; research memo §6).
 - **Change:** `review.manufactured_pressure` — hard `pressure` finding for the urgency and scarcity words ("today only / last piece / only N left / hurry / offer ends tonight / don't miss out / leo tu") unless a promotion tool in this turn supplied the offer. Discount FIGURES stay the `figure` rule's business (every money figure from a hub row or a recorded promotion) — the first cut also flagged "10% off" and the existing verification stress tests showed that broke legitimate campaign replies, so it was narrowed. An honest "we don't offer discounts" passes.
-- **Status:** VERIFIED COMPLETE at the rule level; live effect IMPLEMENTED BUT NOT VERIFIED.
+- **Amended (verification 1):** flagged "no hurry, take your time" and "the last one we sent you"; now needs an imperative hurry or "last X left", is exempt for a stock figure a tool returned, and is **SOFT** (one rewrite) until the live tally shows no false findings.
+- **Status:** PARTIALLY COMPLETE (soft; rule-level tests).
 
 ## W1-7 · A promised offer that cannot be read is surfaced, not dropped
 
 - **Baseline:** `granted_promise` → None on a redis error; the order went out without the discount, silently (INVESTIGATION 1.7).
 - **Change:** the business rule "no offer recorded beats no order created" stands; the gap is now written on the order note, returned to the model as `offer_unverified` with a next step ("a colleague confirms the final amount"), and logged. **Rejected:** refusing the order (the owner's recorded trade-off prefers the order).
+- **Amended (verification 1):** the team is told (`_team_note`) in the same branch, not only the model.
 - **Status:** IMPLEMENTED BUT NOT VERIFIED (redis-error path).
 
 ## W1-13 · The Meta door no longer acks a message it lost
@@ -97,12 +100,12 @@ explicit word.
 
 - **Baseline:** only model-note states cleared a hold; the floor never returns them (INVESTIGATION 2.3).
 - **Change:** `customer_state._buying_message` — a question or a buying signal from a customer on hold lifts the hold.
-- **Status:** VERIFIED COMPLETE at unit level.
+- **Status:** VERIFIED COMPLETE — a behaviour test calls `apply()` with a held deal and a question (verification 1 downgraded the source-string version).
 
 ## W2-4 · The scribe never erases a team check or a hold
 
 - **Change:** `deals._merge_next_action` — an open team check keeps its kind and tucks the new intent under `then`; a hold survives.
-- **Status:** VERIFIED COMPLETE at unit level.
+- **Status:** VERIFIED COMPLETE for `_merge_next_action`; its wiring in `scribe_update` is IMPLEMENTED BUT NOT VERIFIED (source test only).
 
 ## W9-2 · `handoff_to_human` rings the team
 
@@ -117,17 +120,18 @@ explicit word.
 ## W3-1 · A complaint earns the care-first length
 
 - **Change:** the length target's `negative` flag also reads the customer-state floor's `complaint`.
-- **Status:** VERIFIED COMPLETE at unit level (target computed); effect on replies needs the model run.
+- **Status:** IMPLEMENTED BUT NOT VERIFIED (source test only — downgraded by verification 1).
 
 ## W8-1 · Language continuity checked without the model reviewer
 
 - **Change:** `review.language_mismatch` — a soft, deterministic `language` finding for Hindi script, Swahili, French and Portuguese customers whose draft plainly reads as English (three or more English function words and none of the customer's language); English and mixed left alone. The first cut flagged a short Swahili price line ("Trei tatu za … ni KES 66,000") — caught by the existing stress tests and narrowed.
-- **Status:** VERIFIED COMPLETE at rule level.
+- **Amended (verification 1):** flagged a short Swahili price line; now needs a draft that plainly reads as English. SOFT by design: one rewrite, never a hold.
+- **Status:** VERIFIED COMPLETE at rule level (soft).
 
 ## W7-6 · State writes take the row lock
 
 - **Change:** `intent.record_opt_out` and `customer_state.apply` lock the person row before rewriting `state` (the `state_lock` contract).
-- **Status:** VERIFIED COMPLETE at unit level.
+- **Status:** IMPLEMENTED BUT NOT VERIFIED (source test only; the lock is best-effort — downgraded by verification 1).
 
 ## W7-2 · The newest learned rules survive the combined cap
 
@@ -146,13 +150,25 @@ explicit word.
 ## W9-1 · After-sale outcomes say whether the customer was told
 
 - **Change:** every `_celebrate` return carries `customer_told` (True / False / None for unknown delivery); "handled" no longer implies a customer heard anything (INVESTIGATION 9.1).
-- **Status:** VERIFIED COMPLETE at unit level; the standup and the dashboard can now read the distinction.
+- **Status:** VERIFIED COMPLETE — the hub-event tests assert `customer_told` on every branch.
 
 ## W10-3 · The usage row logs the model that actually answered
 
 - **Change:** `_served` prefers `llm.last_model` (set after a fallback) over the configured `_model`.
-- **Status:** VERIFIED COMPLETE at unit level.
+- **Status:** IMPLEMENTED BUT NOT VERIFIED (source test only — downgraded by verification 1).
 
 ## W1-5 (amended) · Fail closed on infrastructure errors only
 
 - The first cut returned None on any exception, which also muted every unit test whose fake session raises an AttributeError. The takeover re-check now fails closed on `SQLAlchemyError`, `OSError` and timeouts (what a database outage raises) and assumes AI on a programming error inside the check, with a warning. Both branches tested.
+
+
+## Verification pass 1 — further repairs (2026-11-06)
+
+- **W1-5 (sync channels):** web chat and the ManyChat relay re-check the takeover after composing and return the human line if a colleague took the thread.
+- **W1-2 (opt-out guards):** "stop messaging me about the cups" and "remove me from the group" are no longer opt-outs (the messaging object is required); real removal requests still are.
+- **W7-4 (closer key):** silence on a closer now arms the closer key, so the next "ok"/"thanks" costs no model turn (the verifier's cost regression).
+- **W1-1 (loud failure):** a gate error is also counted as a failing turn in `agent_health`, so a bug in rule code shows on `/api/health` and the standup instead of holding replies in silence.
+- **W2-1 (closers):** "Thanks for nothing" / "Thanks for the delay" are not closers (object whitelist).
+- **W8 (language):** Swahili with borrowed shop nouns ("Sawa size 42") stays Swahili; `apply()` no longer flips such customers to English.
+- **Runner (§5):** an empty reply fails wherever a reply was expected; `require` fails on an empty reply; a raised turn fails; the paid and pressure readings are the gate's own.
+- **Accepted, recorded (not changed):** Neema-initiated compositions bypass the gate by the existing `read_only` design (verification 1.3); the opt-out door checks text-only messages on every channel (1.4); on an unverifiable takeover the sweeper re-composes rather than re-sends (1.5); comment dedupe is redis-only (1.6); the performance view rides in the same PR (1.15 — the owner may ask for a split).

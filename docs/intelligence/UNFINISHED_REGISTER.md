@@ -43,6 +43,17 @@ the precise dependency · status. Last update: 2026-11-06, end of session 1.
 | Retiring the legacy bridge order path and the expiring receipt shortener (W9-4) | removes a code path hub events may still use; needs a production trace first | INVESTIGATION 9.4 |
 | Turn latency instrumentation, availability history, resolution definition | named on the dashboard as NOT YET MEASURED with what each needs | performance.py |
 
+## Opened by verification pass 1 (not fixed in this slice)
+
+| Item | Why open | Where |
+|---|---|---|
+| Neema-initiated compositions bypass the gate (`read_only`): follow-ups, announcements, the sweeper bridge never meet `paid_ack`/`pressure` | pre-existing design; a rules-only pass on read-only compositions is cheap and should be the next change | VERIFICATION_PASS_1 1.3 |
+| Opt-out door checks text-only messages on every channel | a photo with a "stop" caption reaches the model | 1.4 |
+| Unverifiable takeover → the sweeper re-composes the turn (tools may act twice) | persisting the composed reply for the retry needs a small store; trade-off recorded | 1.5 |
+| Comment dedupe is redis-only; a 502 redelivery with redis down could answer a comment twice | DB-side comment id dedupe | 1.6 |
+| The blind set must be scored before any held-out claim; the runner cannot exercise the Meta/TikTok/web doors or an overlap silence (WhatsApp contacts, sequential turns) | runner channel parameter; concurrent-turn harness | 6, 13 |
+| Four register rows rest on source-string tests (W3-1, W7-6, W10-3, W2-4 wiring) | downgraded; behaviour tests to add | 2 |
+
 ## Open owner decisions carried from earlier stages
 
 - the scope of "pause after two unanswered";

@@ -281,3 +281,26 @@ will not catch the English reply that follows.
 3. §4.1 (7-day holds on "No rush, go ahead", "Hold on", "Ngoja") and §4.5 (Swahili → English flip).
 4. §1.1, §1.2, §1.7, §4.6 (closer-key arming).
 5. Register: downgrade the five VERIFIED COMPLETE rows that rest on `inspect.getsource` (§2) and add the "inbound replies only" / "DM mode only" / "one rewrite, never a hold" qualifications (§1.3, §1.2, §3.1).
+
+
+---
+
+## Implementer's response (same day)
+
+| Finding | Action |
+|---|---|
+| 1 held-out contamination | **Accepted.** Held-out claim withdrawn in BENCHMARK_RESULTS; a blind set of 120 cases commissioned from a fresh author after the tuning, never read by the implementer; only its aggregate is reported. |
+| 2 runner passes empty replies | **Fixed.** Reply-expected turns fail on an empty reply; `require` fails on empty; a raised turn fails; the paid/pressure readings call the gate's own functions. Test added. |
+| 3 hard rules hold correct replies | **Fixed.** `paid_ack`: negation/condition guard (the four sentences are tests), every mode. `pressure`: imperative hurry only, "last X left/remaining/in stock" only, stock-figure exemption, `_PROMO_TOOLS` = real tools, **soft** until the live tally is clean. |
+| 4 opt-out false positives | **Fixed.** "stop messaging me" needs the clause to end (or again/anymore/please); "remove me" needs a list/messages object; group chats are not opt-outs. Tests added. |
+| 5 floor misfires | **Fixed** for every reproduced sentence (developer negatives neg-021…043 and tests): no bare hold-on/ngoja/subiri/no-rush/not-today; the imperative contact form needs a time hint; "continue" dropped, "approved" anchored with a negation guard; bare "sent"/"nimetuma" only as a whole message or with money; a screenshot must be of a payment; pronouns only after with-verbs; "tell/inform/waiting for" removed and "take it to" kept only with a real body; "?" softens consulting; "received my payment?" is a claim that outranks the complaint rule; a strong go-ahead outranks a courtesy hold. |
+| 6 language regression | **Fixed.** Borrowed shop nouns are not English evidence; tests for the three sentences. |
+| 7 "Thanks for anything" | **Fixed.** Object whitelist; sarcastic thanks tested. |
+| 8 missed paths | **Partly fixed:** sync channels re-check the takeover; `paid_ack` runs in comment mode. **Open:** read-only compositions bypass the gate (1.3), media-guarded doors (1.4). |
+| 9 fail-closed flag best-effort | **Mitigated:** a gate error is counted as a failing turn in `agent_health`. The hold line is kept over silence; recorded as a trade-off. |
+| 10 `_still_ai` None → re-compose | **Accepted**, recorded in UNFINISHED_REGISTER. |
+| 11 closer key not armed | **Fixed.** Silence on a closer arms the key on both senders. |
+| 12 VERIFIED COMPLETE on source tests | **Downgraded** (W3-1, W7-6, W10-3, W2-4 wiring); W2-3 got a behaviour test; W9-1 is asserted by the hub-event tests. |
+| 13 runner coverage limits | **Recorded** in UNFINISHED_REGISTER. |
+| 14 Wilson, cap header, sweeper | — |
+| 15 scope | **Recorded**; the owner may ask for the performance view to be split out. |
