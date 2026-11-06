@@ -179,3 +179,98 @@ def _cli() -> None:
 
 if __name__ == "__main__":
     _cli()
+
+
+async def collect(db, redis, handle: str, days: int = 7) -> dict | None:
+    """The same facts as `trace()` prints, as JSON for the admin endpoint
+    (routers/crm.py). The contact is masked in the heading; the thread text is
+    included because the reader is an admin who can open the thread anyway.
+    None when no conversation matches."""
+    import importlib
+    import pkgutil
+    import app.models as models_pkg
+    for mod in pkgutil.iter_modules(models_pkg.__path__):
+        importlib.import_module(f"app.models.{mod.name}")
+    from app.models.agent_action import AgentAction
+    from app.models.conversation import Conversation
+    from app.models.deal import Deal
+    from app.models.intercept import Intercept
+    from app.models.message import Message
+    from app.models.person import Person
+    from app.services.deals import team_check_open
+    from app.services.intent import preferences
+
+    since = datetime.now(timezone.utc) - timedelta(days=days)
+    conv = None
+    try:
+        conv = await db.get(Conversation, uuid.UUID(handle))
+    except (ValueError, AttributeError):
+        pass
+    if conv is None:
+        conv = (await db.execute(select(Conversation).where(
+            Conversation.wa_id == handle.lstrip("+")))).scalar_one_or_none()
+    if conv is None:
+        conv = (await db.execute(select(Conversation).where(
+            Conversation.external_id == handle))).scalars().first()
+    if conv is None:
+        return None
+    key = conv.wa_id or conv.external_id
+    person = await db.get(Person, conv.person_id) if conv.person_id else None
+    out: dict = {
+        "conversation_id": str(conv.id), "channel": conv.channel, "contact": _mask(key),
+        "mode": getattr(conv.intercept_mode, "value", conv.intercept_mode),
+        "status": getattr(conv.status, "value", conv.status),
+        "contact_preferences": preferences(person) if person is not None else {},
+        "customer_state": ((person.state or {}).get("customer_state") if person is not None else None),
+        "days": days, "deals": [], "thread": [], "actions": [], "flags": [], "redis": {},
+    }
+    deals = (await db.execute(select(Deal).where(Deal.conversation_id == conv.id)
+                              .order_by(Deal.updated_at.desc()).limit(3))).scalars().all()
+    for d in deals:
+        out["deals"].append({"id": str(d.id), "status": d.status, "stage": d.stage, "title": d.title,
+                             "team_check_open": team_check_open(d), "blocking": d.blocking,
+                             "next_action": d.next_action})
+    rows = (await db.execute(select(Message).where(
+        Message.conversation_id == conv.id, Message.created_at >= since)
+        .order_by(Message.created_at))).scalars().all()
+    for m in rows:
+        inbound = getattr(m.direction, "value", m.direction) == "inbound"
+        out["thread"].append({
+            "at": _fmt(m.created_at), "direction": "in" if inbound else "out",
+            "sender": getattr(m.sender, "value", m.sender),
+            "text": " ".join((m.text or "").split())[:300],
+            "media_type": m.media_type,
+            "origin": None if inbound else _origin(m),
+            "delivery": None if inbound else (_delivery(m) or None),
+            "waba_msg_id": bool(m.waba_msg_id),
+        })
+    acts = (await db.execute(select(AgentAction).where(
+        AgentAction.conversation_id == conv.id)
+        .order_by(AgentAction.created_at.desc()).limit(40))).scalars().all()
+    for a in acts:
+        out["actions"].append({"created": _fmt(a.created_at), "kind": a.kind, "status": a.status,
+                               "due": _fmt(a.due_at), "source": a.source, "dedupe_key": a.dedupe_key,
+                               "reason": " ".join((a.reason or "").split())[:300],
+                               "has_draft": bool(a.draft)})
+    flags = (await db.execute(select(Intercept).where(
+        Intercept.conversation_id == conv.id,
+        Intercept.created_at >= datetime.now(timezone.utc) - timedelta(days=30))
+        .order_by(Intercept.created_at.desc()).limit(15))).scalars().all()
+    for f in flags:
+        out["flags"].append({"at": _fmt(f.created_at), "action": getattr(f.action, "value", f.action),
+                             "note": " ".join((f.note or "").split())[:200]})
+    if redis is not None:
+        for label, k in [("opt_out", f"agent:optout:{conv.channel}:{key}"),
+                         ("paused", f"agent:pause:{conv.channel}:{key}"),
+                         ("guard_pause", f"guard:pause:{conv.channel}:{key}"),
+                         ("in_flight", f"agent:inflight:{conv.channel}:{key}"),
+                         ("hold_line", f"agent:holdline:{conv.channel}:{key}"),
+                         ("silenced", f"agent:silenced:{conv.channel}:{key}")]:
+            try:
+                v = await redis.get(k)
+                if v:
+                    out["redis"][label] = {"value": v.decode() if isinstance(v, bytes) else str(v),
+                                           "ttl": await redis.ttl(k)}
+            except Exception:
+                pass
+    return out

@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import re
 import logging
 
 # Full model registry so mappers configure standalone.
@@ -105,9 +106,72 @@ SCENARIOS = [
     ]),
 ]
 
-EVAL_IDS = [s[0] for s in SCENARIOS]
+# ── EXPERIENCE SCENARIOS (audit verification, 2026-11-06) ───────────────────
+# The three incident threads reconstructed, and the seven statements the
+# expanded audit ran through the detectors — now through the live turn with
+# the real model, so silence, brevity, language continuity and "no re-asking
+# for a date" are judged on transcripts. Nothing reaches a customer.
+EXPERIENCE = [
+    ("254700000911", "Judas — $335 quotation, 'check in Thursday', then a thank-you", [
+        "How much for 2 aluminium communion trays and 50 silver cups?",
+        "My friend may collect in Nairobi, or you send to Juba by DHL",
+        "I will decide on Thursday, contact me then",
+        "Thank you very much.",
+    ]),
+    ("255700000912", "Willy — Swahili, comparing prices in Arusha", [
+        "Habari, bei ya Golden Communion Tray na Anointing horn?",
+        "Ni shilingi ngapi za Tanzania?",
+        "Ninataka kufuatilia wanaouza hapa Arusha. Nitakuambia nikishapata majibu",
+    ]),
+    ("919000000913", "Pastor Emmanuel — Hindi, cope under availability check", [
+        "नमस्ते, कोप कम्प्लीट सेट की कीमत क्या है? सोने की कढ़ाई के साथ",
+        "ठीक है, मैं पुष्टि का इंतज़ार कर रहा हूँ",
+    ]),
+    ("254700000914", "The seven statements, one thread", [
+        "How much is the purple chasuble?",
+        "Let me compare prices.",
+        "I need to consult my bishop.",
+        "Please contact me on Thursday.",
+        "I'm waiting for confirmation.",
+        "I have already paid.",
+        "Please stop messaging me.",
+    ]),
+]
+
+EVAL_IDS = [s[0] for s in SCENARIOS] + [s[0] for s in EXPERIENCE]
 
 _INTERNAL_WORDS = ("hub", "our system", "search", "look it up", "reserve", "hold the", "hold these")
+
+
+_DATE_ASK_RE = re.compile(r"\b(which day|what day|when (would|should|can) (we|i)|is there a day|when will you|when do you)\b", re.I)
+_PITCH_RE = re.compile(r"\b(shall i (start|reserve|place|go ahead)|would you like (me )?to (start|reserve|place)|"
+                       r"ready to (order|proceed)|go ahead with the order|nikuwekee|tuanze|tuendelee na oda)\b", re.I)
+
+
+def experience_checks(reply: str, user_text: str, *, after_hold: bool) -> list[str]:
+    """Flags for the transcripts an auditor reads: a date re-asked after the
+    customer named one, a pitch after they asked for time, a reply in the
+    wrong script, a non-silent answer to a plain closer."""
+    from app.agent.voice import looks_swahili
+    from app.services.customer_state import floor, guess_language
+    flags = []
+    r = reply or ""
+    reading = floor(user_text) or {}
+    said = reading.get("customer_said")
+    if said in ("needs_time", "comparing", "consulting") and _PITCH_RE.search(r):
+        flags.append("PITCH AFTER A REQUEST FOR TIME")
+    if after_hold and _DATE_ASK_RE.search(r):
+        flags.append("RE-ASKED FOR A DATE")
+    if said == "stop" and r and len(r.split()) > 40:
+        flags.append("LONG OPT-OUT ACKNOWLEDGEMENT")
+    lang = guess_language(user_text)
+    if lang == "hi" and not re.search(r"[\u0900-\u097F]", r):
+        flags.append("REPLY NOT IN HINDI")
+    if lang == "sw" and r and not looks_swahili(r):
+        flags.append("REPLY NOT IN SWAHILI")
+    if said == "closing" and r.strip():
+        flags.append("ANSWERED A CLOSER (silence expected or one line)")
+    return flags
 
 
 def judge(text: str, user_text: str, tools: list | None) -> dict:
@@ -224,6 +288,51 @@ async def run(keep: bool) -> None:
         if redis is not None and wa_id.endswith("902"):
             paused = await redis.get(f"agent:pause:whatsapp:{wa_id}")
             print(f"\n[check] pause cooldown set: {'YES' if paused else 'NO'}")
+
+    # ── the experience set: transcripts plus the audit flags ──
+    for wa_id, title, turns in EXPERIENCE:
+        print(f"\n{'=' * 62}\nEXPERIENCE: {title}  ({wa_id})\n{'=' * 62}")
+        async with AsyncSessionLocal() as db:
+            await provision_user(db, wa_id)
+            await db.commit()
+        after_hold = False
+        for text in turns:
+            print(f"\nCUSTOMER: {text}")
+            async with AsyncSessionLocal() as db:
+                db.add(Message(wa_id=wa_id, channel="whatsapp",
+                               direction=MsgDirection.inbound, sender=MsgSender.user, text=text))
+                await db.commit()
+            facts: dict = {}
+            async with AsyncSessionLocal() as db:
+                try:
+                    reply = await run_turn(db, redis, wa_id, text, build_llm(purpose="job:eval"),
+                                           turn_facts=facts)
+                except Exception as exc:
+                    print(f"NEEMA  : <turn failed: {exc}>")
+                    break
+            print(f"NEEMA  : {reply or '<silence>'}")
+            flags = experience_checks(reply, text, after_hold=after_hold)
+            print("[experience] " + ("; ".join(flags) if flags else "ok"))
+            from app.services.customer_state import floor as _floor
+            if (_floor(text) or {}).get("customer_said") in ("needs_time", "comparing", "consulting"):
+                after_hold = True
+            if reply:
+                async with AsyncSessionLocal() as db:
+                    db.add(Message(wa_id=wa_id, channel="whatsapp",
+                                   direction=MsgDirection.outbound, sender=MsgSender.ai, text=reply))
+                    await db.commit()
+            # the scribe runs inside the live path; here we file the state the same way
+            try:
+                from app.services.deals import scribe_update
+                async with AsyncSessionLocal() as db:
+                    await scribe_update(db, wa_id, "whatsapp", reply or "", inbound_text=text,
+                                        tools=facts.get("tools"))
+            except Exception as exc:
+                print(f"[scribe] skipped: {exc}")
+        if redis is not None:
+            opted = await redis.get(f"agent:optout:whatsapp:{wa_id}")
+            if wa_id.endswith("914"):
+                print(f"\n[check] opt-out recorded: {'YES' if opted else 'NO'}")
 
     t = getattr(run, "totals", None)
     if t and t["turns"]:

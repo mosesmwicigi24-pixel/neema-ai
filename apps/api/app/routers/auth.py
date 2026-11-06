@@ -37,6 +37,36 @@ async def login(body: LoginRequest, db: AsyncSession = Depends(get_db)):
     }
 
 
+@router.post("/login-basic", response_model=TokenResponse)
+async def login_basic(request: Request, db: AsyncSession = Depends(get_db)):
+    """The same login, read from an `Authorization: Basic` header instead of
+    a JSON body — for a client whose credential is held by a secrets proxy
+    that injects HTTP Basic auth (the audit session's credential form) and
+    never sees the password itself. Same check, same tokens, same lifetimes."""
+    import base64
+    import binascii
+    header = str(request.headers.get("authorization") or "")
+    if not header.lower().startswith("basic "):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Basic credentials required")
+    try:
+        raw = base64.b64decode(header[6:].strip(), validate=True).decode("utf-8")
+        email, _, password = raw.partition(":")
+    except (binascii.Error, UnicodeDecodeError, ValueError):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
+    result = await db.execute(select(Agent).where(Agent.email == email.strip()))
+    agent = result.scalar_one_or_none()
+    if not agent or not password or not verify_password(password, agent.password_hash):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
+    return {
+        "access_token": create_access_token(str(agent.id)),
+        "refresh_token": create_refresh_token(str(agent.id)),
+        "token_type": "bearer",
+        "agent_id": str(agent.id),
+        "role": agent.role,
+        "is_superuser": agent.is_superuser,
+    }
+
+
 @router.post("/refresh", response_model=TokenResponse)
 async def refresh(body: dict, db: AsyncSession = Depends(get_db)):
     try:
