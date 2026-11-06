@@ -9,7 +9,7 @@ BLOCKED · NOT STARTED · NOT APPLICABLE. A row is VERIFIED COMPLETE only when t
 evidence column points at a repeatable measurement or an inspection record, never
 because code or tests exist.
 
-Last update: 2026-11-06 (session 1, discovery phase).
+Last update: 2026-11-06 (session 1, end: discovery, baseline, first implementation slice, PR #316 draft).
 
 ## §1 Non-negotiable rules (standing; audited at every phase gate)
 
@@ -31,79 +31,79 @@ Last update: 2026-11-06 (session 1, discovery phase).
 | ID | Requirement | Evidence / where | Status |
 |---|---|---|---|
 | R2.0 | Start from `NEEMA_CAPABILITY_INTELLIGENCE_PROFILE_2026.md` | not in repo/uploads/machine; owner asked to add it | BLOCKED (input) |
-| R2.0b | Nov 5–6 audits, development reports, git history, production evidence | scratchpad audits; git-history.txt (87 commits, PRs #251–#315); /api/health | PARTIALLY COMPLETE |
-| R2.1 | FastAPI runtime and model orchestration | inventory A | NOT STARTED → in progress |
-| R2.2 | Assembled prompts and instruction hierarchy | inventory A | in progress |
-| R2.3 | Customer memory and conversation state | inventory F | in progress |
-| R2.4 | 23-tool architecture and permissions | inventory B | in progress |
-| R2.5 | Hub and commercial data integrations | inventory C | in progress |
-| R2.6 | Quotation, cart, order, payment, after-sales | inventory C | in progress |
-| R2.7 | WhatsApp, Messenger, Instagram, web chat, comments, TikTok | inventory D | in progress |
-| R2.8 | Autonomous actions, follow-ups, dispatch, takeover, consent | inventory D + Stage 1–8 reports | in progress |
-| R2.9 | Response verification and factual grounding | inventory E | in progress |
-| R2.10 | Dashboard, monitoring, evaluation tools | inventory G | in progress |
-| R2.11 | Android/iOS contracts (inspect only) | inventory G | in progress |
-| R2.12 | Verify deployed commit, flags, models, credentials, channel status, execution behaviour | health: ff8c3b5; models from config (tier2 sonnet-5-5 / haiku-5-5; review sonnet-5 / haiku-4-5); live flags readable only via health + admin endpoints (credential pending) | PARTIALLY COMPLETE |
-| R2.13 | Capability-to-implementation inventory with all listed fields | inventories A–G → CAPABILITY_BASELINE | in progress |
-| R2.14 | Trace end-to-end workflows | inventories C, D | in progress |
-| R2.15 | Document paths examined and paths inaccessible/unverified | CAPABILITY_BASELINE §"Not examined" | in progress |
-| R2.16 | Identify dead code, competing implementations, contradictory instructions, ineffective flags, bypasses, obsolete safeguards | each inventory §findings → INVESTIGATION_REPORT | in progress |
+| R2.0b | Nov 5–6 audits, development reports, git history, production evidence | CAPABILITY_BASELINE §3–4; git-history (87 commits, PRs #251–#315); /api/health | VERIFIED COMPLETE |
+| R2.1 | FastAPI runtime and model orchestration | CAPABILITY_BASELINE §2A | VERIFIED COMPLETE |
+| R2.2 | Assembled prompts and instruction hierarchy | CAPABILITY_BASELINE §2A; prompt dumps measured (95–98 K chars) | VERIFIED COMPLETE |
+| R2.3 | Customer memory and conversation state | CAPABILITY_BASELINE §2F | VERIFIED COMPLETE |
+| R2.4 | 23-tool architecture and permissions | CAPABILITY_BASELINE §2B (23 + 1 conditional) | VERIFIED COMPLETE |
+| R2.5 | Hub and commercial data integrations | CAPABILITY_BASELINE §2C; hub-side behaviour [H] | PARTIALLY COMPLETE (hub side unobservable) |
+| R2.6 | Quotation, cart, order, payment, after-sales | CAPABILITY_BASELINE §2C | VERIFIED COMPLETE |
+| R2.7 | WhatsApp, Messenger, Instagram, web chat, comments, TikTok | CAPABILITY_BASELINE §2D | VERIFIED COMPLETE |
+| R2.8 | Autonomous actions, follow-ups, dispatch, takeover, consent | CAPABILITY_BASELINE §2D/E + Stage 1–8 reports | VERIFIED COMPLETE |
+| R2.9 | Response verification and factual grounding | CAPABILITY_BASELINE §2E (28 outbound paths, gate coverage) | VERIFIED COMPLETE |
+| R2.10 | Dashboard, monitoring, evaluation tools | CAPABILITY_BASELINE §2G | VERIFIED COMPLETE |
+| R2.11 | Android/iOS contracts (inspect only) | CAPABILITY_BASELINE §2G (81 endpoints; shared set listed); apps untouched | VERIFIED COMPLETE |
+| R2.12 | Verify deployed commit, flags, models, credentials, channel status, execution behaviour | ff8c3b5 live; models from config; channels per inbox; 22 flag values unknown (box .env unreadable, credential never saved) | PARTIALLY COMPLETE |
+| R2.13 | Capability-to-implementation inventory with all listed fields | CAPABILITY_BASELINE (230 rows) | VERIFIED COMPLETE |
+| R2.14 | Trace end-to-end workflows | CAPABILITY_BASELINE §1 | VERIFIED COMPLETE |
+| R2.15 | Document paths examined and paths inaccessible/unverified | CAPABILITY_BASELINE §5 | VERIFIED COMPLETE |
+| R2.16 | Identify dead code, competing implementations, contradictory instructions, ineffective flags, bypasses, obsolete safeguards | INVESTIGATION_REPORT (50 findings) | VERIFIED COMPLETE |
 | R2.17 | No implementation conclusions before the baseline is evidence-backed | phase gate | applied |
 
 ## §3 Research the highest international standards
 
 | ID | Requirement | Evidence / where | Status |
 |---|---|---|---|
-| R3.1 | Research the seven topic areas | STANDARDS_RESEARCH.md | in progress |
-| R3.2 | Anthropic, OpenAI, DeepMind, Microsoft, NIST, ISO, Fin, Sierra, Agentforce, Decagon | STANDARDS_RESEARCH.md | in progress |
-| R3.3 | τ-bench-style tasks, trajectory testing, blind human assessment, reproducible evals | STANDARDS_RESEARCH.md + EXCELLENCE_SCORE.md | in progress |
-| R3.4 | Separate science from marketing | tags (S)/(E)/(M) | in progress |
-| R3.5 | Per practice: achieves / evidence / Neema equivalent / helps here / adopt simply | STANDARDS_RESEARCH.md §applies | in progress |
+| R3.1 | Research the seven topic areas | STANDARDS_RESEARCH.md | VERIFIED COMPLETE |
+| R3.2 | Anthropic, OpenAI, DeepMind, Microsoft, NIST, ISO, Fin, Sierra, Agentforce, Decagon | STANDARDS_RESEARCH.md §2–4 (ISO text paywalled: structure only) | VERIFIED COMPLETE |
+| R3.3 | τ-bench-style tasks, trajectory testing, blind human assessment, reproducible evals | STANDARDS_RESEARCH §1; adopted in eval_run (end states, pass^k, run record) | VERIFIED COMPLETE |
+| R3.4 | Separate science from marketing | tags (S)/(E)/(M)/(P) throughout | VERIFIED COMPLETE |
+| R3.5 | Per practice: achieves / evidence / Neema equivalent / helps here / adopt simply | STANDARDS_RESEARCH "what applies" (12 ranked) | VERIFIED COMPLETE |
 
 ## §4 The ten advancements (each: initial evaluation · verified gaps · scoped improvements · regression tests · measured outcome)
 
 | ID | Workstream | Status |
 |---|---|---|
-| R4.1 | Reliability, truth, customer trust (opt-outs, verification bypasses, fail-open, discounts, payment state, held replies, delivery uncertainty, identity merge; inbound reaches inbox; financial grounding) | NOT STARTED |
-| R4.2 | Intent and contextual reasoning (extend customer-state, no competing engine) | NOT STARTED |
-| R4.3 | Emotional intelligence (social judgment; human review of hard cases) | NOT STARTED |
-| R4.4 | Sales psychology / consultative intelligence (no manipulation) | NOT STARTED |
-| R4.5 | Onboarding (reuse what the customer said; fewer repeats) | NOT STARTED |
-| R4.6 | Respectful closing (readiness vs time; paid conversion with experience) | NOT STARTED |
-| R4.7 | Memory and context engineering (no blind shortening, no vector DB) | NOT STARTED |
-| R4.8 | Cultural and multilingual excellence (native-speaker evaluation) | NOT STARTED |
-| R4.9 | Autonomous commercial execution (final business states, not API 200s) | NOT STARTED |
-| R4.10 | Continuous scientific evaluation (extend agent_eval.py; history; no uncontrolled prompt changes) | NOT STARTED |
+| R4.1 | Reliability, truth, customer trust | gate fails closed; opt-out door on every channel; takeover fail-closed; paid-ack rule; promised offer surfaced; Meta 502; inbound verified from outside; identity merge and delivery receipts not changed (recorded) | PARTIALLY COMPLETE (production verification pending) |
+| R4.2 | Intent and contextual reasoning | floor widened and measured on held-out (0.54→0.79); holds lift; scribe merge | VERIFIED COMPLETE (floor) / model layer NOT MEASURED |
+| R4.3 | Emotional intelligence | complaint → care-first length; rater packet built; no ratings | PARTIALLY COMPLETE (BLOCKED on raters) |
+| R4.4 | Consultative intelligence | hard pressure rule; discount figures grounded by the figure rule; judgment unmeasured | PARTIALLY COMPLETE |
+| R4.5 | Onboarding | photo turns kept; memory/onboarding case slices written; re-asking unmeasured | PARTIALLY COMPLETE |
+| R4.6 | Closing | readiness read (floor); paid conversion on the dashboard (partial denominator); delivery-total rule not changed | PARTIALLY COMPLETE |
+| R4.7 | Memory and context | newest rules kept; contradictions resolved; silence honoured; locked writes; context experiment NOT STARTED (needs model) | PARTIALLY COMPLETE |
+| R4.8 | Multilingual | language guess 0.75→0.91 held-out; deterministic continuity rule; 100 language cases; native review BLOCKED | PARTIALLY COMPLETE |
+| R4.9 | Autonomous execution | outcomes say customer_told; handoff rings; order idempotency and legacy path not changed (recorded) | PARTIALLY COMPLETE |
+| R4.10 | Continuous evaluation | agent_eval --cases, history in app_settings, dashboard reads it; no automatic prompt change exists | VERIFIED COMPLETE (harness) / run BLOCKED |
 
 ## §5 Independent intelligence baseline
 
 | ID | Requirement | Status |
 |---|---|---|
-| R5.1 | 300–500 cases covering the eleven listed categories | NOT STARTED |
+| R5.1 | 300–500 cases covering the eleven listed categories | 430 cases, all categories (EVALUATION_DATASET) | VERIFIED COMPLETE (no production-derived cases yet) |
 | R5.2 | Real model against controlled data, sends disabled | BLOCKED (no key in session; box/CI run) |
-| R5.3 | Objective assertions + human evaluation where judgment is required | NOT STARTED |
-| R5.4 | Blind comparison: Neema vs skilled humans vs reference agent | NOT STARTED (needs owner-provided human raters/sellers) |
-| R5.5 | Record inputs, model version, prompt revision, traces, outcomes, criteria, limitations | NOT STARTED |
-| R5.6 | Grader independence (not solely the producing model) | design in EXCELLENCE_SCORE | NOT STARTED |
+| R5.3 | Objective assertions + human evaluation where judgment is required | objective verdicts in eval_run; judged turns exported to a packet | PARTIALLY COMPLETE |
+| R5.4 | Blind comparison: Neema vs skilled humans vs reference agent | design only (INTERNATIONAL_ASSESSMENT) | NOT STARTED |
+| R5.5 | Record inputs, model version, prompt revision, traces, outcomes, criteria, limitations | eval_run record (git sha, model ids, prompt hashes, case-set hash, tool traces) | VERIFIED COMPLETE (harness) |
+| R5.6 | Grader independence | objective code + human raters; model judge optional and never sole | VERIFIED COMPLETE (design) |
 
 ## §6 Excellence Score
 
 | ID | Requirement | Status |
 |---|---|---|
-| R6.1 | 10 dimensions, weights as given | NOT STARTED |
-| R6.2 | Per metric: methodology, denominator, sample size, evaluator, evidence source, uncertainty | NOT STARTED |
+| R6.1 | 10 dimensions, weights as given | EXCELLENCE_SCORE | VERIFIED COMPLETE |
+| R6.2 | Per metric: methodology, denominator, sample size, evaluator, evidence source, uncertainty | EXCELLENCE_SCORE table | VERIFIED COMPLETE |
 | R6.3 | NOT MEASURED where unreliable; no invented scores | applied |
-| R6.4 | ≥10-point verified improvement on a held-out set | NOT STARTED |
-| R6.5 | Investigate the six preliminary targets | NOT STARTED |
+| R6.4 | ≥10-point verified improvement on a held-out set | floors only: +24.8 points on customer state, +16.8 language, +20.7 opt-out (held-out). The 100-point aggregate is NOT MEASURED (model-dependent dimensions blocked) — the 10-point claim is NOT demonstrated | PARTIALLY COMPLETE |
+| R6.5 | Investigate the six preliminary targets | EXCELLENCE_SCORE §targets: language continuity measurable now (0.91 floor), the rest need the model run | PARTIALLY COMPLETE |
 | R6.6 | Aggregate never excuses critical safety/financial errors | applied (gating rule in EXCELLENCE_SCORE) |
 
 ## §7 Executive performance dashboard
 
 | ID | Requirement | Status |
 |---|---|---|
-| R7.1 | Thirteen visibility items | NOT STARTED |
-| R7.2 | Baseline, current, trend, confidence where supported | NOT STARTED |
-| R7.3 | NOT YET MEASURED + instrumentation needed; no fabricated values | NOT STARTED |
+| R7.1 | Thirteen visibility items | performance.py + PerformanceView: 31 metric rows covering all thirteen | VERIFIED COMPLETE (view) |
+| R7.2 | Baseline, current, trend, confidence where supported | previous-window comparison, Wilson intervals, eval history trend | VERIFIED COMPLETE |
+| R7.3 | NOT YET MEASURED + instrumentation needed; no fabricated values | every unmeasured row names its instrumentation; DB test asserts no value | VERIFIED COMPLETE |
 
 ## §8 Controlled, verifiable changes
 
@@ -118,8 +118,8 @@ Last update: 2026-11-06 (session 1, discovery phase).
 
 | ID | Requirement | Status |
 |---|---|---|
-| R9.1 | This register, all columns | in progress |
-| R9.2 | Independent verification pass after each phase | NOT STARTED |
+| R9.1 | This register, all columns | this file + ADVANCEMENTS_REGISTER | VERIFIED COMPLETE (living) |
+| R9.2 | Independent verification pass after each phase | VERIFICATION_PASS_1.md (adversarial pass on the diff) | see that file |
 | R9.3 | Durable checkpoints in project records | this folder, committed |
 | R9.4 | Preserve exact state if the session ends | UNFINISHED_REGISTER |
 | R9.5 | Record external dependencies precisely | UNFINISHED_REGISTER |
@@ -128,20 +128,20 @@ Last update: 2026-11-06 (session 1, discovery phase).
 
 | ID | Requirement | Status |
 |---|---|---|
-| R10.1 | Assess the four levels with equivalent tasks, information, scoring, controls | NOT STARTED |
+| R10.1 | Assess the four levels | INTERNATIONAL_ASSESSMENT: level 1 partly; 2–4 NOT MEASURED | PARTIALLY COMPLETE |
 | R10.2 | No "top ten" claim without peer group, method, evidence | applied |
 
 ## §11 Deliverables
 
 | ID | Deliverable | File | Status |
 |---|---|---|---|
-| R11.1 | Verified Capability Baseline | CAPABILITY_BASELINE.md | NOT STARTED |
-| R11.2 | Deep Investigation Report | INVESTIGATION_REPORT.md | NOT STARTED |
-| R11.3 | Ten-Advancement Implementation Register | ADVANCEMENTS_REGISTER.md | NOT STARTED |
-| R11.4 | Intelligence Benchmark Results | BENCHMARK_RESULTS.md | NOT STARTED |
-| R11.5 | Customer Experience Assessment | in BENCHMARK_RESULTS + human ratings | NOT STARTED |
-| R11.6 | Performance Dashboard | web view + API | NOT STARTED |
-| R11.7 | Full Regression and Safety Report | REGRESSION_SAFETY_REPORT.md | NOT STARTED |
-| R11.8 | Unfinished and Unverified Work Register | UNFINISHED_REGISTER.md | NOT STARTED |
-| R11.9 | International Competitiveness Assessment | INTERNATIONAL_ASSESSMENT.md | NOT STARTED |
-| R11.10 | Final Release Readiness Report | RELEASE_READINESS.md | NOT STARTED |
+| R11.1 | Verified Capability Baseline | CAPABILITY_BASELINE.md | VERIFIED COMPLETE |
+| R11.2 | Deep Investigation Report | INVESTIGATION_REPORT.md | VERIFIED COMPLETE |
+| R11.3 | Ten-Advancement Implementation Register | ADVANCEMENTS_REGISTER.md | VERIFIED COMPLETE (living) |
+| R11.4 | Intelligence Benchmark Results | BENCHMARK_RESULTS.md (floors measured; real-model NOT MEASURED) | PARTIALLY COMPLETE |
+| R11.5 | Customer Experience Assessment | needs the model run and raters | BLOCKED |
+| R11.6 | Performance Dashboard | /api/admin/performance + PerformanceView | VERIFIED COMPLETE |
+| R11.7 | Full Regression and Safety Report | REGRESSION_SAFETY_REPORT.md | see that file |
+| R11.8 | Unfinished and Unverified Work Register | UNFINISHED_REGISTER.md | VERIFIED COMPLETE |
+| R11.9 | International Competitiveness Assessment | INTERNATIONAL_ASSESSMENT.md | VERIFIED COMPLETE (honest: levels 2–4 unmeasured) |
+| R11.10 | Final Release Readiness Report | RELEASE_READINESS.md | see that file |
