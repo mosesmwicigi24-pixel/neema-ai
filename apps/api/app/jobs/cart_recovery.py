@@ -190,9 +190,9 @@ async def _opted_out(redis, conv) -> bool:
     from app.services import intent
     try:
         async with AsyncSessionLocal() as db:
-            return await intent.opted_out(db, redis, conv)
+            return await intent.opted_out(db, redis, conv, fail_closed=True)
     except Exception:
-        return False
+        return True                    # a read that cannot be made never clears a send
 
 
 def guard_key(row: dict) -> str:

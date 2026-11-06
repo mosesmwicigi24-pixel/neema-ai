@@ -262,7 +262,7 @@ async def _celebrate(db, redis, conv, event: dict) -> dict:
     # a customer who asked for no messages gets it from a person.
     try:
         from app.services import intent as _intent
-        if await _intent.opted_out(db, redis, conv):
+        if await _intent.opted_out(db, redis, conv, fail_closed=True):
             await _notify_agents(redis, "🔕 Order update for an opted-out customer",
                                  f"{event.get('order_number') or ''}: {brief} — they asked "
                                  "for no automated messages; please tell them yourself.", conv)

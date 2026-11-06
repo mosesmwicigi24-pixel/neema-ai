@@ -32,12 +32,29 @@ _TTL = 3600                      # a rolling hour — matches the self-check cad
 # themselves within the hour: retrying a turn against an unpaid account just
 # fails again, and a budget stop holds until midnight UTC unless someone
 # raises the ceiling.
-ACTIONABLE = ("credit", "auth", "model", "budget", "meta", "whatsapp")
+# `database` / `gate` (slice 5, verification pass 5): a turn cannot complete
+# against a broken database or an erroring rule, so the sweep must stand
+# down rather than burn every waiting thread's strikes and hand it to a
+# person with the wrong reason; the next completed turn clears them.
+ACTIONABLE = ("credit", "auth", "model", "budget", "meta", "whatsapp", "database", "gate")
 
 # The subset where NO model turn can succeed, on any thread, until a person
 # acts: the account, the key, the model id, or our own ceiling. A channel
 # credential (meta/whatsapp) still lets the turn compose — only its send dies.
-AI_DOWN = ("credit", "auth", "model", "budget")
+AI_DOWN = ("credit", "auth", "model", "budget", "database", "gate")
+
+
+def _is_database_error(exc: BaseException) -> bool:
+    """SQLAlchemy's own hierarchy, or a driver error (asyncpg / psycopg)
+    that reached us unwrapped — by type and module, never by message."""
+    try:
+        from sqlalchemy.exc import SQLAlchemyError
+        if isinstance(exc, SQLAlchemyError):
+            return True
+    except Exception:
+        pass
+    mod = type(exc).__module__ or ""
+    return mod.split(".")[0] in ("asyncpg", "psycopg", "psycopg2")
 
 
 def classify(exc_or_text) -> str:
@@ -47,6 +64,17 @@ def classify(exc_or_text) -> str:
     revoked or missing · model → the configured model id isn't valid for this
     account · budget → Neema's own daily spend ceiling tripped (ai_budget) ·
     rate → throttled, usually self-clearing · other → anything else."""
+    # By TYPE before by text (verification pass 3b / UNFINISHED, 2026-11-06):
+    # a database error's message can say "permission denied" or "relation
+    # does not exist", which the text rules below read as "auth" / "model" —
+    # AI_DOWN kinds that pause the missed-reply sweep for an hour and tell
+    # the owner to check the API key. A database or reply-gate failure is
+    # neither: it is counted, named, and never mistaken for the provider.
+    if isinstance(exc_or_text, BaseException):
+        if _is_database_error(exc_or_text):
+            return "database"
+        if str(exc_or_text).startswith("reply gate error"):
+            return "gate"
     s = str(exc_or_text or "").lower()
     # Ours before the provider's: the breaker's message says "spend ceiling",
     # and it must never be mistaken for a real billing failure.
@@ -169,6 +197,8 @@ _HUMAN = {
                  "failing; regenerate it in Meta Business settings and update "
                  "the box env"),
     "rate": "the AI is rate-limiting us — replies are delayed or dropped",
+    "database": "agent turns are failing on the DATABASE — not the AI account; check Postgres and the api logs",
+    "gate": "the reply gate's own rule code is erroring — replies are held, not sent; check the api logs",
     "other": "agent turns are failing",
 }
 

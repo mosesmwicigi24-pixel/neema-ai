@@ -101,12 +101,30 @@ async def record_opt_out(db, redis, conv, text: str, *, channel: str, key: str) 
     the Activity timeline (visible), redis (fast path)."""
     from sqlalchemy.orm.attributes import flag_modified
     now = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    wkey = key                                   # normalised below for WhatsApp
     try:
         pid = getattr(conv, "person_id", None)
         # A WhatsApp identity is a phone number; a web-chat visitor rides the
         # WhatsApp channel with a "web_…" key and has no person to make
         # (verification pass 3: the resolver minted phantom contacts).
-        _can_resolve = bool(key) and (channel != "whatsapp" or str(key).isdigit())
+        # The same plausibility predicate the WhatsApp door uses to mint a
+        # person (`messaging.provision_user` → `is_plausible_phone`), on the
+        # key normalised the way it is stored (no leading "+"), so a
+        # "+254…" from a future caller resolves and a Meta LID does not
+        # (verification pass 3b, #8).
+        rkey = str(key or "")
+        if channel == "whatsapp":
+            from app.core.phone import is_plausible_phone
+            # the digits only: a "+", spaces, dashes, dots or parentheses
+            # would otherwise mint a second person for one phone (pass 5, #7)
+            rkey = "".join(ch for ch in rkey if ch not in "+ -.()").strip()
+            _can_resolve = bool(rkey) and is_plausible_phone(rkey)
+        else:
+            _can_resolve = bool(rkey)
+        wkey = rkey if channel == "whatsapp" else key    # the key every reader uses
+        if pid is None and db is not None and not _can_resolve:
+            _log.info("opt-out for %s/…%s: key is not a resolvable identity — redis only",
+                      channel, rkey[-4:])
         if pid is None and db is not None and _can_resolve:
             # No person yet (an early-funnel contact, a comment-DM thread):
             # the preference must still outlive redis, so the person is
@@ -115,7 +133,7 @@ async def record_opt_out(db, redis, conv, text: str, *, channel: str, key: str) 
             # is one, is linked so later reads find the preference directly.
             try:
                 from app.services.identity import resolve_or_create_person
-                ident = await resolve_or_create_person(db, channel, key, source="opt_out",
+                ident = await resolve_or_create_person(db, channel, rkey, source="opt_out",
                                                        confidence="deterministic")
                 pid = ident.person_id
                 if getattr(conv, "id", None) is not None and hasattr(conv, "person_id"):
@@ -156,25 +174,32 @@ async def record_opt_out(db, redis, conv, text: str, *, channel: str, key: str) 
             pass
     if redis is not None:
         try:
-            await redis.set(_key(channel, key), now, ex=OPT_OUT_TTL)
+            await redis.set(_key(channel, wkey), now, ex=OPT_OUT_TTL)
         except Exception:
             pass
 
 
-async def opted_out(db, redis, conv) -> bool:
+OPT_OUT_YES, OPT_OUT_NO, OPT_OUT_UNKNOWN = "yes", "no", "unknown"
+
+
+async def opt_out_state(db, redis, conv) -> str:
     """Has this customer asked us not to message them? Redis first (fast),
-    then the person's durable preference (re-warming redis)."""
+    then the person's durable preference (re-warming redis). Three answers:
+    "yes", "no", or "unknown" when the durable read itself could not be made
+    (no session, a database error) — so a caller sending an UNPROMPTED
+    message can wait for the next tick instead of guessing either way
+    (verification pass 3b / UNFINISHED, 2026-11-06)."""
     channel = getattr(conv, "channel", None) or "whatsapp"
     key = conv.wa_id if channel == "whatsapp" else getattr(conv, "external_id", None)
     if redis is not None and key:
         try:
             if await redis.get(_key(channel, key)):
-                return True
+                return OPT_OUT_YES
         except Exception:
             pass
     pid = getattr(conv, "person_id", None)
     if db is None:
-        return False
+        return OPT_OUT_UNKNOWN
     try:
         from app.models.person import Person
         if pid is None and key:
@@ -185,18 +210,34 @@ async def opted_out(db, redis, conv) -> bool:
             ident = await _select_identity(db, channel, key)
             pid = getattr(ident, "person_id", None) if ident is not None else None
         if pid is None:
-            return False
+            return OPT_OUT_NO
         person = await db.get(Person, pid)
-    except Exception:
-        return False
+    except Exception as exc:
+        _log.warning("opt-out for %s/…%s could not be read (%s)", channel, str(key or "")[-4:], exc)
+        return OPT_OUT_UNKNOWN
     if person is None or not preferences(person).get("opt_out"):
-        return False
+        return OPT_OUT_NO
     if redis is not None and key:
         try:
             await redis.set(_key(channel, key), "1", ex=OPT_OUT_TTL)
         except Exception:
             pass
-    return True
+    return OPT_OUT_YES
+
+
+async def opted_out(db, redis, conv, *, fail_closed: bool = False) -> bool:
+    """`opt_out_state` as a yes/no. `fail_closed`: an unreadable preference
+    counts as "opted out" — every Neema-initiated sender passes it, so no
+    unprompted message goes out on a guess; a door that only wants to know
+    whether to re-acknowledge keeps the default. (Before 2026-11-06 the read
+    failed open on a query error and closed on a session error.)"""
+    state = await opt_out_state(db, redis, conv)
+    if state == OPT_OUT_UNKNOWN:
+        if fail_closed:
+            _log.warning("opt-out unreadable for …%s — treated as opted out",
+                         str(getattr(conv, "wa_id", None) or getattr(conv, "external_id", None) or "")[-4:])
+        return fail_closed
+    return state == OPT_OUT_YES
 
 
 def acknowledgement(text: str) -> str:

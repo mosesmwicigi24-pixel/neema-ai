@@ -14,6 +14,17 @@ from app.services import hub_events as he
 
 
 @pytest.fixture(autouse=True)
+def _opt_out_preference_is_readable(monkeypatch):
+    """Slice 5 (2026-11-06): an opt-out preference that cannot be READ now
+    means "do not send" (three-state read, fail closed). These worlds never
+    modelled the read at all, so it answers a readable "no" unless a test
+    patches the read itself."""
+    async def _no(db, redis, conv):
+        return "no"
+    monkeypatch.setattr("app.services.intent.opt_out_state", _no)
+
+
+@pytest.fixture(autouse=True)
 def _secret(monkeypatch):
     monkeypatch.setattr(settings, "hub_events_secret", "topsecret", raising=False)
 
@@ -281,11 +292,11 @@ def test_every_celebrate_branch_says_whether_the_customer_was_told(monkeypatch):
     monkeypatch.setattr(he, "_within_window", within)
 
     # 1. opted out: a person is told, the customer is not
-    async def opted(db, redis, c): return True
+    async def opted(db, redis, c, **kw): return True
     monkeypatch.setattr(_intent, "opted_out", opted)
     out = asyncio.run(he._celebrate(None, _Redis(), conv, ev))
     assert out["sent"] == "notified_human" and out["customer_told"] is False and out["reason"] == "opted_out"
-    async def not_opted(db, redis, c): return False
+    async def not_opted(db, redis, c, **kw): return False
     monkeypatch.setattr(_intent, "opted_out", not_opted)
 
     # 2. in window, the drafted announcement thanks for a payment the event never said → held by the rules

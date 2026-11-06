@@ -278,11 +278,13 @@ async def _handle(redis, group: dict, *, send: bool, write: bool = True) -> dict
     try:
         from app.services import intent as _intent
         async with AsyncSessionLocal() as _db:
-            if await _intent.opted_out(_db, redis, conv):
+            if await _intent.opted_out(_db, redis, conv, fail_closed=True):
                 res["skipped"] = "customer asked not to be messaged"
                 return res
-    except Exception:
-        pass
+    except Exception as exc:
+        # Unreadable preference: no reminder on a guess (verification pass 5).
+        res["skipped"] = f"opt-out preference could not be read ({exc})"
+        return res
     if not write:
         return res
 

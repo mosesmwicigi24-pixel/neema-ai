@@ -127,7 +127,7 @@ def test_web_chat_and_the_tiktok_relay_record_an_opt_out_before_the_model():
 def test_the_sweepers_cross_channel_bridge_honours_the_opt_out():
     from app.services import reply_sweeper as sw
     src = inspect.getsource(sw._try_continue_elsewhere)
-    assert "_opted_out(db, redis, sib)" in src and src.index("_opted_out(") < src.index("_compose_bridge(")
+    assert "_opted_out(db, redis, sib, fail_closed=True)" in src and src.index("_opted_out(") < src.index("_compose_bridge(")
 
 
 @pytest.mark.asyncio

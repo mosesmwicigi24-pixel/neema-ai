@@ -228,7 +228,7 @@ def test_the_engine_reads_grades_and_routes():
     src = inspect.getsource(rt._run_comment_engage)
     assert "reading = await read_comment(comment_text, redis=redis)" in src
     # a serious or grave grievance: the private message first, then the line by weight
-    assert "if severity >= 2:" in src and "private_sent = await _private_complaint_message(" in src
+    assert "if severity >= 2 and await _comment_dm_allowed(redis, channel, ext):"   # slice 5: the complaint DM is gated too in src and "private_sent = await _private_complaint_message(" in src
     assert "_PRIVATE_COMPLAINT" in inspect.getsource(rt._private_complaint_message)
     assert "text = empathy_text(kind, severity, swahili, private_sent=private_sent)" in src
     assert "await _route_comment_to_human(channel, ext, comment_text, kind=kind," in src

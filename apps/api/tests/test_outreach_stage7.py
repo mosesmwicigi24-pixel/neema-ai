@@ -21,16 +21,16 @@ def test_the_comment_dm_stands_down_for_an_opted_out_contact(monkeypatch):
     """The public reply still goes; the private DM does not."""
     from app.agent import runtime
     src = inspect.getsource(runtime._run_comment_engage)
-    assert "_opted(" in src and "raise _OptedOut()" in src
-    assert src.index("_opted(") < src.index("await send_private_reply(")
+    assert "_comment_dm_allowed(" in src and "raise _OptedOut()" in src
+    assert src.index("_comment_dm_allowed(") < src.index("await send_private_reply(")
 
 
 def test_seasonal_missed_call_and_recording_notice_check_the_person():
     from app.jobs import seasonal_outreach
     from app.services import missed_call, recording_notice
-    assert "opted_out(db, redis, row[\"conv\"])" in inspect.getsource(seasonal_outreach.run)
+    assert "opted_out(db, redis, row[\"conv\"], fail_closed=True)" in inspect.getsource(seasonal_outreach.run)
     src = inspect.getsource(missed_call._follow_up)
-    assert "opted_out(db, redis, conv)" in src and src.index("opted_out(") < src.index("call:missed-msg")
+    assert "opted_out(db, redis, conv, fail_closed=True)" in src and src.index("opted_out(") < src.index("call:missed-msg")
     src = inspect.getsource(recording_notice.send_for_call)
     assert "return OPTED_OUT" in src and src.index("return OPTED_OUT") < src.index("insert(RecordingNotice)")
     assert recording_notice.OPTED_OUT == "opted_out"

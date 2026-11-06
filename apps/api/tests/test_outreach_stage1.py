@@ -149,8 +149,10 @@ def test_planned_action_with_unknown_outcome_parks_for_a_person(monkeypatch):
     monkeypatch.setattr(act, "_compose_follow_up", compose)
     async def not_repeat(db, c, t): return False
     monkeypatch.setattr(act, "_repeats_earlier", not_repeat)
-    async def not_opted(db, redis, c): return False
+    async def not_opted(db, redis, c, **kw): return False
     monkeypatch.setattr("app.services.intent.opted_out", not_opted)
+    async def readable_no(db, redis, c): return "no"
+    monkeypatch.setattr("app.services.intent.opt_out_state", readable_no)
     async def unknown(db, redis, c, text, action=None, **kw): raise SendOutcomeUnknown("ReadTimeout")
     monkeypatch.setattr(act, "_send", unknown)
     n = asyncio.run(act.process_due(_DB(), None, now=now))
@@ -424,8 +426,11 @@ def _scheduler(monkeypatch, actions_list, conv, deal, *, opted=False):
     monkeypatch.setattr(act, "_compose_follow_up", compose)
     async def not_repeat(db, c, t): return False
     monkeypatch.setattr(act, "_repeats_earlier", not_repeat)
-    async def opted_out(db, redis, c): return opted
+    async def opted_out(db, redis, c, **kw): return opted
     monkeypatch.setattr("app.services.intent.opted_out", opted_out)
+    # the dispatcher reads the three-state form (slice 5, 2026-11-06)
+    async def opt_out_state(db, redis, c): return "yes" if opted else "no"
+    monkeypatch.setattr("app.services.intent.opt_out_state", opt_out_state)
     sent = []
     async def send(db, redis, c, text, action=None, **kw): sent.append((getattr(action, "kind", None), text))
     monkeypatch.setattr(act, "_send", send)
@@ -646,7 +651,7 @@ def test_every_unprompted_sender_checks_the_opt_out_and_stamps_its_rows():
     assert "actions.plan(" in inspect.getsource(cart_recovery._handle)
     assert "actions.plan(" in inspect.getsource(payment_followup._handle)
     assert "_stamp" in inspect.getsource(hub_events._celebrate)
-    assert "opted_out(db, redis, conv)" in inspect.getsource(actions.process_due)
+    assert "opt_out_state(db, redis, conv)" in inspect.getsource(actions.process_due)
     assert "ol.stamp(" in inspect.getsource(actions._send)
     # the event-driven and campaign paths the audit verification (2026-11-06)
     # found without the check: seasonal campaign, missed-call text, recording
@@ -657,7 +662,7 @@ def test_every_unprompted_sender_checks_the_opt_out_and_stamps_its_rows():
     assert "opted_out(" in inspect.getsource(seasonal_outreach.run)
     assert "opted_out(" in inspect.getsource(missed_call._follow_up)
     assert "opted_out(" in inspect.getsource(recording_notice.send_for_call)
-    assert "_opted(" in inspect.getsource(runtime._run_comment_engage)
+    assert "_comment_dm_allowed(" in inspect.getsource(runtime._run_comment_engage)
 
 
 # ── H. the trace reads what the stamps say ───────────────────────────────────
