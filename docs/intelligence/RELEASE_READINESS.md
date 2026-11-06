@@ -15,7 +15,10 @@ on the runner's apt step and was re-run). Slice 4
 sweep, dated facts, Meta receipts, figure facts, rule-proposals card, the
 one-step real-model run) merged as `d084e91` at 19:44 UTC after
 verification passes 3 and 3b (every S1/S2 fixed, two test gaps closed) and
-green CI; deploy in flight.
+green CI; **live on the box at ~19:55 UTC** (replies ok, outreach still shadow;
+the bounded apt step in CI held this time). Full suite on the merged main:
+3,313 passed, 0 failed. Verification pass 4 (an audit of every VERIFIED
+COMPLETE row against the merged code) is running.
 
 ## Measured improvement
 
