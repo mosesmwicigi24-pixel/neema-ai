@@ -60,10 +60,18 @@ jobs:
           fi
       - name: Schema
         run: python -m alembic upgrade head
-      - name: Run the eval and keep the transcript
+      - name: Scripted scenarios (the original battery)
         run: python -m app.jobs.agent_eval 2>&1 | tee agent-eval-transcript.txt
+      - name: The blind held-out case set, pass^3 (the programme's held-out number)
+        run: |
+          python -m app.jobs.agent_eval --cases --file blind_heldout.jsonl --repeat 3 \
+            --out agent-eval-blind.json --packet rater-packet.md 2>&1 | tee agent-eval-blind.log
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: agent-eval-transcript
-          path: apps/api/agent-eval-transcript.txt
+          name: agent-eval-results
+          path: |
+            apps/api/agent-eval-transcript.txt
+            apps/api/agent-eval-blind.json
+            apps/api/agent-eval-blind.log
+            apps/api/rater-packet.md
