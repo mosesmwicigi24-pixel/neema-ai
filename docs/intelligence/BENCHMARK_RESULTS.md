@@ -50,6 +50,23 @@ paths directly: a missed `paid_claim` means the dispatcher does not hold a
 payment reminder; a missed opt-out means the door does not record it; a
 false opt-out silences a customer.
 
+## Correction after verification pass 1 — the held-out number was contaminated
+
+VERIFICATION_PASS_1 (finding 6) is right: before the dev/held-out split was
+used, the first inspection of misses was run on the WHOLE set, and 34 of the
+phrasings in `test_intelligence_floors.py` occur only in held-out cases. The
+split was fixed before tuning, but the tuning had seen held-out phrasings.
+The "held-out after" row below is therefore an **in-sample** number and is
+withdrawn as a held-out claim. The defensible number is the **blind set**
+(`blind_heldout.jsonl`, 120 cases written by a fresh independent author
+after the tuning, never read by the implementer — only its aggregate score
+is read), reported in the next section once scored. The verifier also
+showed that the first widening misfired on ordinary buying messages
+("No rush, go ahead" → a 7-day hold; "Sent you the measurements" → a
+payment claim); those were narrowed with the verifier's sentences added as
+developer negatives (neg-021…043), and the development-half score after
+narrowing is reported honestly as "dev, tuned".
+
 ## After W2 (the floor reads what customers write) — same day, same case set
 
 Files: `results/floors-after-{all,dev,held-out}.json`. Tuned on the
@@ -57,12 +74,12 @@ development half only; the held-out half is the report.
 
 | Metric (floors) | Held-out before | Held-out after | Dev after (tuned) |
 |---|---|---|---|
-| customer state | 137/254 = 0.539 [0.478, 0.600] | **200/254 = 0.787 [0.733, 0.833]** | 204/214 = 0.953 |
+| customer state | 137/254 = 0.539 [0.478, 0.600] | 200/254 = 0.787 — **withdrawn: in-sample** (see correction above) | 204/214 = 0.953 (before narrowing) |
 | language guess | 111/149 = 0.745 [0.669, 0.808] | **136/149 = 0.913 [0.856, 0.948]** | 182/183 = 0.995 |
 | opt-out recognition | 22/29 = 0.759 [0.579, 0.878] | **28/29 = 0.966 [0.828, 0.994]** | 10/11 = 0.909 |
 | developer negatives (20) | 2 misses (one false opt-out) | **0 misses** | — |
 
-The held-out intervals before and after do not overlap on any of the three.
+The intervals do not overlap, but the "after" column is not clean (above).
 The gap between dev (0.95) and held-out (0.79) on customer state is the honest
 measure of how much the tuning fitted the development phrasings; the
 remaining held-out misses are listed in the JSON and are mostly phrasings the
