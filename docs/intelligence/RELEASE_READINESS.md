@@ -1,6 +1,6 @@
 # Final Release Readiness Report — slices 1–4 (2026-11-06)
 
-**Status: slices 1–4 and the eval-runner fix are LIVE (box on `c6455d8` at ~20:27 UTC)** — slice 1 (PR #316) squash-merged as `c8c3356` at 17:18 UTC
+**Status: slices 1–4 and both eval fixes are LIVE (box on `7670de1` at ~20:48 UTC)** — slice 1 (PR #316) squash-merged as `c8c3356` at 17:18 UTC
 on the owner's word ("merge and deploy when green"), after the full suite
 (3,294 passed, 0 failed) and CI were green on its head. The box reported
 `version = c8c3356…` at ~17:52 UTC with `agent.replies = ok`, outreach still
