@@ -251,11 +251,20 @@ def test_the_runner_process_can_configure_every_mapper():
     API process does. This pins that registration (the old list happened to
     resolve in the local environment, so this is a guard, not a reproduction;
     the workflow run is the proof)."""
-    import importlib
-    from sqlalchemy.orm import clear_mappers, configure_mappers
-    importlib.import_module("app.jobs.agent_eval")
-    configure_mappers()                      # raises NoReferencedTableError when a model is missing
-    assert clear_mappers is not None
+    # In a fresh PROCESS, as the runner runs — not in this test process,
+    # whose registry an earlier test module may already have poisoned by
+    # instantiating a model with only part of the models imported (the
+    # failure is sticky in SQLAlchemy; slice 6 found the order dependence).
+    import os
+    import subprocess
+    import sys
+    code = ("import app.jobs.agent_eval\n"
+            "from sqlalchemy.orm import configure_mappers\n"
+            "configure_mappers()\n"            # raises NoReferencedTableError when a model is missing
+            "print('mappers ok')\n")
+    r = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True,
+                       cwd=os.getcwd(), env={**os.environ, "PYTHONPATH": os.getcwd()}, timeout=120)
+    assert r.returncode == 0 and "mappers ok" in r.stdout, (r.stdout[-400:], r.stderr[-800:])
 
 
 def test_a_run_record_is_checkpointed_as_partial_and_finalised_clean(tmp_path):

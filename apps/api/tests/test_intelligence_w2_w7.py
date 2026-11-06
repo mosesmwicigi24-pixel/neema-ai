@@ -7,6 +7,8 @@ from __future__ import annotations
 
 import pytest
 
+import app.main  # noqa: F401  (every model registered: four tests here instantiate models, and a half-registered ORM poisons later modules)
+
 import inspect
 
 from app.agent import review as rv
@@ -332,3 +334,52 @@ async def test_apply_lifts_a_hold_on_a_location_question():
     changed = await cs.apply(_DB(), conv, deal, {"customer_said": "none"}, source="floor",
                              inbound_text="Where is your shop?")
     assert changed.get("hold_cleared") is True and "hold" not in (deal.next_action or {})
+
+
+# ── slice 6: a bare closer gets silence, deterministically ─────────────────
+
+def test_a_bare_closer_in_any_language_is_silenced_and_a_question_or_deferral_is_not():
+    """The first real-model pass answered 33 of 52 closers. The deterministic
+    detector now reaches the forms it missed on the tuning set; a closer that
+    carries a question, a buying word or a deferral still gets a turn."""
+    for text in ["Thank you very much.", "Thank you for your time", "Asante sana, Mungu awabariki.",
+                 "धन्यवाद।", "ठीक है।",
+                 "Poa, baadaye.", "Sawa nimeelewa.", "Mh. Nimesikia.", "I see.", "Aah, poa.", "Received", "...",
+                 "Blessed Sunday to you all 🙏", "ok", "👍", "Asante, Allah akubariki."]:
+        assert rt.silence_decision(text), text
+    # "we're waiting" forms are labelled both ways in the tuning set; they keep a turn
+    for text in ["God bless — how much is the stole?", "Thanks, can you send the photo?", "Sawa, nitakujulisha Jumatatu.",
+                 "Ok waiting", "Sawa nasubiri", "Thanks, awaiting", "Bien. J'attends.",
+                 "I'll get back to you", "Nitarudi.", "Thanks. Do you deliver to Kisumu?", "Welcome, I need a cassock",
+                 "ok send the link", "Thank you, I want to order"]:
+        assert not rt.silence_decision(text), text
+
+
+@pytest.mark.asyncio
+async def test_the_closer_gate_silences_a_bare_closer_without_redis_and_arms_the_flag_with_it():
+    assert await rt.closer_gate(None, "whatsapp", "254700000001", "Thank you for your time") is True
+    assert await rt.closer_gate(None, "whatsapp", "254700000001", "Thanks. Do you deliver to Kisumu?") is False
+
+    class _R:
+        def __init__(self): self.kv = {}
+        async def get(self, k): return self.kv.get(k)
+        async def set(self, k, v, ex=None): self.kv[k] = v
+        async def expire(self, k, ttl): pass
+        async def delete(self, k): self.kv.pop(k, None)
+    r = _R()
+    assert await rt.closer_gate(r, "whatsapp", "254700000001", "Asante sana.") is True
+    assert r.kv.get("closer:whatsapp:254700000001") == "1"          # the next closer is silence too
+    assert await rt.closer_gate(r, "whatsapp", "254700000001", "I need a stole") is False
+    assert "closer:whatsapp:254700000001" not in r.kv                # a substantive message clears it
+
+
+def test_the_floors_score_the_silence_decision():
+    from app.jobs import eval_floors
+    case = {"id": "x", "categories": ["closing"], "lang": "en", "turns": [
+        {"user": "How much is the stole?", "expect": {"next": "answer"}},
+        {"user": "Thank you for your time", "expect": {"next": "silence"}},
+        {"user": "Received", "expect": {"next": "hold_ack"}},              # a deliberate miss
+    ]}
+    out = eval_floors.score([case])
+    assert out["metrics"]["silence"]["all"]["k"] == 2 and out["metrics"]["silence"]["all"]["n"] == 3
+    assert [m["metric"] for m in out["misses"]] == ["silence"]

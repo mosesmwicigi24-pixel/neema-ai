@@ -85,6 +85,16 @@ def score(cases: list[dict]) -> dict:
                 if not ok:
                     misses.append({"id": case["id"], "turn": i, "metric": "opt_out",
                                    "expected": exp["opt_out"], "got": got, "text": text[:120]})
+            if exp.get("next"):
+                # the deterministic silence decision against the gold next action
+                # (slice 6): silence where "silence" is expected, a reply elsewhere
+                from app.agent.cooling import silence_decision
+                got = bool(silence_decision(text))
+                ok = got == (exp["next"] == "silence")
+                tally("silence", ok, keys)
+                if not ok:
+                    misses.append({"id": case["id"], "turn": i, "metric": "silence",
+                                   "expected": exp["next"], "got": "silence" if got else "reply", "text": text[:120]})
             if exp.get("length_kind"):
                 got = _runtime_target(text)["kind"]
                 ok = got == exp["length_kind"]

@@ -45,8 +45,12 @@ def test_a_thumbs_up_is_silence_always():
         assert asyncio.run(rt.closer_gate(None, "messenger", "P1", t)) is True, t
     for t in ("ok", "thanks", "how much?", "👍 how much is it?", ""):
         assert not rt.is_silent_ack(t), t
-    # a typed closer still takes the old path (one warm line, then silence)
-    assert asyncio.run(rt.closer_gate(None, "messenger", "P1", "thanks")) is False
+    # slice 6 (2026-11-06): a typed BARE closer is silence at the gate too — the
+    # prompt's own rule ("a bare thanks/ok/amen gets NOTHING back"), which the
+    # model honoured only two thirds of the time on the first real-model pass.
+    # A deferral still takes a turn, so the promise is scribed.
+    assert asyncio.run(rt.closer_gate(None, "messenger", "P1", "thanks")) is True
+    assert asyncio.run(rt.closer_gate(None, "messenger", "P1", "I'll get back to you")) is False
 
 
 def test_i_am_saying_ok_is_an_acknowledgement():

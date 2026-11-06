@@ -226,6 +226,13 @@ check (harness `v5-mutate.py`, 12 mutants, 12 killed).
 - **Change:** `_recover_from_failed_turn` rolls the session back and disposes the engine pool after any turn error; called from the runner's except branch.
 - **Status:** IMPLEMENTED BUT NOT VERIFIED against the real symptom (the carried-over aborted transaction is not reproduced locally); the helper itself is tested.
 
+### R4 · A bare closer gets silence, deterministically (the first measured failure kind)
+
+- **Investigation:** the first real-model pass answered 33 of 52 closers (silence next-action 0.346). The closer gate silenced only a thumbs-up or a *second* closer; a typed "thanks" went to the model with the prompt's rule "a bare thanks/ok/amen gets NOTHING back", which the model honoured about two thirds of the time. On the tuning set the deterministic detectors reached 132 of 153 silence-expected turns; the 21 misses were mostly Swahili, French, Portuguese, Hindi and Sheng closers.
+- **Change:** `cooling.is_bare_closer` (a thanks / ack / blessing / "received" / "I see" in six languages, never with a question, a buying word or a deferral) and `cooling.silence_decision`; `closer_gate` returns silence for a bare closer immediately and arms the ping-pong flag. "We're waiting" forms (`ok waiting`, `nasubiri`, `j'attends`) are deliberately NOT silenced: the tuning set labels them both ways and a wrongful silence to a customer waiting on us is the worse error. The acknowledgement patterns moved from runtime.py to cooling.py (no model imports) so the floors scorer can measure them.
+- **Measured (new `silence` floor = the gate's deterministic decision against the gold next action, every labelled turn):** blind set **407/459 = 0.887 [0.854, 0.913] → 439/459 = 0.956 [0.934, 0.972]**, intervals separated, false silences 0 → 0, missed closers 52 → 20; tuning set 1097/1243 = 0.883 → 1231/1243 = 0.990, false silences 0 → 0. The real-model effect (the 33 answered closers) is measured by the next model run.
+- **Status:** VERIFIED COMPLETE for the floor (behaviour tests: 20 silenced forms, 11 kept forms incl. questions, deferrals and waiting forms; the gate without redis and with it; the floors metric), pending verification pass 6b. `results/floors-blind-after-slice6.json`.
+
 ### R3 · The `interceptaction` enum migration — HELD for the owner's approval
 
 - **Change (prepared, not in the repository):** `ALTER TYPE interceptaction ADD VALUE IF NOT EXISTS 'flag' / 'escalated'`, idempotent, in alembic's autocommit block, revision a9c1e3f5b7d9 on head e8a1c3d5f7b9. Kept in the session scratchpad until the owner says "approve the enum migration" (DB migrations need explicit approval). OWNER_ACTIONS carries the one-line read-only check for the production database.

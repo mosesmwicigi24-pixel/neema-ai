@@ -120,6 +120,7 @@ Files: `results/floors-blind-before.json`, `results/floors-blind-after.json`.
 | language guess vs gold | 235/445 = 0.528 [0.482, 0.574] | **414/445 = 0.930 [0.903, 0.950]** | **yes** (+40 points) |
 | opt-out recognition | 31/34 = 0.912 [0.770, 0.970] | **33/34 = 0.971 [0.851, 0.995]** | no — n is small; one false negative left |
 | reply-length kind | 211/459 = 0.460 | 218/459 = 0.475 | unchanged by design (W9 evidence) — see Correction 2: the scorer under-read complaints; corrected 221/459 = 0.481 |
+| silence decision vs gold next action (new floor, slice 6) | 407/459 = 0.887 [0.854, 0.913] | **439/459 = 0.956 [0.934, 0.972]** | **yes** (+6.9 points; 0 false silences both before and after; missed closers 52 → 20) |
 
 Reading: the language guesser's gain is the one this slice can claim
 cleanly. The customer-state floor improved on the blind set less than the
