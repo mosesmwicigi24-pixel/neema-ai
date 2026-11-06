@@ -929,6 +929,30 @@ def language_mismatch(comment: str, answer: str) -> str | None:
     return None
 
 
+def initiated_issues(text: str, *, paid_known: bool = False, status_known: bool = False) -> dict:
+    """The deterministic findings on a message NEEMA initiates — a follow-up,
+    an after-sale announcement, the sweeper's bridge — which never pass the
+    reply gate (they are composed read-only). Pure and free: no tool results
+    exist for them, so only the rules that need none run. {"hard": [...],
+    "soft": [...]} (verification pass 1, finding 1.3)."""
+    hard, soft = [], []
+    # a paid celebration composed FROM the hub's own order.paid event is the
+    # one initiated message allowed to say "payment received"
+    if not paid_known and paid_ack_without_source(text, None):
+        hard.append("paid_ack")
+    # an announcement composed FROM a hub order event carries the hub's own
+    # status; a follow-up the dispatcher wrote has no such source
+    if not status_known and _STATUS_CLAIM_RE.search(text or ""):
+        hard.append("status")
+    p = manufactured_pressure(text, None)
+    if p:
+        soft.append(f"pressure:{p}")
+    i = internal_talk(text)
+    if i:
+        soft.append(f"internal:{i}")
+    return {"hard": hard, "soft": soft}
+
+
 def status_without_source(answer: str, tool_results: list | None, transcript: list | None) -> bool:
     if not _STATUS_CLAIM_RE.search(answer or ""):
         return False

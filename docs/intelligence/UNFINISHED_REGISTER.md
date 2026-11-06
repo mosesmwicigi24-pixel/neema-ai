@@ -47,8 +47,6 @@ the precise dependency · status. Last update: 2026-11-06, end of session 1.
 
 | Item | Why open | Where |
 |---|---|---|
-| Neema-initiated compositions bypass the gate (`read_only`): follow-ups, announcements, the sweeper bridge never meet `paid_ack`/`pressure` | pre-existing design; a rules-only pass on read-only compositions is cheap and should be the next change | VERIFICATION_PASS_1 1.3 |
-| Opt-out door checks text-only messages on every channel | a photo with a "stop" caption reaches the model | 1.4 |
 | Unverifiable takeover → the sweeper re-composes the turn (tools may act twice) | persisting the composed reply for the retry needs a small store; trade-off recorded | 1.5 |
 | Comment dedupe is redis-only; a 502 redelivery with redis down could answer a comment twice | DB-side comment id dedupe | 1.6 |
 | The blind set must be scored before any held-out claim; the runner cannot exercise the Meta/TikTok/web doors or an overlap silence (WhatsApp contacts, sequential turns) | runner channel parameter; concurrent-turn harness | 6, 13 |

@@ -126,3 +126,22 @@ def test_the_sweepers_cross_channel_bridge_honours_the_opt_out():
     from app.services import reply_sweeper as sw
     src = inspect.getsource(sw._try_continue_elsewhere)
     assert "_opted_out(db, redis, sib)" in src and src.index("_opted_out(") < src.index("_compose_bridge(")
+
+
+@pytest.mark.asyncio
+async def test_the_opt_out_door_reads_the_words_even_with_a_photo_attached(monkeypatch):
+    calls = []
+
+    async def _handle(redis, channel, key, text):
+        calls.append((channel, key))
+
+    async def _paused(*a, **k):
+        return False
+    monkeypatch.setattr(rt, "_handle_opt_out", _handle)
+    monkeypatch.setattr(rt, "_is_paused", _paused)
+    out = await rt.schedule_reply(None, "254700000002", "Please stop messaging me", dedup_id="m2",
+                                  media={"type": "image", "url": "x"})
+    assert out is True and calls == [("whatsapp", "254700000002")]
+    out = await rt.schedule_meta_reply(None, "messenger", "psid-2", "Stop messaging me", dedup_id="m3",
+                                       media={"type": "image", "url": "x"})
+    assert out is True and calls[-1] == ("messenger", "psid-2")

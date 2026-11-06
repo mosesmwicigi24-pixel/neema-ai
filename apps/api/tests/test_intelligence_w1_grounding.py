@@ -119,3 +119,43 @@ def test_pressure_is_soft_for_now_and_the_exemption_list_names_real_tools():
     assert "pressure" in f and f["pressure"]["hard"] is False
     from app.agent import tools as t
     assert rv._PROMO_TOOLS <= set(t._HANDLERS)
+
+
+# ── Neema-initiated messages meet the deterministic rules (verification 1.3) ──
+
+def test_initiated_issues_reads_the_rules_that_need_no_tools():
+    assert rv.initiated_issues("Thank you for your payment, production starts today.")["hard"] == ["paid_ack"]
+    assert "status" in rv.initiated_issues("Your order has been shipped and is on its way.")["hard"]
+    out = rv.initiated_issues("Hurry, only 2 left! Shall I search our hub for you?")
+    assert out["hard"] == [] and any(x.startswith("pressure:") for x in out["soft"]) \
+        and any(x.startswith("internal:") for x in out["soft"])
+    assert rv.initiated_issues("Habari! Just checking in — would the purple chasuble still help?") == {"hard": [], "soft": []}
+
+
+@pytest.mark.asyncio
+async def test_the_dispatchers_send_refuses_a_payment_acknowledgement_before_delivering(monkeypatch):
+    import types
+    from app.services import actions, messaging as svc
+    sent = []
+
+    async def _waba(recipient, text):
+        sent.append(text)
+        return "wamid"
+    monkeypatch.setattr(svc, "_send_waba", _waba)
+    conv = types.SimpleNamespace(wa_id="254700000001", external_id=None, channel="whatsapp")
+    with pytest.raises(actions.HeldByRules):
+        await actions._send(None, None, conv, "Thank you for your payment! We start the work.")
+    assert sent == []
+
+
+def test_the_announcement_and_the_bridge_hold_on_the_rules():
+    from app.services import hub_events, reply_sweeper
+    assert "initiated_issues(text, paid_known=" in inspect.getsource(hub_events._celebrate)
+    assert "except HeldByRules" in inspect.getsource(reply_sweeper._try_continue_elsewhere)
+
+
+def test_a_paid_celebration_from_the_hubs_own_event_may_say_payment_received():
+    assert rv.initiated_issues("Payment received — thank you! Production begins.", paid_known=True)["hard"] == []
+    assert rv.initiated_issues("Payment received — thank you! Production begins.")["hard"] == ["paid_ack"]
+    assert rv.initiated_issues("Your order has been shipped and is on its way!", status_known=True)["hard"] == []
+    assert rv.initiated_issues("Your order has been shipped and is on its way!")["hard"] == ["status"]

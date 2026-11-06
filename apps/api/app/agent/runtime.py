@@ -2814,7 +2814,7 @@ async def schedule_reply(redis, wa_id: str, text: str, dedup_id: str | None,
     # "Please stop messaging me" (any of our customers' languages) is answered
     # once, recorded for good, and never argued with — no model turn.
     from app.services import intent as _intent
-    if media is None and _intent.is_opt_out(text):
+    if _intent.is_opt_out(text):            # the words decide, photo or not (verification 1.4)
         await _handle_opt_out(redis, "whatsapp", wa_id, text)
         return True
     if media is None and await closer_gate(redis, "whatsapp", wa_id, text):
@@ -3111,7 +3111,7 @@ async def schedule_meta_reply(redis, channel: str, external_id: str, text: str,
     # The same door WhatsApp has (W1, 2026-11-06): "stop messaging me" on
     # Messenger, Instagram or TikTok is recorded for good and answered once.
     from app.services import intent as _intent
-    if media is None and _intent.is_opt_out(text):
+    if _intent.is_opt_out(text):            # the words decide, photo or not (verification 1.4)
         await _handle_opt_out(redis, channel, external_id, text)
         return True
     if media is None and await closer_gate(redis, channel, external_id, text):

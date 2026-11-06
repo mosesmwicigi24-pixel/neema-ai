@@ -281,6 +281,17 @@ async def _celebrate(db, redis, conv, event: dict) -> dict:
         text = await _compose_announcement(db, redis, conv, brief)
         if not text:
             return {"handled": False, "reason": "compose_failed"}
+        # an announcement is composed read-only and never met the gate: the
+        # deterministic rules at least (verification pass 1, finding 1.3)
+        from app.agent.review import initiated_issues
+        _issues = initiated_issues(text, paid_known=str(event.get("type") or "").endswith(".paid"),
+                                   status_known=True)       # the hub's event IS the status
+        if _issues["hard"]:
+            await _notify_agents(redis, "✋ " + (event.get("type") or "hub event"),
+                                 f"{event.get('order_number') or ''}: the drafted announcement was held by "
+                                 f"the rules ({', '.join(_issues['hard'])}) — please send it yourself. ({brief})", conv)
+            return {"handled": True, "sent": "notified_human", "customer_told": False,
+                    "reason": "rules:" + ",".join(_issues["hard"])}
         if conv.channel == "whatsapp":
             try:
                 wamid = await svc._send_waba(recipient, text)
