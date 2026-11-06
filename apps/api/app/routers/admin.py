@@ -2654,6 +2654,21 @@ async def delete_catalog_item(
 
 # ── Stats ─────────────────────────────────────────────────────────────────────
 
+@router.get("/performance")
+async def performance_view(
+    days: int = 7,
+    request: Request = None,
+    db: AsyncSession = Depends(get_db),
+    agent: Agent = Depends(get_current_agent),
+):
+    """The executive performance view (intelligence programme §7): every
+    metric says whether it is measured, partial or not yet measured, with
+    its denominator, interval and the instrumentation it still needs."""
+    from app.services.performance import collect
+    redis = getattr(request.app.state, "redis", None) if request is not None else None
+    return await collect(db, redis, days=days)
+
+
 @router.get("/stats")
 async def overview_stats(
     db: AsyncSession = Depends(get_db),
