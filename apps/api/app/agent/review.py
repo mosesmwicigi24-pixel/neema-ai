@@ -780,6 +780,69 @@ _STATUS_CLAIM_RE = re.compile(
 _ORDER_TOOLS = {"check_order_status", "create_order", "prepare_quotation"}
 
 
+# A PAYMENT ACKNOWLEDGEMENT needs the hub's word in THIS turn (intelligence
+# programme W1, 2026-11-06): "thank you for your payment" after "I've paid"
+# was a prompt rule and a soft reviewer rule only. Hard now: the reply may
+# thank, confirm or receipt a payment only when a check_order_status (or
+# create_order) result in this turn's tool log carries a paid-like state.
+_PAID_ACK_RE = re.compile(
+    r"\b(?:thank(?:s| you) for (?:your |the )?payment|payment (?:is |has been |was )?(?:confirmed|received|"
+    r"successful|reflected|gone through)|(?:we(?:'ve| have) )?received your (?:payment|money|m-?pesa)|"
+    r"your (?:payment|m-?pesa) (?:has )?(?:reflected|come through|arrived)|"
+    r"(?:payment|malipo) (?:yamepokelewa|yamefika|yamethibitishwa)|asante kwa malipo|tumepokea malipo|"
+    r"paiement (?:reçu|confirmé)|pagamento (?:recebido|confirmado))\b", re.IGNORECASE)
+_PAID_STATES = frozenset({"paid", "completed", "settled", "success", "successful", "complete"})
+
+
+def _result_says_paid(out) -> bool:
+    if not isinstance(out, dict):
+        return False
+    for k in ("payment_status", "hub_payment_status", "status", "state"):
+        v = out.get(k)
+        if isinstance(v, str) and v.strip().lower() in _PAID_STATES:
+            return True
+    for v in out.values():
+        if isinstance(v, dict) and _result_says_paid(v):
+            return True
+    return False
+
+
+def paid_ack_without_source(answer: str, tool_results: list | None) -> bool:
+    """True when the draft acknowledges a payment and no order tool in this
+    turn reported a paid state."""
+    if not _PAID_ACK_RE.search(answer or ""):
+        return False
+    for e in tool_results or []:
+        if str((e or {}).get("tool") or "") in _ORDER_TOOLS and _result_says_paid((e or {}).get("out")):
+            return False
+    return True
+
+
+# MANUFACTURED URGENCY OR SCARCITY (W4, 2026-11-06): "today only", "last
+# piece", "only 2 left", "hurry", a discount the shop did not record — the
+# research (FTC/ICPEN 2024, Tuncer 2024) reads these as the opposite of
+# trust. Hard unless a promotion tool in this turn supplied the fact.
+_PRESSURE_RE = re.compile(
+    r"\b(?:today only|(?:this|for) (?:today|tonight) only|limited (?:time|stock|offer|period)|while stocks? last|"
+    r"last (?:one|piece|few|unit)s?(?: left| remaining)?|only \d+ (?:left|remaining|in stock)|hurry|"
+    r"before (?:it'?s|they'?re|it is|they are) gone|offer (?:ends|expires)|act (?:now|fast|quickly)|"
+    r"don'?t miss (?:out|this)|(?:i|we) can (?:give|offer) you (?:a |an )?(?:special |extra |secret )?discount|"
+    r"\d{1,2} ?% ?off|leo tu|ofa (?:ya )?leo|zimebaki \d+)\b", re.IGNORECASE)
+_PROMO_TOOLS = {"apply_offer", "check_offer", "current_offer"}
+
+
+def manufactured_pressure(answer: str, tool_results: list | None) -> str | None:
+    m = _PRESSURE_RE.search(answer or "")
+    if not m:
+        return None
+    for e in tool_results or []:
+        out = (e or {}).get("out")
+        if str((e or {}).get("tool") or "") in _PROMO_TOOLS and isinstance(out, dict) and (
+                out.get("offer") or out.get("ok") or out.get("campaign")):
+            return None
+    return m.group(0)
+
+
 def status_without_source(answer: str, tool_results: list | None, transcript: list | None) -> bool:
     if not _STATUS_CLAIM_RE.search(answer or ""):
         return False
@@ -1118,6 +1181,17 @@ def rule_findings(comment: str, answer: str, seen: list,
         out.append({"kind": "status", "hard": True,
                     "text": "an order-status claim (shipped / on its way / delivered) with no "
                     "check_order_status behind it — check the order, never assume"})
+    if mode == "dm" and paid_ack_without_source(answer, tool_results):
+        out.append({"kind": "paid_ack", "hard": True,
+                    "text": "it thanks for or confirms a payment the hub has not shown as paid in this "
+                    "turn — a payment is a claim until check_order_status says paid: say the team "
+                    "will match it to the order, never that it was received"})
+    _pressure = manufactured_pressure(answer, tool_results)
+    if _pressure:
+        out.append({"kind": "pressure", "hard": True,
+                    "text": f"manufactured urgency, scarcity or a discount from nowhere (\"{_pressure}\") — "
+                    "nothing is 'last' or 'today only' unless a tool said so; discounts come only from "
+                    "a recorded offer"})
     sold = named_rows[0] if named_rows else None
     if sold is not None:
         out.extend(variant_issues(comment, answer, sold, currency))

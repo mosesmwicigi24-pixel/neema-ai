@@ -55,3 +55,34 @@ explicit word.
 - **Baseline:** `_still_ai` returned True on a DB error (talk over a colleague).
 - **Change:** returns None on error; both senders then do not send and return "not handled", so the missed-reply sweeper retries later.
 - **Status:** IMPLEMENTED BUT NOT VERIFIED (DB-error path).
+
+## W1-9 · A payment acknowledgement needs the hub's word (hard gate rule)
+
+- **Baseline:** "PAID IS A CLAIM" lived as a prompt rule and a soft, dm-only reviewer rule; no code stopped "thank you for your payment" after "I've paid" (INVESTIGATION 1.9; C summary).
+- **Change:** `review.paid_ack_without_source` — a hard `paid_ack` finding unless a `check_order_status`/`create_order` result in this turn carries a paid-like state (the same vocabulary as `payment_followup.PAID_STATES`). "The team will match it to your order" passes.
+- **Extends:** `rule_findings` beside the `status` rule, same shape. **Rejected:** a model-only rule (that is what existed).
+- **Tests:** `test_intelligence_w1_grounding.py`; `test_reply_review`, `test_checker_rules`, `test_official_payment_lines` unchanged.
+- **Status:** VERIFIED COMPLETE at the rule level; live effect IMPLEMENTED BUT NOT VERIFIED (real-model run).
+
+## W4-1 · No manufactured urgency, scarcity or discount from nowhere (hard gate rule)
+
+- **Baseline:** prompt-only; no rule kind for it (INVESTIGATION 4.1; research memo §6).
+- **Change:** `review.manufactured_pressure` — hard `pressure` finding for "today only / last piece / only N left / hurry / I can give you a discount / 10% off" unless a promotion tool in this turn supplied the offer. An honest "we don't offer discounts" passes.
+- **Status:** VERIFIED COMPLETE at the rule level; live effect IMPLEMENTED BUT NOT VERIFIED.
+
+## W1-7 · A promised offer that cannot be read is surfaced, not dropped
+
+- **Baseline:** `granted_promise` → None on a redis error; the order went out without the discount, silently (INVESTIGATION 1.7).
+- **Change:** the business rule "no offer recorded beats no order created" stands; the gap is now written on the order note, returned to the model as `offer_unverified` with a next step ("a colleague confirms the final amount"), and logged. **Rejected:** refusing the order (the owner's recorded trade-off prefers the order).
+- **Status:** IMPLEMENTED BUT NOT VERIFIED (redis-error path).
+
+## W1-13 · The Meta door no longer acks a message it lost
+
+- **Change:** a capture exception on `/api/meta/webhook` answers 502 like the WhatsApp door, so Meta redelivers; the mid dedupe absorbs the repeat.
+- **Status:** IMPLEMENTED BUT NOT VERIFIED in production.
+
+## W1-6 · Tools that act before the gate — decision: no deferral
+
+- **Finding:** `send_product_cards`, `send_measurement_guide` and `create_order` act during the tool loop, before the words are reviewed (B §5).
+- **Decision:** cards and the guide carry hub data only (grounded by construction); deferring their sends until after the gate would create a worse failure (words promising cards that then fail to send, which the `photos` rule cannot see). Order creation keeps its own guards and the held path flags the colleague with the draft and the order. Recorded as an accepted, reasoned limitation; revisit if the real-model run shows held replies following sent cards.
+- **Status:** NOT APPLICABLE (by decision), evidence recorded.
