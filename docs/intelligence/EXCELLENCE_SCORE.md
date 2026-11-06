@@ -11,8 +11,9 @@ fails caps the Reliability dimension at 0 for that run and is listed by name.
 
 - **Held-out test set.** The case set (EVALUATION_DATASET.md) is split once,
   by a fixed seed, into a development half (used to design changes) and a
-  held-out half (used only to report). Before/after numbers come from the
-  held-out half under the same model, same prompt revision except the change
+  held-out half — withdrawn as contaminated (BENCHMARK_RESULTS, Correction 1);
+  the BLIND set is the report. Before/after numbers come from the blind set
+  under the same model, same prompt revision except the change
   under test, same business data, sends disabled.
 - **Three evaluator classes.** *Objective* (code asserts a fact: a figure
   equals the hub's, an opt-out was honoured, a language matched, a state was

@@ -255,3 +255,68 @@ def test_confirmed_mirrors_quietly():
     assert "order.confirmed" in hub_events.QUIET
     assert "order.confirmed" not in hub_events.CELEBRATE
     assert "order.confirmed" not in hub_events.ESCALATE
+
+
+def test_every_celebrate_branch_says_whether_the_customer_was_told(monkeypatch):
+    """W9-1 (verification pass 4 found only 2 of 7 branches asserted): the
+    opted-out, rules-held, unknown-delivery and template branches each say
+    the truth about `customer_told` — False, False, None, True."""
+    from app.core.config import settings
+    from app.services import messaging as svc
+    from app.services import intent as _intent
+
+    conv = types.SimpleNamespace(id="c1", channel="whatsapp", wa_id="254700000001",
+                                 external_id=None, person_id="p1", contact_name="Moses")
+    notes, saved = [], []
+
+    async def fake_notify(redis, title, body, c): notes.append(title)
+    async def fake_save(db, redis, to, text, waba_msg_id=None, **k): saved.append((text, waba_msg_id))
+    async def fake_save_ch(db, redis, ch, to, text, **k): saved.append((text, None))
+    monkeypatch.setattr(he, "_notify_agents", fake_notify)
+    monkeypatch.setattr(svc, "save_outbound_message", fake_save)
+    monkeypatch.setattr(svc, "save_outbound_channel_message", fake_save_ch)
+    monkeypatch.setattr(he, "is_quiet_hours", lambda now=None: False)
+    ev = {"id": "e9", "type": "order.shipped", "order_number": "ORD-9"}
+    async def within(db, c): return True
+    monkeypatch.setattr(he, "_within_window", within)
+
+    # 1. opted out: a person is told, the customer is not
+    async def opted(db, redis, c): return True
+    monkeypatch.setattr(_intent, "opted_out", opted)
+    out = asyncio.run(he._celebrate(None, _Redis(), conv, ev))
+    assert out["sent"] == "notified_human" and out["customer_told"] is False and out["reason"] == "opted_out"
+    async def not_opted(db, redis, c): return False
+    monkeypatch.setattr(_intent, "opted_out", not_opted)
+
+    # 2. in window, the drafted announcement thanks for a payment the event never said → held by the rules
+    async def compose_paid(db, redis, c, brief): return "Thank you for your payment! Your order ORD-9 has shipped."
+    monkeypatch.setattr(he, "_compose_announcement", compose_paid)
+    sends = []
+    async def never_send(to, text, context_wamid=None):
+        sends.append(text)
+        return "wamid"
+    monkeypatch.setattr(svc, "_send_waba", never_send)
+    out = asyncio.run(he._celebrate(None, _Redis(), conv, ev))
+    assert out["sent"] == "notified_human" and out["customer_told"] is False and out["reason"].startswith("rules:")
+    assert sends == [] and any(t.startswith("✋") for t in notes)
+
+    # 3. in window, a clean announcement whose delivery outcome is unknown → told None, never resent
+    async def compose_ok(db, redis, c, brief): return "Good news — your order ORD-9 has shipped."
+    monkeypatch.setattr(he, "_compose_announcement", compose_ok)
+    async def unknown_send(to, text, context_wamid=None): raise svc.SendOutcomeUnknown("timeout")
+    monkeypatch.setattr(svc, "_send_waba", unknown_send)
+    out = asyncio.run(he._celebrate(None, _Redis(), conv, ev))
+    assert out == {"handled": True, "sent": "unknown", "customer_told": None}
+    assert saved and saved[-1][1] is None
+
+    # 4. outside the window with an event template → the template told them
+    async def outside(db, c): return False
+    monkeypatch.setattr(he, "_within_window", outside)
+    monkeypatch.setattr(settings, "wa_event_template", "order_update", raising=False)
+    from app.services import templates as _templates
+    async def fake_tpl_send(to, name, params): return ("rendered body", "wamid.T1", {"name": name})
+    monkeypatch.setattr(_templates, "send", fake_tpl_send)
+    monkeypatch.setattr(_templates, "meta", lambda tpl, params: {"template": tpl}, raising=False)
+    out = asyncio.run(he._celebrate(None, _Redis(), conv, ev))
+    assert out == {"handled": True, "sent": "template", "customer_told": True}
+    assert saved[-1] == ("rendered body", "wamid.T1")

@@ -70,7 +70,7 @@ def test_an_eval_history_row_turns_the_eval_metrics_measured(maker):  # noqa: F8
     import json
     from app.services.app_settings import set_value
     from app.services.performance import collect
-    row = {"at": "2026-11-06T12:00:00+00:00", "git": "abc1234", "case_set": "deadbeef", "selection": "held-out",
+    row = {"at": "2026-11-06T12:00:00+00:00", "git": "abc1234", "case_set": "deadbeef", "selection": "file:blind_heldout.jsonl",
            "cases": 227, "repeat": 1, "producer": "claude-sonnet-5-5", "prompt": "p1",
            "turns": {"k": 500, "n": 618, "p": 0.809, "ci95": [0.776, 0.838]},
            "critical": {"k": 200, "n": 240, "p": 0.833, "ci95": [0.78, 0.875]},

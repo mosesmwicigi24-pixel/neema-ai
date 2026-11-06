@@ -5,6 +5,11 @@ have. Each item says what it unblocks and the exact step.
 
 ## 1. Run the real-model evaluation (unblocks 7 of the 10 score dimensions)
 
+**Update 20:00 UTC:** the repository secret is saved (thank you). The first
+run crashed at start-up in the runner itself (not all database models were
+registered); PR #319 fixes it, and the run on the fixed branch is already in
+progress. Nothing more is needed from you for this item unless that run fails.
+
 Pick one:
 
 - **On the box** (the key is already in the api container's environment):

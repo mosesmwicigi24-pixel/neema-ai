@@ -162,23 +162,28 @@ async def collect(db, redis, *, days: int = 7, now: datetime | None = None) -> d
         history = json.loads(raw) if raw else []
     except Exception:
         history = []
-    last = history[-1] if history else None
-    first = history[0] if history else None
+    # Only BLIND runs count as measured (verification pass 4): the dev and
+    # held-out halves were tuned on, so a row from them is a diagnostic, not
+    # a measurement, and a trend must never mix the two.
+    blind = [h for h in history if str(h.get("selection") or "").startswith("file:blind")]
+    last = blind[-1] if blind else None
+    first = blind[0] if blind else None
 
     def _eval_metric(label, key, needs):
         if not last or not (last.get(key) or {}).get("n"):
-            return _not_measured(label, needs=needs, basis="app_settings.eval_history")
+            return _not_measured(label, needs=needs, basis="app_settings.eval_history (blind runs only)")
         m = last[key]
         base = (first or {}).get(key) or {}
         return _measured(label, m.get("p"), unit="proportion", n=m.get("n"), ci95=m.get("ci95"),
-                         basis=f"case-set run {last.get('at', '')[:10]} on {last.get('git', '')}, {last.get('cases')} cases, "
+                         basis=f"blind-set run {last.get('at', '')[:10]} on {last.get('git', '')}, {last.get('cases')} cases, "
                                f"producer {last.get('producer')}",
-                         previous=(base.get("p") if base is not last.get(key) and history and len(history) > 1 else None),
-                         caveat="held-out half only when selection=held-out; objective verdicts, no model judge")
+                         previous=(base.get("p") if first is not last and len(blind) > 1 else None),
+                         caveat="the blind held-out set only; objective verdicts, no model judge")
 
     metrics["intent_next_action"] = _eval_metric(
         "Intent and next-action accuracy", "turns",
-        needs="run `python -m app.jobs.agent_eval --cases --held-out --history` on the box (needs the model key)")
+        needs="run `python -m app.jobs.agent_eval --cases --file blind_heldout.jsonl --history` "
+              "(scripts/eval-blind.sh on the box, or the agent-eval workflow)")
     metrics["critical_safety"] = _eval_metric(
         "Critical-case correctness (consent, payment, invented facts)", "critical",
         needs="same run; the critical slice of the case set")
