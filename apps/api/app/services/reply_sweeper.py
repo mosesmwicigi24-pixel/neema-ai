@@ -65,8 +65,9 @@ def _answerable_turn(text: str | None, media_type: str | None, media_url: str | 
         # A polite closer ("thanks", "I'll get back to you", "God bless") is not
         # a hanging question — rescuing it restarts the politeness ping-pong
         # the closer gate exists to end.
+        from app.agent.cooling import silence_decision
         from app.agent.runtime import is_closer
-        if is_closer(t):
+        if is_closer(t) or silence_decision(t):          # pass 6b: the gate's silence is final
             return None, None
         return t, None
     return None, None
