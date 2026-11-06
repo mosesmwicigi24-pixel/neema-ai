@@ -203,6 +203,9 @@ export const actionsApi = {
 };
 
 /** Standing orders — the owner's live steering Neema reads before every reply. */
+export interface ApiRuleProposal { rule: string; status: "pending" | "approved" | "rejected" }
+export interface ApiRuleProposals { proposals: ApiRuleProposal[]; learned_rules: string | null }
+
 export const settingsApi = {
     getDirectives: () =>
         get<{ directives: string; max_chars: number }>("/admin/settings/directives"),
@@ -224,6 +227,12 @@ export const settingsApi = {
         put<{ ok: boolean; mode: "shadow" | "enforce"; enforced_rules: string[] }>(
             "/admin/settings/outreach", change),
     /** The offer Neema states outright while it runs. */
+    /** The weekly distillation's rule proposals (GET /admin/settings/proposals) and
+     *  the owner's verdict on one (POST …/{idx}/{approve|reject}; admin only). An
+     *  approved rule joins learned_rules and reaches Neema's prompt within minutes. */
+    getProposals: () => get<ApiRuleProposals>("/admin/settings/proposals"),
+    judgeProposal: (idx: number, verdict: "approve" | "reject") =>
+        post<{ ok: boolean; status: string; learned_rules?: string }>(`/admin/settings/proposals/${idx}/${verdict}`, {}),
     getOffer: () => get<ApiOfferSetting>("/admin/settings/offer"),
     putOffer: (campaign: ApiCampaign | null) =>
         put<{ ok: boolean; campaign: ApiCampaign | null; running: boolean; says: string }>(
