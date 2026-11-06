@@ -502,7 +502,7 @@ def test_the_team_note_says_the_draft_was_held_and_why():
 def test_a_tools_own_numbers_are_the_ground_truth():
     log = [{"tool": "update_cart", "input": {}, "out": {"total": 39350, "lines": [{"qty": 2, "unit": 19500}],
                                                         "note": "delivery KES 350 within Nairobi"}}]
-    assert rv.figures_in_results(log) == {39350.0, 2.0, 19500.0, 350.0}
+    assert rv.figures_in_results(log) == {39350.0, 19500.0, 350.0}   # a qty is never a money fact (1.15)
     ok = asyncio.run(rv.review_reply("go ahead", "Your total is KES 39,350 for 2 sets, delivery included.",
                                      [], tool_results=log, mode="dm"))
     assert ok["ok"] is True

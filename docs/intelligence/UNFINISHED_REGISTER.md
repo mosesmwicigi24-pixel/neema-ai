@@ -46,6 +46,7 @@ the precise dependency · status. Last update: 2026-11-06, end of session 1.
 | Person-keyed `said_once` and product interest (W7-5, second half) | one identity lookup per turn on every channel; measure two-channel activity inside the TTL first | INVESTIGATION 7.5 |
 | One pause decision instead of four (W3-3) | a redesign; judge with the real-model run on `needs-silence`/`closing` cases | INVESTIGATION 3.3 |
 | A server side for the Business / Neema / Integrations settings panels (today: reference-only, values live in the box's configuration) | decide which of these the owner wants editable from the dashboard; each is an app_settings row plus a reader | INVENTORY G §5.2 |
+| The prompt's delivery figure is a fact in every currency (W1-15, second half): "$350" passes where only "KES 350" is true | per-currency prompt figures; measure the false-hold rate on true cross-currency delivery lines with the model first | INVESTIGATION 1.15 |
 | Currency lock once a figure is quoted in a turn (W9-5) | `search_catalog`/`capture_contact` move the turn's currency on purpose (the customer's own words); a lock would delay that correction by a turn — measure with the model first | INVESTIGATION 9.5 |
 | Retiring the legacy bridge order path and the expiring receipt shortener (W9-4) | removes a code path hub events may still use; needs a production trace first | INVESTIGATION 9.4 |
 | Turn latency instrumentation, availability history, resolution definition | named on the dashboard as NOT YET MEASURED with what each needs | performance.py |
