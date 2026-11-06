@@ -18,6 +18,7 @@ ff8c3b5).
 | CI on 8cae9b7 (slice 2: behaviour tests, length scorer, blind exclusion, timing tests stub the hub) | GitHub Actions | CI and Build & Push green; the first head (ede8dee) failed only `test_a_fast_request_stays_quiet` (health waited 15 s on the hub from the runner — pre-existing, now stubbed) |
 | CI on 4db8f55 (slices 2–3 final head, merged as 34d371e) | GitHub Actions | CI and Build & Push green |
 | CI on 16e7a17 (slice 4 final head, merged as d084e91) | GitHub Actions | CI and Build & Push green |
+| Full API suite on the merged main d084e91 (slices 1–4) | `pytest tests` | 3,313 passed, 1 xpassed, 0 failed (10 min 8 s) |
 | Production after 34d371e (~19:22 UTC) | `/api/health` from outside | status ok, replies ok, review tallies populated, outreach shadow with no enforced rules |
 | Production after c8c3356 (~17:52 UTC) | `/api/health` from outside | status ok, replies ok, review tallies populated, outreach shadow with no enforced rules |
 | Web | `pnpm exec tsc --noEmit` + `pnpm build` | passed (agent report) |
