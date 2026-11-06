@@ -317,8 +317,10 @@ async def run(send: bool, ignore_quiet_hours: bool = False,
                     _log.info("[SKIP (opted out)] %-9s …%s", row["conv"].channel or "whatsapp",
                               str(row.get("wa_id") or "")[-4:])
                     continue
-            except Exception:
-                pass
+            except Exception as exc:
+                # Unreadable preference: not in the campaign (verification pass 5).
+                _log.warning("[SKIP (opt-out unreadable)] …%s: %s", str(row.get("wa_id") or "")[-4:], exc)
+                continue
             kept.append(row)
         rows = kept
     _log.info("%d customer(s) bought during %s in a previous year",

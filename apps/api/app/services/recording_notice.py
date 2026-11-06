@@ -121,8 +121,11 @@ async def send_for_call(call_id: str, redis=None) -> str:
                 _log.info("recording notice skipped for %s …%s (call %s): opted out",
                           channel, str(recipient)[-4:], call_id)
                 return OPTED_OUT
-        except Exception:
-            pass
+        except Exception as exc:
+            # Unreadable preference: no notice on a guess (verification pass 5).
+            _log.warning("recording notice for %s …%s (call %s) not sent: opt-out could not be read (%s)",
+                         channel, str(recipient)[-4:], call_id, exc)
+            return OPTED_OUT
         # Claim before sending: the primary key lets exactly one sender through.
         claimed = (await db.execute(
             insert(RecordingNotice).values(channel=channel, recipient=recipient, call_id=call_id)

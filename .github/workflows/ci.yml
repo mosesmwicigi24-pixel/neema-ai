@@ -67,7 +67,7 @@ jobs:
         run: |
           command -v ffmpeg && exit 0
           for i in 1 2 3; do
-            sudo dpkg --configure -a || true
+            sudo timeout 60 dpkg --configure -a || true
             sudo timeout 150 apt-get update -q -o Acquire::Retries=3 \
               && sudo timeout 150 apt-get install -y -q --no-install-recommends -o Acquire::Retries=3 ffmpeg \
               && exit 0
@@ -168,7 +168,7 @@ jobs:
         run: |
           command -v ffmpeg && exit 0
           for i in 1 2 3; do
-            sudo dpkg --configure -a || true
+            sudo timeout 60 dpkg --configure -a || true
             sudo timeout 150 apt-get update -q -o Acquire::Retries=3 \
               && sudo timeout 150 apt-get install -y -q --no-install-recommends -o Acquire::Retries=3 ffmpeg \
               && exit 0

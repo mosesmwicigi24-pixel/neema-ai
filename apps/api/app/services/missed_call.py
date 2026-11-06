@@ -78,8 +78,12 @@ async def _follow_up(redis, call_id: str) -> bool:
                 if conv is not None and await opted_out(db, redis, conv, fail_closed=True):
                     _log.info("missed-call message skipped for …%s: opted out", str(handle)[-4:])
                     return False
-            except Exception:
-                pass
+            except Exception as exc:
+                # The preference could not be read at all: no text on a guess
+                # (verification pass 5 — this used to fall through to the send).
+                _log.warning("missed-call message for …%s not sent: opt-out could not be read (%s)",
+                             str(handle)[-4:], exc)
+                return False
         key = f"call:missed-msg:{channel}:{handle}"
         ttl = max(1, int(settings.missed_call_message_cooldown_h)) * 3600
         claimed = None

@@ -1416,10 +1416,16 @@ async def _reply_in_words(llm, sys_blocks, messages: list, tools: list) -> str:
             # 2026-11-06). Cut to the last whole sentence; nothing to keep →
             # the draft as written, as _settle_truncated's "kept".
             cut, was_cut = trim_truncated(text)
-            _log.warning("reply-in-words hit max_tokens too — %s",
-                         "cut back to its last whole sentence" if was_cut
-                         else "no whole sentence to keep; kept as written")
-            return cut if was_cut else text
+            dropped = text[len(cut):] if was_cut else text
+            if was_cut and not _ANSWER_MARK_RE.search(dropped):
+                _log.warning("reply-in-words hit max_tokens too — cut back to its last whole sentence")
+                return cut
+            # The dropped tail carried a figure, a currency or a question
+            # (verification pass 5): the draft goes out as written so the
+            # gate's figure check judges it — a cut would drop the price.
+            _log.warning("reply-in-words hit max_tokens too — %s; kept as written for the gate",
+                         "the dropped tail carried an answer" if was_cut else "no whole sentence to keep")
+            return text
         return text
     except Exception as exc:
         _log.info("reply-in-words call failed: %s", exc)
@@ -5997,7 +6003,7 @@ async def _run_comment_engage(redis, channel: str, comment: dict, own_pages: set
                 # line by its weight — which claims the message only when it
                 # went. Never a price, never a pitch, never cheer.
                 private_sent = False
-                if severity >= 2:
+                if severity >= 2 and await _comment_dm_allowed(redis, channel, ext):
                     private_sent = await _private_complaint_message(
                         cid, comment.get("page_id"), channel, name_tag, swahili)
                 text = empathy_text(kind, severity, swahili, private_sent=private_sent).replace("{name}", name_tag)
@@ -6175,7 +6181,8 @@ async def _run_comment_engage(redis, channel: str, comment: dict, own_pages: set
                                      channel=channel)
             dm_sent = True
         except _OptedOut:
-            _log.info("comment DM skipped for %s/…%s: opted out", channel, str(ext)[-4:])
+            _log.info("comment DM skipped for %s/…%s: opted out, or the preference could not be read",
+                      channel, str(ext)[-4:])
         except Exception as exc:
             # Now that the public comment is unconditionally link-free, the
             # private reply is the ONLY route the storefront link has. A failure

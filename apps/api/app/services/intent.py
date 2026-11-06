@@ -101,6 +101,7 @@ async def record_opt_out(db, redis, conv, text: str, *, channel: str, key: str) 
     the Activity timeline (visible), redis (fast path)."""
     from sqlalchemy.orm.attributes import flag_modified
     now = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    wkey = key                                   # normalised below for WhatsApp
     try:
         pid = getattr(conv, "person_id", None)
         # A WhatsApp identity is a phone number; a web-chat visitor rides the
@@ -114,10 +115,13 @@ async def record_opt_out(db, redis, conv, text: str, *, channel: str, key: str) 
         rkey = str(key or "")
         if channel == "whatsapp":
             from app.core.phone import is_plausible_phone
-            rkey = rkey.lstrip("+").strip()
+            # the digits only: a "+", spaces, dashes, dots or parentheses
+            # would otherwise mint a second person for one phone (pass 5, #7)
+            rkey = "".join(ch for ch in rkey if ch not in "+ -.()").strip()
             _can_resolve = bool(rkey) and is_plausible_phone(rkey)
         else:
             _can_resolve = bool(rkey)
+        wkey = rkey if channel == "whatsapp" else key    # the key every reader uses
         if pid is None and db is not None and not _can_resolve:
             _log.info("opt-out for %s/…%s: key is not a resolvable identity — redis only",
                       channel, rkey[-4:])
@@ -170,7 +174,7 @@ async def record_opt_out(db, redis, conv, text: str, *, channel: str, key: str) 
             pass
     if redis is not None:
         try:
-            await redis.set(_key(channel, key), now, ex=OPT_OUT_TTL)
+            await redis.set(_key(channel, wkey), now, ex=OPT_OUT_TTL)
         except Exception:
             pass
 

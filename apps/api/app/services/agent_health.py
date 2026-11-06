@@ -32,12 +32,16 @@ _TTL = 3600                      # a rolling hour — matches the self-check cad
 # themselves within the hour: retrying a turn against an unpaid account just
 # fails again, and a budget stop holds until midnight UTC unless someone
 # raises the ceiling.
-ACTIONABLE = ("credit", "auth", "model", "budget", "meta", "whatsapp")
+# `database` / `gate` (slice 5, verification pass 5): a turn cannot complete
+# against a broken database or an erroring rule, so the sweep must stand
+# down rather than burn every waiting thread's strikes and hand it to a
+# person with the wrong reason; the next completed turn clears them.
+ACTIONABLE = ("credit", "auth", "model", "budget", "meta", "whatsapp", "database", "gate")
 
 # The subset where NO model turn can succeed, on any thread, until a person
 # acts: the account, the key, the model id, or our own ceiling. A channel
 # credential (meta/whatsapp) still lets the turn compose — only its send dies.
-AI_DOWN = ("credit", "auth", "model", "budget")
+AI_DOWN = ("credit", "auth", "model", "budget", "database", "gate")
 
 
 def _is_database_error(exc: BaseException) -> bool:

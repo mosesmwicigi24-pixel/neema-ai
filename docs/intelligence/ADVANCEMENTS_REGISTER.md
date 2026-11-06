@@ -198,6 +198,17 @@ check (harness `v5-mutate.py`, 12 mutants, 12 killed).
 - **Change:** none to production; the pass-4 "fix" used "Where is your shop?", which `cooling._BUY_RE` matches on `shop`, so M6 (the `"?"` branch) survived. The new test uses "Are you there?" (no buying word) through `customer_state.apply`.
 - **Status:** VERIFIED COMPLETE — `test_a_bare_question_with_no_buying_word_lifts_a_hold`; mutant M6 killed.
 
+### Verification pass 5 (same day) — ten findings, all acted on
+
+- **Status of the slice restated: IMPLEMENTED BUT NOT VERIFIED** until the full suite and CI on the final head are green (pass 5, finding 9: the first head `a5b4dc1` was red on twelve test worlds).
+- **S1 amended:** `database` and `gate` are in `AI_DOWN` and `ACTIONABLE` — the sweep stands down on a fleet-wide database or gate failure instead of burning every thread's strikes, health says a person is needed, and the next completed turn clears it (finding 2).
+- **S2 amended:** the four senders whose surrounding `except` fell through to a send now skip on any read failure (finding 3); the dispatcher's deferral rolls the session back, counts the try, parks after three, and tallies `defer_optout_unreadable` / `park_optout_unreadable` for the shadow report (finding 4).
+- **S3 amended:** the complaint DM goes through `_comment_dm_allowed` too (finding 5); the skip log names "opted out, or the preference could not be read" (finding 6).
+- **S4 amended:** the retry is cut only when the dropped tail carries no figure, currency or question; otherwise it goes to the gate as written (finding 1).
+- **S5 amended:** the resolver key is the digits only and the redis key is written on it (finding 7); the "redis only" line and the psycopg branches are tested (finding 8).
+- **S7 amended:** `timeout 60` on each `dpkg --configure -a` (finding 10).
+- Evidence: VERIFICATION_PASS_5.md with the response table; 24 of 24 mutants killed; `tests/test_intelligence_slice5.py` (21 tests).
+
 ### S7 · CI apt step bounded for its real worst case
 
 - **Change:** `timeout-minutes: 16` (three attempts × ~305 s) and `sudo dpkg --configure -a || true` before each attempt, in both jobs that install ffmpeg. The 8-minute bound was hit again on PR #321 (docs-only; a stalled mirror; the re-run passed).

@@ -732,7 +732,35 @@ async def process_due(db, redis, *, now: datetime | None = None, limit: int = 10
             if _oo == _intent.OPT_OUT_UNKNOWN:
                 # The preference could not be read this tick: nothing is
                 # sent on a guess, and nothing is vetoed on one either — the
-                # row stays planned for the next tick (2026-11-06).
+                # row stays planned for the next tick (2026-11-06). The
+                # failed read leaves the session aborted, so it is rolled
+                # back here or the NEXT row in the tick fails; the try is
+                # counted like a failed send, so after three the row parks
+                # for a person instead of retrying for ever (verification
+                # pass 5, finding 4).
+                try:
+                    await db.rollback()
+                except Exception:
+                    pass
+                _tries = 0
+                if redis is not None:
+                    try:
+                        _tries = int(await redis.incr(f"actions:tries:{action.id}"))
+                        if _tries == 1:
+                            await redis.expire(f"actions:tries:{action.id}", 7 * 86400)
+                    except Exception:
+                        _tries = 0
+                if _tries > 3:
+                    if await claim(db, action, ("planned",), "needs_approval"):
+                        await finish(db, action, "needs_approval",
+                                     reason=with_hold_reason(action.reason,
+                                                             "opt-out preference could not be read for 3 ticks — needs a human"))
+                    await _shadow_count(redis, "park_optout_unreadable")
+                    ol.decision("actions", conv.channel, who, "park",
+                                "opt-out preference unreadable for 3 ticks; parked for a person",
+                                kind=getattr(action, "kind", None), action=getattr(action, "id", None))
+                    continue
+                await _shadow_count(redis, "defer_optout_unreadable")
                 ol.decision("actions", conv.channel, who, "defer",
                             "opt-out preference could not be read; row kept for the next tick",
                             kind=getattr(action, "kind", None), action=getattr(action, "id", None))

@@ -33,6 +33,7 @@ the precise dependency · status. Last update: 2026-11-06, end of session 1.
 ## Not done, by decision (recorded)
 
 | Item | Why | Where recorded |
+| The fail-closed read at `hub_events._celebrate`, `missed_call._follow_up`, `recording_notice.send_for_call` and `seasonal_outreach.run` is proven at source level only (the keyword and the except branch); payment follow-up, cart recovery, the dispatcher and the comment DM have behaviour tests | their entry points need a Call / season / order fixture; verification pass 5 finding 3 (mutants V7/V8 die to the string test alone) | VERIFICATION_PASS_5 |
 |---|---|---|
 | Deferring product-card sends until after the gate (W1-6) | would create a worse failure (words promising cards that then fail) | ADVANCEMENTS_REGISTER W1-6 |
 | Refusing an order when the promised offer cannot be read (W1-7) | the owner's recorded trade-off prefers the order; the gap is now surfaced | W1-7 |
