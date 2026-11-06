@@ -87,16 +87,20 @@ class _Redis:
 
 def test_first_closer_replies_then_silence_until_substance():
     r = _Redis()
-    # First "thanks": gate open (model replies once), then armed post-send.
-    assert asyncio.run(rt.closer_gate(r, "whatsapp", "254700", "Thanks!")) is False
-    asyncio.run(rt.mark_closer_answered(r, "whatsapp", "254700", "Thanks!"))
+    # Slice 6 (2026-11-06): a bare "thanks" is silence at the gate itself — the
+    # prompt's own rule, which the model honoured only two thirds of the time
+    # on the first real-model pass — and the gate arms the ping-pong flag.
+    assert asyncio.run(rt.closer_gate(r, "whatsapp", "254700", "Thanks!")) is True
+    assert r.store.get("closer:whatsapp:254700") == "1"
     # The ping-pong: every further closer is silence, not a model call.
     assert asyncio.run(rt.closer_gate(r, "whatsapp", "254700", "🙏")) is True
     assert asyncio.run(rt.closer_gate(r, "whatsapp", "254700", "I'll get back to you")) is True
     # Substance clears the flag — the conversation is alive again.
     assert asyncio.run(rt.closer_gate(r, "whatsapp", "254700", "How much is the tray?")) is False
     assert "closer:whatsapp:254700" not in r.store
-    assert asyncio.run(rt.closer_gate(r, "whatsapp", "254700", "Thanks!")) is False
+    # a deferral with the flag down still gets a turn (the promise is scribed)
+    assert asyncio.run(rt.closer_gate(r, "whatsapp", "254700", "I'll get back to you")) is False
+    assert asyncio.run(rt.closer_gate(r, "whatsapp", "254700", "Thanks!")) is True
 
 
 def test_gate_never_arms_after_a_substantive_reply():

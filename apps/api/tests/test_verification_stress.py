@@ -471,9 +471,8 @@ def test_the_ok_ping_pong_still_ends_in_silence():
         async def expire(self, k, t):
             return True
     r = _R()
-    assert asyncio.run(rt.closer_gate(r, "messenger", "P", "ok")) is False      # the first "ok": one warm line
-    asyncio.run(rt.mark_closer_answered(r, "messenger", "P", "ok"))
-    assert asyncio.run(rt.closer_gate(r, "messenger", "P", "I'm saying ok")) is True   # then silence
+    assert asyncio.run(rt.closer_gate(r, "messenger", "P", "ok")) is True       # slice 6: a bare "ok" is silence at once
+    assert asyncio.run(rt.closer_gate(r, "messenger", "P", "I'm saying ok")) is True   # and so is the next
     assert asyncio.run(rt.closer_gate(r, "messenger", "P", "how much is the tray?")) is False  # substance clears it
     assert asyncio.run(rt.closer_gate(r, "messenger", "P", "👍")) is True         # a thumbs-up: always silence
 
