@@ -266,7 +266,7 @@ async def _celebrate(db, redis, conv, event: dict) -> dict:
             await _notify_agents(redis, "🔕 Order update for an opted-out customer",
                                  f"{event.get('order_number') or ''}: {brief} — they asked "
                                  "for no automated messages; please tell them yourself.", conv)
-            return {"handled": True, "sent": "notified_human", "reason": "opted_out"}
+            return {"handled": True, "sent": "notified_human", "customer_told": False, "reason": "opted_out"}
     except Exception:
         pass
     _stamp = ol.stamp("hub_events", ol.TRANSACTIONAL, reference=event.get("order_number"),
@@ -281,6 +281,17 @@ async def _celebrate(db, redis, conv, event: dict) -> dict:
         text = await _compose_announcement(db, redis, conv, brief)
         if not text:
             return {"handled": False, "reason": "compose_failed"}
+        # an announcement is composed read-only and never met the gate: the
+        # deterministic rules at least (verification pass 1, finding 1.3)
+        from app.agent.review import initiated_issues
+        _issues = initiated_issues(text, paid_known=str(event.get("type") or "").endswith(".paid"),
+                                   status_known=True)       # the hub's event IS the status
+        if _issues["hard"]:
+            await _notify_agents(redis, "✋ " + (event.get("type") or "hub event"),
+                                 f"{event.get('order_number') or ''}: the drafted announcement was held by "
+                                 f"the rules ({', '.join(_issues['hard'])}) — please send it yourself. ({brief})", conv)
+            return {"handled": True, "sent": "notified_human", "customer_told": False,
+                    "reason": "rules:" + ",".join(_issues["hard"])}
         if conv.channel == "whatsapp":
             try:
                 wamid = await svc._send_waba(recipient, text)
@@ -288,7 +299,7 @@ async def _celebrate(db, redis, conv, event: dict) -> dict:
                 _stamp["delivery"] = {"status": "unknown", "error": str(exc)[:120]}
                 await svc.save_outbound_message(db, redis, recipient, text, waba_msg_id=None,
                                                 raw_meta=_stamp)
-                return {"handled": True, "sent": "unknown"}
+                return {"handled": True, "sent": "unknown", "customer_told": None}
             await svc.save_outbound_message(db, redis, recipient, text, waba_msg_id=wamid,
                                             raw_meta=_stamp)
         else:
@@ -297,7 +308,7 @@ async def _celebrate(db, redis, conv, event: dict) -> dict:
             await svc.save_outbound_channel_message(db, redis, conv.channel, recipient, text,
                                                     raw_meta=_stamp)
         _log.info("hub event %s → celebrated in-window to %s", event.get("type"), recipient)
-        return {"handled": True, "sent": "freeform"}
+        return {"handled": True, "sent": "freeform", "customer_told": True}
 
     if conv.channel == "whatsapp" and settings.wa_event_template:
         from app.services import templates as _templates
@@ -317,12 +328,12 @@ async def _celebrate(db, redis, conv, event: dict) -> dict:
             await _notify_agents(redis, "💰 " + (event.get("type") or "hub event"),
                                  f"{event.get('order_number') or ''}: template refused "
                                  f"({exc}) — send the good news manually. ({brief})", conv)
-            return {"handled": True, "sent": "notified_human", "reason": str(exc)}
+            return {"handled": True, "sent": "notified_human", "customer_told": False, "reason": str(exc)}
         # The thread stores what the customer read, tagged as a template.
         _stamp["template"] = _templates.meta(tpl, params)
         await svc.save_outbound_message(db, redis, recipient, rendered, waba_msg_id=wamid,
                                         raw_meta=_stamp)
-        return {"handled": True, "sent": "template"}
+        return {"handled": True, "sent": "template", "customer_told": True}
 
     await _notify_agents(
         redis, "💰 " + (event.get("type") or "hub event"),
@@ -331,7 +342,7 @@ async def _celebrate(db, redis, conv, event: dict) -> dict:
            if conv.channel == "whatsapp" else
            "outside the 24h window — only a person may message them now")
         + f" — send the good news manually. ({brief})", conv)
-    return {"handled": True, "sent": "notified_human"}
+    return {"handled": True, "sent": "notified_human", "customer_told": False}
 
 
 async def _mirror_order_state(db, event: dict) -> bool:

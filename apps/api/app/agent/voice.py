@@ -39,12 +39,13 @@ _BUTLER = re.compile(
 # short list of everyday shop words — the point is to pick the Swahili canned
 # line for "Bei gani?" or "Nataka hii", never to guess from a name or a flag.
 # Weak connectives ("na", "ya", "ni") are left out: they are too short to mean
-# anything on their own.
+# anything on their own — and "je", the question particle, is also the French
+# "I": two of them made "je vais en parler… je reviens" read as Swahili.
 _SW_WORDS = frozenset("""
     bei gani ngapi pesa shilingi nataka ninataka nahitaji ninahitaji naomba ninaomba
     nipe nitumie tuma tuambie niambie tafadhali habari asante karibu sana
     unauza mnauza unayo mnayo mnaweza unaweza kuagiza agiza oda hii hiyo hizi hizo
-    ile kiasi je ndiyo ndio hapana sawa leo kesho wapi niko nipo nataka bado
+    ile kiasi ndiyo ndio hapana sawa leo kesho wapi niko nipo nataka bado
     divai mkate vifaa meza bwana kanisa mchungaji askofu kasisi kasoki joho stola
     kikombe vikombe sinia msalaba rangi vipimo ukubwa saizi bidhaa nunua kununua
     inauzwa zinauzwa hapa huko kwako yako zako wangu yangu mimi wewe nyinyi sisi

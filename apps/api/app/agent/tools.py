@@ -1455,8 +1455,17 @@ async def _create_order(args: dict, ctx: ToolContext) -> dict:
         # now: a customer who never asked is never quietly discounted, and one
         # who was quoted the offer price still gets it after the campaign ends.
         _granted = await _promo.granted_promise(ctx.redis, ctx.channel, ctx.wa_id)
+        _promise_unread = False
     except Exception:
-        _granted = None           # no offer recorded beats no order created
+        # The order still goes (no offer recorded beats no order created) but
+        # the gap is SAID — on the order, to the model, in the log — instead
+        # of a promised discount vanishing in silence (W1, 2026-11-06).
+        _granted = None
+        _promise_unread = True
+        _log.warning("promised offer could not be read for %s — order placed without it, flagged", ctx.wa_id)
+        order_note = "; ".join(x for x in (
+            order_note, "PROMISED OFFER UNVERIFIED (offer store unreachable at order time) — "
+                        "confirm any discount with the customer before invoicing") if x)
 
     # A wa_id the phone library can't validate (an Ivorian account from before
     # renumbering…) still finds the hub customer created with it when WhatsApp
@@ -1585,6 +1594,21 @@ async def _create_order(args: dict, ctx: ToolContext) -> dict:
         "unmatched": pushed.get("unmatched") or [],
         "note_on_order": order_note,
     }
+    if _promise_unread:
+        result["offer_unverified"] = True
+        try:
+            await _team_note(ctx, kind="offer_unverified",
+                             title="⚠️ Promised offer could not be applied — confirm the amount",
+                             text=(f"⚠️ ORDER #{pushed.get('order_number')} placed WITHOUT checking the offer this "
+                                   "customer was promised (the offer store was unreachable). Please confirm any "
+                                   "discount with them before invoicing; Neema has told them a colleague confirms "
+                                   "the final amount."),
+                             body=f"order #{pushed.get('order_number')} — {ctx.wa_id}")
+        except Exception as exc:
+            _log.warning("offer-unverified team note failed for %s: %s", ctx.wa_id, exc)
+        result["next_step"] = ("Say the order is placed and that a colleague will confirm the final "
+                               "amount with them (an offer they were promised could not be applied "
+                               "automatically) — never state the total as final.")
     # AN INTERNATIONAL ORDER TELLS THE TEAM ITSELF (2026-09-26): the customer
     # pays by a transfer route a colleague confirms with them — the note and
     # the ping go out here, so Neema stays on the thread instead of a
@@ -2298,7 +2322,20 @@ async def _handoff_to_human(args: dict, ctx: ToolContext) -> dict:
                 "note": "conversation not found — tell the customer a colleague will follow up"}
     conv.intercept_mode = InterceptMode.human
     await ctx.db.commit()
-    return {"ok": True, "reason": args.get("reason")}
+    # Three other hand-over paths flag and ring the team; this one set the
+    # mode and fell silent (W9, 2026-11-06). Best-effort, never on a draft.
+    told = False
+    if not ctx.read_only:
+        try:
+            told = await _team_note(
+                ctx, kind="handoff",
+                title="🙋 Neema handed a chat to the team",
+                text=("🙋 HANDED TO THE TEAM — " + (reason or "the customer needs a person")
+                      + ". Neema has stepped back; the next reply here is yours."),
+                body=f"{_channel_label(ctx)} {ctx.wa_id} — {reason or 'handoff'}")
+        except Exception as exc:
+            _log.warning("handoff ring failed for %s: %s", ctx.wa_id, exc)
+    return {"ok": True, "reason": args.get("reason"), "team_told": told}
 
 
 async def _raise_complaint(args: dict, ctx: ToolContext) -> dict:

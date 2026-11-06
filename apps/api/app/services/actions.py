@@ -506,14 +506,29 @@ async def _repeats_earlier(db, conv, text: str, *, look_back: int = 6,
     return False
 
 
+class HeldByRules(Exception):
+    """A Neema-initiated message the deterministic rules refuse to send
+    (a payment acknowledged with no hub state, an order status from nowhere).
+    The caller parks the action for a person; it is never retried blind."""
+
+
 async def _send(db, redis, conv, text: str, action=None, shadow: list | None = None) -> None:
     """Deliver, then record. Raises only when delivery failed: once the
     message is out, a failure to record it is logged, never raised — a raise
     there would put the action back in the queue and send it twice. An
     UNKNOWN outcome (SendOutcomeUnknown) is recorded as such and re-raised
-    for the caller to park the action — never to retry it."""
+    for the caller to park the action — never to retry it. A message the
+    deterministic rules refuse raises HeldByRules BEFORE anything is sent
+    (verification pass 1, finding 1.3: initiated messages met no gate)."""
     from app.services import messaging as svc
     from app.services import outreach_log as ol
+    from app.agent.review import initiated_issues
+    issues = initiated_issues(text)
+    if issues["hard"]:
+        raise HeldByRules(", ".join(issues["hard"]))
+    if issues["soft"]:
+        _log.info("initiated message to …%s sent with notes: %s",
+                  str(conv.wa_id or conv.external_id)[-4:], "; ".join(issues["soft"]))
     recipient = conv.wa_id if conv.channel == "whatsapp" else conv.external_id
     meta = ol.stamp("actions", message_class(action) if action is not None else ol.ROUTINE,
                     action_id=getattr(action, "id", None), kind=getattr(action, "kind", None),
@@ -963,6 +978,15 @@ async def process_due(db, redis, *, now: datetime | None = None, limit: int = 10
                 continue
             try:
                 await _send(db, redis, conv, text, action, shadow=shadow_flags)
+            except HeldByRules as exc:
+                await finish(db, action, "needs_approval", draft=text,
+                             reason=with_hold_reason(action.reason, f"held by the rules ({exc}) — a person decides"))
+                ol.decision("actions", conv.channel, who, "hold", f"held by rules: {exc}",
+                            kind=getattr(action, "kind", None), action=getattr(action, "id", None))
+                await _shadow_count(redis, "rules_held")
+                await _notify(redis, "✋ Follow-up held by the rules",
+                              f"{str(exc)[:60]} — {(action.reason or '')[:80]}", conv)
+                continue
             except SendOutcomeUnknown as exc:
                 # Meta may have delivered it: the row is recorded as unknown
                 # and a person decides — never an automatic resend.

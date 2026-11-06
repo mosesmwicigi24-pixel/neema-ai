@@ -61,6 +61,7 @@ const LeadsView    = lazyView(() => import("@/components/views/LeadsView").then(
 const CallsView    = lazyView(() => import("@/components/views/CallsView").then(m => m.CallsView));
 const DealsView    = lazyView(() => import("@/components/views/DealsView").then(m => m.DealsView));
 const ReportsView  = lazyView(() => import("@/components/views/ReportsView").then(m => m.ReportsView));
+const PerformanceView = lazyView(() => import("@/components/views/PerformanceView").then(m => m.PerformanceView));
 const ProfileView  = lazyView(() => import("@/components/views/ProfileView").then(m => m.ProfileView));
 const SettingsView = lazyView(() => import("@/components/views/SettingsView").then(m => m.SettingsView));
 
@@ -74,6 +75,7 @@ const PREFETCH_VIEWS = [
     () => import("@/components/views/LeadsView"),
     () => import("@/components/views/OverviewView"),
     () => import("@/components/views/ReportsView"),
+    () => import("@/components/views/PerformanceView"),
     () => import("@/components/views/CatalogView"),
     () => import("@/components/views/AgentsView"),
     () => import("@/components/views/ProfileView"),
@@ -194,7 +196,7 @@ export default function NeemaDashboard(): React.ReactElement {
         const viewParam = params.get("view") as ViewId | null;
         const caller = params.get("caller");
         const views: ViewId[] = ["conversations", "calls", "orders", "deals", "leads",
-            "reports", "agents", "catalog", "overview", "profile", "settings"];
+            "reports", "performance", "agents", "catalog", "overview", "profile", "settings"];
         if (open) {
             openConversationFor(openRef ? `${open}|${openRef}` : open);
         } else if (viewParam && views.includes(viewParam)) {
@@ -223,6 +225,7 @@ export default function NeemaDashboard(): React.ReactElement {
             conversations: "Inbox", orders: "Orders", leads: "Leads",
             overview: "Analytics", catalog: "Catalog", agents: "Team",
             profile: "Profile", settings: "Settings", reports: "Reports",
+            performance: "Performance",
         };
         document.title = `${labels[view] ?? view} | Neema`;
     }, [view]);
@@ -543,6 +546,12 @@ export default function NeemaDashboard(): React.ReactElement {
                 icon: <Icon d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />,
                 label: "Reports",
                 badge: null,
+            },
+            {
+                id: "performance" as ViewId,
+                icon: <Icon d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" />,
+                label: "Performance",
+                badge: null,
             }] : []),
         ...(can(PERMS.VIEW_LEADS)
             ? [{
@@ -637,6 +646,7 @@ export default function NeemaDashboard(): React.ReactElement {
                 {...viewProps}
             />
         ),
+        performance: <PerformanceView {...viewProps} />,
         agents: (
             <AgentsView
                 agents={agents}

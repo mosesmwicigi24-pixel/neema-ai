@@ -42,12 +42,21 @@ _CUSTOMER_PROMISE_RE = re.compile(
     r"\b(?:i(?:'ll| will)|we(?:'ll| will)|nita|tuta)\s?"
     r"(?:confirm|get back|let you know|revert|respond|reply|check|decide|send|pay"
     r"|need|order|buy|take|contact|call|message|text|write|remind|communicate"
-    r"|come back|be in touch|consult|ask|discuss|talk|wasiliana|piga)",
+    r"|come back|be in touch|consult|ask|discuss|talk|sort|arrange"
+    r"|wasiliana|piga|lipa|tuma|rudi|julisha|kujulisha|amua|thibitisha|jibu|kuja|fika)"
+    # the imperative: "contact me on Thursday", "call me after 4pm", "let's talk next week"
+    r"|\b(?:contact|call|message|text|ping|reach|remind|get back to|check with)\s+(?:me|us)\b"
+    r"|\blet(?:'s| us)\s+(?:talk|speak|discuss|meet)\b"
+    r"|\b(?:je reviens|je vous (?:recontacte|tiens au courant)|je vais en parler|on se reparle|je (?:confirme|décide|paie))\b"
+    r"|\b(?:volto a falar|eu aviso|dou retorno|vou (?:confirmar|decidir|pagar|falar))\b",
     re.IGNORECASE)
 _TIME_HINT_RE = re.compile(
     r"\b(tomorrow|kesho|tonight|this evening|later today|"
     r"after (?:the |our )?(?:meeting|service|church|committee)|"
     r"next week|weekend|monday|tuesday|wednesday|thursday|friday|saturday|sunday|"
+    r"after \d{1,2} ?(?:am|pm)|after (?:easter|christmas|lent|pentecost|the holidays?)|next year|mwakani|"
+    r"kesho asubuhi|kesho jioni|demain|la semaine prochaine|lundi|mardi|mercredi|jeudi|vendredi|samedi|dimanche|"
+    r"amanh[ãa]|semana que vem|pr[óo]xima semana|"
     # Replenishment timelines ("we'll need them in two weeks", "wiki mbili")
     r"in (?:a|one|two|three|1|2|3) weeks?|after (?:a|one|two|three|1|2|3) weeks?|"
     r"wiki (?:moja|mbili|tatu)|in (?:a|one|1) month|next month|end (?:of )?month|month end)\b",
@@ -117,6 +126,23 @@ def detect_customer_promise(text: str, *, now: datetime | None = None) -> tuple[
     else:                                              # tomorrow / kesho / after the meeting
         due_nbo = _at(now_nbo + timedelta(days=1), 10)
     return due_nbo - timedelta(hours=3), hint
+
+
+def _merge_next_action(current, new: dict) -> dict:
+    """The scribe's new intent on top of what the deal already carries: an
+    open team check keeps its kind (the dispatcher waits on it) and tucks the
+    new intent under "then"; a customer's hold survives either way (W2,
+    2026-11-06 — before this the promise branch assigned wholesale and could
+    erase a team check opened in the same turn)."""
+    cur = dict(current or {}) if isinstance(current, dict) else {}
+    out = dict(new)
+    if cur.get("hold"):
+        out["hold"] = cur["hold"]
+    if cur.get("kind") == "team_check":
+        keep = {k: v for k, v in cur.items() if k != "then"}
+        keep["then"] = new
+        return keep
+    return out
 
 
 def derive_stage(cart_items: int, current: str) -> str:
@@ -233,15 +259,16 @@ async def scribe_update(db, key: str, channel: str, reply: str,
         if promise:
             due = datetime.now(timezone.utc) + timedelta(hours=PROMISE_FOLLOW_UP_HOURS)
             deal.blocking = f"Neema owes the customer: {promise[:200]}"
-            deal.next_action = {"kind": "follow_up", "owner": "ai",
-                                "due_at": due.isoformat(), "note": promise[:200]}
+            deal.next_action = _merge_next_action(deal.next_action, {
+                "kind": "follow_up", "owner": "ai", "due_at": due.isoformat(), "note": promise[:200]})
             await upsert_follow_up(db, deal, due_at=due, kind="follow_up",
                                    reason=f"Neema promised: {promise}")
         elif cust:
             due, hint = cust
             deal.blocking = f"Waiting on the customer ({hint})"
-            deal.next_action = {"kind": "customer_promise", "owner": "ai",
-                                "due_at": due.isoformat(), "note": f"they said: {hint}"}
+            deal.next_action = _merge_next_action(deal.next_action, {
+                "kind": "customer_promise", "owner": "ai", "due_at": due.isoformat(),
+                "note": f"they said: {hint}"})
             await upsert_follow_up(db, deal, due_at=due, kind="customer_promise",
                                    reason=f"Customer said they'd respond ({hint}) — "
                                           "warm check-in if they haven't")

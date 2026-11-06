@@ -780,6 +780,179 @@ _STATUS_CLAIM_RE = re.compile(
 _ORDER_TOOLS = {"check_order_status", "create_order", "prepare_quotation"}
 
 
+# A PAYMENT ACKNOWLEDGEMENT needs the hub's word in THIS turn (intelligence
+# programme W1, 2026-11-06): "thank you for your payment" after "I've paid"
+# was a prompt rule and a soft reviewer rule only. Hard now: the reply may
+# thank, confirm or receipt a payment only when a check_order_status (or
+# create_order) result in this turn's tool log carries a paid-like state.
+_PAID_ACK_RE = re.compile(
+    r"\b(?:thank(?:s| you) for (?:your |the )?payment|payment (?:is |has been |was )?(?:confirmed|received|"
+    r"successful|reflected|gone through)|(?:we(?:'ve| have) )?received your (?:payment|money|m-?pesa)|"
+    r"your (?:payment|m-?pesa) (?:has )?(?:reflected|come through|arrived)|"
+    r"(?:payment|malipo) (?:yamepokelewa|yamefika|yamethibitishwa)|asante kwa malipo|tumepokea malipo|"
+    r"paiement (?:reçu|confirmé)|pagamento (?:recebido|confirmado))\b", re.IGNORECASE)
+_PAID_STATES = frozenset({"paid", "completed", "settled", "success", "successful", "complete"})
+
+
+def _result_says_paid(out) -> bool:
+    if not isinstance(out, dict):
+        return False
+    for k in ("payment_status", "hub_payment_status", "status", "state"):
+        v = out.get(k)
+        if isinstance(v, str) and v.strip().lower() in _PAID_STATES:
+            return True
+    for v in out.values():
+        if isinstance(v, dict) and _result_says_paid(v):
+            return True
+    return False
+
+
+_PAID_ACK_NEG = frozenset("""
+    not n't never haven't hasn't havent hasnt yet once when until after if before pending awaiting
+    unless as soon upon confirm confirms confirmed? will
+""".split())
+
+
+def _conditional_or_negated(text: str, m) -> bool:
+    """The eight words around the match carry a negation or a condition —
+    "we have NOT received your payment yet", "ONCE your payment is
+    confirmed", "ships AS SOON AS the payment has been received"."""
+    words = re.findall(r"[a-z']+", text.lower())
+    pre = " ".join(re.findall(r"[a-z']+", text[:m.start()].lower())[-8:])
+    post = " ".join(re.findall(r"[a-z']+", text[m.end():m.end() + 40].lower())[:4])
+    around = f"{pre} {post}"
+    if re.search(r"\b(?:not|n't|never|haven't|hasn't|havent|hasnt|yet to|once|when|until|after|if|before|pending|"
+                 r"awaiting|unless|as soon as|upon)\b", around):
+        return True
+    return bool(re.search(r"\bnot yet\b|\bnot (?:yet )?(?:come|arrived|reflected|seen)\b", post)) or not words
+
+
+def paid_ack_without_source(answer: str, tool_results: list | None) -> bool:
+    """True when the draft acknowledges a payment as received and no order
+    tool in this turn reported a paid state. A negated or conditional
+    mention ("not received yet", "once it is confirmed") is not an
+    acknowledgement."""
+    m = _PAID_ACK_RE.search(answer or "")
+    if not m or _conditional_or_negated(answer or "", m):
+        return False
+    for e in tool_results or []:
+        if str((e or {}).get("tool") or "") in _ORDER_TOOLS and _result_says_paid((e or {}).get("out")):
+            return False
+    return True
+
+
+# MANUFACTURED URGENCY OR SCARCITY (W4, 2026-11-06): "today only", "last
+# piece", "only 2 left", "hurry", a discount the shop did not record — the
+# research (FTC/ICPEN 2024, Tuncer 2024) reads these as the opposite of
+# trust. Hard unless a promotion tool in this turn supplied the fact.
+_PRESSURE_RE = re.compile(
+    r"\b(?:today only|(?:this|for) (?:today|tonight) only|limited (?:time|stock|period) (?:only|offer)?|while stocks? last|"
+    r"last (?:one|piece|few|unit)s? (?:left|remaining|in stock|available)|only \d+ (?:left|remaining|in stock)|"
+    r"(?:^|[.!?]\s*|please\s+|so\s+)hurry(?: up)?\b|"
+    r"before (?:it'?s|they'?re|it is|they are) (?:all )?gone|offer (?:ends|expires) (?:today|tonight|in \d+ hours?)|"
+    r"act (?:now|fast|quickly)|don'?t miss (?:out|this)|leo tu|zimebaki \d+ tu)\b", re.IGNORECASE)
+_PRESSURE_NEG_RE = re.compile(r"\b(?:no|not|don'?t|do not|never|without|needn'?t|need not)\s+(?:\w+\s+){0,2}hurry", re.IGNORECASE)
+# (a discount FIGURE from nowhere is the `figure` rule's catch — every money
+# figure must come from a hub row or a recorded promotion; this rule is for
+# the pressure words around it)
+_PROMO_TOOLS = {"apply_offer"}
+
+
+def _stock_figures(tool_results: list | None) -> set[int]:
+    """Quantities a tool reported this turn (stock, quantity, available, left)."""
+    out: set[int] = set()
+
+    def walk(v):
+        if isinstance(v, dict):
+            for k, x in v.items():
+                if str(k).lower() in ("stock", "quantity", "available", "in_stock", "left", "remaining", "qty") \
+                        and isinstance(x, (int, float)):
+                    out.add(int(x))
+                walk(x)
+        elif isinstance(v, list):
+            for x in v:
+                walk(x)
+    for e in tool_results or []:
+        walk((e or {}).get("out"))
+    return out
+
+
+def manufactured_pressure(answer: str, tool_results: list | None) -> str | None:
+    """The urgency or scarcity phrase the draft invented, or None: a recorded
+    offer (apply_offer) or a stock figure a tool returned ("only 2 left" with
+    a row saying stock: 2) is a fact, not pressure; "no hurry" is kindness."""
+    m = _PRESSURE_RE.search(answer or "")
+    if not m or _PRESSURE_NEG_RE.search(answer or ""):
+        return None
+    phrase = m.group(0).strip(" .!?")
+    for e in tool_results or []:
+        out = (e or {}).get("out")
+        if str((e or {}).get("tool") or "") in _PROMO_TOOLS and isinstance(out, dict) and (
+                out.get("offer") or out.get("ok") or out.get("campaign")):
+            return None
+    nums = [int(n) for n in re.findall(r"\d+", phrase)]
+    if nums and set(nums) & _stock_figures(tool_results):
+        return None
+    return phrase
+
+
+_DEVANAGARI_RE = re.compile(r"[\u0900-\u097F]")
+_EN_MARK_RE = re.compile(r"\b(the|is|are|your|you|we|with|for|and|would|shall|each|so|two|add|them|this|that)\b", re.I)
+_FR_MARK_RE = re.compile(r"\b(le|la|les|des|vous|nous|prix|merci|bonjour|pour|avec|est|votre)\b", re.I)
+_PT_MARK_RE = re.compile(r"\b(obrigad[oa]|preço|você|para|com|sim|não|temos|custa|bom dia|boa tarde)\b", re.I)
+
+
+def language_mismatch(comment: str, answer: str) -> str | None:
+    """The customer wrote in a language the floor can place (Hindi script,
+    Swahili, French, Portuguese) and the draft is plainly not in it — the
+    language the reply should be in, else None. Deterministic, so continuity
+    no longer depends on the model reviewer running (W8, 2026-11-06). English
+    and mixed messages are left alone: Kenyan customers switch freely."""
+    from app.agent.voice import looks_swahili
+    from app.services.customer_state import guess_language
+    if not (answer or "").strip():
+        return None
+    lang = guess_language(comment or "")
+    a = answer or ""
+    if lang == "hi" and not _DEVANAGARI_RE.search(a):
+        return "hi"
+    # for the Latin-script languages the draft must plainly READ AS ENGLISH to
+    # be flagged — a short Swahili price line with no listed Swahili word is
+    # not an English reply ("Trei tatu za … ni KES 66,000")
+    english = len(_EN_MARK_RE.findall(a)) >= 3
+    if lang == "sw" and english and not looks_swahili(a):
+        return "sw"
+    if lang == "fr" and english and len(_FR_MARK_RE.findall(a)) < 2:
+        return "fr"
+    if lang == "pt" and english and not _PT_MARK_RE.search(a):
+        return "pt"
+    return None
+
+
+def initiated_issues(text: str, *, paid_known: bool = False, status_known: bool = False) -> dict:
+    """The deterministic findings on a message NEEMA initiates — a follow-up,
+    an after-sale announcement, the sweeper's bridge — which never pass the
+    reply gate (they are composed read-only). Pure and free: no tool results
+    exist for them, so only the rules that need none run. {"hard": [...],
+    "soft": [...]} (verification pass 1, finding 1.3)."""
+    hard, soft = [], []
+    # a paid celebration composed FROM the hub's own order.paid event is the
+    # one initiated message allowed to say "payment received"
+    if not paid_known and paid_ack_without_source(text, None):
+        hard.append("paid_ack")
+    # an announcement composed FROM a hub order event carries the hub's own
+    # status; a follow-up the dispatcher wrote has no such source
+    if not status_known and _STATUS_CLAIM_RE.search(text or ""):
+        hard.append("status")
+    p = manufactured_pressure(text, None)
+    if p:
+        soft.append(f"pressure:{p}")
+    i = internal_talk(text)
+    if i:
+        soft.append(f"internal:{i}")
+    return {"hard": hard, "soft": soft}
+
+
 def status_without_source(answer: str, tool_results: list | None, transcript: list | None) -> bool:
     if not _STATUS_CLAIM_RE.search(answer or ""):
         return False
@@ -1118,6 +1291,25 @@ def rule_findings(comment: str, answer: str, seen: list,
         out.append({"kind": "status", "hard": True,
                     "text": "an order-status claim (shipped / on its way / delivered) with no "
                     "check_order_status behind it — check the order, never assume"})
+    _lang = language_mismatch(comment, answer) if mode == "dm" else None
+    if _lang:
+        _name = {"hi": "Hindi", "sw": "Swahili", "fr": "French", "pt": "Portuguese"}[_lang]
+        out.append({"kind": "language", "hard": False,
+                    "text": f"they wrote in {_name} and the draft is not — answer in {_name}, "
+                    "the same facts, the same length"})
+    if paid_ack_without_source(answer, tool_results):
+        out.append({"kind": "paid_ack", "hard": True,
+                    "text": "it thanks for or confirms a payment the hub has not shown as paid in this "
+                    "turn — a payment is a claim until check_order_status says paid: say the team "
+                    "will match it to the order, never that it was received"})
+    _pressure = manufactured_pressure(answer, tool_results)
+    if _pressure:
+        # SOFT for now (verification pass 1): one rewrite removes the words;
+        # it becomes hard once the live tally shows no false findings
+        out.append({"kind": "pressure", "hard": False,
+                    "text": f"manufactured urgency, scarcity or a discount from nowhere (\"{_pressure}\") — "
+                    "nothing is 'last' or 'today only' unless a tool said so; discounts come only from "
+                    "a recorded offer"})
     sold = named_rows[0] if named_rows else None
     if sold is not None:
         out.extend(variant_issues(comment, answer, sold, currency))

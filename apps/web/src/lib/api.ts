@@ -928,6 +928,61 @@ export const reportsApi = {
     },
 };
 
+// ── Executive performance view (GET /api/admin/performance) ──────────────────
+// Every metric says whether it is measured, partial or not yet measured;
+// nothing is estimated. `previous` is the same metric on the window before.
+export type ApiPerformanceStatus = "measured" | "partial" | "not_measured";
+
+export interface ApiPerformanceMetric {
+    label: string;
+    status: ApiPerformanceStatus;
+    value: number | null;
+    unit: string;
+    n: number | null;
+    ci95: [number, number] | null;
+    basis: string;
+    caveat: string;
+    /** What the metric needs before it can be measured (not_measured only). */
+    instrumentation?: string;
+    previous: number | null;
+    trend: "up" | "down" | "flat" | null;
+}
+
+/** One proportion from a case-set run: k of n passed, with a Wilson interval. */
+export interface ApiEvalProportion {
+    k: number;
+    n: number;
+    p: number | null;
+    ci95: [number, number] | null;
+}
+
+export interface ApiEvalRun {
+    at: string;
+    git: string;
+    case_set: string;
+    selection: string;
+    cases: number;
+    producer: string;
+    turns: ApiEvalProportion;
+    critical: ApiEvalProportion;
+    language: ApiEvalProportion;
+    figures: ApiEvalProportion;
+}
+
+export interface ApiPerformance {
+    window_days: number;
+    since: string;
+    until: string;
+    counts: { measured: number; partial: number; not_measured: number };
+    metrics: Record<string, ApiPerformanceMetric>;
+    eval_history: ApiEvalRun[];
+}
+
+export const getPerformance = (days = 7) =>
+    get<ApiPerformance>(`/admin/performance?days=${days}`);
+
+export const performanceApi = { get: getPerformance };
+
 // Send the approved WhatsApp invite template to a customer's number, opening a
 // WhatsApp thread with someone who reached us on Messenger/Facebook.
 export const whatsappApi = {

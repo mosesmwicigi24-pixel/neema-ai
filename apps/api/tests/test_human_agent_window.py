@@ -266,7 +266,7 @@ def test_a_messenger_order_event_outside_the_window_asks_a_human(monkeypatch):
     monkeypatch.setattr(hub, "_within_window", _win_closed)
     out = asyncio.run(hub._celebrate(None, None, conv,
                                      {"type": "order.shipped", "order_number": "ORD-1"}))
-    assert out == {"handled": True, "sent": "notified_human"}
+    assert out == {"handled": True, "sent": "notified_human", "customer_told": False}
     assert not sends, "nothing automated may go out after 24h"
     assert notified and "only a person may message them" in notified[0]
 
@@ -298,7 +298,7 @@ def test_a_messenger_order_event_inside_the_window_sends_untagged(monkeypatch):
                                  external_id="psid1")
     out = asyncio.run(hub._celebrate(None, None, conv,
                                      {"type": "order.shipped", "order_number": "ORD-1"}))
-    assert out == {"handled": True, "sent": "freeform"}
+    assert out == {"handled": True, "sent": "freeform", "customer_told": True}
     assert calls[-1]["tag"] is None and not calls[-1].get("human_agent")
 
 
@@ -318,5 +318,5 @@ def test_an_instagram_order_event_outside_the_window_still_asks_a_human(monkeypa
                                  external_id="ig1", contact_name=None)
     out = asyncio.run(hub._celebrate(None, None, conv,
                                      {"type": "order.shipped", "order_number": "ORD-2"}))
-    assert out == {"handled": True, "sent": "notified_human"}
+    assert out == {"handled": True, "sent": "notified_human", "customer_told": False}
     assert notified, "nobody was told to send the news by hand"

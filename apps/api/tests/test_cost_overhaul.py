@@ -19,7 +19,7 @@ def test_usage_logs_the_model_that_actually_served(monkeypatch):
     import inspect
     from app.agent import runtime
     src = inspect.getsource(runtime.run_turn)
-    assert 'getattr(llm, "_model", None) or settings.tier2_model' in src
+    assert 'getattr(llm, "last_model", None) or getattr(llm, "_model", None)' in src
     assert "settings.tier2_model, totals)" not in src        # the old lie
 
 

@@ -13,6 +13,7 @@ import types
 from datetime import datetime, timezone
 
 from sqlalchemy import func as sa_func, select
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agent.llm import LLM, LLMResponse, TURN_NOTE_HEADER
@@ -694,11 +695,21 @@ async def mark_closer_answered(redis, channel: str, key: str, inbound_text: str)
 
 
 _ACK_RE = re.compile(
-    r"^(?:(?:i'?m|i\s*am|am|just|i)\s*(?:saying|said|say)\s*)?"
-    r"(thanks?|thank\s*you|asante(\s*sana)?|thx|ty|amen|ok(?:ay|ey|k)?|kk|sawa(?:\s*sawa)?|poa|"
+    r"^(?:(?:hmm+|mmh+|mm+|well|ah+|oh+|great|perfect|wonderful|super|lovely|sawa|ok(?:ay)?|"
+    r"ok(?:ay)? now i (?:understand|get it|see)|understood|got it)[,.!\s]+)?"
+    r"(?:(?:i'?m|i\s*am|am|just|i)\s*(?:saying|said|say)\s*)?"
+    r"(thanks?(?:\s*(?:a\s*lot|so\s*much|a\s*million|very\s*much))?|thank\s*you(?:\s*(?:very\s*much|so\s*much|a\s*lot))?|"
+    r"thanks?\s*for\s*(?:the|your|that|this)?\s*(?:help|helping|understanding|info|information|invoice|quote|quotation|"
+    r"reply|replying|response|update|time|patience|support|price|prices|details|clarification|explanation|"
+    r"photos?|pictures?|pics|link|answer|quick\s*(?:reply|response)|prompt\s*(?:reply|response))|"
+    r"much\s*appreciated|noted\s*with\s*thanks|cheers|"
+    r"asante(\s*sana)?([,\s]*mwanangu)?|shukran|merci(\s*beaucoup)?|obrigad[oa]|murakoze|mungu\s*akubariki(\s*sana)?([,\s]*mwanangu)?|"
+    r"god\s*bless(\s*you)?|que\s*dieu\s*vous\s*(?:b[ée]nisse|garde)|deus\s*aben[çc]oe|fique\s*com\s*deus|thank\s*you\s*ji|"
+    r"thx|ty|amen|ok(?:ay|ey|k)?|kk|sawa(?:\s*sawa)?|poa|"
     r"got\s*it|noted|alright|aight|cool|"
     r"👍+|🙏+|❤️*|😊+|👌+|🙌+|✅+)"
-    r"(?:[\s,]+(?:ok(?:ay)?|sawa|poa|thanks?|asante|noted|👍|🙏))*[\s!.,🙏👍❤😊👌🙌✅💯]*$",
+    r"(?:[\s,]+(?:ok(?:ay)?|sawa|poa|thanks?|thank\s*you|asante(\s*sana)?|noted|cheers|merci(\s*beaucoup)?|god\s*bless|"
+    r"que\s*dieu\s*vous\s*(?:b[ée]nisse|garde)|deus\s*aben[çc]oe|fique\s*com\s*deus|tutaongea|tutawasiliana|👍|🙏))*[\s!.,🙏👍❤😊👌🙌✅💯]*$",
     re.IGNORECASE,
 )
 # A thumbs-up, a folded hands, a heart — satisfaction, the end of the exchange
@@ -999,7 +1010,13 @@ async def _history(db: AsyncSession, key: str, limit: int = 20,
         # it can't listen to audio (services/voice_notes).
         text = (_voice_line(m) or m.text or "").strip()
         if not text:
-            continue
+            # A caption-less photo or video the customer sent is a turn, not
+            # a gap: without this line the model never knew it happened
+            # (W5, 2026-11-06). Outbound empty rows stay out.
+            if m.direction == MsgDirection.inbound and (m.media_type or "") in ("image", "video"):
+                text = "[the customer sent a photo]" if m.media_type == "image" else "[the customer sent a video]"
+            else:
+                continue
         role = "user" if m.direction == MsgDirection.inbound else "assistant"
         # A HUMAN colleague's reply must be recognisable as such (owner,
         # 2026-08-19): Moses answered Mestowt's shipping question by hand —
@@ -1197,6 +1214,40 @@ async def _facts_for_ask(ctx, user_text: str, tool_log: list) -> list:
     except Exception as exc:
         _log.info("gate facts search failed: %s", exc)
         return []
+
+
+async def _gate_failed_closed(reply: str, *, db, redis, channel: str, key: str,
+                              public_comment: bool, closer: bool, swahili: bool,
+                              error: str) -> tuple[str, list, str]:
+    """What a draft becomes when the gate itself breaks: the held outcome.
+    Best-effort on the flag and the tally (they must not break the hold)."""
+    issues = [f"reply gate could not run ({error})"]
+    try:
+        from app.agent import review as _rv
+        await _rv.record_verdict(redis, "held", kinds=["gate_error"],
+                                 model=getattr(settings, "review_model_light", "") or "")
+    except Exception:
+        pass
+    try:
+        # the health endpoint and the standup see it as a failing turn — loud,
+        # so a bug in rule code cannot hold replies fleet-wide in silence
+        from app.services.agent_health import record_turn_failure
+        await record_turn_failure(redis, key, RuntimeError(f"reply gate error: {error}"))
+    except Exception:
+        pass
+    if public_comment or closer:
+        return "", issues, "held"
+    try:
+        await _flag_held_reply(db, channel, key, issues, reply, redis=redis)
+    except Exception as exc:
+        _log.warning("could not flag the held draft for %s: %s", key, exc)
+    try:
+        from app.agent import review as _rv
+        if await _rv.held_recently(redis, channel, key):
+            return "", issues, "held"
+    except Exception:
+        pass
+    return (_SW_REVIEW_HOLD_DM if swahili else _REVIEW_HOLD_DM), issues, "held"
 
 
 async def _flag_held_reply(db, channel: str, key: str, issues: list, draft: str,
@@ -1618,6 +1669,7 @@ async def run_turn(db: AsyncSession, redis, wa_id: str, user_text: str, llm: LLM
     # 2026-10-21: cache WRITES were over half of a $24 day). The reply gate
     # still counts these as known facts (`extra_known`).
     turn_notes: list[str] = []
+    _overlap_noted = False
 
     # 40 messages of context (was 20): re-asking an answered question is the
     # most robotic failure there is, and it usually happened because the answer
@@ -1639,6 +1691,7 @@ async def run_turn(db: AsyncSession, redis, wa_id: str, user_text: str, llm: LLM
         try:
             if await _answered_after(db, key, channel, inbound_ids):
                 turn_notes.append(OVERLAP_NOTE)
+                _overlap_noted = True
         except Exception as exc:
             _log.info("overlap check skipped for %s: %s", key, exc)
 
@@ -2039,10 +2092,14 @@ async def run_turn(db: AsyncSession, redis, wa_id: str, user_text: str, llm: LLM
     _len_target: dict = {}
     try:
         from app.agent import reply_length as _rl
+        from app.services.customer_state import floor as _cs_floor
         _len_target = _rl.target_for(
             user_text or "", closer=is_closer(user_text or ""),
             greeting=bool(_GREETING_RE.match((user_text or "").strip())),
-            negative=looks_negative(user_text or ""))
+            # a complaint earns the care-first length whether the comment
+            # detector or the customer-state floor read it (W3, 2026-11-06)
+            negative=looks_negative(user_text or "")
+            or (_cs_floor(user_text) or {}).get("customer_said") == "complaint")
         if not scribe_only and not read_only:
             _len_note = _rl.note(_len_target)
             if _len_note:
@@ -2161,6 +2218,13 @@ async def run_turn(db: AsyncSession, redis, wa_id: str, user_text: str, llm: LLM
 
         if not resp.tool_calls:
             reply = resp.text or ""
+            if not reply and (_overlap_noted or is_closer(user_text or "")):
+                # The contract the turn was given: an empty reply SENDS NOTHING
+                # when the message was already answered (OVERLAP_NOTE) or was
+                # a bare closer — never the stall line the prompt itself bans
+                # (W7, 2026-11-06).
+                _log.info("empty reply honoured as silence for %s (overlap=%s)", key, _overlap_noted)
+                break
             if not reply:
                 # NEVER A GENERIC HOLD (owner, 2026-09-26): the writer ended
                 # with no words — ask once for the reply itself, in words,
@@ -2212,6 +2276,7 @@ async def run_turn(db: AsyncSession, redis, wa_id: str, user_text: str, llm: LLM
     # flagged with the reasons). Real turns only: a draft or a scribe pass
     # is not sent to anyone.
     _gate_outcome, _held = "skipped", []
+    reply = reply or ""
     if reply and not read_only and not scribe_only and _gate_applies(user_text):
         try:
             reply, _held, _gate_outcome = await _gate_turn_reply(
@@ -2228,7 +2293,15 @@ async def run_turn(db: AsyncSession, redis, wa_id: str, user_text: str, llm: LLM
                 greeting=bool(_GREETING_RE.match((user_text or "").strip())),
                 allow=_campaign_allow, extra_known=_turn_note)
         except Exception as exc:
-            _log.warning("reply gate failed open for %s: %s", key, exc)
+            # FAIL CLOSED (intelligence programme W1, 2026-11-06): a gate that
+            # cannot run is a draft nobody verified. It is treated exactly as
+            # a held draft — silence on a closer or a public comment, the
+            # holding line and a flagged colleague otherwise — never sent.
+            _log.warning("reply gate failed for %s — holding the draft, not sending it: %s", key, exc)
+            reply, _held, _gate_outcome = await _gate_failed_closed(
+                reply, db=db, redis=redis, channel=channel, key=key, public_comment=public_comment,
+                closer=is_closer(user_text or ""), swahili=looks_swahili(user_text or ""),
+                error=str(exc)[:200])
     if _photo_refer is not None and reply:
         # A referred photo is never priced, whatever the draft says: a money
         # figure swaps the reply for the plain hand-over line. Then a person
@@ -2310,7 +2383,10 @@ async def run_turn(db: AsyncSession, redis, wa_id: str, user_text: str, llm: LLM
         except Exception:
             pass
 
-    _served = getattr(llm, "_model", None) or settings.tier2_model
+    # the model that ANSWERED — after a fallback `last_model` differs from the
+    # configured `_model` (W10, 2026-11-06: the usage split was the configured name)
+    _served = (getattr(llm, "last_model", None) or getattr(llm, "_model", None)
+               or settings.tier2_model)
     # The daily breaker is fed by the LLM client itself, call by call and by
     # purpose (services/ai_budget.meter) — the reviewer, the rewrite and every
     # vision read included — so nothing is metered twice here.
@@ -2575,9 +2651,11 @@ async def in_flight(redis, channel: str, key: str) -> bool:
         return False
 
 
-async def _still_ai(channel: str, key: str) -> bool:
+async def _still_ai(channel: str, key: str) -> bool | None:
     """Re-read the thread's mode right before a send: a colleague who took
-    the chat while the turn composed is not talked over. Fail-open."""
+    the chat while the turn composed is not talked over. True → send; False →
+    a colleague holds it; None → the check itself failed (fail CLOSED: the
+    caller does not send and leaves the turn unhandled so the sweeper retries)."""
     from sqlalchemy import or_
     from app.database import AsyncSessionLocal
     from app.models.conversation import Conversation, InterceptMode
@@ -2588,7 +2666,13 @@ async def _still_ai(channel: str, key: str) -> bool:
                 or_(Conversation.external_id == key, Conversation.wa_id == key))
             )).scalars().first()
         return mode is None or mode == InterceptMode.ai
-    except Exception:
+    except (SQLAlchemyError, OSError, asyncio.TimeoutError) as exc:
+        # the database could not be asked: fail CLOSED (W1, 2026-11-06)
+        _log.warning("takeover check failed for %s/…%s — not sending: %s", channel, str(key)[-4:], exc)
+        return None
+    except Exception as exc:
+        # a programming error inside the check is not a reason to mute the agent
+        _log.warning("takeover check raised for %s/…%s — assuming AI: %s", channel, str(key)[-4:], exc)
         return True
 
 
@@ -2617,12 +2701,16 @@ async def _run_and_send(redis, wa_id: str, text: str, media: dict | None = None,
                     # A decision, not a miss: the missed-reply sweep leaves it be
                     # (as on Messenger) instead of re-running the silence.
                     await _mark_silenced(redis, "whatsapp", wa_id)
+                    await mark_closer_answered(redis, "whatsapp", wa_id, text)   # silence IS the answer
                     return False
                 if await _is_echo(db, "whatsapp", wa_id, reply):
                     _log.info("echo guard: identical reply within minutes suppressed for %s", wa_id)
                     await _mark_silenced(redis, "whatsapp", wa_id)
                     return False
-            if not await _still_ai("whatsapp", wa_id):
+            _ai = await _still_ai("whatsapp", wa_id)
+            if _ai is None:
+                return False                       # unverifiable: the sweeper retries
+            if not _ai:
                 _log.info("a colleague took %s while the turn composed — not sent", wa_id)
                 return False
             unknown = None
@@ -2726,7 +2814,7 @@ async def schedule_reply(redis, wa_id: str, text: str, dedup_id: str | None,
     # "Please stop messaging me" (any of our customers' languages) is answered
     # once, recorded for good, and never argued with — no model turn.
     from app.services import intent as _intent
-    if media is None and _intent.is_opt_out(text):
+    if _intent.is_opt_out(text):            # the words decide, photo or not (verification 1.4)
         await _handle_opt_out(redis, "whatsapp", wa_id, text)
         return True
     if media is None and await closer_gate(redis, "whatsapp", wa_id, text):
@@ -2942,13 +3030,17 @@ async def _run_and_send_meta(redis, channel: str, external_id: str, text: str,
                     _log.info("silence on %s for %s: nothing to send (a closer, or a held "
                               "acknowledgement)", channel, external_id)
                     await _mark_silenced(redis, channel, external_id)
+                    await mark_closer_answered(redis, channel, external_id, text)
                     return True
                 if await _is_echo(db, channel, external_id, reply):
                     _log.info("echo guard: identical reply within minutes suppressed for %s/%s",
                               channel, external_id)
                     await _mark_silenced(redis, channel, external_id)
                     return True
-            if not await _still_ai(channel, external_id):
+            _ai = await _still_ai(channel, external_id)
+            if _ai is None:
+                return False                       # unverifiable: the sweeper retries
+            if not _ai:
                 _log.info("a colleague took %s/%s while the turn composed — not sent", channel, external_id)
                 return True
             unknown = None
@@ -3016,6 +3108,12 @@ async def schedule_meta_reply(redis, channel: str, external_id: str, text: str,
     redelivered webhook never double-replies."""
     if await _is_paused(redis, channel, external_id, text):
         return False
+    # The same door WhatsApp has (W1, 2026-11-06): "stop messaging me" on
+    # Messenger, Instagram or TikTok is recorded for good and answered once.
+    from app.services import intent as _intent
+    if _intent.is_opt_out(text):            # the words decide, photo or not (verification 1.4)
+        await _handle_opt_out(redis, channel, external_id, text)
+        return True
     if media is None and await closer_gate(redis, channel, external_id, text):
         return False
     if redis is not None and dedup_id:

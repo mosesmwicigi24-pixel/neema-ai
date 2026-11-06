@@ -173,11 +173,21 @@ async def _try_continue_elsewhere(redis, conv, msg):
                 continue
             if win.get("mode") != "open":
                 continue
+            # A Neema-initiated message on another channel is unprompted
+            # there: the opt-out rule applies (W1, 2026-11-06).
+            from app.services.intent import opted_out as _opted_out
+            if await _opted_out(db, redis, sib):
+                _log.info("cross-channel: %s asked not to be messaged — not continued", sib.channel)
+                return False
             text = await _compose_bridge(db, redis, sib, conv.channel, msg.text)
             if not text:
                 return False
-            from app.services.actions import _send
-            await _send(db, redis, sib, text)
+            from app.services.actions import HeldByRules, _send
+            try:
+                await _send(db, redis, sib, text)
+            except HeldByRules as exc:
+                _log.info("cross-channel: bridge text held by the rules (%s) — escalating instead", exc)
+                return False
             # Explain the source thread to any human reading it — and this note
             # becomes its latest (outbound) message, so the sweep de-queues it.
             db.add(Message(

@@ -193,8 +193,14 @@ def judge(text: str, user_text: str, tools: list | None) -> dict:
 
 
 async def _cleanup(redis) -> None:
+    await _cleanup_contacts(redis, EVAL_IDS)
+
+
+async def _cleanup_contacts(redis, ids: list[str]) -> None:
+    """Delete every row a run created for these throwaway contacts, and the
+    redis keys that would otherwise carry state into the next run."""
     async with AsyncSessionLocal() as db:
-        for wa_id in EVAL_IDS:
+        for wa_id in ids:
             await db.execute(delete(Message).where(Message.wa_id == wa_id))
             user = (await db.execute(select(User).where(User.wa_id == wa_id))).scalar_one_or_none()
             if user is not None:
@@ -212,11 +218,14 @@ async def _cleanup(redis) -> None:
                         await db.delete(person)
         await db.commit()
     if redis is not None:
-        for wa_id in EVAL_IDS:
-            try:
-                await redis.delete(f"agent:pause:whatsapp:{wa_id}")
-            except Exception:
-                pass
+        for wa_id in ids:
+            for k in (f"agent:pause:whatsapp:{wa_id}", f"agent:optout:whatsapp:{wa_id}",
+                      f"said:whatsapp:{wa_id}", f"interest:whatsapp:{wa_id}",
+                      f"agent:holdline:whatsapp:{wa_id}", f"agent:silenced:whatsapp:{wa_id}"):
+                try:
+                    await redis.delete(k)
+                except Exception:
+                    pass
 
 
 async def run(keep: bool) -> None:
@@ -355,4 +364,22 @@ if __name__ == "__main__":
     ap = argparse.ArgumentParser(description="Run scripted conversations through the real agent.")
     ap.add_argument("--keep", action="store_true",
                     help="keep the eval contacts/messages for inbox inspection")
-    asyncio.run(run(keep=ap.parse_args().keep))
+    ap.add_argument("--cases", action="store_true",
+                    help="run the intelligence case set (app/jobs/eval_cases) with objective scoring")
+    ap.add_argument("--held-out", action="store_true", help="--cases: the held-out half only")
+    ap.add_argument("--dev", action="store_true", help="--cases: the development half only")
+    ap.add_argument("--repeat", type=int, default=1, help="--cases: runs per case (pass^k)")
+    ap.add_argument("--only", help="--cases: id prefix filter, e.g. sales-0")
+    ap.add_argument("--limit", type=int, help="--cases: first N cases only")
+    ap.add_argument("--out", help="--cases: write the full run record (JSON) here")
+    ap.add_argument("--packet", help="--cases: write the human rater packet (Markdown) here")
+    ap.add_argument("--history", action="store_true",
+                    help="--cases: append the run summary to the evaluation history")
+    a = ap.parse_args()
+    if a.cases:
+        from app.jobs.eval_run import run_cases
+        asyncio.run(run_cases(selection="held-out" if a.held_out else "dev" if a.dev else "all",
+                              repeat=max(1, a.repeat), only=a.only, out_path=a.out,
+                              packet_path=a.packet, history=a.history, keep=a.keep, limit=a.limit))
+    else:
+        asyncio.run(run(keep=a.keep))

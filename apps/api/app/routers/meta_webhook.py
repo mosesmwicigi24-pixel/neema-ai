@@ -112,8 +112,13 @@ async def receive_webhook(request: Request, db: AsyncSession = Depends(get_db)):
         _log.warning("Messenger calls tap failed (continuing): %s", exc)
     try:
         await _capture_events(db, channel, payload, redis=redis)
-    except Exception as exc:                     # never let capture break the ack
-        _log.warning("meta webhook capture failed (%s) — acking anyway: %s", channel, exc)
+    except Exception as exc:
+        # As on the WhatsApp door (whatsapp_webhook.py): a failed capture is
+        # answered 502 so Meta redelivers; the mid dedupe absorbs the repeat.
+        # Acking a lost message was the one way a customer's text vanished
+        # without a trace (W1, 2026-11-06).
+        _log.warning("meta webhook capture failed (%s) — 502 so Meta redelivers: %s", channel, exc)
+        return Response(status_code=502)
     try:
         await _capture_comment_events(db, channel, payload, redis=redis)
     except Exception as exc:
