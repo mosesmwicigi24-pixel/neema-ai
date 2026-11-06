@@ -280,6 +280,7 @@ export type ViewId =
     | "deals"
     | "leads"
     | "reports"
+    | "performance"
     | "agents"
     | "catalog"
     | "overview"
