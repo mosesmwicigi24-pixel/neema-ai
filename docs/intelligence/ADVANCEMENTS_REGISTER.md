@@ -214,6 +214,23 @@ check (harness `v5-mutate.py`, 12 mutants, 12 killed).
 - **Change:** `timeout-minutes: 16` (three attempts × ~305 s) and `sudo dpkg --configure -a || true` before each attempt, in both jobs that install ffmpeg. The 8-minute bound was hit again on PR #321 (docs-only; a stalled mirror; the re-run passed).
 - **Status:** IMPLEMENTED BUT NOT VERIFIED — proven only by the next stalled-mirror run.
 
+## Slice 6 (2026-11-06, 23:1x) · the eval runner after its first real run
+
+### R1 · Contact cleanup in FK order, one transaction per contact
+
+- **Change:** `_cleanup_contacts` deletes identity → flush → identifiers → flush → person, each contact in its own transaction; a failing contact is rolled back, logged and skipped (run 42289125585 crashed at case-run 180 of 360 on `identifiers_person_id_fkey`).
+- **Status:** VERIFIED COMPLETE (behaviour test on a recording session: the order, and a raising commit that does not end the run).
+
+### R2 · A failed turn drops its pooled connections
+
+- **Change:** `_recover_from_failed_turn` rolls the session back and disposes the engine pool after any turn error; called from the runner's except branch.
+- **Status:** IMPLEMENTED BUT NOT VERIFIED against the real symptom (the carried-over aborted transaction is not reproduced locally); the helper itself is tested.
+
+### R3 · The `interceptaction` enum migration — HELD for the owner's approval
+
+- **Change (prepared, not in the repository):** `ALTER TYPE interceptaction ADD VALUE IF NOT EXISTS 'flag' / 'escalated'`, idempotent, in alembic's autocommit block, revision a9c1e3f5b7d9 on head e8a1c3d5f7b9. Kept in the session scratchpad until the owner says "approve the enum migration" (DB migrations need explicit approval). OWNER_ACTIONS carries the one-line read-only check for the production database.
+- **Status:** BLOCKED (owner decision).
+
 ## Verification pass 1 — further repairs (2026-11-06)
 
 - **W1-5 (sync channels):** web chat and the ManyChat relay re-check the takeover after composing and return the human line if a colleague took the thread.

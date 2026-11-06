@@ -372,6 +372,23 @@ def _write_record(record: dict, out_path: str, *, partial: bool, done: int = 0, 
     os.replace(tmp, out_path)
 
 
+async def _recover_from_failed_turn(db) -> None:
+    """A failed turn must not reach the next one. Run 42289125585: three
+    later turns raised "current transaction is aborted" within 0.03 s — a
+    pooled connection carried the aborted transaction into a fresh session.
+    Roll this session back and drop every pooled connection, so the next
+    turn opens a clean one. Best-effort: never raises."""
+    try:
+        await db.rollback()
+    except Exception:
+        pass
+    try:
+        from app import database as _database
+        await _database.engine.dispose()
+    except Exception:
+        pass
+
+
 async def run_cases(*, selection: str = "all", repeat: int = 1, only: str | None = None,
                     out_path: str | None = None, packet_path: str | None = None,
                     history: bool = False, keep: bool = False, limit: int | None = None,
@@ -461,6 +478,7 @@ async def run_cases(*, selection: str = "all", repeat: int = 1, only: str | None
                             except Exception as exc:
                                 reply = ""
                                 facts = {**facts, "error": str(exc)[:200]}
+                                await _recover_from_failed_turn(db)
                     latency = round(time.monotonic() - t0, 2)
                     async with AsyncSessionLocal() as db:
                         conv = (await db.execute(select(Conversation).where(

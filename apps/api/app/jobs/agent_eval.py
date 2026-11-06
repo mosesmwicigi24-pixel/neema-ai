@@ -38,7 +38,7 @@ from sqlalchemy import delete, select
 from app.core.config import settings
 from app.database import AsyncSessionLocal
 from app.models.message import Message, MsgDirection, MsgSender
-from app.models.person import Person, Identity
+from app.models.person import Person, Identity, Identifier
 from app.models.user import User
 
 _log = logging.getLogger("neema.eval")
@@ -195,25 +195,39 @@ async def _cleanup(redis) -> None:
 
 async def _cleanup_contacts(redis, ids: list[str]) -> None:
     """Delete every row a run created for these throwaway contacts, and the
-    redis keys that would otherwise carry state into the next run."""
-    async with AsyncSessionLocal() as db:
-        for wa_id in ids:
-            await db.execute(delete(Message).where(Message.wa_id == wa_id))
-            user = (await db.execute(select(User).where(User.wa_id == wa_id))).scalar_one_or_none()
-            if user is not None:
-                await db.delete(user)
-            ident = (await db.execute(select(Identity).where(
-                Identity.channel == "whatsapp", Identity.external_id == wa_id))).scalar_one_or_none()
-            if ident is not None:
-                pid = ident.person_id
-                await db.delete(ident)
-                others = (await db.execute(select(Identity).where(
-                    Identity.person_id == pid))).scalars().first()
-                if others is None:
-                    person = await db.get(Person, pid)
-                    if person is not None:
-                        await db.delete(person)
-        await db.commit()
+    redis keys that would otherwise carry state into the next run.
+
+    One transaction per contact, the person deleted only after its
+    identity, identifier and user rows are FLUSHED (run 42289125585 died at
+    case-run 180 of 360 on `identifiers_person_id_fkey`: the unit of work
+    had emitted the person delete first). A contact whose cleanup fails is
+    rolled back and logged, never allowed to end the run — the next repeat
+    simply reuses the rows."""
+    for wa_id in ids:
+        try:
+            async with AsyncSessionLocal() as db:
+                await db.execute(delete(Message).where(Message.wa_id == wa_id))
+                user = (await db.execute(select(User).where(User.wa_id == wa_id))).scalar_one_or_none()
+                if user is not None:
+                    await db.delete(user)
+                ident = (await db.execute(select(Identity).where(
+                    Identity.channel == "whatsapp", Identity.external_id == wa_id))).scalar_one_or_none()
+                if ident is not None:
+                    pid = ident.person_id
+                    await db.delete(ident)
+                    await db.flush()                      # the RESTRICT rows go first
+                    others = (await db.execute(select(Identity).where(
+                        Identity.person_id == pid))).scalars().first()
+                    if others is None:
+                        await db.execute(delete(Identifier).where(Identifier.person_id == pid))
+                        await db.flush()
+                        person = await db.get(Person, pid)
+                        if person is not None:
+                            await db.delete(person)
+                await db.commit()
+        except Exception as exc:
+            logging.getLogger("neema.eval").warning(
+                "cleanup for …%s failed (%s) — rolled back; the run continues", wa_id[-4:], exc)
     if redis is not None:
         for wa_id in ids:
             for k in (f"agent:pause:whatsapp:{wa_id}", f"agent:optout:whatsapp:{wa_id}",
