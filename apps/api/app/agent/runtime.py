@@ -2907,7 +2907,8 @@ async def _hear_voice_note(text: str, media: dict | None, *, channel: str = "",
 async def _run_and_send_meta(redis, channel: str, external_id: str, text: str,
                              page_id: str | None = None,
                              media: dict | None = None, *, deferred: bool = False,
-                             hold_line: bool = True) -> bool:
+                             hold_line: bool = True,
+                             inbound_ids: list[str] | None = None) -> bool:
     """Generate + send one Meta reply. Returns True only when it actually
     reached the customer (so the sweep counts real sends, not attempts).
     `hold_line=False` for a retry, as in `_run_and_send`."""
@@ -2934,7 +2935,8 @@ async def _run_and_send_meta(redis, channel: str, external_id: str, text: str,
                 reply = await run_turn(db, redis, wa_id=external_id, user_text=text,
                                        llm=build_llm(model=model, purpose=channel),
                                        channel=channel, external_id=external_id,
-                                       media=media, deferred=deferred, turn_facts=facts)
+                                       media=media, deferred=deferred, turn_facts=facts,
+                                       inbound_ids=inbound_ids)
                 if not (reply or "").strip():
                     _log.info("silence on %s for %s: nothing to send (a closer, or a held "
                               "acknowledgement)", channel, external_id)
@@ -2948,10 +2950,21 @@ async def _run_and_send_meta(redis, channel: str, external_id: str, text: str,
             if not await _still_ai(channel, external_id):
                 _log.info("a colleague took %s/%s while the turn composed — not sent", channel, external_id)
                 return True
-            await send_to_channel(channel, external_id, reply, page_id=page_id)
+            unknown = None
+            try:
+                await send_to_channel(channel, external_id, reply, page_id=page_id)
+            except svc.SendOutcomeUnknown as exc:
+                # Meta may have delivered it: record it so nothing re-answers
+                # the same message; never resend (parity with WhatsApp).
+                unknown = str(exc)[:120]
+                _log.warning("reply on %s to %s: outcome unknown (%s) — recorded, not resent",
+                             channel, external_id, unknown)
             async with AsyncSessionLocal() as db2:
-                await svc.save_outbound_channel_message(db2, redis, channel, external_id, reply)
-            if facts.get("follow_up"):
+                await svc.save_outbound_channel_message(
+                    db2, redis, channel, external_id, reply,
+                    raw_meta=({"delivery": {"status": "unknown", "error": unknown}}
+                              if unknown else None))
+            if facts.get("follow_up") and not unknown:
                 await asyncio.sleep(FOLLOW_UP_DELAY_S)
                 await send_to_channel(channel, external_id, facts["follow_up"], page_id=page_id)
                 async with AsyncSessionLocal() as db2b:
@@ -2995,7 +3008,8 @@ async def _run_and_send_meta(redis, channel: str, external_id: str, text: str,
 
 async def schedule_meta_reply(redis, channel: str, external_id: str, text: str,
                               dedup_id: str | None, page_id: str | None = None,
-                              media: dict | None = None) -> bool:
+                              media: dict | None = None,
+                              inbound_id: str | None = None) -> bool:
     """Fire the agent for one inbound Messenger/IG message (text, photo, or
     both — the agent sees images natively). Deduped on the Meta message id so a
     redelivered webhook never double-replies."""
@@ -3018,7 +3032,8 @@ async def schedule_meta_reply(redis, channel: str, external_id: str, text: str,
         if await _pace.should_defer(redis, channel, external_id, text, bool(media),
                                     closer=is_closer(text or "")):
             async def _later(t, m):
-                await _run_and_send_meta(redis, channel, external_id, t, page_id, m, deferred=True)
+                await _run_and_send_meta(redis, channel, external_id, t, page_id, m, deferred=True,
+                                         inbound_ids=[inbound_id] if inbound_id else None)
             if await _pace.slow_lane(redis, channel, external_id, text, media, _later):
                 await _mark_silenced(redis, channel, external_id)   # the sweep leaves it to the lane
                 return True
@@ -3029,7 +3044,7 @@ async def schedule_meta_reply(redis, channel: str, external_id: str, text: str,
     # overlapping replies. Like WhatsApp (wa_native's debounce), the messages
     # are buffered for a short window and answered once, together; the
     # customer sees "typing…" meanwhile. No redis → no buffer → answered now.
-    token = await _meta_enqueue(redis, channel, external_id, text, media)
+    token = await _meta_enqueue(redis, channel, external_id, text, media, inbound_id)
     if token is not None:
         try:
             from app.agent.domain import is_paused as _guard_paused
@@ -3039,7 +3054,8 @@ async def schedule_meta_reply(redis, channel: str, external_id: str, text: str,
         except Exception:
             pass
     task = asyncio.create_task(_run_meta_after_burst(redis, channel, external_id, text,
-                                                     page_id, media, token))
+                                                     page_id, media, token,
+                                                     inbound_ids=[inbound_id] if inbound_id else None))
     _bg_tasks.add(task)
     task.add_done_callback(_bg_tasks.discard)
     return True
@@ -3054,14 +3070,14 @@ def _meta_tok_key(channel: str, external_id: str) -> str:
 
 
 async def _meta_enqueue(redis, channel: str, external_id: str, text: str,
-                        media: dict | None) -> int | None:
+                        media: dict | None, inbound_id: str | None = None) -> int | None:
     """Buffer one inbound and bump the burst token. None when there is no
     buffer (no redis, a window of 0, redis down) — the caller answers now."""
     if redis is None or settings.meta_debounce_seconds <= 0:
         return None
     try:
         await redis.rpush(_meta_buf_key(channel, external_id),
-                          json.dumps({"text": text or "", "media": media}))
+                          json.dumps({"text": text or "", "media": media, "id": inbound_id}))
         await redis.expire(_meta_buf_key(channel, external_id), 600)
         tok = await redis.incr(_meta_tok_key(channel, external_id))
         await redis.expire(_meta_tok_key(channel, external_id), 600)
@@ -3081,12 +3097,14 @@ async def _meta_drain(redis, channel: str, external_id: str, token: int):
         await redis.delete(_meta_buf_key(channel, external_id))
     except Exception:
         return None
-    texts, media = [], None
+    texts, media, ids = [], None, []
     for r in raw or []:
         try:
             item = json.loads(r.decode() if isinstance(r, bytes) else r)
         except Exception:
             continue
+        if item.get("id"):
+            ids.append(str(item["id"]))
         if (item.get("text") or "").strip():
             texts.append(item["text"].strip())
         m = item.get("media")
@@ -3099,22 +3117,26 @@ async def _meta_drain(redis, channel: str, external_id: str, token: int):
         # Prefer an image so the agent SEES what they sent; else keep the latest.
         if m and (media is None or m.get("type") == "image"):
             media = m
-    return "\n".join(texts), media
+    return "\n".join(texts), media, ids
 
 
 async def _run_meta_after_burst(redis, channel: str, external_id: str, text: str,
                                 page_id: str | None, media: dict | None,
-                                token: int | None) -> bool:
-    """Wait out the burst window, then answer the COMBINED turn once."""
+                                token: int | None, inbound_ids: list[str] | None = None) -> bool:
+    """Wait out the burst window, then answer the COMBINED turn once — with
+    the ids of every buffered row, so the turn excludes them from history and
+    appends them once (the overlap rule, as on WhatsApp)."""
     if token is not None:
         await asyncio.sleep(max(settings.meta_debounce_seconds, 1))
         drained = await _meta_drain(redis, channel, external_id, token)
         if drained is None:
             return False                       # superseded — a later flush owns it
-        text, media = drained
+        text, media, ids = drained
+        inbound_ids = ids or inbound_ids
     if not ((text or "").strip() or media):
         return False
-    return await _run_and_send_meta(redis, channel, external_id, text, page_id, media)
+    return await _run_and_send_meta(redis, channel, external_id, text, page_id, media,
+                                    inbound_ids=inbound_ids)
 
 
 # ── Facebook / Instagram comment engagement ──────────────────────────────────

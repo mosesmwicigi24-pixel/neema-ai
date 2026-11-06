@@ -85,10 +85,12 @@ def test_scribe_rows_stay_one_per_deal_and_say_what_superseded_what():
                                   draft="Shall I reserve it?", dedupe_key="buying:d1", source="scribe")
     class _R:
         def scalars(self): return types.SimpleNamespace(all=lambda: [quote])
+        def scalar_one_or_none(self): return None          # plan(): no open row for the promise yet
     class _DB:
         def __init__(self): self.added = []
         async def execute(self, q): return _R()
         def add(self, row): self.added.append(row)
+        async def commit(self): pass
     db = _DB()
     deal = types.SimpleNamespace(id="d1", conversation_id="c1")
     asyncio.run(upsert_follow_up(db, deal, due_at=datetime.now(timezone.utc), kind="follow_up",

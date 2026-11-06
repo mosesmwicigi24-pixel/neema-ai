@@ -289,6 +289,10 @@ export interface ApiConversation {
     external_id?: string | null;
     intercept_mode: "ai" | "human" | "paused";
     lead_stage?: string | null;
+    /** What they last said about buying (Stage 3): needs_time, comparing, consulting, paid_claim, … */
+    customer_state?: string | null;
+    /** Their language from their own words (ISO 639-1). */
+    language?: string | null;
     assigned_agent_id: string | null;
     assigned_agent_name?: string | null;
     handover_request?: import("@/types").HandoverRequest | null;
@@ -1369,6 +1373,8 @@ export function mapConversation(c: ApiConversation): Conversation {
         channel: (c.channel ?? "whatsapp") as Channel,
         intercept_mode: c.intercept_mode,
         lead_stage: c.lead_stage ?? null,
+        customer_state: c.customer_state ?? null,
+        language: c.language ?? null,
         status: c.status,
         last_message_preview: c.last_message_preview ?? "",
         last_message: c.last_message_preview ?? "",

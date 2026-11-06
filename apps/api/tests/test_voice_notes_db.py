@@ -545,7 +545,7 @@ def test_a_messenger_burst_hears_every_voice_note(rig, clips):
             await runtime._meta_enqueue(r, "messenger", "psid-b", "",
                                         {"type": "audio", "url": "u", "message_id": str(i)})
         tok = int(r.kv[runtime._meta_tok_key("messenger", "psid-b")])
-        text, media = await runtime._meta_drain(r, "messenger", "psid-b", tok)
+        text, media, _ids = await runtime._meta_drain(r, "messenger", "psid-b", tok)
         return await runtime._hear_voice_note(text, media, channel="messenger", external_id="psid-b")
     text, media = run(go())
     assert text == "🎤 (voice note): Nataka kasoki\n🎤 (voice note): Size hamsini na mbili"

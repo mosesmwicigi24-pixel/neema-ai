@@ -231,7 +231,7 @@ async def _capture_events(db: AsyncSession, channel: str, payload: dict, redis=N
     from app.models.conversation import InterceptMode
 
     broadcasts: list[tuple[str, dict]] = []
-    replies: list[tuple[str, str, str | None, str]] = []   # (sender, text, mid, page_id)
+    replies: list[tuple] = []   # (sender, text, mid, page_id, media, row_id)
     media_rehosts: list[tuple[str, str, str]] = []    # (mid, cdn_url, media_type) to re-host
     voice_jobs: list = []                             # (message row id, cdn_url) to transcribe
     captured = 0
@@ -420,7 +420,7 @@ async def _capture_events(db: AsyncSession, channel: str, payload: dict, redis=N
                 turn_media = {"type": "audio", "url": media_url,
                               "message_id": str(row_id)}
             if (turn_text or turn_media) and conv.intercept_mode == InterceptMode.ai:
-                replies.append((sender, turn_text, mid, page_id, turn_media))
+                replies.append((sender, turn_text, mid, page_id, turn_media, str(row_id)))
             elif turn_text and conv.intercept_mode == InterceptMode.human:
                 # Copilot (plan C2/C3): a human holds this thread — draft a
                 # suggestion for them and keep the scribe capturing.
@@ -463,10 +463,11 @@ async def _capture_events(db: AsyncSession, channel: str, payload: dict, redis=N
         # Send API. Fires after the inbound is persisted; deduped on the Meta mid.
         if settings.meta_agent_reply:
             from app.agent import runtime
-            for sender, text, mid, page_id, media in replies:
+            for sender, text, mid, page_id, media, row_id in replies:
                 try:
                     await runtime.schedule_meta_reply(redis, channel, sender, text, dedup_id=mid,
-                                                      page_id=page_id or None, media=media)
+                                                      page_id=page_id or None, media=media,
+                                                      inbound_id=row_id)
                 except Exception as exc:
                     _log.warning("meta agent reply failed to schedule for %s: %s", sender, exc)
 

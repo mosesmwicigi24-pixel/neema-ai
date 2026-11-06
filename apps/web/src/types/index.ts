@@ -34,6 +34,8 @@ export interface Conversation {
     intercept_mode: InterceptMode;
     /** Lead-pipeline stage for the row chip (new/contacted/qualified/…). */
     lead_stage?: string | null;
+    customer_state?: string | null;
+    language?: string | null;
     status: ConversationStatus;
     last_message_preview: string;
     last_message: string;

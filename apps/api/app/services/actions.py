@@ -195,19 +195,14 @@ async def upsert_follow_up(db, deal, *, due_at: datetime, kind: str,
                                         "buying_follow_up"):
             r.status = "vetoed"
             r.reason = f"{r.reason or ''} [superseded by a newer {kind}]"[:1000]
-    if same is None:
-        db.add(AgentAction(deal_id=deal.id, conversation_id=deal.conversation_id,
-                           due_at=due_at, kind=kind, reason=reason[:500],
-                           dedupe_key=key, source="scribe"))
-    else:
-        if same.kind == "quote_follow_up":
-            same.draft = None
-        same.due_at = due_at
-        same.kind = kind
-        same.reason = reason[:500]
-        same.status = "planned"
-        same.dedupe_key = key
-        same.source = same.source or "scribe"
+    if same is not None and same.kind == "quote_follow_up":
+        same.draft = None                     # a re-quote is composed afresh
+    if same is not None and same.dedupe_key != key:
+        same.dedupe_key = key                 # a row from before identities existed
+    # One path files every commitment (Stage 6): plan() finds the open row by
+    # its identity, refreshes it, or inserts under the unique index.
+    await plan(db, conversation_id=deal.conversation_id, deal_id=deal.id, kind=kind,
+               due_at=due_at, reason=reason, source="scribe", dedupe_key=key)
 
 
 async def withdraw_routine(db, conversation_id, *, why: str) -> int:

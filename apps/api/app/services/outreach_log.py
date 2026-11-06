@@ -114,6 +114,72 @@ async def health_view(redis, db_factory=None) -> dict:
             out["rows"] = {"planned": waiting.get("planned", 0),
                            "needs_approval": waiting.get("needs_approval", 0),
                            "unknown_outcome": int(unknown)}
+            try:
+                out["backlog"] = await backlog_view(db)
+            except Exception:
+                pass
     except Exception:
         pass
     return out
+
+
+# ── the parked-row backlog (Stage 6) ─────────────────────────────────────────
+# 595 rows sat in needs_approval the day the programme went live. Counts by WHY
+# they wait and by HOW LONG, so a person can see the pile without SSH and the
+# CLI below can retire what is plainly stale — never silently, never sending.
+
+BACKLOG_BUCKETS = (
+    ("window", "outside the 24h"),
+    ("team_check", "team still confirming"),
+    ("language", "they write in"),
+    ("unknown_outcome", "outcome unknown"),
+    ("failed", "auto-send failed"),
+    ("opt_out", "asked not to be messaged"),
+    ("human_held", "human-held"),
+    ("flagged", "flagged for the team"),
+    ("sensitive", "deal total above"),
+    ("nudged", "already nudged"),
+)
+BACKLOG_AGES = ((7, "under_7d"), (30, "7_to_30d"), (10 ** 6, "over_30d"))
+
+
+def backlog_bucket(reason: str | None) -> str:
+    r = (reason or "").lower()
+    for name, needle in BACKLOG_BUCKETS:
+        if needle in r:
+            return name
+    return "other"
+
+
+def backlog_age(created_at, now) -> str:
+    from datetime import timezone as _tz
+    if created_at is None:
+        return "unknown"
+    if created_at.tzinfo is None:
+        created_at = created_at.replace(tzinfo=_tz.utc)
+    days = (now - created_at).days
+    for limit, name in BACKLOG_AGES:
+        if days < limit:
+            return name
+    return "over_30d"
+
+
+async def backlog_view(db, *, now=None) -> dict:
+    """{'by_reason': {...}, 'by_age': {...}, 'by_kind': {...}, 'total': n} over
+    the rows in needs_approval. Counts only."""
+    from datetime import datetime, timezone as _tz
+    from sqlalchemy import select
+    from app.models.agent_action import AgentAction
+    now = now or datetime.now(_tz.utc)
+    rows = (await db.execute(
+        select(AgentAction.kind, AgentAction.reason, AgentAction.created_at)
+        .where(AgentAction.status == "needs_approval"))).all()
+    by_reason: dict = {}
+    by_age: dict = {}
+    by_kind: dict = {}
+    for kind, reason, created in rows:
+        by_reason[backlog_bucket(reason)] = by_reason.get(backlog_bucket(reason), 0) + 1
+        a = backlog_age(created, now)
+        by_age[a] = by_age.get(a, 0) + 1
+        by_kind[kind or "?"] = by_kind.get(kind or "?", 0) + 1
+    return {"total": len(rows), "by_reason": by_reason, "by_age": by_age, "by_kind": by_kind}

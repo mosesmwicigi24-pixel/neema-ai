@@ -414,7 +414,6 @@ async def _plan_fit_check(db, redis, conv, event: dict) -> None:
     """Plan the after-delivery fit check — the relationship moment of a
     made-to-measure business. One per order (redis guard); rides the existing
     AgentAction scheduler, so approval gates and quiet hours apply there."""
-    from app.models.agent_action import AgentAction
     number = event.get("order_number") or ""
     if redis is not None:
         try:
@@ -423,15 +422,13 @@ async def _plan_fit_check(db, redis, conv, event: dict) -> None:
                 return
         except Exception:
             pass
-    db.add(AgentAction(
-        deal_id=None, conversation_id=conv.id,
-        due_at=datetime.now(timezone.utc) + timedelta(days=FIT_CHECK_DAYS),
-        kind="fit_check", source="hub",
-        dedupe_key=f"care:{number or _recipient_of(conv)}"[:80],
-        reason=(f"Order {number} was delivered {FIT_CHECK_DAYS} days ago — ask "
-                "warmly whether it fits and serves well, and offer our free "
-                "adjustment if anything needs it. Care, not selling.")))
-    await db.commit()
+    from app.services.actions import plan
+    await plan(db, conversation_id=conv.id, kind="fit_check", source="hub",
+               due_at=datetime.now(timezone.utc) + timedelta(days=FIT_CHECK_DAYS),
+               dedupe_key=f"care:{number or _recipient_of(conv)}"[:80],
+               reason=(f"Order {number} was delivered {FIT_CHECK_DAYS} days ago — ask "
+                       "warmly whether it fits and serves well, and offer our free "
+                       "adjustment if anything needs it. Care, not selling."))
 
 
 async def _escalate(db, redis, conv, event: dict) -> dict:

@@ -19,6 +19,14 @@ export interface MessageMeta {
     /** Meta's / TikTok's own message type ("unsupported", "reaction", …). */
     type?: string;
     kind?: string;
+    // An unprompted outbound (services/outreach_log.stamp): its class, the
+    // planner, a template name when it rode one, Meta's delivery status, and
+    // what the shadow rules would have done.
+    class?: string;
+    planner?: string;
+    template?: string | null;
+    delivery?: { status?: string; error?: string } | null;
+    shadow?: string[] | null;
     // location
     lat?: number; lng?: number; name?: string; address?: string;
     // contacts
@@ -264,3 +272,38 @@ export function viewForRow(row: { text?: string | null; media_type?: string | nu
     }
     return kindView(legacyMeta(row.text, !!row.media_type));
 }
+
+
+// ── Unprompted outbound rows (Stage 6) ───────────────────────────────────────
+// A row Neema sent without being asked carries its origin stamp. The bubble
+// shows a quiet tag — "template", "follow-up", "reminder" — the delivery
+// status Meta reported, and, in the shadow week, what enforce would have done.
+export interface OutreachBadge { label: string; tone: "muted" | "warn"; detail?: string }
+
+const CLASS_WORD: Record<string, string> = {
+    routine: "follow-up", promise: "check-in", transactional: "reminder", answer: "team answer",
+};
+
+export function outreachBadge(meta: MessageMeta | null | undefined): OutreachBadge | null {
+    if (!meta) return null;
+    const isOutreach = meta.kind === "outreach" || meta.kind === "template";
+    const delivery = meta.delivery?.status;
+    if (!isOutreach && !delivery) return null;
+    const parts: string[] = [];
+    if (meta.template) parts.push(`template · ${meta.template}`);
+    else if (isOutreach) parts.push(CLASS_WORD[meta.class ?? ""] ?? "unprompted");
+    if (delivery === "unknown") parts.push("delivery unknown — check before resending");
+    else if (delivery === "failed") parts.push("not delivered");
+    else if (delivery) parts.push(delivery);
+    const shadow = (meta.shadow ?? []).length ? `shadow: would have ${meta.shadow![0]}` : undefined;
+    return {
+        label: parts.join(" · ") || "unprompted",
+        tone: delivery === "unknown" || delivery === "failed" ? "warn" : "muted",
+        detail: shadow,
+    };
+}
+
+export const CUSTOMER_STATE_WORD: Record<string, string> = {
+    needs_time: "asked for time", comparing: "comparing prices", consulting: "consulting someone",
+    paid_claim: "says they paid", ready: "ready to buy", complaint: "complaint", stop: "opted out",
+};

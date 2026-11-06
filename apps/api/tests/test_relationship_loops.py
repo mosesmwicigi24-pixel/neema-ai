@@ -183,7 +183,8 @@ def test_failure_handlers_call_the_hold_line():
 
 def test_delivery_plans_a_fit_check_six_days_out():
     from app.services import hub_events as he
-    db, r = _DB(), _Redis()
+    # plan() first looks for the open row of this commitment (none yet)
+    db, r = _DB(results=[types.SimpleNamespace(scalar_one_or_none=lambda: None)]), _Redis()
     asyncio.run(he._plan_fit_check(db, r, _conv(), {"order_number": "BH-2417"}))
     assert db.committed and len(db.added) == 1
     action = db.added[0]
