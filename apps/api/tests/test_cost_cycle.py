@@ -378,7 +378,7 @@ def test_meta_burst_is_answered_once_together(monkeypatch):
     import app.services.meta_send as meta_send
     ran, slept, typed = [], [], []
 
-    async def _run(redis, channel, ext, text, page_id=None, media=None):
+    async def _run(redis, channel, ext, text, page_id=None, media=None, **kw):
         ran.append((channel, ext, text, media))
         return True
 
@@ -416,7 +416,7 @@ def test_meta_burst_is_answered_once_together(monkeypatch):
 def test_meta_burst_prefers_the_photo_and_survives_no_redis(monkeypatch):
     ran = []
 
-    async def _run(redis, channel, ext, text, page_id=None, media=None):
+    async def _run(redis, channel, ext, text, page_id=None, media=None, **kw):
         ran.append((text, media))
         return True
 

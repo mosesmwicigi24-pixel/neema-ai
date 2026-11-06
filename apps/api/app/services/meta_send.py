@@ -41,13 +41,19 @@ async def _graph_post(path: str, body: dict, what: str, page_id: str | None = No
     if not token:
         raise RuntimeError(f"META_PAGE_TOKEN not configured — cannot {what}")
     url = f"https://graph.facebook.com/{settings.meta_graph_version}/{path}"
-    async with httpx.AsyncClient() as client:
-        resp = await client.post(
-            url,
-            headers={"Authorization": f"Bearer {token}"},
-            json=body,
-            timeout=30.0,
-        )
+    from app.services.messaging import _UNKNOWN_AFTER_WRITE, SendOutcomeUnknown
+    try:
+        async with httpx.AsyncClient() as client:
+            resp = await client.post(
+                url,
+                headers={"Authorization": f"Bearer {token}"},
+                json=body,
+                timeout=httpx.Timeout(30.0, connect=10.0),
+            )
+    except _UNKNOWN_AFTER_WRITE as exc:
+        # The request reached Meta and no answer came back: the message MAY be
+        # delivered. The caller records it and never resends (audit, 2026-11-05).
+        raise SendOutcomeUnknown(f"{type(exc).__name__}: {what} outcome unknown") from exc
     if not resp.is_success:
         _log.error("Meta %s failed %s: %s", what, resp.status_code, resp.text)
         raise RuntimeError(f"Meta {what} failed ({resp.status_code}): {resp.text[:300]}")

@@ -436,7 +436,7 @@ def test_the_schedulers_put_cooled_chat_on_the_slow_lane(monkeypatch):
     async def _run(redis, wa_id, text, media=None, *, deferred=False, **kw):
         ran.append(("wa", text, deferred))
 
-    async def _run_meta(redis, channel, ext, text, page_id=None, media=None, *, deferred=False):
+    async def _run_meta(redis, channel, ext, text, page_id=None, media=None, *, deferred=False, **kw):
         ran.append((channel, text, deferred))
         return True
 

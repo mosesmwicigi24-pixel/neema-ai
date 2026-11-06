@@ -29,7 +29,7 @@ import type {
 } from "@/types";
 import { useSession } from "next-auth/react";
 import { CALL_ICON_PATH } from "@/lib/callStatus";
-import { viewForRow } from "@/lib/messageKinds";
+import { viewForRow, outreachBadge, CUSTOMER_STATE_WORD } from "@/lib/messageKinds";
 import { CallCard } from "@/components/views/CallCard";
 import { VoiceNoteText } from "@/components/ui/VoiceNoteText";
 import { nearestCallId, mediaKey } from "@/lib/callCard";
@@ -2875,6 +2875,10 @@ export function ConversationsView({
                     const humanSib = group.siblings.find((s) => s.intercept_mode === "human");
                     const chipConv = humanSib ?? conv;
                     const rowStage = group.siblings.map((s) => s.lead_stage).find(Boolean) ?? null;
+                    // What they last said about buying (Stage 3) — only the states
+                    // that change what the team should do next are shown.
+                    const rowState = group.siblings.map((s) => (s as any).customer_state as string | null)
+                        .find((v) => v && CUSTOMER_STATE_WORD[v]) ?? null;
                     // Completed (paid) orders for the person behind this row —
                     // siblings of one person carry the same count, so max is it.
                     const rowOrders = Math.max(
@@ -3079,6 +3083,15 @@ export function ConversationsView({
                                                     }}
                                                 >
                                                     {rowStage}
+                                                </span>
+                                            )}
+                                            {rowState && (
+                                                <span
+                                                    className="text-[10px] font-semibold px-1.5 h-[16px] rounded border flex items-center leading-none"
+                                                    title={`They said: ${CUSTOMER_STATE_WORD[rowState]}`}
+                                                    style={{ backgroundColor: "#fff7ed", borderColor: "#fdba74", color: "#9a3412" }}
+                                                >
+                                                    {CUSTOMER_STATE_WORD[rowState]}
                                                 </span>
                                             )}
                                             {/* Country chip — the flag on the avatar
@@ -4076,10 +4089,24 @@ export function ConversationsView({
                                                             if (kindCard) {
                                                                 return <MessageKindCard view={kindCard} isInbound={isInbound} />;
                                                             }
+                                                            // An unprompted outbound (a follow-up, a template, a
+                                                            // reminder) says so under its text, with Meta's
+                                                            // delivery status when one was reported.
+                                                            const badge = !isInbound ? outreachBadge(msg.meta) : null;
                                                             return (
-                                                                <p className="leading-relaxed whitespace-pre-wrap">
-                                                                    {formatWa(msg.text)}
-                                                                </p>
+                                                                <>
+                                                                    <p className="leading-relaxed whitespace-pre-wrap">
+                                                                        {formatWa(msg.text)}
+                                                                    </p>
+                                                                    {badge && (
+                                                                        <p className="mt-1 text-[10px] leading-snug"
+                                                                            title={badge.detail}
+                                                                            style={{ color: badge.tone === "warn" ? "#b45309" : "rgba(0,0,0,0.45)" }}>
+                                                                            {badge.label}
+                                                                            {badge.detail ? ` · ${badge.detail}` : ""}
+                                                                        </p>
+                                                                    )}
+                                                                </>
                                                             );
                                                         }
                                                         if (

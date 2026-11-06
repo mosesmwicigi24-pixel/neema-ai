@@ -55,7 +55,14 @@ Daily, no customer contact involved:
    — origin of every outbound row, delivery status, the planned actions in
    every status, the deal's hold / team check / blocking, contact
    preferences, redis guards. Read-only; the number is masked in the heading.
-4. **The log**: one line per decision, contact masked —
+4. **The pile**: `/api/health` → `outreach.backlog` counts the rows in
+   needs-approval by why they wait (window, team check, language, unknown
+   outcome, …), by age and by kind. On the box,
+   `docker compose -f docker-compose.yml -f docker-compose.vps.yml exec -T api python -m app.jobs.outreach_backlog`
+   prints the same, and `--retire-older-than 30` vetoes ROUTINE rows parked
+   longer than that with a visible reason — promises and care are never
+   touched, and nothing is sent. A person runs it; it is not scheduled.
+5. **The log**: one line per decision, contact masked —
    `outreach actions whatsapp/…1234 shadow-suppress: the customer wrote after this was planned …`
    (`grep "outreach " ` on the api logs). Verdicts: `go`, `send`, `hold`,
    `park`, `defer`, `suppress`, `shadow-*`, `enforced_*`.
