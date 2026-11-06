@@ -214,7 +214,7 @@ async def withdraw_routine(db, conversation_id, *, why: str) -> int:
     rows = (await db.execute(select(AgentAction).where(
         AgentAction.conversation_id == conversation_id,
         AgentAction.status.in_(("planned", "needs_approval")),
-        AgentAction.kind.in_(("follow_up", "quote_follow_up"))))).scalars().all()
+        AgentAction.kind.in_(("follow_up", "quote_follow_up", "buying_follow_up"))))).scalars().all()
     n = 0
     for row in rows:
         row.status = "vetoed"

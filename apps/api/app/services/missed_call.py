@@ -67,6 +67,19 @@ async def _follow_up(redis, call_id: str) -> bool:
                 ).limit(1))).first()
             if later is not None:
                 return False
+            # Their "do not message me" covers a missed-call text too.
+            try:
+                from app.models.conversation import Conversation
+                from app.services.intent import opted_out
+                conv = (await db.execute(select(Conversation).where(
+                    (Conversation.wa_id == handle) if channel == "whatsapp"
+                    else ((Conversation.channel == channel) & (Conversation.external_id == handle))
+                ))).scalars().first()
+                if conv is not None and await opted_out(db, redis, conv):
+                    _log.info("missed-call message skipped for …%s: opted out", str(handle)[-4:])
+                    return False
+            except Exception:
+                pass
         key = f"call:missed-msg:{channel}:{handle}"
         ttl = max(1, int(settings.missed_call_message_cooldown_h)) * 3600
         claimed = None

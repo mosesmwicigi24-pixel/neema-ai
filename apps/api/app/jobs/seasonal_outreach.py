@@ -307,6 +307,20 @@ async def run(send: bool, ignore_quiet_hours: bool = False,
     redis = await _make_redis()
     async with AsyncSessionLocal() as db:
         rows = await find_audience(db, season["season"])
+        # A customer who asked not to be messaged is never in a campaign
+        # (audit verification, 2026-11-06: this path missed the opt-out).
+        from app.services.intent import opted_out
+        kept = []
+        for row in rows:
+            try:
+                if await opted_out(db, redis, row["conv"]):
+                    _log.info("[SKIP (opted out)] %-9s …%s", row["conv"].channel or "whatsapp",
+                              str(row.get("wa_id") or "")[-4:])
+                    continue
+            except Exception:
+                pass
+            kept.append(row)
+        rows = kept
     _log.info("%d customer(s) bought during %s in a previous year",
               len(rows), season["season"])
     rows, same_parish = dedupe_by_parish(rows)

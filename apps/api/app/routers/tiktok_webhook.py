@@ -136,7 +136,9 @@ async def _receive(db: AsyncSession, request: Request, event: dict, content: dic
     if not text:
         from app.services.inbound_kinds import unsupported_social
         stored, raw_meta = unsupported_social(CHANNEL, content.get("type"), content)
-    db.add(Message(channel=CHANNEL, external_id=from_user, wa_id=None,
+    import uuid as _uuid
+    row_id = _uuid.uuid4()                  # chosen up front: the turn excludes it from history
+    db.add(Message(id=row_id, channel=CHANNEL, external_id=from_user, wa_id=None,
                    conversation_id=conv.id, person_id=conv.person_id,
                    direction=MsgDirection.inbound, sender=MsgSender.user,
                    text=stored, waba_msg_id=mid or None, raw_meta=raw_meta))
@@ -160,7 +162,8 @@ async def _receive(db: AsyncSession, request: Request, event: dict, content: dic
     if intercepted or not text:
         return
     from app.agent.runtime import schedule_meta_reply
-    await schedule_meta_reply(redis, CHANNEL, from_user, text, dedup_id=mid or None)
+    await schedule_meta_reply(redis, CHANNEL, from_user, text, dedup_id=mid or None,
+                              inbound_id=str(row_id))
 
 
 async def _echo(db: AsyncSession, event: dict, content: dict) -> None:
