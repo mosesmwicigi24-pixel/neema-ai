@@ -331,20 +331,34 @@ def test_both_senders_leave_an_unowned_hold_unmarked(monkeypatch):
     NO redis key written — no silenced stamp, no closer mark, no hold line —
     on WhatsApp and on Messenger, even for a closer text; the missed-reply
     sweep therefore still sees the inbound as unanswered."""
-    import types
     import app.database as dbm
 
     class _Redis:
-        def __init__(self): self.store = {}
+        def __init__(self):
+            self.store = {}
+
         async def set(self, k, v, ex=None, nx=False):
-            if nx and k in self.store: return None
-            self.store[k] = v; return True
-        async def get(self, k): return self.store.get(k)
-        async def delete(self, *k):
-            for x in k: self.store.pop(x, None)
-        async def incr(self, k): self.store[k] = int(self.store.get(k, 0)) + 1; return self.store[k]
-        async def expire(self, k, s): pass
-        async def exists(self, k): return 1 if k in self.store else 0
+            if nx and k in self.store:
+                return None
+            self.store[k] = v
+            return True
+
+        async def get(self, k):
+            return self.store.get(k)
+
+        async def delete(self, *keys):
+            for x in keys:
+                self.store.pop(x, None)
+
+        async def incr(self, k):
+            self.store[k] = int(self.store.get(k, 0)) + 1
+            return self.store[k]
+
+        async def expire(self, k, s):
+            pass
+
+        async def exists(self, k):
+            return 1 if k in self.store else 0
 
     class _Sess:
         async def __aenter__(self): return self
