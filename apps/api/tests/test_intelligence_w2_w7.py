@@ -55,8 +55,18 @@ def test_a_caption_less_photo_is_a_turn_in_history():
 
 
 def test_a_complaint_read_by_the_floor_earns_the_care_first_length():
-    src = inspect.getsource(rt.run_turn)
-    assert '(_cs_floor(user_text) or {}).get("customer_said") == "complaint"' in src
+    """Behaviour: the live turn's own target function. A complaint the
+    comment detector misses but the customer-state floor reads still lands
+    on the care-first length; a plain price ask does not."""
+    text = "The cassock you sent me is torn at the seam and I paid in full. This is not acceptable."
+    assert cs.floor(text)["customer_said"] == "complaint"
+    target = rt.length_target_for(text)
+    assert target["kind"] == "complaint" and target["words"] == 60
+    assert rt.length_target_for("How much is the stole?")["kind"] != "complaint"
+    assert rt.length_target_for(None)["kind"] != "complaint"              # no text, no crash
+    # the evaluation harness scores the same function, not a mirror of it
+    from app.jobs.eval_floors import _runtime_target
+    assert _runtime_target(text) == target
 
 
 def test_language_continuity_is_checked_without_the_model_reviewer():
@@ -75,10 +85,63 @@ def test_language_continuity_is_checked_without_the_model_reviewer():
     assert "language" in kinds and not kinds["language"]["hard"]
 
 
-def test_state_writes_take_the_row_lock():
-    from app.services import intent
-    assert "lock_for_write(db, person)" in inspect.getsource(intent.record_opt_out)
-    assert "lock_for_write(db, person)" in inspect.getsource(cs.apply)
+@pytest.mark.asyncio
+async def test_state_writes_take_the_row_lock(monkeypatch):
+    """Behaviour: both writers of persons.state hand the person to the lock
+    and write to the row the lock hands back (locked AND re-read)."""
+    import types
+    from app.services import intent, state_lock
+
+    locked, fresh = [], types.SimpleNamespace(id="p", state={"contact_preferences": {"language": "en"}})
+    stale = types.SimpleNamespace(id="p", state={"contact_preferences": {"language": "en"}})
+
+    async def fake_lock(db, row):
+        locked.append(row)
+        return fresh
+    monkeypatch.setattr(state_lock, "lock_for_write", fake_lock)
+
+    class _DB:
+        def __init__(self): self.added = []
+        async def get(self, model, pk): return stale
+        async def commit(self): pass
+        async def rollback(self): pass
+        def add(self, o): self.added.append(o)
+
+    conv = types.SimpleNamespace(id="c", person_id="p", channel="whatsapp", wa_id="254700000001")
+    await cs.apply(_DB(), conv, None, {"customer_said": "needs_time"}, source="floor",
+                   inbound_text="Nitakujulisha Jumatatu")
+    assert locked == [stale]
+    assert fresh.state["customer_state"]["said"] == "needs_time"       # written to the re-read row
+    assert "customer_state" not in stale.state                            # not to the stale copy
+
+    locked.clear()
+    await intent.record_opt_out(_DB(), None, conv, "stop messaging me", channel="whatsapp", key="254700000001")
+    assert locked == [stale]
+    assert fresh.state["contact_preferences"]["opt_out"]["said"] == "stop messaging me"
+    assert "opt_out" not in stale.state["contact_preferences"]
+
+
+@pytest.mark.asyncio
+async def test_an_opt_out_still_lands_when_the_lock_cannot_be_taken(monkeypatch):
+    """Recorded trade-off (W7-6): a lock failure is logged and the write goes
+    ahead unlocked — a lost opt-out would be the worse failure."""
+    import types
+    from app.services import intent, state_lock
+
+    async def broken_lock(db, row):
+        raise RuntimeError("lock unavailable")
+    monkeypatch.setattr(state_lock, "lock_for_write", broken_lock)
+    person = types.SimpleNamespace(id="p", state={})
+
+    class _DB:
+        async def get(self, model, pk): return person
+        async def commit(self): pass
+        async def rollback(self): pass
+        def add(self, o): pass
+
+    conv = types.SimpleNamespace(id="c", person_id="p", channel="whatsapp", wa_id="254700000001")
+    await intent.record_opt_out(_DB(), None, conv, "stop", channel="whatsapp", key="254700000001")
+    assert person.state["contact_preferences"]["opt_out"]["said"] == "stop"
 
 
 def test_the_standing_orders_cap_keeps_the_newest_learned_rules():
@@ -108,3 +171,142 @@ async def test_apply_lifts_a_hold_when_the_customer_asks_a_question():
                              inbound_text="How much is the stole?")
     assert changed.get("hold_cleared") is True
     assert "hold" not in (deal.next_action or {}) and deal.blocking is None
+
+
+def test_the_scribe_keeps_the_team_check_when_the_customer_names_a_day(monkeypatch):
+    """Behaviour (W2-4 wiring): scribe_update itself, with a deal that holds an
+    open team check, filing a customer promise — the team check stays the
+    next action and the promise is tucked under it."""
+    import asyncio
+    import types
+    from app.agent import cart as cartmod
+    from app.services import customer_state
+
+    conv = types.SimpleNamespace(id="conv1", person_id="p1")
+    deal = types.SimpleNamespace(next_action={"kind": "team_check", "item": "gold cope",
+                                              "since": "2026-11-06T10:00:00"},
+                                 blocking="Checking with the team: gold cope",
+                                 items_snapshot=None, title=None, stage="new")
+    queued = []
+
+    class _DB:
+        def add(self, o): pass
+        async def flush(self): pass
+        async def commit(self): pass
+        async def rollback(self): pass
+
+    async def fake_conv(db, key, channel): return conv
+    async def fake_open(db, conversation_id=None, person_id=None): return deal
+    async def fake_cart(db, key, channel="whatsapp"): return {"items": []}
+    async def fake_upsert(db, d, *, due_at, kind, reason): queued.append(kind)
+    async def fake_after_turn(*a, **k): return {}
+    monkeypatch.setattr(deals, "_conversation_of", fake_conv)
+    monkeypatch.setattr(deals, "open_deal_for", fake_open)
+    monkeypatch.setattr(cartmod, "get_cart", fake_cart)
+    monkeypatch.setattr("app.services.actions.upsert_follow_up", fake_upsert)
+    monkeypatch.setattr(customer_state, "after_turn", fake_after_turn)
+
+    asyncio.run(deals.scribe_update(_DB(), "254700000001", "whatsapp", "Sawa, tutaongea Jumatatu.",
+                                    inbound_text="I will confirm on Monday", tools=[]))
+    assert queued == ["customer_promise"]
+    assert deal.next_action["kind"] == "team_check" and deal.next_action["item"] == "gold cope"
+    assert deal.next_action["then"]["kind"] == "customer_promise"
+    assert deal.blocking.startswith("Waiting on the customer")
+
+
+def test_usage_logs_the_model_that_actually_served():
+    """Behaviour (W10-3): after a fallback the client's last_model differs
+    from its configured _model, and that is the one that gets logged."""
+    import types
+    assert rt.served_model(types.SimpleNamespace(_model="claude-a", last_model="claude-b")) == "claude-b"
+    assert rt.served_model(types.SimpleNamespace(_model="claude-a", last_model=None)) == "claude-a"
+    assert rt.served_model(types.SimpleNamespace()) == ""
+
+
+def test_a_draft_cut_by_the_token_ceiling_ends_on_a_whole_sentence():
+    """W7-4, second half (verification: stop_reason was never inspected)."""
+    cut = rt.trim_truncated
+    assert cut("The cope set is KES 45,000 and ships in a week. We also have the matching stole in purple, green and") \
+        == ("The cope set is KES 45,000 and ships in a week.", True)
+    assert cut("Karibu! Bei ya stola ni KES 2,500. Je, ungependa rangi gani? Tuna nyekundu, kijani na") \
+        == ("Karibu! Bei ya stola ni KES 2,500. Je, ungependa rangi gani?", True)
+    assert cut("Price is KES 2,500.\nShall I add") == ("Price is KES 2,500.", True)
+    assert cut('It costs "KES 2,500." Want it') == ('It costs "KES 2,500."', True)
+    # left alone: already whole, no boundary at all, or too little would remain
+    assert cut("The cope set is KES 45,000 and ships in a week.") == ("The cope set is KES 45,000 and ships in a week.", False)
+    assert cut("Thanks for your patience, the") == ("Thanks for your patience, the", False)
+    assert cut("Ok. " + "x" * 200) == ("Ok. " + "x" * 200, False)
+    assert cut("It is 2.5 metres long and") == ("It is 2.5 metres long and", False)   # a decimal is not a boundary
+    assert cut("") == ("", False)
+    # verification pass 2b: abbreviations, initials and list numbers are not sentence ends
+    assert cut("Your parish is St. Peter's in Nakuru, and the") == ("Your parish is St. Peter's in Nakuru, and the", False)
+    assert cut("Delivery to Mt. Kenya region takes a week. We also stock the") == ("Delivery to Mt. Kenya region takes a week.", True)
+    assert cut("Ask Rev. Fr. Otieno for the size, e.g. 42 or 44, and we") == ("Ask Rev. Fr. Otieno for the size, e.g. 42 or 44, and we", False)
+    assert cut("1. Cope\n2. Stole\n3.") == ("1. Cope\n2. Stole\n3.", False)
+    assert cut("We have three options for you today. 1. Cope\n2. Stole\n3.") == ("We have three options for you today.", True)
+    # the thresholds and the lookahead, pinned
+    assert cut("Hello there friend. " + "x" * 100) == ("Hello there friend. " + "x" * 100, False)   # under a third
+    assert cut("Yes we do. " + "y" * 20) == ("Yes we do. " + "y" * 20, False)                      # 10 chars < 12: kept
+    assert cut("Yes, we do. " + "y" * 20) == ("Yes, we do. " + "y" * 20, False)                    # 11 chars < 12: kept
+    assert cut("Yes, we do!! " + "y" * 20) == ("Yes, we do!!", True)                               # 12 chars: cut
+    assert cut("Price KES 2,500.Then we") == ("Price KES 2,500.Then we", False)                      # no space after the stop
+
+
+def test_the_turn_cuts_a_max_tokens_draft_and_records_it():
+    """Behaviour through run_turn: a writer that stops on max_tokens mid-sentence
+    has its draft cut back and the turn facts say so; end_turn is untouched."""
+    import asyncio
+    import types
+    from tests.test_agent_flow import _FakeDB, _Res
+
+    def llm(stop):
+        class _L:
+            async def complete(self, *, system, messages, tools, **kw):
+                return types.SimpleNamespace(
+                    text="The cope set is KES 45,000 and ships in a week. We also have the matching stole in",
+                    tool_calls=[], assistant_content=[], usage={}, stop_reason=stop)
+        return _L()
+
+    def db():
+        user = types.SimpleNamespace(name="Moses")
+        return _FakeDB([_Res(one=user), _Res(one=None), _Res(one=None), _Res(one=None), _Res(many=[])])
+
+    facts: dict = {}
+    out = asyncio.run(rt.run_turn(db(), None, "254700000001", "how much is the cope set?",
+                                  llm("max_tokens"), read_only=True, turn_facts=facts))
+    assert out == "The cope set is KES 45,000 and ships in a week."
+    assert facts.get("truncated") is True
+    facts2: dict = {}
+    out2 = asyncio.run(rt.run_turn(db(), None, "254700000001", "how much is the cope set?",
+                                   llm("end_turn"), read_only=True, turn_facts=facts2))
+    assert out2.endswith("the matching stole in") and "truncated" not in facts2
+
+
+def test_a_cut_that_would_drop_the_answer_asks_once_more():
+    """Verification pass 2b: 'Thanks for asking, Moses. The cope set is KES
+    45,000 and ships in a' must not become 'Thanks for asking, Moses.' —
+    the dropped tail carried the figure, so the turn asks once for the reply
+    in words and sends that."""
+    import asyncio
+    import types
+    from tests.test_agent_flow import _FakeDB, _Res
+
+    calls = []
+
+    class _L:
+        async def complete(self, *, system, messages, tools, **kw):
+            calls.append(kw.get("tool_choice"))
+            if len(calls) == 1:
+                return types.SimpleNamespace(
+                    text="Thanks for asking, Moses. The cope set is KES 45,000 and ships in a",
+                    tool_calls=[], assistant_content=[], usage={}, stop_reason="max_tokens")
+            return types.SimpleNamespace(text="The cope set is KES 45,000 and ships in a week.",
+                                         tool_calls=[], assistant_content=[], usage={}, stop_reason="end_turn")
+
+    user = types.SimpleNamespace(name="Moses")
+    db = _FakeDB([_Res(one=user), _Res(one=None), _Res(one=None), _Res(one=None), _Res(many=[])])
+    facts: dict = {}
+    out = asyncio.run(rt.run_turn(db, None, "254700000001", "how much is the cope set?", _L(),
+                                  read_only=True, turn_facts=facts))
+    assert out == "The cope set is KES 45,000 and ships in a week."
+    assert facts.get("truncation") == "retried" and len(calls) == 2 and calls[1] == "none"

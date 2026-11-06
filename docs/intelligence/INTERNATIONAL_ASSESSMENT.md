@@ -13,7 +13,7 @@ need: the same tasks (our case set), the same business information (the hub
 and the prompt inputs), the same scoring (the objective verdicts and human
 rubric), run on each system — which means building a reference agent with
 Neema's tools on a general-purpose agent framework and running it on the
-held-out half. That reference-agent run has not happened.
+blind set. That reference-agent run has not happened.
 
 ## The four levels, assessed
 
@@ -27,7 +27,7 @@ held-out half. That reference-agent run has not happened.
 ## Where Neema is ahead of common practice (evidence-backed)
 
 - Hard grounding of money figures and links to tool results in a deterministic gate (review.py) — most published agents rely on the model alone.
-- A durable, multi-language opt-out with a deterministic recogniser measured at 0.966 on held-out independent cases.
+- A durable, multi-language opt-out with a deterministic recogniser measured at 0.971 on the blind set (n=34, wide interval; the held-out figure was withdrawn as contaminated).
 - Consent and outreach controls per rule with a shadow tally (Stages 2–5).
 
 ## Where Neema is behind (evidence-backed)
@@ -38,7 +38,7 @@ held-out half. That reference-agent run has not happened.
 
 ## What would make a defensible claim
 
-1. The real-model run on the held-out half (pass^3, intervals).
+1. The real-model run on the blind set (pass^3, intervals).
 2. Human ratings on the rater packet from two raters with κ.
 3. A reference agent with the same tools on the same cases.
 4. Two human sellers on a 40-case sample, blind.

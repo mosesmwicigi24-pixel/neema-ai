@@ -21,10 +21,16 @@ Hindi 4. Categories cover all eleven the directive lists (coverage table in
 ## Split
 
 A fixed development / held-out split by a seeded hash of the case id
-(`eval_cases.split`): dev 203 cases / 602 turns, held-out 227 cases / 618
-turns. Changes are designed on dev; reported numbers come from held-out.
+(`eval_cases.split`): dev 217 cases / 596 length turns, held-out 236 cases /
+600 length turns (453 tuning cases after the verifier's negatives joined).
 The split does not change when files are added (an id's half is a property
-of the id).
+of the id). **The held-out half is contaminated** (BENCHMARK_RESULTS,
+Correction 1): the implementer inspected its misses during tuning. Reported
+numbers therefore come from the **blind set** — `blind_heldout.jsonl`, 120
+cases / 459 turns written by a fresh author after all tuning, never read by
+the implementer, scored aggregate-only with `--file`. The default loader
+leaves blind cases out of the dev/held-out sweep (`"blind": true`), so no
+future tuning run can touch them.
 
 ## What a case asserts
 
@@ -41,7 +47,7 @@ candidates for a second rater (κ to be reported).
 - `python -m app.jobs.eval_floors` — model-free, seconds, anywhere: the
   deterministic floors (customer state, language guess, opt-out, length
   target) against the gold labels.
-- `python -m app.jobs.agent_eval --cases [--held-out] [--repeat 3] --out … --packet … --history` —
+- `python -m app.jobs.agent_eval --cases --file blind_heldout.jsonl [--repeat 3] --out … --packet … --history` (the blind set is the report; `--held-out` is the contaminated half, for diagnosis only) —
   the real prompt, model, catalogue, cart and gate with sends sandboxed;
   objective verdicts per turn; pass^k; run record with model ids and prompt
   hashes; rater packet for the judged dimensions; history row in

@@ -368,6 +368,7 @@ if __name__ == "__main__":
                     help="run the intelligence case set (app/jobs/eval_cases) with objective scoring")
     ap.add_argument("--held-out", action="store_true", help="--cases: the held-out half only")
     ap.add_argument("--dev", action="store_true", help="--cases: the development half only")
+    ap.add_argument("--file", help="--cases: one case file, ignoring the split (e.g. blind_heldout.jsonl)")
     ap.add_argument("--repeat", type=int, default=1, help="--cases: runs per case (pass^k)")
     ap.add_argument("--only", help="--cases: id prefix filter, e.g. sales-0")
     ap.add_argument("--limit", type=int, help="--cases: first N cases only")
@@ -380,6 +381,7 @@ if __name__ == "__main__":
         from app.jobs.eval_run import run_cases
         asyncio.run(run_cases(selection="held-out" if a.held_out else "dev" if a.dev else "all",
                               repeat=max(1, a.repeat), only=a.only, out_path=a.out,
-                              packet_path=a.packet, history=a.history, keep=a.keep, limit=a.limit))
+                              packet_path=a.packet, history=a.history, keep=a.keep, limit=a.limit,
+                              file=a.file))
     else:
         asyncio.run(run(keep=a.keep))

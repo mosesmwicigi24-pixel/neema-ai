@@ -291,6 +291,7 @@ will not catch the English reply that follows.
 |---|---|
 | 1 held-out contamination | **Accepted.** Held-out claim withdrawn in BENCHMARK_RESULTS; a blind set of 120 cases commissioned from a fresh author after the tuning, never read by the implementer; only its aggregate is reported. |
 | 2 runner passes empty replies | **Fixed.** Reply-expected turns fail on an empty reply; `require` fails on empty; a raised turn fails; the paid/pressure readings call the gate's own functions. Test added. |
+| 1.6 comment dedupe redis-only | **Fixed** (second pass, same day): the comment row's own id is queried before the row is stored or engaged — the DM path's pattern, no migration. Test added. |
 | 3 hard rules hold correct replies | **Fixed.** `paid_ack`: negation/condition guard (the four sentences are tests), every mode. `pressure`: imperative hurry only, "last X left/remaining/in stock" only, stock-figure exemption, `_PROMO_TOOLS` = real tools, **soft** until the live tally is clean. |
 | 4 opt-out false positives | **Fixed.** "stop messaging me" needs the clause to end (or again/anymore/please); "remove me" needs a list/messages object; group chats are not opt-outs. Tests added. |
 | 5 floor misfires | **Fixed** for every reproduced sentence (developer negatives neg-021…043 and tests): no bare hold-on/ngoja/subiri/no-rush/not-today; the imperative contact form needs a time hint; "continue" dropped, "approved" anchored with a negation guard; bare "sent"/"nimetuma" only as a whole message or with money; a screenshot must be of a payment; pronouns only after with-verbs; "tell/inform/waiting for" removed and "take it to" kept only with a real body; "?" softens consulting; "received my payment?" is a claim that outranks the complaint rule; a strong go-ahead outranks a courtesy hold. |
@@ -300,7 +301,7 @@ will not catch the English reply that follows.
 | 9 fail-closed flag best-effort | **Mitigated:** a gate error is counted as a failing turn in `agent_health`. The hold line is kept over silence; recorded as a trade-off. |
 | 10 `_still_ai` None → re-compose | **Accepted**, recorded in UNFINISHED_REGISTER. |
 | 11 closer key not armed | **Fixed.** Silence on a closer arms the key on both senders. |
-| 12 VERIFIED COMPLETE on source tests | **Downgraded** (W3-1, W7-6, W10-3, W2-4 wiring); W2-3 got a behaviour test; W9-1 is asserted by the hub-event tests. |
+| 12 VERIFIED COMPLETE on source tests | **Fixed** (second pass, same day): W3-1, W7-6, W10-3 and the W2-4 wiring now have behaviour tests (`test_intelligence_w2_w7.py`); W2-3 got one earlier; W9-1 is asserted by the hub-event tests. Found on the way: the harness's length scorer mirrored the runtime without the complaint floor — now one function (`runtime.length_target_for`); and the default case sweep had started to include the blind file — now excluded by the loader. |
 | 13 runner coverage limits | **Recorded** in UNFINISHED_REGISTER. |
 | 14 Wilson, cap header, sweeper | — |
 | 15 scope | **Recorded**; the owner may ask for the performance view to be split out. |

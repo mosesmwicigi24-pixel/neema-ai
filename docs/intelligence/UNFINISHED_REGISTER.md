@@ -37,9 +37,13 @@ the precise dependency · status. Last update: 2026-11-06, end of session 1.
 | Deferring product-card sends until after the gate (W1-6) | would create a worse failure (words promising cards that then fail) | ADVANCEMENTS_REGISTER W1-6 |
 | Refusing an order when the promised offer cannot be read (W1-7) | the owner's recorded trade-off prefers the order; the gap is now surfaced | W1-7 |
 | A DB-side idempotency key for orders (W9-3) | needs a migration (owner approval) | INVESTIGATION 9.3 |
+| `_reply_in_words` (the once-more ask for a truncated or empty draft) does not re-check its own `stop_reason`; a second ceiling hit is sent as written | inspect `stop_reason` on that path too; rare (4,096-token ceiling, twice) | VERIFICATION_PASS_2B |
+| An index on `messages.waba_msg_id` (the comment and DM dedupe lookups seq-scan today) | a migration (owner approval); one line in alembic | VERIFICATION_PASS_2 #6 |
+| A DB error during Meta comment capture is acked, so the comment is lost silently (pre-existing: the DM path answers 502 so Meta redelivers; the comment path acks anyway) | decide whether comments should also 502 on a DB error — Meta then redelivers, and the durable dedupe now makes that safe | VERIFICATION_PASS_2 #4 |
 | Context-engineering experiment (W7-1: structured state object vs raw history) | must be a controlled comparison on the held-out set; needs the model | INVESTIGATION 7.1 |
 | Prompt shortening / SELL LIKE A CONSULTANT rewrite (W4-3) | no blind cut; replay comparison first | INVESTIGATION 4.3 |
 | Delivery total consistency (W6-2), `payment_url` key rename (W6-1) | prompt/tool contract changes to be measured with the model | INVESTIGATION 6.1–6.2 |
+| Currency lock once a figure is quoted in a turn (W9-5) | `search_catalog`/`capture_contact` move the turn's currency on purpose (the customer's own words); a lock would delay that correction by a turn — measure with the model first | INVESTIGATION 9.5 |
 | Retiring the legacy bridge order path and the expiring receipt shortener (W9-4) | removes a code path hub events may still use; needs a production trace first | INVESTIGATION 9.4 |
 | Turn latency instrumentation, availability history, resolution definition | named on the dashboard as NOT YET MEASURED with what each needs | performance.py |
 
@@ -48,9 +52,10 @@ the precise dependency · status. Last update: 2026-11-06, end of session 1.
 | Item | Why open | Where |
 |---|---|---|
 | Unverifiable takeover → the sweeper re-composes the turn (tools may act twice) | persisting the composed reply for the retry needs a small store; trade-off recorded | 1.5 |
-| Comment dedupe is redis-only; a 502 redelivery with redis down could answer a comment twice | DB-side comment id dedupe | 1.6 |
+| ~~Comment dedupe is redis-only; a 502 redelivery with redis down could answer a comment twice~~ | done, same day: the comment row's own id (`waba_msg_id`) is the durable dedupe, queried before the row is stored or engaged — no migration, the DM path's own pattern; test `test_a_redelivered_comment_is_not_answered_twice_without_redis` | 1.6 |
 | The blind set must be scored before any held-out claim; the runner cannot exercise the Meta/TikTok/web doors or an overlap silence (WhatsApp contacts, sequential turns) | runner channel parameter; concurrent-turn harness | 6, 13 |
-| Four register rows rest on source-string tests (W3-1, W7-6, W10-3, W2-4 wiring) | downgraded; behaviour tests to add | 2 |
+| ~~Four register rows rest on source-string tests (W3-1, W7-6, W10-3, W2-4 wiring)~~ | done, same day: behaviour tests added, rows back to VERIFIED COMPLETE | 2 |
+| `/api/health` can block up to 15 s when the price-audit cache is cold: it fetches the hub catalogue over the network (hub_client timeout 15 s) before answering. Seen on CI (PR #317, 15,025 ms); on the box Redis caches the audit for an hour, so it bites once an hour at most, but a public liveness probe should never wait on the hub. | proposed patch: `price_audit.health_summary` serves the cached audit only and leaves computing it to the hourly job / first live turn (one function, one test); a production behaviour change, so it waits for the owner's word. The timing tests stub the hub meanwhile. | CI on #317 |
 
 ## Open owner decisions carried from earlier stages
 

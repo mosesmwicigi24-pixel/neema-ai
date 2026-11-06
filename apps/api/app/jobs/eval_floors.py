@@ -16,6 +16,7 @@ model-in-the-loop run measures. Nothing here touches a database or redis.
 from __future__ import annotations
 
 import argparse
+import sys
 import json
 import math
 from collections import defaultdict
@@ -37,13 +38,11 @@ _LANG_MAP = {"ke-en": "en", "sheng": None, "mixed": None}   # what guess_languag
 
 
 def _runtime_target(text: str) -> dict:
-    """The length target exactly as the live turn computes it
-    (runtime.py: closer, greeting and negative flags from the same text)."""
-    from app.agent.reply_length import target_for
-    from app.agent.runtime import _GREETING_RE, is_closer, looks_negative
-    return target_for(text or "", closer=is_closer(text or ""),
-                      greeting=bool(_GREETING_RE.match((text or "").strip())),
-                      negative=looks_negative(text or ""))
+    """The length target exactly as the live turn computes it: the runtime's
+    own function, not a mirror (a mirror here once lacked the complaint
+    floor the live turn uses — verification pass 1, repaired 2026-11-06)."""
+    from app.agent.runtime import length_target_for
+    return length_target_for(text)
 
 
 def score(cases: list[dict]) -> dict:
@@ -114,12 +113,20 @@ def _cli() -> None:
     ap.add_argument("--json", help="write the full result here")
     ap.add_argument("--misses", action="store_true", help="print every miss")
     args = ap.parse_args()
-    cases = eval_cases.load(args.file) if args.file else eval_cases.load()
+    cases = eval_cases.load(args.file, include_blind=True) if args.file else eval_cases.load()
     dev, held = eval_cases.split(cases)
     chosen = cases if args.file else held if args.held_out else dev if args.dev else cases
     label = f"file:{args.file}" if args.file else "held-out" if args.held_out else "dev" if args.dev else "all"
     cov = eval_cases.coverage(chosen)
+    if not chosen:
+        print(f"no cases selected ({label}) — check --file", file=sys.stderr)
+        raise SystemExit(2)                 # never a green exit on an empty run
     res = score(chosen)
+    if any(c.get("blind") for c in chosen) and not args.misses:
+        # The blind set is scored aggregate-only: its misses (with the case
+        # text) stay out of the record unless asked for on purpose.
+        res["misses"] = []
+        res["misses_withheld"] = "blind set — pass --misses to see them"
     print(f"case set: {cov['cases']} cases / {cov['turns']} turns ({label}); "
           f"sources {cov['by_source']}; critical {cov['critical']}")
     for metric, rows in res["metrics"].items():

@@ -1,9 +1,15 @@
 # Final Release Readiness Report — slice 1 (2026-11-06)
 
-**Status: the owner has given the word to merge and deploy when green**
-(2026-11-06, ~17:00 UTC). Gates before the merge: the full suite green on the
-repaired state, CI green on the head. The verification pass's S1/S2 findings
-are fixed or recorded (VERIFICATION_PASS_1 response table).
+**Status: slice 1 is LIVE** — PR #316 squash-merged as `c8c3356` at 17:18 UTC
+on the owner's word ("merge and deploy when green"), after the full suite
+(3,294 passed, 0 failed) and CI were green on its head. The box reported
+`version = c8c3356…` at ~17:52 UTC with `agent.replies = ok`, outreach still
+in shadow mode with no enforced rules. The first main build hung 24 minutes
+on the runner's apt step before any test ran; it was cancelled and re-run.
+The verification pass's S1/S2 findings are fixed or recorded
+(VERIFICATION_PASS_1 response table). Slice 2 (PR #317: behaviour tests for
+the downgraded rows, the length-scorer correction, blind set out of the
+sweep) is green and merges next under the same word.
 
 ## Measured improvement
 
@@ -35,7 +41,8 @@ silence, plus fail-closed safeguards that had been fail-open.
 
 ## Items requiring owner approval
 
-- Merge and deploy PR #316 (production deployment).
+- ~~Merge and deploy PR #316 (production deployment).~~ Done, c8c3356 live.
+- The `/api/health` hub wait (UNFINISHED_REGISTER): a one-function change to serve only the cached price audit — production behaviour, waits for the owner's word.
 - A model key on the box or as the repository secret (to run the evaluation).
 - Saving the dashboard credential from a browser (for production-derived cases).
 - Naming human raters and native speakers.

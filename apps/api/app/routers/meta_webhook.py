@@ -748,7 +748,7 @@ async def _capture_comment_events(db: AsyncSession, channel: str, payload: dict,
             c["page_id"] = str(entry.get("id") or "") or None   # owning page → right token
             if c["from_id"] in own:            # our own comment/reply — never self-answer
                 continue
-            if redis is not None:              # dedup on the comment id (best-effort)
+            if redis is not None:              # dedup on the comment id (fast path)
                 try:
                     ok = await redis.set(f"meta:comment:{c['comment_id']}", "1",
                                          nx=True, ex=7 * 24 * 3600)
@@ -756,6 +756,18 @@ async def _capture_comment_events(db: AsyncSession, channel: str, payload: dict,
                         continue
                 except Exception:
                     pass
+            # Durable idempotency (verification 1.6, 2026-11-06): the redis mark
+            # is best-effort, and a 502 from the DM capture above makes Meta
+            # redeliver the whole payload, comments included. The comment's own
+            # row carries its id (waba_msg_id), as a DM's does — so with redis
+            # down the same comment is still never answered twice.
+            from sqlalchemy import select as _select
+            dup = (await db.execute(
+                _select(Message.id).where(Message.channel == comment_channel,
+                                          Message.waba_msg_id == c["comment_id"]).limit(1)
+            )).scalar_one_or_none()
+            if dup is not None:
+                continue
 
             # Resolve WHAT this comment is replying to. A bare comment ("how much?"
             # / "where are you?") is meaningless without the post it sits under, so

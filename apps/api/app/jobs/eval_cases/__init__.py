@@ -59,9 +59,15 @@ LANGS = ("en", "sw", "ke-en", "sheng", "fr", "pt", "hi", "mixed")
 HERE = Path(__file__).parent
 
 
-def load(pattern: str = "*.jsonl") -> list[dict]:
+def load(pattern: str = "*.jsonl", *, include_blind: bool = False) -> list[dict]:
     """Every case, validated, in file order. Raises on a malformed case so a
-    bad label never scores silently."""
+    bad label never scores silently.
+
+    Blind cases (`"blind": true`) are LEFT OUT unless `include_blind=True`,
+    whatever the pattern: they are the untouched held-out set, never folded
+    into the development/held-out split that the floors are tuned on
+    (verification pass 1, repaired 2026-11-06; pass 2 closed the pattern
+    loophole). The two scorers' `--file` flags pass `include_blind=True`."""
     cases: list[dict] = []
     seen: set[str] = set()
     for path in sorted(HERE.glob(pattern)):
@@ -78,6 +84,8 @@ def load(pattern: str = "*.jsonl") -> list[dict]:
                 raise ValueError(f"{path.name}:{n}: duplicate id {case['id']}")
             seen.add(case["id"])
             case["_file"] = path.name
+            if case.get("blind") and not include_blind:
+                continue
             cases.append(case)
     return cases
 

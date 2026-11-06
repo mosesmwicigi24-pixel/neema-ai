@@ -199,3 +199,44 @@ def test_an_empty_reply_never_passes_where_a_reply_was_expected():
     v = eval_run.check_turn(case, 0, _turn("silence"), "", {"tools": [], "review": None},
                             opted_out=False, intercept_mode="ai", after_hold=False)
     assert v["passed"]
+
+
+def test_the_default_sweep_leaves_the_blind_set_out():
+    """The blind held-out file is scored only when named: the development
+    split must never contain a blind case (verification pass 1, finding 6)."""
+    swept = eval_cases.load()
+    assert swept and not any(c.get("blind") for c in swept)
+    assert not any(c["_file"] == "blind_heldout.jsonl" for c in swept)
+    assert eval_cases.load("blind_heldout.jsonl") == []           # not even when named, unless asked
+    assert not any(c.get("blind") for c in eval_cases.load("*.json*"))   # no pattern loophole (pass 2)
+    blind = eval_cases.load("blind_heldout.jsonl", include_blind=True)
+    assert blind and all(c.get("blind") for c in blind)
+    assert eval_cases.load(include_blind=True) and len(eval_cases.load(include_blind=True)) == len(swept) + len(blind)
+    dev, held = eval_cases.split(swept)
+    assert not any(c.get("blind") for c in dev + held)
+
+
+def test_the_runner_and_the_scorer_reach_the_blind_set_and_refuse_an_empty_run(tmp_path, monkeypatch):
+    """Verification pass 2b: include_blind on both --file paths, pinned; an
+    empty selection is never a green exit; a blind run withholds its misses."""
+    import json
+    import sys
+    from app.jobs import eval_floors, eval_run
+
+    blind = eval_run.select_cases("held-out", file="blind_heldout.jsonl")
+    assert len(blind) == 120 and all(c.get("blind") for c in blind)          # --held-out means nothing with --file
+    assert eval_run.select_cases("held-out", file="blind_heldout.jsonl", only="zzz") == []
+    assert not any(c.get("blind") for c in eval_run.select_cases("all"))
+
+    out = tmp_path / "blind.json"
+    monkeypatch.setattr(sys, "argv", ["eval_floors", "--file", "blind_heldout.jsonl", "--json", str(out)])
+    eval_floors._cli()
+    rec = json.loads(out.read_text())
+    assert rec["coverage"]["cases"] == 120 and rec["coverage"]["turns"] == 459
+    assert rec["misses"] == [] and "blind" in rec["misses_withheld"]
+    assert rec["metrics"]["said"]["all"]["n"] == 459
+
+    monkeypatch.setattr(sys, "argv", ["eval_floors", "--file", "no_such_file.jsonl"])
+    with pytest.raises(SystemExit) as e:
+        eval_floors._cli()
+    assert e.value.code == 2

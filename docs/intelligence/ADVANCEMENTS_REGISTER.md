@@ -105,7 +105,7 @@ explicit word.
 ## W2-4 · The scribe never erases a team check or a hold
 
 - **Change:** `deals._merge_next_action` — an open team check keeps its kind and tucks the new intent under `then`; a hold survives.
-- **Status:** VERIFIED COMPLETE for `_merge_next_action`; its wiring in `scribe_update` is IMPLEMENTED BUT NOT VERIFIED (source test only).
+- **Status:** VERIFIED COMPLETE — `_merge_next_action` tested, and `scribe_update` itself tested with a deal holding an open team check while the customer names a day (`test_the_scribe_keeps_the_team_check_when_the_customer_names_a_day`): the team check stays, the promise is tucked under it, the check-in is queued.
 
 ## W9-2 · `handoff_to_human` rings the team
 
@@ -119,8 +119,8 @@ explicit word.
 
 ## W3-1 · A complaint earns the care-first length
 
-- **Change:** the length target's `negative` flag also reads the customer-state floor's `complaint`.
-- **Status:** IMPLEMENTED BUT NOT VERIFIED (source test only — downgraded by verification 1).
+- **Change:** the length target's `negative` flag also reads the customer-state floor's `complaint`. The computation now lives in `runtime.length_target_for` (the live turn and the evaluation harness call the same function — the harness's mirror had lacked the complaint term).
+- **Status:** VERIFIED COMPLETE — behaviour test on `length_target_for`: a complaint the comment detector misses lands on the 60-word care-first target; a price ask does not; the harness scores the same function.
 
 ## W8-1 · Language continuity checked without the model reviewer
 
@@ -131,7 +131,7 @@ explicit word.
 ## W7-6 · State writes take the row lock
 
 - **Change:** `intent.record_opt_out` and `customer_state.apply` lock the person row before rewriting `state` (the `state_lock` contract).
-- **Status:** IMPLEMENTED BUT NOT VERIFIED (source test only; the lock is best-effort — downgraded by verification 1).
+- **Status:** VERIFIED COMPLETE — behaviour tests: both writers hand the person to `lock_for_write` and write to the row it hands back (the re-read row, not the stale copy). The best-effort fallback is a recorded trade-off with its own test: when the lock cannot be taken, the opt-out is still written unlocked, because a lost opt-out is the worse failure.
 
 ## W7-2 · The newest learned rules survive the combined cap
 
@@ -154,8 +154,8 @@ explicit word.
 
 ## W10-3 · The usage row logs the model that actually answered
 
-- **Change:** `_served` prefers `llm.last_model` (set after a fallback) over the configured `_model`.
-- **Status:** IMPLEMENTED BUT NOT VERIFIED (source test only — downgraded by verification 1).
+- **Change:** `_served` prefers `llm.last_model` (set after a fallback) over the configured `_model`; now `runtime.served_model(llm)`, used by the verdict record and the usage row alike.
+- **Status:** VERIFIED COMPLETE — behaviour test on `served_model` (last_model wins; falls back to the configured model; empty when the client says nothing) plus the usage-row pin.
 
 ## W1-5 (amended) · Fail closed on infrastructure errors only
 
@@ -171,7 +171,16 @@ explicit word.
 - **W2-1 (closers):** "Thanks for nothing" / "Thanks for the delay" are not closers (object whitelist).
 - **W8 (language):** Swahili with borrowed shop nouns ("Sawa size 42") stays Swahili; `apply()` no longer flips such customers to English.
 - **Runner (§5):** an empty reply fails wherever a reply was expected; `require` fails on an empty reply; a raised turn fails; the paid and pressure readings are the gate's own.
-- **Accepted, recorded (not changed):** Neema-initiated compositions bypass the gate by the existing `read_only` design (verification 1.3); the opt-out door checks text-only messages on every channel (1.4); on an unverifiable takeover the sweeper re-composes rather than re-sends (1.5); comment dedupe is redis-only (1.6); the performance view rides in the same PR (1.15 — the owner may ask for a split).
+- **Accepted, recorded (not changed):** Neema-initiated compositions bypass the gate by the existing `read_only` design (verification 1.3); the opt-out door checks text-only messages on every channel (1.4); on an unverifiable takeover the sweeper re-composes rather than re-sends (1.5); ~~comment dedupe is redis-only (1.6)~~ (fixed later the same day: W1-15 below); the performance view rides in the same PR (1.15 — the owner may ask for a split).
 
 - **W1-14 (verification 1.3, fixed):** Neema-initiated messages now meet the deterministic rules before they are sent — `review.initiated_issues` (paid acknowledgement, order status, pressure, internal talk, no tool results needed). The dispatcher's `_send` raises `HeldByRules` before delivery and the action is parked for a person with a bell; an after-sale announcement held by the rules asks a person instead (the hub's own `.paid` event may say "payment received" and every hub event carries its own status); the sweeper's bridge escalates instead of sending. Tests: `test_intelligence_w1_grounding.py`.
 - **W1-2 (verification 1.4, fixed):** the opt-out door on WhatsApp and Meta reads the words whether or not a photo is attached. Test: `test_intelligence_w1_fail_closed.py`.
+- **Verification 1 finding 12 (fixed):** the four register rows that rested on source-string tests (W3-1, W7-6, W10-3, W2-4 wiring) now have behaviour tests; two small extractions made that possible (`runtime.length_target_for`, `runtime.served_model`), with no change in what the turn does.
+- **Scorer correction (found while fixing finding 12):** the floors harness computed the reply-length target with a mirror of the runtime that lacked the complaint floor; it now calls the runtime's own function. Re-scored: `results/floors-rescored-*.json` (see BENCHMARK_RESULTS, "Correction 2").
+- **Blind set isolation (finding 6, hardened):** the case loader's default sweep now leaves `"blind": true` cases out, so the development/held-out split can never contain a blind case; the blind file is scored only when named. Test: `test_the_default_sweep_leaves_the_blind_set_out`.
+- **W1-15 (verification 1.6, fixed):** a Facebook or Instagram comment is deduped on its own row (`Message.waba_msg_id = comment id`, the DM path's pattern) before it is stored or engaged, in addition to the redis mark. A 502 redelivery with redis down no longer answers a comment twice. No migration. Test: `test_inbound_social.py::test_a_redelivered_comment_is_not_answered_twice_without_redis`.
+- **W7-4 (second half, verification: `stop_reason` never inspected — fixed):** a draft the writer could not finish (stop_reason `max_tokens`) is cut back to its last whole sentence before the gate (`runtime.trim_truncated`), when one exists and enough remains to stand as the answer; the turn facts record `truncated`. A draft with no sentence boundary goes on as written. Tests: the trimmer on nine shapes (English, Swahili, a newline, a quoted figure, a decimal, a short tail) and `run_turn` with a fake writer stopping on `max_tokens` vs `end_turn`.
+- **W9-5 (currency mutation mid-turn) — deferred with reasons:** `search_catalog` and `capture_contact` move `ctx.currency` within a turn by design (the "Kenya money plz" case: the model re-fetches in KES in the same turn, and a placed customer is already `market_locked`). Locking the currency once a figure is quoted would hold that correction to the next turn; whether that helps or hurts needs the real-model run on the `price-objection`/`org-purchase` cases. Recorded in UNFINISHED_REGISTER.
+- **W7-5 (split memory homes — first half, fixed):** a Messenger/Instagram turn now also reads the facts on the linked WhatsApp `User` row (the WhatsApp side already read the person's), so a thread continues where the other channel left off. Best-effort lookup, de-duplicated. Test: `test_a_messenger_turn_reads_the_linked_whatsapp_users_facts`. Still open from 7.5: `said_once` and product interest keyed by channel+handle, and the phone call stored three times (each needs its own measured change).
+- **Verification pass 2 (slice 2) — 0 × S1, 1 × S2, 7 × S3; the S2 and two S3 fixed the same day:** the real-model runner can reach the blind set again (`--file blind_heldout.jsonl`); the loader's blind exclusion holds for every pattern; the comment-redelivery test reads the statement it answers. Report and response table: `VERIFICATION_PASS_2.md`. Eleven of thirteen targeted production mutations were killed by the new behaviour tests; the two survivors were the predicate mutants the fake DB could not see, now covered.
+- **Verification pass 2b (slice 3) — 0 × S1, 2 × S2, 10 × S3; both S2 and nine S3 fixed the same day:** the trimmer no longer reads an abbreviation, an initial or a list number as a sentence end; a cut that would drop a figure, a currency or a question asks once more for the reply in words instead (`_settle_truncated`, also on the ran-out-of-iterations branch); the memory lookup orders by `updated_at` and unions case-insensitively, with a fake that reads the statement and an error-path test; both scorers reach the blind set through `--file` with `include_blind` pinned, refuse an empty run (exit 2), record `file:` as the selection, and withhold a blind file's misses (the three committed blind result files had their misses removed unread). Report and response table: `VERIFICATION_PASS_2B.md`.

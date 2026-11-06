@@ -1425,7 +1425,7 @@ async def _gate_turn_reply(reply: str, *, user_text: str, transcript: list, tool
             post_caption=post_caption, campaign=campaign)
 
     v1 = await _verdict(reply)
-    _vm = str(getattr(llm, "last_model", "") or getattr(llm, "_model", "") or "")
+    _vm = served_model(llm)
 
     async def _record(outcome: str) -> None:
         await _rv.record_verdict(redis, outcome, channel, kinds=v1.get("kinds") or (),
@@ -1509,6 +1509,96 @@ async def _gate_turn_reply(reply: str, *, user_text: str, transcript: list, tool
     if money:
         return (_SW_REVIEW_HOLD_DM_PRICE if swahili else _REVIEW_HOLD_DM_PRICE), all_issues, "held"
     return (_SW_REVIEW_HOLD_DM if swahili else _REVIEW_HOLD_DM), all_issues, "held"
+
+
+_SENTENCE_END_RE = re.compile(r"[.!?…][\"'”’)\]]*(?=\s|$)")
+# A full stop that does NOT end a sentence: an abbreviation ("St.", "Rev.",
+# "e.g."), an initial ("J."), or a list number ("3."). Matched against the
+# text before the stop (verification pass 2b: "Your parish is St." was a cut).
+_NOT_A_SENTENCE_END_RE = re.compile(
+    r"(?:^|[\s(\[])(?:[A-Za-z]|\d{1,3}|St|Mt|Ft|Rev|Fr|Sr|Br|Dr|Mr|Mrs|Ms|Prof|Pr|Hon|"
+    r"vs|etc|approx|no|nos|e\.g|i\.e|cf|Jan|Feb|Mar|Apr|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec)$",
+    re.I)
+# What a dropped tail may have been carrying: a figure, a currency, a question.
+_ANSWER_MARK_RE = re.compile(r"\d|KES|USD|ZMW|[$€£]|\?", re.I)
+
+
+def _sentence_ends(t: str) -> list[int]:
+    ends = []
+    for m in _SENTENCE_END_RE.finditer(t):
+        if t[m.start()] == "." and _NOT_A_SENTENCE_END_RE.search(t[:m.start()]):
+            continue
+        ends.append(m.end())
+    return ends
+
+
+def trim_truncated(text: str) -> tuple[str, bool]:
+    """A reply the model could not finish (stop_reason max_tokens), cut back
+    to its last complete sentence. Returns (text, cut). Nothing is cut when
+    the text already ends a sentence, when it has no sentence boundary at
+    all (abbreviations, initials and list numbers are not boundaries), or
+    when what would remain is too little to stand as the answer (under 12
+    characters or under a third of the draft) — then the whole draft goes
+    on as written."""
+    t = (text or "").rstrip()
+    if not t:
+        return t, False
+    ends = _sentence_ends(t)
+    if not ends or ends[-1] == len(t):
+        return t, False
+    keep = ends[-1]
+    if keep < 12 or keep < len(t) // 3:
+        return t, False
+    return t[:keep].rstrip(), True
+
+
+async def _settle_truncated(reply: str, llm, sys_blocks, messages: list, tools: list,
+                            key: str, turn_facts: dict | None) -> str:
+    """What goes on to the gate when the writer hit the token ceiling. Cut
+    back to the last whole sentence when the dropped tail carried nothing
+    the customer asked for; when it carried a figure, a currency or a
+    question — or there was no sentence to keep — ask once for the reply in
+    words (the loop's own mechanism), and only then settle for the cut or
+    the draft as written (verification pass 2b: a cut once kept the
+    pleasantry and dropped the price)."""
+    cut, was_cut = trim_truncated(reply)
+    dropped = reply[len(cut):] if was_cut else reply
+    how = "cut" if was_cut else "kept"
+    if not was_cut or _ANSWER_MARK_RE.search(dropped):
+        retry = await _reply_in_words(llm, sys_blocks, messages, tools)
+        if retry:
+            cut, how = retry, "retried"
+    _log.warning("reply for %s hit max_tokens — %s", key,
+                 {"cut": "cut back to its last whole sentence",
+                  "retried": "asked once more for the reply in words",
+                  "kept": "no whole sentence to keep; sent as written"}[how])
+    if turn_facts is not None:
+        turn_facts["truncated"] = True
+        turn_facts["truncation"] = how
+    return cut
+
+
+def length_target_for(user_text: str | None) -> dict:
+    """The reply-length target for one customer message, exactly as the live
+    turn computes it: closer, greeting and negative flags from the same text,
+    where "negative" is the comment detector OR the customer-state floor
+    reading a complaint (W3, 2026-11-06). One function so the evaluation
+    harness scores the real thing, not a mirror of it."""
+    from app.agent import reply_length as _rl
+    from app.services.customer_state import floor as _cs_floor
+    t = user_text or ""
+    return _rl.target_for(
+        t, closer=is_closer(t),
+        greeting=bool(_GREETING_RE.match(t.strip())),
+        negative=looks_negative(t)
+        or (_cs_floor(t) or {}).get("customer_said") == "complaint")
+
+
+def served_model(llm) -> str:
+    """The model that ANSWERED: after a fallback the client's `last_model`
+    differs from its configured `_model` (W10, 2026-11-06). "" when the
+    client says nothing."""
+    return str(getattr(llm, "last_model", None) or getattr(llm, "_model", None) or "")
 
 
 async def run_turn(db: AsyncSession, redis, wa_id: str, user_text: str, llm: LLM,
@@ -2092,14 +2182,7 @@ async def run_turn(db: AsyncSession, redis, wa_id: str, user_text: str, llm: LLM
     _len_target: dict = {}
     try:
         from app.agent import reply_length as _rl
-        from app.services.customer_state import floor as _cs_floor
-        _len_target = _rl.target_for(
-            user_text or "", closer=is_closer(user_text or ""),
-            greeting=bool(_GREETING_RE.match((user_text or "").strip())),
-            # a complaint earns the care-first length whether the comment
-            # detector or the customer-state floor read it (W3, 2026-11-06)
-            negative=looks_negative(user_text or "")
-            or (_cs_floor(user_text) or {}).get("customer_said") == "complaint")
+        _len_target = length_target_for(user_text)
         if not scribe_only and not read_only:
             _len_note = _rl.note(_len_target)
             if _len_note:
@@ -2218,6 +2301,11 @@ async def run_turn(db: AsyncSession, redis, wa_id: str, user_text: str, llm: LLM
 
         if not resp.tool_calls:
             reply = resp.text or ""
+            if reply and getattr(resp, "stop_reason", "") == "max_tokens":
+                # The writer hit the token ceiling mid-sentence. A half-written
+                # sentence is never the answer (W7-4, verification: stop_reason
+                # was never inspected).
+                reply = await _settle_truncated(reply, llm, sys_blocks, messages, tools, key, turn_facts)
             if not reply and (_overlap_noted or is_closer(user_text or "")):
                 # The contract the turn was given: an empty reply SENDS NOTHING
                 # when the message was already answered (OVERLAP_NOTE) or was
@@ -2268,6 +2356,8 @@ async def run_turn(db: AsyncSession, redis, wa_id: str, user_text: str, llm: LLM
         # never "let me get a colleague" when the facts are already in hand.
         reply = resp.text or await _reply_in_words(llm, sys_blocks, messages, tools) \
             or "Let me get a colleague to help you with this."
+        if resp.text and getattr(resp, "stop_reason", "") == "max_tokens":
+            reply = await _settle_truncated(reply, llm, sys_blocks, messages, tools, key, turn_facts)
 
     # THE GATE BEFORE POSTING (owner, 2026-09-25) — EVERY channel: the reply
     # is verified against this turn's ground truth before anyone sends it;
@@ -2385,8 +2475,7 @@ async def run_turn(db: AsyncSession, redis, wa_id: str, user_text: str, llm: LLM
 
     # the model that ANSWERED — after a fallback `last_model` differs from the
     # configured `_model` (W10, 2026-11-06: the usage split was the configured name)
-    _served = (getattr(llm, "last_model", None) or getattr(llm, "_model", None)
-               or settings.tier2_model)
+    _served = served_model(llm) or settings.tier2_model
     # The daily breaker is fed by the LLM client itself, call by call and by
     # purpose (services/ai_budget.meter) — the reviewer, the rewrite and every
     # vision read included — so nothing is metered twice here.
