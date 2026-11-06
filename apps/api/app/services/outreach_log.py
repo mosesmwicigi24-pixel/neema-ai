@@ -54,6 +54,7 @@ def decision(source: str, channel: str, key: str, verdict: str, reason: str,
 # ── the shadow week, readable without SSH (Stage 4) ──────────────────────────
 
 TALLY_FIELDS = ("suppress", "defer", "enforced_suppress", "enforced_defer",
+                "rule_customer_replied", "rule_colleague_replied", "rule_daily_cap", "rule_other",
                 "hold_customer", "hold_team_check", "park_language", "park_template",
                 "unknown_outcome")
 
@@ -80,8 +81,9 @@ async def health_view(redis, db_factory=None) -> dict:
     """Counts only, for /api/health (public): what the dispatcher decided today
     and yesterday (Nairobi days), and how many rows wait for a person. Never a
     number, a name, a reason text or a message. Each part is best-effort."""
-    from app.core.config import settings
-    out: dict = {"mode": getattr(settings, "outreach_mode", "shadow")}
+    from app.services import app_settings
+    out: dict = {"mode": app_settings._default_outreach_control()["mode"],
+                 "enforced_rules": app_settings._default_outreach_control()["rules"]}
     if redis is not None:
         try:
             out["today"] = await _tally(redis, _day_key(0))
@@ -95,6 +97,11 @@ async def health_view(redis, db_factory=None) -> dict:
         from sqlalchemy import func, select
         from app.models.agent_action import AgentAction
         async with db_factory() as db:
+            try:
+                ctrl = await app_settings.get_outreach_control(db, redis)
+                out["mode"], out["enforced_rules"] = ctrl["mode"], ctrl["rules"]
+            except Exception:
+                pass
             rows = (await db.execute(
                 select(AgentAction.status, func.count()).where(
                     AgentAction.status.in_(("planned", "needs_approval", "sending")))

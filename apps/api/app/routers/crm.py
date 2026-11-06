@@ -1149,6 +1149,59 @@ async def put_translation_setting(
     return {"ok": True, "enabled": enabled}
 
 
+# ── Outbound communication control (services/actions.py, Stage 5) ───────────
+
+@router.get("/settings/outreach")
+async def get_outreach_setting(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    agent: Agent = Depends(get_current_agent),
+):
+    """The rollout control for unprompted messages: shadow or enforce, and the
+    rules enforced while still in shadow — with the environment default and
+    the last two days' tally beside it, so the switch is flipped on evidence."""
+    from app.services import outreach_log
+    from app.services.app_settings import (OUTREACH_RULE_LABELS, OUTREACH_RULES,
+                                           _default_outreach_control, get_outreach_control)
+    redis = getattr(request.app.state, "redis", None)
+    ctrl = await get_outreach_control(db, redis)
+    tally = {}
+    try:
+        tally = {"today": await outreach_log._tally(redis, outreach_log._day_key(0)) if redis is not None else {},
+                 "yesterday": await outreach_log._tally(redis, outreach_log._day_key(1)) if redis is not None else {}}
+    except Exception:
+        pass
+    return {"mode": ctrl["mode"], "enforced_rules": ctrl["rules"],
+            "rules": [{"id": r, "label": OUTREACH_RULE_LABELS[r]} for r in OUTREACH_RULES],
+            "default": _default_outreach_control(), **tally}
+
+
+@router.put("/settings/outreach")
+async def put_outreach_setting(
+    body: dict,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    agent: Agent = Depends(get_current_agent),
+):
+    """Change the mode and/or the enforced rules. Admin-only: it decides which
+    unprompted messages customers stop receiving."""
+    if not (getattr(agent, "is_superuser", False) or str(agent.role) in ("admin", "AgentRole.admin")):
+        raise HTTPException(status_code=403, detail="Admin only")
+    from app.services.app_settings import OUTREACH_MODES, OUTREACH_RULES, set_outreach_control
+    body = body or {}
+    mode = body.get("mode")
+    rules = body.get("enforced_rules")
+    if mode is None and rules is None:
+        raise HTTPException(status_code=422, detail="give mode and/or enforced_rules")
+    if mode is not None and mode not in OUTREACH_MODES:
+        raise HTTPException(status_code=422, detail=f"mode must be one of {', '.join(OUTREACH_MODES)}")
+    if rules is not None and (not isinstance(rules, list) or any(r not in OUTREACH_RULES for r in rules)):
+        raise HTTPException(status_code=422, detail=f"enforced_rules may hold {', '.join(OUTREACH_RULES)}")
+    redis = getattr(request.app.state, "redis", None)
+    ctrl = await set_outreach_control(db, redis, mode=mode, rules=rules, updated_by=agent.id)
+    return {"ok": True, "mode": ctrl["mode"], "enforced_rules": ctrl["rules"]}
+
+
 # ── The offer running now (services/promotions) ──────────────────────────────
 
 @router.get("/settings/offer")

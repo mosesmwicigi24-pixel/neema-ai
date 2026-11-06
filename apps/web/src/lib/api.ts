@@ -218,6 +218,11 @@ export const settingsApi = {
         get<ApiTranslationSetting>("/admin/settings/translation"),
     putTranslation: (enabled: boolean) =>
         put<{ ok: boolean; enabled: boolean }>("/admin/settings/translation", { enabled }),
+    /** Unprompted messages: shadow or enforce, and the rules enforced meanwhile. */
+    getOutreach: () => get<ApiOutreachSetting>("/admin/settings/outreach"),
+    putOutreach: (change: { mode?: "shadow" | "enforce"; enforced_rules?: string[] }) =>
+        put<{ ok: boolean; mode: "shadow" | "enforce"; enforced_rules: string[] }>(
+            "/admin/settings/outreach", change),
     /** The offer Neema states outright while it runs. */
     getOffer: () => get<ApiOfferSetting>("/admin/settings/offer"),
     putOffer: (campaign: ApiCampaign | null) =>
@@ -243,6 +248,17 @@ export interface ApiOfferSetting {
     /** The sentence Neema is told to say. */
     says: string;
     max_percent: number;
+}
+
+export interface ApiOutreachSetting {
+    mode: "shadow" | "enforce";
+    /** Rules enforced while the mode is still shadow. */
+    enforced_rules: string[];
+    rules: { id: string; label: string }[];
+    default: { mode: "shadow" | "enforce"; rules: string[] };
+    /** Counts only (the dispatcher's decisions, Nairobi days). */
+    today?: Record<string, number>;
+    yesterday?: Record<string, number>;
 }
 
 export interface ApiTranslationSetting {

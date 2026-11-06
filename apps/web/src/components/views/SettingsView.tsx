@@ -2,7 +2,7 @@
 import React, { useEffect, useState } from "react";
 import { Toggle } from "@/components/ui/Layout";
 import { InputField } from "@/components/ui/FormFields";
-import { settingsApi, type ApiTranslationSetting,
+import { settingsApi, type ApiTranslationSetting, type ApiOutreachSetting,
          type ApiCampaign, type ApiOfferSetting } from "@/lib/api";
 import type { SharedViewProps } from "@/types";
 import { WhatsAppCallingCard } from "@/components/views/WhatsAppCallingCard";
@@ -280,6 +280,88 @@ function TranslationCard({ onToast }: { onToast: SharedViewProps["onToast"] }) {
     );
 }
 
+/** Unprompted messages (follow-ups, nudges, reminders). The dispatcher's three
+ *  contextual rules run in SHADOW first — sent as before, recorded as if held —
+ *  and are switched on one at a time from here, on the tally shown beside them. */
+function OutreachCard({ onToast }: { onToast: SharedViewProps["onToast"] }) {
+    const [state, setState] = useState<ApiOutreachSetting | null>(null);
+    const [saving, setSaving] = useState(false);
+
+    useEffect(() => {
+        let gone = false;
+        settingsApi.getOutreach()
+            .then((r) => { if (!gone) setState(r); })
+            .catch(() => { /* leave the card loading */ });
+        return () => { gone = true; };
+    }, []);
+
+    const apply = async (change: { mode?: "shadow" | "enforce"; enforced_rules?: string[] }, said: string) => {
+        if (!state || saving) return;
+        const before = state;
+        setState({ ...state, ...(change.mode ? { mode: change.mode } : {}),
+                   ...(change.enforced_rules ? { enforced_rules: change.enforced_rules } : {}) });
+        setSaving(true);
+        try {
+            const r = await settingsApi.putOutreach(change);
+            setState((s) => (s ? { ...s, mode: r.mode, enforced_rules: r.enforced_rules } : s));
+            onToast(said);
+        } catch {
+            setState(before);
+            onToast("Couldn't change that (admin only)", "error");
+        } finally {
+            setSaving(false);
+        }
+    };
+
+    const enforceAll = state?.mode === "enforce";
+    const count = (k: string) => (state?.yesterday?.[k] ?? 0) + (state?.today?.[k] ?? 0);
+
+    return (
+        <SectionCard title="Unprompted messages"
+            description="Follow-ups and nudges Neema sends without being asked. In shadow they still go out, and the card shows what each rule would have held; switch a rule on when its number looks right.">
+            <div className="flex items-center justify-between gap-4">
+                <div className="min-w-0">
+                    <p className="text-xs font-semibold text-stone-700">
+                        {state === null ? "Loading…" : enforceAll ? "Enforcing every rule" : "Shadow — sent, and recorded"}
+                    </p>
+                    <p className="text-[10px] text-stone-400 mt-0.5 leading-relaxed">
+                        {state === null ? "\u00a0"
+                            : `Yesterday + today: would hold ${count("suppress")}, would defer ${count("defer")}`
+                              + (count("enforced_suppress") + count("enforced_defer") > 0
+                                  ? ` · held ${count("enforced_suppress")}, deferred ${count("enforced_defer")}` : "")}
+                    </p>
+                </div>
+                <Toggle checked={!!enforceAll}
+                    onChange={() => apply({ mode: enforceAll ? "shadow" : "enforce" },
+                        enforceAll ? "Back to shadow — messages go out again, decisions stay recorded"
+                                   : "Enforcing every rule — held messages show under Deals → Needs approval")} />
+            </div>
+            {state !== null && !enforceAll && (
+                <div className="mt-3 space-y-2">
+                    {state.rules.map((r) => {
+                        const on = state.enforced_rules.includes(r.id);
+                        return (
+                            <div key={r.id} className="flex items-center justify-between gap-3">
+                                <div className="min-w-0">
+                                    <p className="text-[11px] text-stone-700 leading-snug">{r.label}</p>
+                                    <p className="text-[10px] text-stone-400">
+                                        {`fired ${count("rule_" + r.id)} time${count("rule_" + r.id) === 1 ? "" : "s"} yesterday + today`}
+                                    </p>
+                                </div>
+                                <Toggle checked={on}
+                                    onChange={() => apply(
+                                        { enforced_rules: on ? state.enforced_rules.filter((x) => x !== r.id)
+                                                             : [...state.enforced_rules, r.id] },
+                                        on ? "Rule back to shadow" : "Rule enforced from the next sweep")} />
+                            </div>
+                        );
+                    })}
+                </div>
+            )}
+        </SectionCard>
+    );
+}
+
 /** The offer Neema states outright. Named, sized, scoped and dated — the four
  *  things a customer needs, and the four a vague "we have a discount" leaves
  *  out. Order lines still reach the hub at list price and a person applies the
@@ -512,6 +594,7 @@ export function SettingsView({ onToast, isMobile, canManageCalling = false }: Sh
                 {/* Business */}
                 <StandingOrdersCard onToast={onToast} />
                 <TranslationCard onToast={onToast} />
+                <OutreachCard onToast={onToast} />
                 <OfferCard onToast={onToast} />
 
                 <SectionCard title="Business" description="Core platform details">

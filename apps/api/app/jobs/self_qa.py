@@ -261,13 +261,16 @@ async def compose_standup(db) -> str:
             from app.core.config import settings
             _h = await _redis.hgetall(f"outreach:shadow:{_y}") or {}
             _h = {(k.decode() if isinstance(k, bytes) else k): int(v) for k, v in _h.items()}
+            from app.services.app_settings import outreach_control_cached
+            _ctrl = await outreach_control_cached(_redis)
+            _mode = (_ctrl or {}).get("mode") or settings.outreach_mode
             if _h:
                 lines.append(
                     "🧭 Outreach: yesterday the contextual rules "
                     + ("held " if "enforced_suppress" in _h or "enforced_defer" in _h else "would have held ")
                     + f"{_h.get('suppress', 0) + _h.get('enforced_suppress', 0)} and deferred "
                     f"{_h.get('defer', 0) + _h.get('enforced_defer', 0)} unprompted message(s)"
-                    + (" (shadow — sent anyway)." if settings.outreach_mode != "enforce" else "."))
+                    + (" (shadow — sent anyway)." if _mode != "enforce" else "."))
     except Exception:
         pass
 

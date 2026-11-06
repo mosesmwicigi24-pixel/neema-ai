@@ -76,19 +76,41 @@ Questions the week answers, per the brief:
   mid-week; expected = no duplicate commitment, no second greeting, nothing
   while a team check or a hold is open.
 
-## 3. Turning enforcement on (Stage 5)
+## 3. Turning enforcement on (Stage 5) — from the dashboard, one rule at a time
 
-Preconditions: a week of shadow with the tally read; the owner's explicit
-approval for the configuration change (it affects live customers).
+Settings → **Unprompted messages** (admin only; `GET/PUT /api/admin/settings/outreach`).
+The card shows the mode, each rule with how often it fired yesterday + today,
+and switches. Nothing here needs SSH or a restart: the dispatcher reads the
+control at the start of every sweep (redis-cached, 5 min; a change clears the
+cache at once).
 
-1. `OUTREACH_MODE=enforce` in the box `.env`; restart the api.
-2. Watch the next two standups: `enforced_suppress` / `enforced_defer`
-   should match the shadow counts of the week before; Needs approval should
-   not grow.
-3. Optional tuning, each a config change under the same approval rule:
-   `CUSTOMER_HOLD_DAYS` (owner decision pending: 7 or shorter); the quote
-   follow-up delay (code, 4 h today — a later change if the week argues
-   for the next working morning).
+| Control | Meaning |
+|---|---|
+| Mode `shadow` (default) | every contextual rule records what it would do; messages still go |
+| Rule switch (while in shadow) | that one rule is enforced; the others stay in shadow |
+| Mode `enforce` | every rule enforced |
+
+The environment (`OUTREACH_MODE`, `OUTREACH_ENFORCE_RULES`) is only the
+default before anyone touches the card; the card's rows override it for good.
+
+Recommended order, each step under the owner's explicit approval (it changes
+which messages live customers receive):
+
+1. After the shadow week: enforce **the customer wrote after planning** and
+   **a colleague replied after planning**. Both are near-certain — the thread
+   already carries an answer — and the read-out shows how many messages each
+   would have held.
+2. A week later, on the tally: enforce **one unprompted sales message per
+   customer per day**. This one trades recoveries for restraint; read
+   Reports → recovery outcomes for the week before deciding.
+3. Mode `enforce` once all three are on (equivalent; keeps the card simple).
+4. Watch the next two standups and `/api/health` → `outreach`:
+   `enforced_suppress` / `enforced_defer` should match the shadow counts of
+   the week before; `rows.needs_approval` should not grow.
+
+Rollback of any step: flip the switch back. Nothing is lost — rows the rule
+held are vetoed with their reason and visible under Deals → Needs approval;
+rows it deferred come due the next morning.
 
 ## 4. Rollback
 
