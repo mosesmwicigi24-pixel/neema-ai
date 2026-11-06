@@ -184,11 +184,26 @@ def _row_figures(p: dict, currency: str = "USD") -> set[float]:
     return out
 
 
+# Keys whose numbers are never money: an id, a count, a size, a page. A
+# reply that quotes one of them as a price is a figure from nowhere, and the
+# gate must say so (investigation 1.15, 2026-11-06: any numeric tool value
+# used to count as ground truth).
+_NOT_MONEY_KEYS = frozenset({
+    "id", "ids", "idx", "index", "n", "count", "qty", "quantity", "pack", "pack_size",
+    "stock", "in_stock", "page", "pages", "per_page", "offset", "limit",
+    "hub_product_id", "product_id", "order_id", "conversation_id", "person_id", "deal_id",
+    "sku", "phone", "wa_id", "external_id", "year", "month", "day", "hour", "minute",
+    "size", "sizes", "width", "height", "length", "weight", "cm", "inches", "age",
+    "items_count", "attempt", "tries", "version", "ttl", "seconds", "ms", "days",
+})
+
+
 def figures_in_results(tool_results: list | None) -> set[float]:
-    """Every number a tool RETURNED this turn — the turn's ground truth: a
-    cart total, an order total, an offer price, a variant's price, a
-    figure inside a tool's own text. Numeric values anywhere in the result,
-    plus money-marked figures in its strings."""
+    """Every MONEY number a tool RETURNED this turn — the turn's ground truth:
+    a cart total, an order total, an offer price, a variant's price, a
+    figure inside a tool's own text. Numeric values anywhere in the result
+    except under keys that are never money (ids, counts, sizes, pages), plus
+    money-marked figures in its strings."""
     out: set[float] = set()
 
     def _walk(o):
@@ -202,7 +217,9 @@ def figures_in_results(tool_results: list | None) -> set[float]:
             for v in money_figures(o):
                 out.add(round(v, 2))
         elif isinstance(o, dict):
-            for v in o.values():
+            for k, v in o.items():
+                if str(k).lower() in _NOT_MONEY_KEYS and not isinstance(v, (dict, list, tuple)):
+                    continue
                 _walk(v)
         elif isinstance(o, (list, tuple)):
             for v in o:

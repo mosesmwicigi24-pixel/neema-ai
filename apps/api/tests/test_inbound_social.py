@@ -3,6 +3,7 @@ messages that used to land as "⚠️ Sent a message we can't display here — a
 them to resend as text.", "[story_mention]", "[unsupported message]" or an
 EMPTY comment row now carry words a person understands and a record."""
 import asyncio
+import types
 
 import app.models.agent  # noqa: F401
 import app.models.conversation  # noqa: F401
@@ -179,3 +180,53 @@ def test_a_redelivered_comment_is_not_answered_twice_without_redis(monkeypatch):
     db3 = _RowDB({("instagram", "ig9")})
     asyncio.run(mw._capture_comment_events(db3, "instagram", ig, redis=None))
     assert db3.sql and "messages.channel = 'instagram'" in db3.sql[0] and not engaged
+
+
+def test_a_meta_delivery_receipt_stamps_the_outbound_rows_it_covers(monkeypatch):
+    """Investigation 1.10: Meta's receipts carry a watermark, not our ids.
+    Every outbound row to that contact up to the watermark is stamped
+    delivered / read; a later row is not; a higher status is never lowered."""
+    from datetime import datetime, timezone
+    from app.services import messaging as svc
+
+    t = lambda s: datetime.fromisoformat(s).replace(tzinfo=timezone.utc)  # noqa: E731
+    rows = [
+        types.SimpleNamespace(created_at=t("2026-11-06T10:00:00"), raw_meta=None),                      # before: stamped
+        types.SimpleNamespace(created_at=t("2026-11-06T10:05:00"), raw_meta={"delivery": {"status": "read"}}),  # higher: kept
+        types.SimpleNamespace(created_at=t("2026-11-06T10:20:00"), raw_meta=None),                      # after the watermark
+    ]
+    watermark = int(t("2026-11-06T10:10:00").timestamp() * 1000)
+
+    class _DB:
+        def __init__(self): self.commits, self.sql = 0, []
+        async def execute(self, stmt):
+            from sqlalchemy.dialects import postgresql
+            sql = str(stmt.compile(dialect=postgresql.dialect(), compile_kwargs={"literal_binds": True}))
+            self.sql.append(sql)
+            until = datetime.fromtimestamp(watermark / 1000, tz=timezone.utc)
+            hit = [r for r in rows if r.created_at <= until]
+            return types.SimpleNamespace(scalars=lambda: types.SimpleNamespace(all=lambda: hit))
+        async def commit(self): self.commits += 1
+        async def rollback(self): pass
+
+    db = _DB()
+    n = asyncio.run(svc.record_meta_receipt(db, "messenger", "PSID_1", "delivered", watermark))
+    assert n == 1 and db.commits == 1
+    assert rows[0].raw_meta["delivery"]["status"] == "delivered"
+    assert rows[1].raw_meta["delivery"]["status"] == "read"                 # never lowered
+    assert rows[2].raw_meta is None
+    assert "messages.channel = 'messenger'" in db.sql[0] and "messages.external_id = 'PSID_1'" in db.sql[0]
+    assert "direction" in db.sql[0] and "created_at <=" in db.sql[0]
+    # no watermark, unknown status: nothing happens
+    assert asyncio.run(svc.record_meta_receipt(db, "messenger", "PSID_1", "delivered", None)) == 0
+    assert asyncio.run(svc.record_meta_receipt(db, "messenger", "PSID_1", "seen", watermark)) == 0
+
+    # and the webhook routes a read receipt there, with the sender's PSID
+    seen = []
+    async def fake_receipt(db, channel, ext, status, wm):
+        seen.append((channel, ext, status, wm)); return 1
+    monkeypatch.setattr(svc, "record_meta_receipt", fake_receipt)
+    payload = {"object": "page", "entry": [{"messaging": [
+        {"sender": {"id": "PSID_1"}, "recipient": {"id": "PAGE"}, "read": {"watermark": watermark}}]}]}
+    asyncio.run(mw._capture_events(_FakeDB(), "messenger", payload))
+    assert seen == [("messenger", "PSID_1", "read", watermark)]

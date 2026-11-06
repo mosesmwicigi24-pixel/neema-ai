@@ -291,6 +291,7 @@ will not catch the English reply that follows.
 |---|---|
 | 1 held-out contamination | **Accepted.** Held-out claim withdrawn in BENCHMARK_RESULTS; a blind set of 120 cases commissioned from a fresh author after the tuning, never read by the implementer; only its aggregate is reported. |
 | 2 runner passes empty replies | **Fixed.** Reply-expected turns fail on an empty reply; `require` fails on empty; a raised turn fails; the paid/pressure readings call the gate's own functions. Test added. |
+| 1.7 hold line promised when the flag fails | **Fixed** (same day; corrected after verification pass 3 found the first version dead): the flag reports failure, the handover is tried, and an unowned hold is left unmarked for the missed-reply sweep — never the promise, never "silence". Tests through the real flag and `run_turn`. |
 | 1.6 comment dedupe redis-only | **Fixed** (second pass, same day): the comment row's own id is queried before the row is stored or engaged — the DM path's pattern, no migration. Test added. |
 | 3 hard rules hold correct replies | **Fixed.** `paid_ack`: negation/condition guard (the four sentences are tests), every mode. `pressure`: imperative hurry only, "last X left/remaining/in stock" only, stock-figure exemption, `_PROMO_TOOLS` = real tools, **soft** until the live tally is clean. |
 | 4 opt-out false positives | **Fixed.** "stop messaging me" needs the clause to end (or again/anymore/please); "remove me" needs a list/messages object; group chats are not opt-outs. Tests added. |

@@ -2,7 +2,7 @@
 import React, { useEffect, useState } from "react";
 import { Toggle } from "@/components/ui/Layout";
 import { InputField } from "@/components/ui/FormFields";
-import { settingsApi, type ApiTranslationSetting, type ApiOutreachSetting,
+import { settingsApi, type ApiTranslationSetting, type ApiOutreachSetting, type ApiRuleProposal,
          type ApiCampaign, type ApiOfferSetting } from "@/lib/api";
 import type { SharedViewProps } from "@/types";
 import { WhatsAppCallingCard } from "@/components/views/WhatsAppCallingCard";
@@ -489,6 +489,74 @@ function OfferCard({ onToast }: { onToast: SharedViewProps["onToast"] }) {
     );
 }
 
+/** What Neema proposed to learn from the week's reviewed conversations
+ *  (jobs/self_qa.distill_weekly). Nothing reaches her prompt until a person
+ *  approves it here; a rejected line is kept, marked, and never proposed as
+ *  learned. The endpoint existed since plan D4; this is its first caller. */
+function ProposalsCard({ onToast }: { onToast: SharedViewProps["onToast"] }) {
+    const [rows, setRows] = useState<ApiRuleProposal[] | null>(null);
+    const [learned, setLearned] = useState<string>("");
+    const [busy, setBusy] = useState<number | null>(null);
+
+    const load = () => settingsApi.getProposals()
+        .then((r) => { setRows(r.proposals ?? []); setLearned(r.learned_rules ?? ""); })
+        .catch(() => { /* leave the card loading */ });
+    useEffect(() => { load(); }, []);
+
+    const judge = async (idx: number, verdict: "approve" | "reject") => {
+        if (busy !== null) return;
+        setBusy(idx);
+        try {
+            await settingsApi.judgeProposal(idx, verdict);
+            onToast(verdict === "approve"
+                ? "Approved — Neema follows this rule from her next conversation"
+                : "Rejected — kept here, never followed");
+            await load();
+        } catch {
+            onToast("Couldn't record that (admin only)", "error");
+        } finally {
+            setBusy(null);
+        }
+    };
+
+    const pending = (rows ?? []).map((r, i) => ({ ...r, i })).filter((r) => r.status === "pending");
+    const decided = (rows ?? []).filter((r) => r.status !== "pending");
+    const learnedCount = learned.split("\n").filter((l) => l.trim().startsWith("-")).length;
+
+    return (
+        <SectionCard title="What Neema proposes to learn"
+            description="Each week she distils the reviewed conversations into rules. None applies until someone approves it here.">
+            {rows === null ? (
+                <p className="text-xs text-stone-400">Loading…</p>
+            ) : pending.length === 0 ? (
+                <p className="text-xs text-stone-500">Nothing waiting. {learnedCount > 0 ? `${learnedCount} learned rule${learnedCount === 1 ? "" : "s"} in force.` : "No learned rules yet."}</p>
+            ) : (
+                <ul className="space-y-2">
+                    {pending.map((r) => (
+                        <li key={r.i} className="flex items-start justify-between gap-3 border border-[#e6f3d8] rounded-xl px-3 py-2">
+                            <p className="text-xs text-[#16270c] leading-relaxed flex-1">{r.rule}</p>
+                            <div className="flex gap-1.5 flex-shrink-0">
+                                <button onClick={() => judge(r.i, "approve")} disabled={busy !== null}
+                                    className="h-7 px-2.5 rounded-lg text-[10px] font-semibold text-white disabled:opacity-60"
+                                    style={{ backgroundColor: "#589b31" }}>Approve</button>
+                                <button onClick={() => judge(r.i, "reject")} disabled={busy !== null}
+                                    className="h-7 px-2.5 rounded-lg text-[10px] font-semibold border text-stone-500 disabled:opacity-60"
+                                    style={{ borderColor: "#e6f3d8" }}>Reject</button>
+                            </div>
+                        </li>
+                    ))}
+                </ul>
+            )}
+            {decided.length > 0 && (
+                <p className="text-[10px] text-stone-400 mt-3">
+                    {decided.filter((r) => r.status === "approved").length} approved · {decided.filter((r) => r.status === "rejected").length} rejected this round
+                    {learnedCount > 0 ? ` · ${learnedCount} learned rule${learnedCount === 1 ? "" : "s"} in force` : ""}
+                </p>
+            )}
+        </SectionCard>
+    );
+}
+
 function SectionCard({ title, description, children }: {
     title: string; description?: string; children: React.ReactNode;
 }) {
@@ -534,9 +602,7 @@ export function SettingsView({ onToast, isMobile, canManageCalling = false }: Sh
     /** manage_settings: the WhatsApp calling card (its routes refuse everyone else). */
     canManageCalling?: boolean;
 }): React.ReactElement {
-    const [savingBiz, setSavingBiz]   = useState(false);
-    const [savingAi,  setSavingAi]    = useState(false);
-    const [integrations, setIntegrations] = useState<Integration[]>(INTEGRATIONS);
+    const [integrations] = useState<Integration[]>(INTEGRATIONS);
     const [expandedInteg, setExpandedInteg] = useState<string | null>(null);
     const [integConfig, setIntegConfig]     = useState<Record<string, Record<string, string>>>({});
 
@@ -555,32 +621,15 @@ export function SettingsView({ onToast, isMobile, canManageCalling = false }: Sh
         timezone: "Africa/Nairobi",
     });
 
-    const saveBiz = async () => {
-        setSavingBiz(true);
-        await new Promise((r) => setTimeout(r, 600));
-        setSavingBiz(false);
-        onToast("Business settings saved");
-    };
-
-    const saveAi = async () => {
-        setSavingAi(true);
-        await new Promise((r) => setTimeout(r, 600));
-        setSavingAi(false);
-        onToast("Neema settings saved");
-    };
-
-    const toggleIntegration = (key: string) => {
-        setIntegrations((prev) => prev.map((i) =>
-            i.key === key ? { ...i, status: i.status === "connected" ? "disconnected" : "connected" } : i
-        ));
-        const integ = integrations.find((i) => i.key === key);
-        onToast(`${integ?.name} ${integ?.status === "connected" ? "disconnected" : "connected"}`);
-    };
-
-    const saveIntegConfig = (key: string) => {
-        onToast(`${integrations.find((i) => i.key === key)?.name} settings saved`);
-        setExpandedInteg(null);
-    };
+    // These three panels never had a server side: the values live in the
+    // box's configuration. Until they do, nothing here claims to save
+    // (intelligence programme W10, 2026-11-06: a "saved" toast with no
+    // write behind it was the dashboard telling the owner something false).
+    const NOT_EDITABLE_HERE = "Set in the box's configuration — nothing on this card saves yet";
+    const saveBiz = async () => { onToast(NOT_EDITABLE_HERE, "error"); };
+    const saveAi = async () => { onToast(NOT_EDITABLE_HERE, "error"); };
+    const toggleIntegration = (key: string) => { void key; onToast("Integrations are connected on the box — this switch changes nothing here", "error"); };
+    const saveIntegConfig = (key: string) => { void key; onToast(NOT_EDITABLE_HERE, "error"); setExpandedInteg(null); };
 
     return (
         <div className={`flex-1 overflow-y-auto bg-[#f3f9ec] ${isMobile ? "p-4 pb-24" : "p-6"}`}>
@@ -596,8 +645,9 @@ export function SettingsView({ onToast, isMobile, canManageCalling = false }: Sh
                 <TranslationCard onToast={onToast} />
                 <OutreachCard onToast={onToast} />
                 <OfferCard onToast={onToast} />
+                <ProposalsCard onToast={onToast} />
 
-                <SectionCard title="Business" description="Core platform details">
+                <SectionCard title="Business" description="Core platform details — shown for reference; set in the box's configuration">
                     <div className="grid grid-cols-2 gap-x-3">
                         <Field label="Business Name">
                             <SmallInput value={biz.business_name} onChange={(v) => setBiz((s) => ({ ...s, business_name: v }))} placeholder="Bethany House" />
@@ -615,16 +665,15 @@ export function SettingsView({ onToast, isMobile, canManageCalling = false }: Sh
                             <SmallInput value={biz.open_hours} onChange={(v) => setBiz((s) => ({ ...s, open_hours: v }))} placeholder="08:00–18:00" />
                         </Field>
                     </div>
-                    <button onClick={saveBiz} disabled={savingBiz}
-                        className="mt-1 h-8 px-4 rounded-lg text-xs font-semibold text-white transition-colors flex items-center gap-1.5 disabled:opacity-60"
-                        style={{ backgroundColor: "#589b31" }}>
-                        {savingBiz && <div className="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin" />}
-                        {savingBiz ? "Saving…" : "Save"}
+                    <button onClick={saveBiz}
+                        className="mt-1 h-8 px-4 rounded-lg text-xs font-semibold border text-stone-500 transition-colors"
+                        style={{ borderColor: "#e6f3d8" }}>
+                        Not editable here
                     </button>
                 </SectionCard>
 
                 {/* AI */}
-                <SectionCard title="Neema" description="How Neema handles conversations">
+                <SectionCard title="Neema" description="How Neema handles conversations — shown for reference; set in the box's configuration">
                     <div className="grid grid-cols-2 gap-x-3">
                         <Field label="Escalation Threshold" hint="Messages before escalating">
                             <SmallInput value={ai.auto_intercept_threshold} type="number"
@@ -648,11 +697,10 @@ export function SettingsView({ onToast, isMobile, canManageCalling = false }: Sh
                         <Toggle checked={ai.draft_approval}
                             onChange={() => setAi((s) => ({ ...s, draft_approval: !s.draft_approval }))} />
                     </div>
-                    <button onClick={saveAi} disabled={savingAi}
-                        className="h-8 px-4 rounded-lg text-xs font-semibold text-white transition-colors flex items-center gap-1.5 disabled:opacity-60"
-                        style={{ backgroundColor: "#589b31" }}>
-                        {savingAi && <div className="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin" />}
-                        {savingAi ? "Saving…" : "Save Neema settings"}
+                    <button onClick={saveAi}
+                        className="h-8 px-4 rounded-lg text-xs font-semibold border text-stone-500 transition-colors"
+                        style={{ borderColor: "#e6f3d8" }}>
+                        Not editable here
                     </button>
                 </SectionCard>
             </div>
@@ -711,7 +759,7 @@ export function SettingsView({ onToast, isMobile, canManageCalling = false }: Sh
                                                 ? { backgroundColor: "#fff5f5", color: "#c0392b", border: "1px solid #fecaca" }
                                                 : { backgroundColor: "#f0f9ec", color: "#589b31", border: "1px solid #b5da8b" }}
                                         >
-                                            {isConnected ? "Disconnect" : "Connect"}
+                                            Managed on the box
                                         </button>
                                     </div>
                                 </div>
@@ -739,7 +787,7 @@ export function SettingsView({ onToast, isMobile, canManageCalling = false }: Sh
                                             className="h-7 px-4 rounded-lg text-[10px] font-semibold text-white"
                                             style={{ backgroundColor: "#589b31" }}
                                         >
-                                            Save Configuration
+                                            Not editable here
                                         </button>
                                     </div>
                                 )}

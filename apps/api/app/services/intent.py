@@ -103,6 +103,27 @@ async def record_opt_out(db, redis, conv, text: str, *, channel: str, key: str) 
     now = datetime.now(timezone.utc).isoformat(timespec="seconds")
     try:
         pid = getattr(conv, "person_id", None)
+        # A WhatsApp identity is a phone number; a web-chat visitor rides the
+        # WhatsApp channel with a "web_…" key and has no person to make
+        # (verification pass 3: the resolver minted phantom contacts).
+        _can_resolve = bool(key) and (channel != "whatsapp" or str(key).isdigit())
+        if pid is None and db is not None and _can_resolve:
+            # No person yet (an early-funnel contact, a comment-DM thread):
+            # the preference must still outlive redis, so the person is
+            # created now — the same resolver every inbound door uses
+            # (verification 1.3, 2026-11-06). The conversation row, when it
+            # is one, is linked so later reads find the preference directly.
+            try:
+                from app.services.identity import resolve_or_create_person
+                ident = await resolve_or_create_person(db, channel, key, source="opt_out",
+                                                       confidence="deterministic")
+                pid = ident.person_id
+                if getattr(conv, "id", None) is not None and hasattr(conv, "person_id"):
+                    conv.person_id = pid
+            except Exception as exc:
+                _log.warning("opt-out for %s/%s: no person could be made (%s) — redis only",
+                             channel, key[-4:], exc)
+                pid = None
         if pid is not None:
             from app.models.person import Person
             person = await db.get(Person, pid)
@@ -152,10 +173,19 @@ async def opted_out(db, redis, conv) -> bool:
         except Exception:
             pass
     pid = getattr(conv, "person_id", None)
-    if pid is None or db is None:
+    if db is None:
         return False
     try:
         from app.models.person import Person
+        if pid is None and key:
+            # A thread with no person (a comment-DM, a synthetic conversation)
+            # can still belong to a person who opted out on this handle: the
+            # identity is the durable link (verification 1.3).
+            from app.services.identity import _select_identity
+            ident = await _select_identity(db, channel, key)
+            pid = getattr(ident, "person_id", None) if ident is not None else None
+        if pid is None:
+            return False
         person = await db.get(Person, pid)
     except Exception:
         return False

@@ -159,3 +159,24 @@ def test_a_paid_celebration_from_the_hubs_own_event_may_say_payment_received():
     assert rv.initiated_issues("Payment received — thank you! Production begins.")["hard"] == ["paid_ack"]
     assert rv.initiated_issues("Your order has been shipped and is on its way!", status_known=True)["hard"] == []
     assert rv.initiated_issues("Your order has been shipped and is on its way!")["hard"] == ["status"]
+
+
+def test_a_tools_ids_counts_and_sizes_are_not_money_facts():
+    """Investigation 1.15: any numeric tool value used to count as ground
+    truth, so "KES 350" could be vouched for by a pack size of 350 or an id.
+    Money keys stay; ids, quantities, sizes and pages do not; strings with
+    money marks still count; nested rows are walked."""
+    from app.agent import review as rv
+    results = [{"tool": "search_catalog", "out": {
+        "items": [{"hub_product_id": 350, "name": "Cope", "price": 45000, "price_usd": 350.0,
+                   "qty": 3, "pack_size": 12, "size": 42, "in_stock": 7}],
+        "page": 2, "count": 1, "note": "delivery is KES 350 within Nairobi"}}]
+    figs = rv.figures_in_results(results)
+    assert 45000.0 in figs and 350.0 in figs                 # the price, the USD price, the KES line
+    assert 3.0 not in figs and 12.0 not in figs and 42.0 not in figs and 7.0 not in figs and 2.0 not in figs
+    # an id alone never vouches for a figure
+    only_ids = [{"tool": "get_cart", "out": {"id": 2500, "items": [{"hub_product_id": 1800, "qty": 2}]}}]
+    assert rv.figures_in_results(only_ids) == set()
+    # a money key under a non-money-named container is still walked
+    nested = [{"tool": "x", "out": {"size": {"price": 900}}}]
+    assert rv.figures_in_results(nested) == {900.0}

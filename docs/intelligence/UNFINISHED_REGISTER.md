@@ -43,6 +43,14 @@ the precise dependency · status. Last update: 2026-11-06, end of session 1.
 | Context-engineering experiment (W7-1: structured state object vs raw history) | must be a controlled comparison on the held-out set; needs the model | INVESTIGATION 7.1 |
 | Prompt shortening / SELL LIKE A CONSULTANT rewrite (W4-3) | no blind cut; replay comparison first | INVESTIGATION 4.3 |
 | Delivery total consistency (W6-2), `payment_url` key rename (W6-1) | prompt/tool contract changes to be measured with the model | INVESTIGATION 6.1–6.2 |
+| Person-keyed `said_once` and product interest (W7-5, second half) | one identity lookup per turn on every channel; measure two-channel activity inside the TTL first | INVESTIGATION 7.5 |
+| One pause decision instead of four (W3-3) | a redesign; judge with the real-model run on `needs-silence`/`closing` cases | INVESTIGATION 3.3 |
+| A server side for the Business / Neema / Integrations settings panels (today: reference-only, values live in the box's configuration) | decide which of these the owner wants editable from the dashboard; each is an app_settings row plus a reader | INVENTORY G §5.2 |
+| The prompt's delivery figure is a fact in every currency (W1-15, second half): "$350" passes where only "KES 350" is true | per-currency prompt figures; measure the false-hold rate on true cross-currency delivery lines with the model first | INVESTIGATION 1.15 |
+| Rule proposals are judged by index into a list the weekly distillation replaces (a verdict can land on the wrong proposal if the job runs between read and click) — inherited | key proposals by a stable id; small | VERIFICATION_PASS_3 |
+| An unowned hold on the sync channels (web chat shows "🙏", ManyChat sends nothing) is not swept, so it is not retried | a sync-channel retry or a visible "we'll come back to you" that a person owns; rare (the DB must die mid-turn) | VERIFICATION_PASS_3B |
+| `record_turn_failure` classifies a gate/database error by its text, so a DB outage can read as "credit"/"auth" on health and pause the missed-reply sweep for up to an hour | classify by exception type before text | VERIFICATION_PASS_3B |
+| The comment-DM opt-out read fails open on a query error (DM sent) and closed on a session error (DM skipped) | one posture; fail closed (no DM) is the safer | VERIFICATION_PASS_3B |
 | Currency lock once a figure is quoted in a turn (W9-5) | `search_catalog`/`capture_contact` move the turn's currency on purpose (the customer's own words); a lock would delay that correction by a turn — measure with the model first | INVESTIGATION 9.5 |
 | Retiring the legacy bridge order path and the expiring receipt shortener (W9-4) | removes a code path hub events may still use; needs a production trace first | INVESTIGATION 9.4 |
 | Turn latency instrumentation, availability history, resolution definition | named on the dashboard as NOT YET MEASURED with what each needs | performance.py |

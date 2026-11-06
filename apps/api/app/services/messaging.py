@@ -333,6 +333,55 @@ async def send_wa_template(wa_id: str, template: str, lang: str,
 _STATUS_RANK = {"sent": 1, "delivered": 2, "read": 3, "failed": 9, "deleted": 9}
 
 
+async def record_meta_receipt(db, channel: str, external_id: str, status: str,
+                              watermark_ms: int | None) -> int:
+    """Stamp a Messenger/Instagram delivery or read receipt onto the outbound
+    rows it covers. Meta's receipts carry no per-message id we stored (the
+    Send API's id is not kept) but a WATERMARK: every message to that contact
+    sent up to that moment is delivered/read. Rows already at a higher status
+    keep it. Returns the rows updated. Best-effort, never raises
+    (investigation 1.10, 2026-11-06: receipts were discarded, so "delivered"
+    was never known on Messenger/Instagram)."""
+    from datetime import datetime, timezone
+    from sqlalchemy.orm.attributes import flag_modified
+    status = (status or "").lower()
+    if status not in _STATUS_RANK or not external_id or not watermark_ms:
+        return 0
+    try:
+        until = datetime.fromtimestamp(int(watermark_ms) / 1000, tz=timezone.utc)
+        rows = (await db.execute(
+            select(Message).where(Message.channel == channel,
+                                  Message.external_id == external_id,
+                                  Message.direction == MsgDirection.outbound,
+                                  Message.created_at <= until)
+            .order_by(Message.created_at.desc()).limit(20))).scalars().all()
+        n = 0
+        for row in rows:
+            meta = dict(row.raw_meta or {})
+            prev = (meta.get("delivery") or {}).get("status") or ""
+            if _STATUS_RANK.get(status, 0) <= _STATUS_RANK.get(prev, 0):
+                continue
+            meta["delivery"] = {"status": status, "at": until.isoformat(timespec="seconds")}
+            row.raw_meta = meta
+            try:
+                flag_modified(row, "raw_meta")
+            except Exception:
+                pass
+            n += 1
+        if n:
+            await db.commit()
+        return n
+    except Exception as exc:
+        import logging as _logging
+        _logging.getLogger("neema.meta").info("meta receipt not recorded for %s/%s: %s",
+                                              channel, external_id[-4:], exc)
+        try:
+            await db.rollback()
+        except Exception:
+            pass
+        return 0
+
+
 async def record_delivery_statuses(db, statuses: list[dict]) -> int:
     """Stamp provider delivery statuses onto the outbound rows they belong to
     (`messages.raw_meta.delivery`), matched on the wamid Graph returned at send

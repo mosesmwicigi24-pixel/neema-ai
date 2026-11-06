@@ -21,6 +21,8 @@ NOT STARTED · NOT APPLICABLE.
 | `UNFINISHED_REGISTER.md` | nothing silently omitted |
 | `INTERNATIONAL_ASSESSMENT.md` | evidence-backed comparison against a defensible peer group |
 | `RELEASE_READINESS.md` | measured improvement, remaining risks, items requiring owner approval |
+| `VERIFICATION_PASS_1.md`, `_2.md`, `_2B.md`, `_3.md`, `_3B.md` | the independent adversarial passes (one per slice) with the implementer's response tables |
+| `OWNER_ACTIONS.md` | the exact steps for what only the owner can do, and the decisions waiting |
 
 Inputs that were **not available** to the session that started this record:
 `NEEMA_CAPABILITY_INTELLIGENCE_PROFILE_2026.md` (not in the repository, the

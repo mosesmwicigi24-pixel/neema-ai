@@ -11,6 +11,8 @@ person for Meta) so the agent sells like it remembers them.
 """
 from __future__ import annotations
 
+from datetime import datetime, timezone
+
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm.attributes import flag_modified
@@ -20,6 +22,7 @@ from app.models.person import Person, Identity
 from app.models.user import User
 
 _KEY = "agent_memory"
+_AT_KEY = "agent_memory_at"      # fact (lower-cased) → the day it was noted or last confirmed
 _MAX_FACTS = 20
 
 
@@ -60,6 +63,13 @@ def read_memory(state: dict | None) -> list[str]:
     return facts if isinstance(facts, list) else []
 
 
+def _noted_on(state: dict | None) -> dict[str, str]:
+    """{fact (lower-cased): YYYY-MM-DD} — when each fact was noted or last
+    confirmed. Empty for rows written before the dates existed."""
+    at = (state or {}).get(_AT_KEY)
+    return {str(k): str(v) for k, v in at.items()} if isinstance(at, dict) else {}
+
+
 def _union(facts: list[str], more: list[str]) -> list[str]:
     """`facts` then whatever in `more` is not already there — compared the
     way the writer compares (case-insensitive, stripped), so two homes never
@@ -98,6 +108,16 @@ async def add_fact(db: AsyncSession, wa_id: str, fact: str, channel: str = "what
     state = dict(store.state or {})
     facts = _merge(read_memory(state), fact)
     state[_KEY] = facts
+    # When each fact was noted (W5-3, 2026-11-06): a size or a parish told a
+    # year ago is not the same evidence as one told last week — the model
+    # is shown the date and can confirm instead of assuming. Re-stating a
+    # fact refreshes its date; dates of facts that fell off the cap go too.
+    at = dict(state.get(_AT_KEY) or {})
+    k = fact.strip().lower()
+    if k:
+        at[k] = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    keep = {f.strip().lower() for f in facts}
+    state[_AT_KEY] = {f: d for f, d in at.items() if f in keep}
     store.state = state
     # JSONB columns need an explicit reassignment to be flagged dirty.
     flag_modified(store, "state")
@@ -161,6 +181,7 @@ async def build_memory_context(db: AsyncSession, redis, wa_id: str, user: User |
     store = user if (user is not None and channel == "whatsapp") else (
         await _load_store(db, wa_id, channel))
     facts = read_memory(getattr(store, "state", None) if store else None)
+    when = _noted_on(getattr(store, "state", None) if store else None)   # fact → day noted
     if channel == "whatsapp" and store is not None and getattr(store, "person_id", None):
         # A customer who started on Messenger carries facts on their PERSON
         # (merged across by the waref/phone link) — surface them here so the
@@ -168,6 +189,7 @@ async def build_memory_context(db: AsyncSession, redis, wa_id: str, user: User |
         person = await db.get(Person, store.person_id)
         pfacts = read_memory(person.state if person else None)
         facts = _union(facts, pfacts)
+        when = {**_noted_on(person.state if person else None), **when}
     elif isinstance(store, Person):
         # The other direction (W7-5, 2026-11-06): a customer who started on
         # WhatsApp carries facts on their USER row — surface them on
@@ -180,6 +202,7 @@ async def build_memory_context(db: AsyncSession, redis, wa_id: str, user: User |
             )).scalar_one_or_none()
             ufacts = read_memory(getattr(u, "state", None) if u is not None else None)
             facts = _union(facts, ufacts)
+            when = {**_noted_on(getattr(u, "state", None) if u is not None else None), **when}
         except Exception:
             pass
     person_id = store.id if (channel != "whatsapp" and isinstance(store, Person)) else None
@@ -219,7 +242,10 @@ async def build_memory_context(db: AsyncSession, redis, wa_id: str, user: User |
     if parish_line:
         parts.append(parish_line)
     if facts:
-        parts.append("Known facts:\n" + "\n".join(f"- {f}" for f in facts))
+        parts.append("Known facts (with the day each was noted — confirm an old one "
+                     "rather than assume it still holds):\n"
+                     + "\n".join(f"- {f}" + (f" (noted {d})" if (d := when.get(f.strip().lower())) else "")
+                                 for f in facts))
     if sizes:
         parts.append("Measurements on file: " + sizes +
                      "\n(Confirm these instead of asking again — "
