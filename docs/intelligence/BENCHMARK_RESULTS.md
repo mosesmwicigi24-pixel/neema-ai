@@ -102,6 +102,31 @@ review and time-math suites unchanged.
 Not changed: the reply-length kind (0.55 on both halves) — a vocabulary
 disagreement, taken to W9.
 
+## The blind set — the only defensible held-out number (2026-11-06, after the repairs)
+
+`blind_heldout.jsonl`: 120 cases / 459 turns / 48 critical, written by a
+fresh independent author after all tuning, from the domain brief alone (the
+author was told not to read the other case files). The implementer has not
+read a line of it; both runs below are aggregate-only (`--file`, no misses
+printed). "Before" is main's code (ff8c3b5) in a clean worktree with only
+the scorer and the file copied in; "after" is the repaired branch (111ee6e).
+Files: `results/floors-blind-before.json`, `results/floors-blind-after.json`.
+
+| Metric (floors) | Before (main) | After (branch) | Separated? |
+|---|---|---|---|
+| customer state vs gold | 333/459 = 0.725 [0.683, 0.764] | **358/459 = 0.780 [0.740, 0.815]** | no — intervals overlap; a real but modest gain (+5.5 points) |
+| language guess vs gold | 235/445 = 0.528 [0.482, 0.574] | **414/445 = 0.930 [0.903, 0.950]** | **yes** (+40 points) |
+| opt-out recognition | 31/34 = 0.912 [0.770, 0.970] | **33/34 = 0.971 [0.851, 0.995]** | no — n is small; one false negative left |
+| reply-length kind | 211/459 = 0.460 | 218/459 = 0.475 | unchanged by design (W9 evidence) |
+
+Reading: the language guesser's gain is the one this slice can claim
+cleanly. The customer-state floor improved on the blind set less than the
+contaminated number suggested (0.78 vs the withdrawn 0.79, but from a
+higher baseline of 0.73 rather than 0.54 — the blind author's labels are
+also more conservative, with `said` null on 321 of 459 turns). The
+remaining misses are not inspected, by design; a future slice may read
+them only after a new blind set exists.
+
 ## Real-model baseline — NOT MEASURED
 
 Command, once a key exists on the box or as the `ANTHROPIC_API_KEY`
