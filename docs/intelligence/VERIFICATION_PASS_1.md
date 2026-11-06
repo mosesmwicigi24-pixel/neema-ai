@@ -300,7 +300,7 @@ will not catch the English reply that follows.
 | 9 fail-closed flag best-effort | **Mitigated:** a gate error is counted as a failing turn in `agent_health`. The hold line is kept over silence; recorded as a trade-off. |
 | 10 `_still_ai` None → re-compose | **Accepted**, recorded in UNFINISHED_REGISTER. |
 | 11 closer key not armed | **Fixed.** Silence on a closer arms the key on both senders. |
-| 12 VERIFIED COMPLETE on source tests | **Downgraded** (W3-1, W7-6, W10-3, W2-4 wiring); W2-3 got a behaviour test; W9-1 is asserted by the hub-event tests. |
+| 12 VERIFIED COMPLETE on source tests | **Fixed** (second pass, same day): W3-1, W7-6, W10-3 and the W2-4 wiring now have behaviour tests (`test_intelligence_w2_w7.py`); W2-3 got one earlier; W9-1 is asserted by the hub-event tests. Found on the way: the harness's length scorer mirrored the runtime without the complaint floor — now one function (`runtime.length_target_for`); and the default case sweep had started to include the blind file — now excluded by the loader. |
 | 13 runner coverage limits | **Recorded** in UNFINISHED_REGISTER. |
 | 14 Wilson, cap header, sweeper | — |
 | 15 scope | **Recorded**; the owner may ask for the performance view to be split out. |

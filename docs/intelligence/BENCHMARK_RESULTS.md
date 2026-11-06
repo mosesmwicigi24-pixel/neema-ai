@@ -117,7 +117,7 @@ Files: `results/floors-blind-before.json`, `results/floors-blind-after.json`.
 | customer state vs gold | 333/459 = 0.725 [0.683, 0.764] | **358/459 = 0.780 [0.740, 0.815]** | no — intervals overlap; a real but modest gain (+5.5 points) |
 | language guess vs gold | 235/445 = 0.528 [0.482, 0.574] | **414/445 = 0.930 [0.903, 0.950]** | **yes** (+40 points) |
 | opt-out recognition | 31/34 = 0.912 [0.770, 0.970] | **33/34 = 0.971 [0.851, 0.995]** | no — n is small; one false negative left |
-| reply-length kind | 211/459 = 0.460 | 218/459 = 0.475 | unchanged by design (W9 evidence) |
+| reply-length kind | 211/459 = 0.460 | 218/459 = 0.475 | unchanged by design (W9 evidence) — see Correction 2: the scorer under-read complaints; corrected 221/459 = 0.481 |
 
 Reading: the language guesser's gain is the one this slice can claim
 cleanly. The customer-state floor improved on the blind set less than the
@@ -126,6 +126,40 @@ higher baseline of 0.73 rather than 0.54 — the blind author's labels are
 also more conservative, with `said` null on 321 of 459 turns). The
 remaining misses are not inspected, by design; a future slice may read
 them only after a new blind set exists.
+
+## Correction 2 — the length scorer was a mirror, and the sweep had started to include the blind file (2026-11-06, later the same day)
+
+Found while replacing the source-string tests with behaviour tests:
+
+1. `eval_floors._runtime_target` re-implemented the live turn's length
+   target and had not been given the complaint-floor term that W3-1 added
+   to the runtime. The runtime's computation is now one function
+   (`runtime.length_target_for`) and the harness calls it. Effect on the
+   reply-length metric only, same turns: all 657→677 of 1,196 (0.549→0.566);
+   held-out 329→335 of 600 (0.548→0.558); dev 328→342 of 596; blind
+   218→221 of 459 (0.475→0.481, interval [0.436, 0.527]). No other metric
+   moves from this.
+2. The case loader's default sweep (`*.jsonl`) had picked up
+   `blind_heldout.jsonl` once it existed, so a `--dev`/`--held-out` run
+   after the blind set was written would have mixed blind cases into the
+   tuning split. The loader now leaves blind cases out unless their file
+   is named; the published "after" runs above predate the blind file and
+   were not affected. A test pins the exclusion.
+
+Re-scored on the current case set (453 non-blind cases: the verifier's
+23 negatives joined the sweep after the "after" runs, which is why the
+non-length denominators differ; the blind set is unchanged at 120):
+
+| Metric (floors) | All (453) | Dev (217) | Held-out (236) | Blind (120) |
+|---|---|---|---|---|
+| customer state vs gold | 422/491 = 0.859 [0.826, 0.887] | 214/228 = 0.939 | 208/263 = 0.791 [0.738, 0.836] | 358/459 = 0.780 |
+| language guess vs gold | 342/355 = 0.963 [0.938, 0.978] | 196/197 = 0.995 | 146/158 = 0.924 [0.872, 0.956] | 414/445 = 0.930 |
+| opt-out recognition | 40/42 = 0.952 | 11/12 = 0.917 | 29/30 = 0.967 | 33/34 = 0.971 |
+| reply-length kind vs gold | 677/1196 = 0.566 [0.538, 0.594] | 342/596 = 0.574 | 335/600 = 0.558 [0.518, 0.598] | 221/459 = 0.481 |
+
+Files: `results/floors-rescored-{all,dev,held-out,blind}.json`. The blind
+column remains the only number this programme claims as held-out; the
+dev/held-out split is tuned-on and contaminated, as Correction 1 records.
 
 ## Real-model baseline — NOT MEASURED
 

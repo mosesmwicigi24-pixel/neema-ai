@@ -37,13 +37,11 @@ _LANG_MAP = {"ke-en": "en", "sheng": None, "mixed": None}   # what guess_languag
 
 
 def _runtime_target(text: str) -> dict:
-    """The length target exactly as the live turn computes it
-    (runtime.py: closer, greeting and negative flags from the same text)."""
-    from app.agent.reply_length import target_for
-    from app.agent.runtime import _GREETING_RE, is_closer, looks_negative
-    return target_for(text or "", closer=is_closer(text or ""),
-                      greeting=bool(_GREETING_RE.match((text or "").strip())),
-                      negative=looks_negative(text or ""))
+    """The length target exactly as the live turn computes it: the runtime's
+    own function, not a mirror (a mirror here once lacked the complaint
+    floor the live turn uses — verification pass 1, repaired 2026-11-06)."""
+    from app.agent.runtime import length_target_for
+    return length_target_for(text)
 
 
 def score(cases: list[dict]) -> dict:

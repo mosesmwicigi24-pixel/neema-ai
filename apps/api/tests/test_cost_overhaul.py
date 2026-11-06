@@ -17,10 +17,13 @@ def test_usage_logs_the_model_that_actually_served(monkeypatch):
     """settings.tier2_model recorded every Haiku-routed turn as Sonnet — the
     per-model split in the standup was fiction. The row must carry llm._model."""
     import inspect
+    import types
     from app.agent import runtime
     src = inspect.getsource(runtime.run_turn)
-    assert 'getattr(llm, "last_model", None) or getattr(llm, "_model", None)' in src
+    assert "log_agent_usage(db, key, _served, totals" in src and "_served = served_model(llm)" in src
     assert "settings.tier2_model, totals)" not in src        # the old lie
+    # and what served_model answers: the model that replied, after a fallback
+    assert runtime.served_model(types.SimpleNamespace(_model="claude-a", last_model="claude-b")) == "claude-b"
 
 
 def test_usage_rows_carry_where_the_money_went():

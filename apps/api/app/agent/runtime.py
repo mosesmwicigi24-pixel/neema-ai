@@ -1425,7 +1425,7 @@ async def _gate_turn_reply(reply: str, *, user_text: str, transcript: list, tool
             post_caption=post_caption, campaign=campaign)
 
     v1 = await _verdict(reply)
-    _vm = str(getattr(llm, "last_model", "") or getattr(llm, "_model", "") or "")
+    _vm = served_model(llm)
 
     async def _record(outcome: str) -> None:
         await _rv.record_verdict(redis, outcome, channel, kinds=v1.get("kinds") or (),
@@ -1509,6 +1509,29 @@ async def _gate_turn_reply(reply: str, *, user_text: str, transcript: list, tool
     if money:
         return (_SW_REVIEW_HOLD_DM_PRICE if swahili else _REVIEW_HOLD_DM_PRICE), all_issues, "held"
     return (_SW_REVIEW_HOLD_DM if swahili else _REVIEW_HOLD_DM), all_issues, "held"
+
+
+def length_target_for(user_text: str | None) -> dict:
+    """The reply-length target for one customer message, exactly as the live
+    turn computes it: closer, greeting and negative flags from the same text,
+    where "negative" is the comment detector OR the customer-state floor
+    reading a complaint (W3, 2026-11-06). One function so the evaluation
+    harness scores the real thing, not a mirror of it."""
+    from app.agent import reply_length as _rl
+    from app.services.customer_state import floor as _cs_floor
+    t = user_text or ""
+    return _rl.target_for(
+        t, closer=is_closer(t),
+        greeting=bool(_GREETING_RE.match(t.strip())),
+        negative=looks_negative(t)
+        or (_cs_floor(t) or {}).get("customer_said") == "complaint")
+
+
+def served_model(llm) -> str:
+    """The model that ANSWERED: after a fallback the client's `last_model`
+    differs from its configured `_model` (W10, 2026-11-06). "" when the
+    client says nothing."""
+    return str(getattr(llm, "last_model", None) or getattr(llm, "_model", None) or "")
 
 
 async def run_turn(db: AsyncSession, redis, wa_id: str, user_text: str, llm: LLM,
@@ -2092,14 +2115,7 @@ async def run_turn(db: AsyncSession, redis, wa_id: str, user_text: str, llm: LLM
     _len_target: dict = {}
     try:
         from app.agent import reply_length as _rl
-        from app.services.customer_state import floor as _cs_floor
-        _len_target = _rl.target_for(
-            user_text or "", closer=is_closer(user_text or ""),
-            greeting=bool(_GREETING_RE.match((user_text or "").strip())),
-            # a complaint earns the care-first length whether the comment
-            # detector or the customer-state floor read it (W3, 2026-11-06)
-            negative=looks_negative(user_text or "")
-            or (_cs_floor(user_text) or {}).get("customer_said") == "complaint")
+        _len_target = length_target_for(user_text)
         if not scribe_only and not read_only:
             _len_note = _rl.note(_len_target)
             if _len_note:
@@ -2385,8 +2401,7 @@ async def run_turn(db: AsyncSession, redis, wa_id: str, user_text: str, llm: LLM
 
     # the model that ANSWERED — after a fallback `last_model` differs from the
     # configured `_model` (W10, 2026-11-06: the usage split was the configured name)
-    _served = (getattr(llm, "last_model", None) or getattr(llm, "_model", None)
-               or settings.tier2_model)
+    _served = served_model(llm) or settings.tier2_model
     # The daily breaker is fed by the LLM client itself, call by call and by
     # purpose (services/ai_budget.meter) — the reviewer, the rewrite and every
     # vision read included — so nothing is metered twice here.

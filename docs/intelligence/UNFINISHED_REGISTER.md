@@ -50,7 +50,7 @@ the precise dependency · status. Last update: 2026-11-06, end of session 1.
 | Unverifiable takeover → the sweeper re-composes the turn (tools may act twice) | persisting the composed reply for the retry needs a small store; trade-off recorded | 1.5 |
 | Comment dedupe is redis-only; a 502 redelivery with redis down could answer a comment twice | DB-side comment id dedupe | 1.6 |
 | The blind set must be scored before any held-out claim; the runner cannot exercise the Meta/TikTok/web doors or an overlap silence (WhatsApp contacts, sequential turns) | runner channel parameter; concurrent-turn harness | 6, 13 |
-| Four register rows rest on source-string tests (W3-1, W7-6, W10-3, W2-4 wiring) | downgraded; behaviour tests to add | 2 |
+| ~~Four register rows rest on source-string tests (W3-1, W7-6, W10-3, W2-4 wiring)~~ | done, same day: behaviour tests added, rows back to VERIFIED COMPLETE | 2 |
 
 ## Open owner decisions carried from earlier stages
 

@@ -73,7 +73,7 @@ def test_run_turn_hands_the_target_over_and_never_trims():
     from app.agent import runtime
     from app.agent import conversation_budget as cb
     src = inspect.getsource(runtime.run_turn)
-    assert src.index("_rl.target_for(") < src.index("llm.complete(system=sys_blocks")
+    assert src.index("length_target_for(user_text)") < src.index("llm.complete(system=sys_blocks")
     i = src.index("_rl2.record(")
     assert "reply =" not in src[i: i + 400]
     assert cb.DECISIONS["long"].startswith("Reply ran long")

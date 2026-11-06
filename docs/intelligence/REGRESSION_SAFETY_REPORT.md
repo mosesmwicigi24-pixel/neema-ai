@@ -14,7 +14,7 @@ ff8c3b5).
 | The 5 remaining | `test_verification_stress` | two new gate rules (pressure, language) produced false holds on legitimate Swahili price lines and campaign discount replies — **caught by the existing stress tests**, both rules narrowed; 204 passed on re-run |
 | Full API suite on 5cb9e2b (test pins) | `pytest tests` | 4 failed, 3,235 passed — the four (`test_verification_stress` ×3, `test_web_geo`) pass on their own on the next commit; attributed to running while files were being edited |
 | Full API suite on 111ee6e (verification repairs) | `pytest tests` | 1 failed (`test_spend_meter`, passes alone — a second suite was running concurrently against the same services), 3,288 passed, 1 xpassed |
-| Full API suite on af34fcf (initiated-message rules, doors) | `pytest tests` | **PENDING** — recorded when the run completes |
+| Full API suite on bbe48cf (= af34fcf code: initiated-message rules, doors; merged as c8c3356) | `pytest tests` | 3,294 passed, 1 xpassed, 0 failed (10 min 18 s) |
 | Web | `pnpm exec tsc --noEmit` + `pnpm build` | passed (agent report) |
 | Lint | `ruff check app tests` | 96 findings = the committed baseline (CI ratchet 115) |
 

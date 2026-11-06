@@ -199,3 +199,16 @@ def test_an_empty_reply_never_passes_where_a_reply_was_expected():
     v = eval_run.check_turn(case, 0, _turn("silence"), "", {"tools": [], "review": None},
                             opted_out=False, intercept_mode="ai", after_hold=False)
     assert v["passed"]
+
+
+def test_the_default_sweep_leaves_the_blind_set_out():
+    """The blind held-out file is scored only when named: the development
+    split must never contain a blind case (verification pass 1, finding 6)."""
+    swept = eval_cases.load()
+    assert swept and not any(c.get("blind") for c in swept)
+    assert not any(c["_file"] == "blind_heldout.jsonl" for c in swept)
+    blind = eval_cases.load("blind_heldout.jsonl")
+    assert blind and all(c.get("blind") for c in blind)
+    assert eval_cases.load(include_blind=True) and len(eval_cases.load(include_blind=True)) == len(swept) + len(blind)
+    dev, held = eval_cases.split(swept)
+    assert not any(c.get("blind") for c in dev + held)

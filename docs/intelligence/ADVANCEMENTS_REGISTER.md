@@ -105,7 +105,7 @@ explicit word.
 ## W2-4 · The scribe never erases a team check or a hold
 
 - **Change:** `deals._merge_next_action` — an open team check keeps its kind and tucks the new intent under `then`; a hold survives.
-- **Status:** VERIFIED COMPLETE for `_merge_next_action`; its wiring in `scribe_update` is IMPLEMENTED BUT NOT VERIFIED (source test only).
+- **Status:** VERIFIED COMPLETE — `_merge_next_action` tested, and `scribe_update` itself tested with a deal holding an open team check while the customer names a day (`test_the_scribe_keeps_the_team_check_when_the_customer_names_a_day`): the team check stays, the promise is tucked under it, the check-in is queued.
 
 ## W9-2 · `handoff_to_human` rings the team
 
@@ -119,8 +119,8 @@ explicit word.
 
 ## W3-1 · A complaint earns the care-first length
 
-- **Change:** the length target's `negative` flag also reads the customer-state floor's `complaint`.
-- **Status:** IMPLEMENTED BUT NOT VERIFIED (source test only — downgraded by verification 1).
+- **Change:** the length target's `negative` flag also reads the customer-state floor's `complaint`. The computation now lives in `runtime.length_target_for` (the live turn and the evaluation harness call the same function — the harness's mirror had lacked the complaint term).
+- **Status:** VERIFIED COMPLETE — behaviour test on `length_target_for`: a complaint the comment detector misses lands on the 60-word care-first target; a price ask does not; the harness scores the same function.
 
 ## W8-1 · Language continuity checked without the model reviewer
 
@@ -131,7 +131,7 @@ explicit word.
 ## W7-6 · State writes take the row lock
 
 - **Change:** `intent.record_opt_out` and `customer_state.apply` lock the person row before rewriting `state` (the `state_lock` contract).
-- **Status:** IMPLEMENTED BUT NOT VERIFIED (source test only; the lock is best-effort — downgraded by verification 1).
+- **Status:** VERIFIED COMPLETE — behaviour tests: both writers hand the person to `lock_for_write` and write to the row it hands back (the re-read row, not the stale copy). The best-effort fallback is a recorded trade-off with its own test: when the lock cannot be taken, the opt-out is still written unlocked, because a lost opt-out is the worse failure.
 
 ## W7-2 · The newest learned rules survive the combined cap
 
@@ -154,8 +154,8 @@ explicit word.
 
 ## W10-3 · The usage row logs the model that actually answered
 
-- **Change:** `_served` prefers `llm.last_model` (set after a fallback) over the configured `_model`.
-- **Status:** IMPLEMENTED BUT NOT VERIFIED (source test only — downgraded by verification 1).
+- **Change:** `_served` prefers `llm.last_model` (set after a fallback) over the configured `_model`; now `runtime.served_model(llm)`, used by the verdict record and the usage row alike.
+- **Status:** VERIFIED COMPLETE — behaviour test on `served_model` (last_model wins; falls back to the configured model; empty when the client says nothing) plus the usage-row pin.
 
 ## W1-5 (amended) · Fail closed on infrastructure errors only
 
@@ -175,3 +175,6 @@ explicit word.
 
 - **W1-14 (verification 1.3, fixed):** Neema-initiated messages now meet the deterministic rules before they are sent — `review.initiated_issues` (paid acknowledgement, order status, pressure, internal talk, no tool results needed). The dispatcher's `_send` raises `HeldByRules` before delivery and the action is parked for a person with a bell; an after-sale announcement held by the rules asks a person instead (the hub's own `.paid` event may say "payment received" and every hub event carries its own status); the sweeper's bridge escalates instead of sending. Tests: `test_intelligence_w1_grounding.py`.
 - **W1-2 (verification 1.4, fixed):** the opt-out door on WhatsApp and Meta reads the words whether or not a photo is attached. Test: `test_intelligence_w1_fail_closed.py`.
+- **Verification 1 finding 12 (fixed):** the four register rows that rested on source-string tests (W3-1, W7-6, W10-3, W2-4 wiring) now have behaviour tests; two small extractions made that possible (`runtime.length_target_for`, `runtime.served_model`), with no change in what the turn does.
+- **Scorer correction (found while fixing finding 12):** the floors harness computed the reply-length target with a mirror of the runtime that lacked the complaint floor; it now calls the runtime's own function. Re-scored: `results/floors-rescored-*.json` (see BENCHMARK_RESULTS, "Correction 2").
+- **Blind set isolation (finding 6, hardened):** the case loader's default sweep now leaves `"blind": true` cases out, so the development/held-out split can never contain a blind case; the blind file is scored only when named. Test: `test_the_default_sweep_leaves_the_blind_set_out`.
