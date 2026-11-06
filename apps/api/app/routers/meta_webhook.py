@@ -255,6 +255,16 @@ async def _capture_events(db: AsyncSession, channel: str, payload: dict, redis=N
             # Message row + phantom "[messenger message]" preview + broadcast.
             # Capture any ad referral they carry, then skip.
             if not event.get("message"):
+                # Delivery and read receipts: stamped on the outbound rows they
+                # cover (by watermark), as WhatsApp's statuses are — so
+                # "delivered"/"read" is known on Messenger/Instagram too.
+                for kind in ("delivery", "read"):
+                    rc = event.get(kind)
+                    if isinstance(rc, dict):
+                        from app.services import messaging as _svc
+                        await _svc.record_meta_receipt(
+                            db, channel, sender, "delivered" if kind == "delivery" else "read",
+                            rc.get("watermark"))
                 referral = (event.get("referral")
                             or (event.get("postback") or {}).get("referral"))
                 if referral:
