@@ -200,7 +200,7 @@ check (harness `v5-mutate.py`, 12 mutants, 12 killed).
 
 ### Verification pass 5 (same day) — ten findings, all acted on
 
-- **Status of the slice: VERIFIED COMPLETE** (restated 22:29 UTC) — the full suite on b002177 passed apart from one source-string test fixed in 1365420, and CI on 1365420 is green; the first head `a5b4dc1` had been red on twelve test worlds (pass 5, finding 9). S7 (CI apt bound) stays IMPLEMENTED BUT NOT VERIFIED and the four source-level sender proofs stay in UNFINISHED.
+- **Status of the slice: VERIFIED COMPLETE** (restated 22:29 UTC) — the full suite on b002177 passed apart from one source-string test fixed in 1365420, and CI on the final head is recorded in REGRESSION_SAFETY_REPORT (the 1365420 run was cancelled by the next push, not green); the first head `a5b4dc1` had been red on twelve test worlds (pass 5, finding 9). S7 (CI apt bound) stays IMPLEMENTED BUT NOT VERIFIED and the four source-level sender proofs stay in UNFINISHED.
 - **S1 amended:** `database` and `gate` are in `AI_DOWN` and `ACTIONABLE` — the sweep stands down on a fleet-wide database or gate failure instead of burning every thread's strikes, health says a person is needed, and the next completed turn clears it (finding 2).
 - **S2 amended:** the four senders whose surrounding `except` fell through to a send now skip on any read failure (finding 3); the dispatcher's deferral rolls the session back, counts the try, parks after three, and tallies `defer_optout_unreadable` / `park_optout_unreadable` for the shadow report (finding 4).
 - **S3 amended:** the complaint DM goes through `_comment_dm_allowed` too (finding 5); the skip log names "opted out, or the preference could not be read" (finding 6).
