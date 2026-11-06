@@ -372,6 +372,41 @@ def _write_record(record: dict, out_path: str, *, partial: bool, done: int = 0, 
     os.replace(tmp, out_path)
 
 
+def _guard_pool_checkout(dbapi_connection, connection_record, connection_proxy) -> None:
+    """Pool `checkout` listener: a connection that comes back from the pool
+    still inside a transaction is invalidated, so the caller gets a fresh
+    one. Run 42289125585: four turns raised "current transaction is aborted"
+    within 0.03 s of starting; three of them followed turns that did NOT
+    raise (verification pass 6), so a rollback-on-error alone cannot cover
+    them, and the carry-over is not reproducible locally — this guard holds
+    whatever the cause. asyncpg's adapter keeps the raw connection at
+    `_connection`; `is_in_transaction()` is its own API."""
+    raw = getattr(dbapi_connection, "_connection", None)
+    probe = getattr(raw, "is_in_transaction", None)
+    try:
+        if callable(probe) and probe():
+            from sqlalchemy import exc as _exc
+            raise _exc.DisconnectionError("pooled connection still in a transaction — invalidated (eval runner guard)")
+    except Exception as e:
+        from sqlalchemy import exc as _exc
+        if isinstance(e, _exc.DisconnectionError):
+            raise
+        # a probe that cannot run never blocks a checkout
+
+
+def _install_pool_guard() -> bool:
+    """Register the guard once on the app engine's pool (the eval process
+    only; production never imports this module). Returns whether it was
+    installed now."""
+    from sqlalchemy import event
+    from app import database as _database
+    sync_engine = getattr(_database.engine, "sync_engine", _database.engine)
+    if event.contains(sync_engine, "checkout", _guard_pool_checkout):
+        return False
+    event.listen(sync_engine, "checkout", _guard_pool_checkout)
+    return True
+
+
 async def _recover_from_failed_turn(db) -> None:
     """A failed turn must not reach the next one. Run 42289125585: three
     later turns raised "current transaction is aborted" within 0.03 s — a
@@ -422,6 +457,7 @@ async def run_cases(*, selection: str = "all", repeat: int = 1, only: str | None
     except Exception:
         redis = None
 
+    _install_pool_guard()
     contacts = {c["id"]: contact_for(c, n) for n, c in enumerate(chosen, 1)}
     await _cleanup_contacts(redis, list(contacts.values()))
 

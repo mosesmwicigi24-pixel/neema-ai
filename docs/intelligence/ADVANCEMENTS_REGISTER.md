@@ -218,13 +218,13 @@ check (harness `v5-mutate.py`, 12 mutants, 12 killed).
 
 ### R1 · Contact cleanup in FK order, one transaction per contact
 
-- **Change:** `_cleanup_contacts` deletes identity → flush → identifiers → flush → person, each contact in its own transaction; a failing contact is rolled back, logged and skipped (run 42289125585 crashed at case-run 180 of 360 on `identifiers_person_id_fkey`).
-- **Status:** VERIFIED COMPLETE (behaviour test on a recording session: the order, and a raising commit that does not end the run).
+- **Change (corrected by verification pass 6):** the crash was the never-deleted `identifiers` rows, not flush order — the first diagnosis was wrong and the two flushes it added were redundant (removed). `_cleanup_contacts` now deletes messages, the conversation (intercepts and activity cascade), the user, the WhatsApp identity, and — only when no other identity still points at the person — its identifiers and the person; one transaction per contact; a failing contact is rolled back, logged and skipped.
+- **Status:** VERIFIED COMPLETE — `tests/test_eval_cleanup_db.py` against a real Postgres (every row of the contact goes; a person with another identity stays; a Messenger identity with the same digits is untouched; an unrelated contact is untouched), plus the recording-session shape test.
 
 ### R2 · A failed turn drops its pooled connections
 
-- **Change:** `_recover_from_failed_turn` rolls the session back and disposes the engine pool after any turn error; called from the runner's except branch.
-- **Status:** IMPLEMENTED BUT NOT VERIFIED against the real symptom (the carried-over aborted transaction is not reproduced locally); the helper itself is tested.
+- **Change (extended after verification pass 6):** `_recover_from_failed_turn` (rollback + pool dispose after a raising turn) AND a pool `checkout` guard, `_guard_pool_checkout`, installed by `run_cases`, which invalidates any pooled connection handed out while still inside a transaction — three of the four casualties in run 42289125585 followed turns that did NOT raise, so the first mitigation alone could not have covered them.
+- **Status:** IMPLEMENTED BUT NOT VERIFIED against the real symptom: the carry-over is not reproducible locally (eight scenarios, pass 6) and its root cause is unproven (UNFINISHED); both helpers are tested.
 
 ### R4 · A bare closer gets silence, deterministically (the first measured failure kind)
 

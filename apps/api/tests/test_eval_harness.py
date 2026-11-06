@@ -284,17 +284,20 @@ def test_a_run_record_is_checkpointed_as_partial_and_finalised_clean(tmp_path):
 
 def test_cleanup_deletes_the_person_only_after_its_restrict_rows_are_flushed(monkeypatch):
     """Run 42289125585 died at case-run 180 of 360: `identifiers_person_id_fkey`
-    fired because the person delete was emitted before the identity delete.
-    The order is now identity → flush → identifiers → flush → person, one
-    transaction per contact, and a contact whose cleanup fails is logged and
-    skipped, never allowed to end the run."""
+    fired because the cleanup never deleted `identifiers` (verification pass 6
+    corrected the first diagnosis, which blamed flush order). It now deletes
+    messages, conversation, user, identity, identifiers, person — one
+    transaction per contact — and a contact whose cleanup fails is logged and
+    skipped, never allowed to end the run. The predicates themselves are
+    proven against a real database in test_eval_cleanup_db.py; this fake sees
+    only the shape."""
     import asyncio
     import types
     from app.jobs import agent_eval
 
     calls = []
     user = types.SimpleNamespace(wa_id="254700000901")
-    ident = types.SimpleNamespace(person_id="p1", channel="whatsapp", external_id="254700000901")
+    ident = types.SimpleNamespace(id="i1", person_id="p1", channel="whatsapp", external_id="254700000901")
     person = types.SimpleNamespace(id="p1")
 
     class _Res:
@@ -323,6 +326,9 @@ def test_cleanup_deletes_the_person_only_after_its_restrict_rows_are_flushed(mon
             text = str(stmt).lower()
             if text.startswith("delete from messages"):
                 calls.append("delete messages")
+                return _Res()
+            if text.startswith("delete from conversations"):
+                calls.append("delete conversation")
                 return _Res()
             if text.startswith("delete from identifiers"):
                 calls.append("delete identifiers")
@@ -353,8 +359,8 @@ def test_cleanup_deletes_the_person_only_after_its_restrict_rows_are_flushed(mon
     monkeypatch.setattr(agent_eval, "AsyncSessionLocal", lambda: next(sessions))
     asyncio.run(agent_eval._cleanup_contacts(None, ["254700000901", "254700000902", "254700000903"]))
     first = calls[:calls.index("commit") + 1]
-    assert first == ["delete messages", "delete user", "delete identity", "flush",
-                     "delete identifiers", "flush", "delete person", "commit"]
+    assert first == ["delete messages", "delete conversation", "delete user", "delete identity",
+                     "delete identifiers", "delete person", "commit"]
     # the second contact's commit raised; the third still ran to its commit
     assert calls.count("commit") == 2
 
@@ -388,3 +394,22 @@ def test_a_failed_turn_rolls_back_and_drops_the_pool(monkeypatch):
     assert seen[-1] == "dispose"
     src = inspect.getsource(eval_run.run_cases)
     assert "await _recover_from_failed_turn(db)" in src
+
+
+
+def test_the_pool_guard_invalidates_a_connection_still_in_a_transaction():
+    """Pass 6 finding 3: three of the four aborted-transaction turns followed
+    turns that did not raise, so the guard sits on the pool itself."""
+    import types
+    from sqlalchemy import exc
+    from app.jobs import eval_run
+
+    busy = types.SimpleNamespace(_connection=types.SimpleNamespace(is_in_transaction=lambda: True))
+    idle = types.SimpleNamespace(_connection=types.SimpleNamespace(is_in_transaction=lambda: False))
+    with pytest.raises(exc.DisconnectionError):
+        eval_run._guard_pool_checkout(busy, None, None)
+    eval_run._guard_pool_checkout(idle, None, None)                    # nothing
+    eval_run._guard_pool_checkout(types.SimpleNamespace(), None, None)  # no probe → never blocks
+    assert eval_run._install_pool_guard() is True and eval_run._install_pool_guard() is False
+    src = inspect.getsource(eval_run.run_cases)
+    assert "_install_pool_guard()" in src

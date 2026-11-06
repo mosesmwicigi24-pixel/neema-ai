@@ -21,7 +21,7 @@ NOT STARTED · NOT APPLICABLE.
 | `UNFINISHED_REGISTER.md` | nothing silently omitted |
 | `INTERNATIONAL_ASSESSMENT.md` | evidence-backed comparison against a defensible peer group |
 | `RELEASE_READINESS.md` | measured improvement, remaining risks, items requiring owner approval |
-| `VERIFICATION_PASS_1.md`, `_2.md`, `_2B.md`, `_3.md`, `_3B.md`, `_4.md`, `_5.md` | the independent adversarial passes (one per slice) with the implementer's response tables |
+| `VERIFICATION_PASS_1.md`, `_2.md`, `_2B.md`, `_3.md`, `_3B.md`, `_4.md`, `_5.md`, `_6.md` | the independent adversarial passes (one per slice) with the implementer's response tables |
 | `EVIDENCE_DOSSIER_FOR_INDEPENDENT_REVIEW.md` | the self-contained evidence dossier for an outside reviewer: capabilities, before/after, examples, what is NOT MEASURED, the 100-point score status, appendix (6 Nov, main 7670de1) |
 | `OWNER_ACTIONS.md` | the exact steps for what only the owner can do, and the decisions waiting |
 | `reports/` | the Stage 1–8 reports and the 5–6 November audits this programme built on |

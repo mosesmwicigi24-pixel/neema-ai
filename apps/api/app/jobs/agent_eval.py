@@ -194,19 +194,24 @@ async def _cleanup(redis) -> None:
 
 
 async def _cleanup_contacts(redis, ids: list[str]) -> None:
-    """Delete every row a run created for these throwaway contacts, and the
+    """Delete the rows a run created for these throwaway contacts, and the
     redis keys that would otherwise carry state into the next run.
 
-    One transaction per contact, the person deleted only after its
-    identity, identifier and user rows are FLUSHED (run 42289125585 died at
-    case-run 180 of 360 on `identifiers_person_id_fkey`: the unit of work
-    had emitted the person delete first). A contact whose cleanup fails is
-    rolled back and logged, never allowed to end the run — the next repeat
-    simply reuses the rows."""
+    What goes: messages, the user row, the conversation (its intercepts and
+    activity rows cascade; deals, actions, photo checks and the rest keep a
+    NULL conversation), the WhatsApp identity, and — only when no other
+    identity still points at the person — the person's identifiers and the
+    person. Run 42289125585 died at case-run 180 of 360 on
+    `identifiers_person_id_fkey` because this never deleted `identifiers`
+    (verification pass 6 corrected the slice's first diagnosis, which blamed
+    flush order). One transaction per contact; a contact whose cleanup
+    fails is rolled back and logged, never allowed to end the run."""
+    from app.models.conversation import Conversation
     for wa_id in ids:
         try:
             async with AsyncSessionLocal() as db:
                 await db.execute(delete(Message).where(Message.wa_id == wa_id))
+                await db.execute(delete(Conversation).where(Conversation.wa_id == wa_id))
                 user = (await db.execute(select(User).where(User.wa_id == wa_id))).scalar_one_or_none()
                 if user is not None:
                     await db.delete(user)
@@ -215,19 +220,16 @@ async def _cleanup_contacts(redis, ids: list[str]) -> None:
                 if ident is not None:
                     pid = ident.person_id
                     await db.delete(ident)
-                    await db.flush()                      # the RESTRICT rows go first
                     others = (await db.execute(select(Identity).where(
-                        Identity.person_id == pid))).scalars().first()
+                        Identity.person_id == pid, Identity.id != ident.id))).scalars().first()
                     if others is None:
                         await db.execute(delete(Identifier).where(Identifier.person_id == pid))
-                        await db.flush()
                         person = await db.get(Person, pid)
                         if person is not None:
                             await db.delete(person)
                 await db.commit()
         except Exception as exc:
-            logging.getLogger("neema.eval").warning(
-                "cleanup for …%s failed (%s) — rolled back; the run continues", wa_id[-4:], exc)
+            _log.warning("cleanup for …%s failed (%s) — rolled back; the run continues", wa_id[-4:], exc)
     if redis is not None:
         for wa_id in ids:
             for k in (f"agent:pause:whatsapp:{wa_id}", f"agent:optout:whatsapp:{wa_id}",
