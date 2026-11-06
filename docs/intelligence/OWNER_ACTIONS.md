@@ -50,3 +50,19 @@ and `/api/admin/settings/prompt-inputs` (the 22 flag values).
 - Whether the Business / Neema / Integrations settings panels get a server side.
 - The four open outreach decisions carried from earlier stages.
 - `NEEMA_CAPABILITY_INTELLIGENCE_PROFILE_2026.md` — add it under `docs/` if it exists.
+
+## After the first real-model pass (2026-11-06, 23:00 UTC)
+
+1. **Check the production enum** (read-only, 10 seconds). On the box:
+
+   ```sh
+   docker compose -f docker-compose.yml -f docker-compose.vps.yml exec -T db \
+     psql -U neema -d neema -c "select enum_range(null::interceptaction);"
+   ```
+
+   If the list lacks `flag` or `escalated`, every opt-out record, held-reply
+   flag and escalation write on the box has been failing silently (each is
+   wrapped in a try). Approving the one-line migration (`ADD VALUE IF NOT
+   EXISTS`, idempotent, no table rewrite) fixes it; say "approve the enum
+   migration" and it ships with the next slice.
+2. **Send the box run's files** (`eval-out/agent-eval-blind-7670de1-*.json` and `.log`) — they are the second independent measurement, on the production database.
