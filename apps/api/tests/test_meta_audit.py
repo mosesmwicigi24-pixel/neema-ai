@@ -70,7 +70,7 @@ def test_first_contact_no_longer_pairs_a_location_question():
     flat = _flat()
     assert "First contact is the ONLY exception" not in flat
     assert "item or colour question with their city/country" not in flat
-    assert "ask EXACTLY ONE question" in flat
+    assert "ask AT MOST ONE question" in flat
 
 
 # ── F7/F8: speed rules have explicit winners ─────────────────────────────────

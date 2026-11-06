@@ -414,7 +414,7 @@ def test_the_takeover_lessons_are_in_the_prompt():
                  "A MISTAKE IS OWNED IN A FEW WORDS", "never copy those"):
         assert rule in flat, rule
     # the team's own size is the target now
-    assert "1–2 short sentences, roughly 20 words" in flat
+    assert "1–2 short sentences — complete, warm" in flat
 
 
 # ── Neema's own drafts are not the team's voice (owner, 2026-10-30) ──────────

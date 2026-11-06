@@ -97,7 +97,7 @@ def test_celebrate_routes_and_paid_guard(monkeypatch):
 
     ev = {"id": "e3", "type": "order.paid", "order_number": "ORD-1"}
     out = asyncio.run(he._celebrate(None, r, conv, ev))
-    assert out == {"handled": True, "sent": "freeform"}
+    assert out == {"handled": True, "sent": "freeform", "customer_told": True}
     assert sent[0][0] == "wa" and "Asante" in sent[0][2]
     # The Graph wamid must land on the saved row — that's what makes the
     # message reply-quotable by the customer later.
@@ -193,7 +193,7 @@ def test_deferred_paid_event_sends_in_the_morning(monkeypatch):
     monkeypatch.setattr(svc, "save_outbound_message", fake_save)
 
     out = asyncio.run(he._celebrate(None, r, conv, ev))
-    assert out == {"handled": True, "sent": "freeform"}
+    assert out == {"handled": True, "sent": "freeform", "customer_told": True}
     assert sent == ["Asante! 🙏"]
 
 

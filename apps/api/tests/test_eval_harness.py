@@ -53,8 +53,7 @@ def test_the_floors_scorer_reports_misses_by_case():
     assert res["metrics"]["said"]["all"]["k"] == 2
     assert res["metrics"]["opt_out"]["all"]["k"] == 2
     assert res["metrics"]["length_kind"]["all"]["k"] == 1
-    # the one miss documents a real limit: a plain English imperative is "unsure" to the guesser
-    assert [m["metric"] for m in res["misses"]] == ["lang"]
+    assert res["misses"] == []        # "Please stop messaging me" reads as English since W2
 
 
 def _turn(next_, **exp):
