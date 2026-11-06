@@ -119,7 +119,9 @@ def test_willy_comparing_in_arusha_holds_the_nudge_and_tells_the_next_turn(maker
     sent = _wire(monkeypatch)
     _compose(monkeypatch, "Habari Willy, tray bado ipo — nikuwekee?")
     monkeypatch.setattr(settings, "outreach_mode", "shadow", raising=False)  # the hold is never shadowed
-    assert _tick(maker, _Redis()) == 0 and sent == []
+    r = _Redis()
+    assert _tick(maker, r) == 0 and sent == []
+    assert r.hashes[next(iter(r.hashes))] == {"hold_customer": 1}            # the read-out's tally
     status, due = _due(maker, cid)["buying_follow_up"]
     assert status == "planned" and due > datetime.now(timezone.utc) + timedelta(days=6)
     note = _live_note(maker, WILLY)
@@ -155,9 +157,11 @@ def test_a_hindi_speaking_pastor_is_answered_live_but_never_nudged_by_a_machine(
     _plan(maker, cid, "buying_follow_up", "They built a cart — purple chasuble", source="cart_recovery")
     sent = _wire(monkeypatch)
     _compose(monkeypatch, "should never be composed")
-    assert _tick(maker, _Redis()) == 0 and sent == []
+    r = _Redis()
+    assert _tick(maker, r) == 0 and sent == []
     rows = _rows(maker, cid)
     assert rows[-1][1] == "needs_approval" and "they write in 'hi'" in rows[-1][4]
+    assert r.hashes[next(iter(r.hashes))] == {"park_language": 1}
 
 
 # ── "I will consult the committee and contact you on Thursday" ──────────────

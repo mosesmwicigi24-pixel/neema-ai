@@ -119,6 +119,14 @@ async def health(request: Request):
                         "noted": g.get("noted", 0)}
     except Exception:
         pass
+    # OUTBOUND COMMUNICATION, the shadow week (2026-11-06): what the dispatcher
+    # decided today and yesterday and how many rows wait for a person — counts
+    # only, so the week can be read from one curl.
+    try:
+        from app.services import outreach_log as _ol
+        out["outreach"] = await _ol.health_view(getattr(request.app.state, "redis", None))
+    except Exception:
+        pass
     # RECOVERY SWEEPS (2026-10-10): which daily jobs are switched on and
     # what their last runs did — counts only, never a handle or a message.
     try:
