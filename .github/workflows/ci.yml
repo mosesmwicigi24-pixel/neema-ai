@@ -70,10 +70,15 @@ jobs:
           command -v ffmpeg && exit 0
           for i in 1 2; do
             sudo timeout 60 dpkg --configure -a || true
-            sudo timeout 150 apt-get update -q -o Acquire::Retries=3 \
-              && sudo timeout 150 apt-get install -y -q --no-install-recommends -o Acquire::Retries=3 ffmpeg \
+            sudo timeout 120 apt-get update -q -o Acquire::Retries=3 \
+              && sudo timeout 240 apt-get install -y -q --no-install-recommends -o Acquire::Retries=3 ffmpeg \
               && exit 0
-            echo "apt attempt $i failed or stalled on the default mirror; switching to archive.ubuntu.com"
+            # The runner's apt reads its mirror from /etc/apt/apt-mirrors.txt
+            # (a mirror+file: source), not from the sources files — the stall
+            # on 2026-11-06 was in the PACKAGE download from the azure mirror
+            # after 30 of 81 packages, twice in a row on the same runner.
+            echo "apt attempt $i failed or stalled; switching the mirror list to archive.ubuntu.com"
+            printf 'http://archive.ubuntu.com/ubuntu/\tpriority:1\n' | sudo tee /etc/apt/apt-mirrors.txt >/dev/null
             sudo sed -i 's#http://azure.archive.ubuntu.com/ubuntu/#http://archive.ubuntu.com/ubuntu/#g' \
               /etc/apt/sources.list /etc/apt/sources.list.d/*.sources /etc/apt/sources.list.d/*.list 2>/dev/null || true
           done
@@ -175,10 +180,15 @@ jobs:
           command -v ffmpeg && exit 0
           for i in 1 2; do
             sudo timeout 60 dpkg --configure -a || true
-            sudo timeout 150 apt-get update -q -o Acquire::Retries=3 \
-              && sudo timeout 150 apt-get install -y -q --no-install-recommends -o Acquire::Retries=3 ffmpeg \
+            sudo timeout 120 apt-get update -q -o Acquire::Retries=3 \
+              && sudo timeout 240 apt-get install -y -q --no-install-recommends -o Acquire::Retries=3 ffmpeg \
               && exit 0
-            echo "apt attempt $i failed or stalled on the default mirror; switching to archive.ubuntu.com"
+            # The runner's apt reads its mirror from /etc/apt/apt-mirrors.txt
+            # (a mirror+file: source), not from the sources files — the stall
+            # on 2026-11-06 was in the PACKAGE download from the azure mirror
+            # after 30 of 81 packages, twice in a row on the same runner.
+            echo "apt attempt $i failed or stalled; switching the mirror list to archive.ubuntu.com"
+            printf 'http://archive.ubuntu.com/ubuntu/\tpriority:1\n' | sudo tee /etc/apt/apt-mirrors.txt >/dev/null
             sudo sed -i 's#http://azure.archive.ubuntu.com/ubuntu/#http://archive.ubuntu.com/ubuntu/#g' \
               /etc/apt/sources.list /etc/apt/sources.list.d/*.sources /etc/apt/sources.list.d/*.list 2>/dev/null || true
           done
