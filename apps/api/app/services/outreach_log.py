@@ -90,7 +90,8 @@ async def health_view(redis, db_factory=None) -> dict:
             pass
     try:
         if db_factory is None:
-            from app.database import AsyncSessionLocal as db_factory
+            from app import database as _database
+            db_factory = _database.AsyncSessionLocal
         from sqlalchemy import func, select
         from app.models.agent_action import AgentAction
         async with db_factory() as db:
