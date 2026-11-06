@@ -1237,28 +1237,33 @@ async def _gate_failed_closed(reply: str, *, db, redis, channel: str, key: str,
         pass
     if public_comment or closer:
         return "", issues, "held"
-    owned = True
     try:
-        await _flag_held_reply(db, channel, key, issues, reply, redis=redis)
+        owned = bool(await _flag_held_reply(db, channel, key, issues, reply, redis=redis))
     except Exception as exc:
         _log.warning("could not flag the held draft for %s: %s", key, exc)
+        owned = False
+    if not owned:
         # The likeliest cause of a gate error is the database — the same
         # thing the flag needs. The hold line promises "one of our team will
         # come back to you"; it must not go out when nobody has been told
-        # (verification 1.7). Second route: the redis-backed handover.
+        # (verification 1.7). Second route: the handover (its own session,
+        # so it fails the same way when the database is down).
         try:
-            owned = await escalate_to_human(channel, key, f"Reply held: {issues[0]}",
-                                            draft=reply, redis=redis)
+            owned = bool(await escalate_to_human(channel, key, f"Reply held: {issues[0]}",
+                                                 draft=reply, redis=redis))
         except Exception:
             owned = False
         if not owned:
-            # Silence, not a promise: the customer's message stays the latest
-            # inbound, so the missed-reply sweep finds it, retries when the
-            # fault clears, and hands it to a person after three strikes.
-            _log.warning("held draft for %s could not be handed to anyone — silent, "
-                         "left to the missed-reply sweep", key)
+            # Not a promise and NOT "silence": the outcome says the hold is
+            # unowned, so the sender leaves the thread unmarked — the
+            # customer's message stays the latest inbound and the missed-
+            # reply sweep retries it when the fault clears, then hands it
+            # to a person after three strikes (verification pass 3: a hold
+            # marked as deliberate silence was dropped, never retried).
+            _log.warning("held draft for %s could not be handed to anyone — left to "
+                         "the missed-reply sweep", key)
             issues.append("nobody could be told — left to the missed-reply sweep")
-            return "", issues, "held"
+            return "", issues, "unowned"
     try:
         from app.agent import review as _rv
         if await _rv.held_recently(redis, channel, key):
@@ -1269,7 +1274,7 @@ async def _gate_failed_closed(reply: str, *, db, redis, channel: str, key: str,
 
 
 async def _flag_held_reply(db, channel: str, key: str, issues: list, draft: str,
-                           redis=None) -> None:
+                           redis=None) -> bool:
     """A held private reply is a colleague's to answer: the conversation is
     flagged with the reviewer's reasons and the draft (never sent), moved to
     HUMAN (the Human tab) and the team is alerted the way escalate_to_human
@@ -1286,7 +1291,7 @@ async def _flag_held_reply(db, channel: str, key: str, issues: list, draft: str,
             or_(Conversation.external_id == key, Conversation.wa_id == key),
         ))).scalars().first()
         if conv is None:
-            return
+            return False
         why = "; ".join(str(i) for i in issues)
         note = ("HELD BACK BY THE REVIEWER — Neema's reply did not pass verification and "
                 "was NOT sent; the customer was told a colleague will come back to them "
@@ -1302,8 +1307,12 @@ async def _flag_held_reply(db, channel: str, key: str, issues: list, draft: str,
             await _alert_team(redis, str(conv.id), key, (draft or "")[:2000],
                               "🛑 Reply held — a customer is waiting for you",
                               "Held back by the reviewer: " + why)
+        return True
     except Exception as exc:
+        # Says so instead of pretending (verification pass 3): the caller
+        # decides what a hold nobody was told about becomes.
         _log.info("held-reply flag not written for %s/%s: %s", channel, key, exc)
+        return False
 
 
 async def _flag_guard(db, channel: str, key: str, note: str) -> None:
@@ -2410,6 +2419,8 @@ async def run_turn(db: AsyncSession, redis, wa_id: str, user_text: str, llm: LLM
                 reply, db=db, redis=redis, channel=channel, key=key, public_comment=public_comment,
                 closer=is_closer(user_text or ""), swahili=looks_swahili(user_text or ""),
                 error=str(exc)[:200])
+            if _gate_outcome == "unowned" and turn_facts is not None:
+                turn_facts["unowned_hold"] = True     # the sender must not call this silence
     if _photo_refer is not None and reply:
         # A referred photo is never priced, whatever the draft says: a money
         # figure swaps the reply for the plain hand-over line. Then a person
@@ -2804,6 +2815,11 @@ async def _run_and_send(redis, wa_id: str, text: str, media: dict | None = None,
                                        deferred=deferred, turn_facts=facts,
                                        inbound_ids=inbound_ids)
                 if not (reply or "").strip():
+                    if facts.get("unowned_hold"):
+                        # A hold nobody was told about is a MISS, not a
+                        # decision: left unmarked for the missed-reply sweep.
+                        _log.warning("unowned hold for %s — left to the missed-reply sweep", wa_id)
+                        return False
                     _log.info("silence for %s: nothing to send (a closer, or a held acknowledgement)", wa_id)
                     # A decision, not a miss: the missed-reply sweep leaves it be
                     # (as on Messenger) instead of re-running the silence.
@@ -3139,6 +3155,9 @@ async def _run_and_send_meta(redis, channel: str, external_id: str, text: str,
                                        media=media, deferred=deferred, turn_facts=facts,
                                        inbound_ids=inbound_ids)
                 if not (reply or "").strip():
+                    if facts.get("unowned_hold"):
+                        _log.warning("unowned hold for %s/%s — left to the missed-reply sweep", channel, external_id)
+                        return False
                     _log.info("silence on %s for %s: nothing to send (a closer, or a held "
                               "acknowledgement)", channel, external_id)
                     await _mark_silenced(redis, channel, external_id)
@@ -6123,8 +6142,11 @@ async def _run_comment_engage(redis, channel: str, comment: dict, own_pages: set
             # A contact who asked not to be messaged gets the public reply
             # only — never a DM (audit verification, 2026-11-06).
             from app.services.intent import opted_out as _opted
-            if await _opted(None, redis, types.SimpleNamespace(channel=channel, wa_id=None,
-                                                               external_id=ext, person_id=None)):
+            from app.database import AsyncSessionLocal as _Sess
+            _synthetic = types.SimpleNamespace(channel=channel, wa_id=None, external_id=ext, person_id=None)
+            async with _Sess() as _odb:               # durable read through the identity (1.3)
+                _no_dm = await _opted(_odb, redis, _synthetic)
+            if _no_dm:
                 raise _OptedOut()
             await send_private_reply(cid, dm_text, page_id=comment.get("page_id"),
                                      channel=channel)

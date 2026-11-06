@@ -103,7 +103,11 @@ async def record_opt_out(db, redis, conv, text: str, *, channel: str, key: str) 
     now = datetime.now(timezone.utc).isoformat(timespec="seconds")
     try:
         pid = getattr(conv, "person_id", None)
-        if pid is None and db is not None and key:
+        # A WhatsApp identity is a phone number; a web-chat visitor rides the
+        # WhatsApp channel with a "web_…" key and has no person to make
+        # (verification pass 3: the resolver minted phantom contacts).
+        _can_resolve = bool(key) and (channel != "whatsapp" or str(key).isdigit())
+        if pid is None and db is not None and _can_resolve:
             # No person yet (an early-funnel contact, a comment-DM thread):
             # the preference must still outlive redis, so the person is
             # created now — the same resolver every inbound door uses
@@ -111,7 +115,8 @@ async def record_opt_out(db, redis, conv, text: str, *, channel: str, key: str) 
             # is one, is linked so later reads find the preference directly.
             try:
                 from app.services.identity import resolve_or_create_person
-                ident = await resolve_or_create_person(db, channel, key)
+                ident = await resolve_or_create_person(db, channel, key, source="opt_out",
+                                                       confidence="deterministic")
                 pid = ident.person_id
                 if getattr(conv, "id", None) is not None and hasattr(conv, "person_id"):
                     conv.person_id = pid

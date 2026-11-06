@@ -759,7 +759,7 @@ export function SettingsView({ onToast, isMobile, canManageCalling = false }: Sh
                                                 ? { backgroundColor: "#fff5f5", color: "#c0392b", border: "1px solid #fecaca" }
                                                 : { backgroundColor: "#f0f9ec", color: "#589b31", border: "1px solid #b5da8b" }}
                                         >
-                                            {isConnected ? "Disconnect" : "Connect"}
+                                            Managed on the box
                                         </button>
                                     </div>
                                 </div>
@@ -787,7 +787,7 @@ export function SettingsView({ onToast, isMobile, canManageCalling = false }: Sh
                                             className="h-7 px-4 rounded-lg text-[10px] font-semibold text-white"
                                             style={{ backgroundColor: "#589b31" }}
                                         >
-                                            Save Configuration
+                                            Not editable here
                                         </button>
                                     </div>
                                 )}

@@ -21,6 +21,7 @@ def test_a_gate_error_holds_the_draft_instead_of_sending_it(monkeypatch):
 
     async def _flag(db, channel, key, issues, draft, redis=None):
         flagged.append((channel, key, issues, draft))
+        return True                                   # the flag landed: someone owns the hold
 
     async def _record(redis, outcome, **kw):
         verdicts.append(outcome)
@@ -148,37 +149,76 @@ async def test_the_opt_out_door_reads_the_words_even_with_a_photo_attached(monke
 
 
 def test_the_hold_line_is_not_promised_when_nobody_could_be_told(monkeypatch):
-    """Verification 1.7: a gate error is most likely the database, which the
-    flag needs too. When the flag fails, the redis handover is tried; when
-    that fails as well, the turn is silent (the sweep owns it) rather than
-    promising a colleague nobody has heard of."""
+    """Verification 1.7 (and pass 3): the REAL flag with a database that
+    raises reports failure instead of swallowing it; the handover is tried;
+    when that fails or raises too, the outcome is "unowned" — never the
+    promise, and never "silence" the sweep would honour."""
     from app.agent import review as rv
 
     async def _record(redis, outcome, **kw): pass
-    async def _flag_boom(*a, **k): raise RuntimeError("db down")
     monkeypatch.setattr(rv, "record_verdict", _record)
-    monkeypatch.setattr(rt, "_flag_held_reply", _flag_boom)
+    async def _not_recent(*a, **k): return False
+    monkeypatch.setattr(rv, "held_recently", _not_recent)
+
+    class _DeadDB:                                   # the outage the gate error most likely is
+        async def execute(self, *a, **k): raise RuntimeError("connection refused")
+        def add(self, o): pass
+        async def commit(self): pass
+
+    # the flag itself, unpatched, says it could not land
+    assert asyncio.run(rt._flag_held_reply(_DeadDB(), "whatsapp", "2547000", ["x"], "draft")) is False
 
     handed = []
     async def _escalate_ok(channel, ext, note, draft=None, redis=None):
         handed.append((channel, ext, note, draft))
         return True
     monkeypatch.setattr(rt, "escalate_to_human", _escalate_ok)
-    async def _not_recent(*a, **k): return False
-    monkeypatch.setattr(rv, "held_recently", _not_recent)
     reply, issues, outcome = asyncio.run(rt._gate_failed_closed(
-        "The chasuble is KES 999,999.", db=None, redis=None, channel="whatsapp", key="2547000",
+        "The chasuble is KES 999,999.", db=_DeadDB(), redis=None, channel="whatsapp", key="2547000",
         public_comment=False, closer=False, swahili=False, error="boom"))
     assert outcome == "held" and reply == rt._REVIEW_HOLD_DM          # someone owns it: the promise stands
     assert handed and handed[0][3] == "The chasuble is KES 999,999." and "gate could not run" in handed[0][2]
 
+    for broken in (lambda *a, **k: False, None):
+        async def _escalate_fail(*a, **k):
+            if broken is None:
+                raise RuntimeError("redis down")
+            return False
+        monkeypatch.setattr(rt, "escalate_to_human", _escalate_fail)
+        reply, issues, outcome = asyncio.run(rt._gate_failed_closed(
+            "The chasuble is KES 999,999.", db=_DeadDB(), redis=None, channel="whatsapp", key="2547000",
+            public_comment=False, closer=False, swahili=False, error="boom"))
+        assert (reply, outcome) == ("", "unowned")                      # nobody told: the sweep's, not silence
+        assert any("missed-reply sweep" in i for i in issues)
+
+
+def test_an_unowned_hold_reaches_the_sender_as_a_miss_not_silence(monkeypatch):
+    """Through run_turn: a gate that raises, a database that is down for the
+    flag, a handover that fails — the turn returns no text AND marks the
+    facts `unowned_hold`, which the senders read before calling it silence."""
+    import types
+    from tests.test_agent_flow import _FakeDB, _Res
+
+    async def _gate_boom(*a, **k): raise RuntimeError("rule code bug")
+    monkeypatch.setattr(rt, "_gate_turn_reply", _gate_boom)
+    async def _flag_fails(*a, **k): return False
+    monkeypatch.setattr(rt, "_flag_held_reply", _flag_fails)
     async def _escalate_fail(*a, **k): return False
     monkeypatch.setattr(rt, "escalate_to_human", _escalate_fail)
-    reply, issues, outcome = asyncio.run(rt._gate_failed_closed(
-        "The chasuble is KES 999,999.", db=None, redis=None, channel="whatsapp", key="2547000",
-        public_comment=False, closer=False, swahili=False, error="boom"))
-    assert (reply, outcome) == ("", "held")                             # nobody told: silence, the sweep's
-    assert any("missed-reply sweep" in i for i in issues)
+    from app.agent import review as rv
+    async def _record(redis, outcome, **kw): pass
+    monkeypatch.setattr(rv, "record_verdict", _record)
+
+    class _L:
+        async def complete(self, *, system, messages, tools, **kw):
+            return types.SimpleNamespace(text="The cope set is KES 45,000.", tool_calls=[],
+                                         assistant_content=[], usage={}, stop_reason="end_turn")
+    user = types.SimpleNamespace(name="Moses")
+    db = _FakeDB([_Res(one=user), _Res(one=None), _Res(one=None), _Res(one=None), _Res(many=[])])
+    facts: dict = {}
+    out = asyncio.run(rt.run_turn(db, None, "254700000001", "how much is the cope set?", _L(), turn_facts=facts))
+    assert out == "" and facts.get("unowned_hold") is True
+
 
 
 # ── the opt-out outlives redis even for a contact with no person ─────────────
@@ -198,6 +238,7 @@ def test_an_opt_out_from_a_contact_with_no_person_makes_one_and_lands_on_it(monk
 
     async def fake_resolve(db, channel, external_id, **kw):
         made.append((channel, external_id))
+        assert kw.get("source") == "opt_out" and kw.get("confidence") == "deterministic"
         return ident
     monkeypatch.setattr(identity, "resolve_or_create_person", fake_resolve)
     monkeypatch.setattr("app.services.intent.flag_modified", lambda *a, **k: None, raising=False)
@@ -223,3 +264,29 @@ def test_an_opt_out_from_a_contact_with_no_person_makes_one_and_lands_on_it(monk
     assert asyncio.run(intent.opted_out(_DB(), None, synthetic)) is True
     stranger = types.SimpleNamespace(person_id=None, channel="messenger", external_id="PSID_0", wa_id=None)
     assert asyncio.run(intent.opted_out(_DB(), None, stranger)) is False
+
+
+def test_a_web_chat_opt_out_never_mints_a_whatsapp_person(monkeypatch):
+    """Verification pass 3: a web visitor rides the WhatsApp channel with a
+    web_… key; the resolver must not make a phantom (whatsapp, web_…) person.
+    The preference still lands in redis."""
+    import types
+    from app.services import intent, identity
+
+    async def boom(*a, **k): raise AssertionError("resolver must not be called")
+    monkeypatch.setattr(identity, "resolve_or_create_person", boom)
+
+    class _DB:
+        async def get(self, model, pk): return None
+        def add(self, o): pass
+        async def commit(self): pass
+        async def rollback(self): pass
+
+    class _R:
+        def __init__(self): self.set_calls = []
+        async def set(self, k, v, ex=None): self.set_calls.append(k)
+
+    r = _R()
+    conv = types.SimpleNamespace(id="c-web", person_id=None, channel="whatsapp", external_id=None, wa_id="web_abc123")
+    asyncio.run(intent.record_opt_out(_DB(), r, conv, "stop", channel="whatsapp", key="web_abc123"))
+    assert r.set_calls and conv.person_id is None

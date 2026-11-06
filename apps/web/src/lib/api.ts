@@ -232,7 +232,7 @@ export const settingsApi = {
      *  approved rule joins learned_rules and reaches Neema's prompt within minutes. */
     getProposals: () => get<ApiRuleProposals>("/admin/settings/proposals"),
     judgeProposal: (idx: number, verdict: "approve" | "reject") =>
-        post<{ ok: boolean; status: string; learned_rules?: string }>(`/admin/settings/proposals/${idx}/${verdict}`, {}),
+        post<{ ok: boolean }>(`/admin/settings/proposals/${idx}/${verdict}`, {}),
     getOffer: () => get<ApiOfferSetting>("/admin/settings/offer"),
     putOffer: (campaign: ApiCampaign | null) =>
         put<{ ok: boolean; campaign: ApiCampaign | null; running: boolean; says: string }>(
