@@ -51,6 +51,7 @@ the precise dependency · status. Last update: 2026-11-06, end of session 1.
 | Comment dedupe is redis-only; a 502 redelivery with redis down could answer a comment twice | DB-side comment id dedupe | 1.6 |
 | The blind set must be scored before any held-out claim; the runner cannot exercise the Meta/TikTok/web doors or an overlap silence (WhatsApp contacts, sequential turns) | runner channel parameter; concurrent-turn harness | 6, 13 |
 | ~~Four register rows rest on source-string tests (W3-1, W7-6, W10-3, W2-4 wiring)~~ | done, same day: behaviour tests added, rows back to VERIFIED COMPLETE | 2 |
+| `/api/health` can block up to 15 s when the price-audit cache is cold: it fetches the hub catalogue over the network (hub_client timeout 15 s) before answering. Seen on CI (PR #317, 15,025 ms); on the box Redis caches the audit for an hour, so it bites once an hour at most, but a public liveness probe should never wait on the hub. | proposed patch: `price_audit.health_summary` serves the cached audit only and leaves computing it to the hourly job / first live turn (one function, one test); a production behaviour change, so it waits for the owner's word. The timing tests stub the hub meanwhile. | CI on #317 |
 
 ## Open owner decisions carried from earlier stages
 

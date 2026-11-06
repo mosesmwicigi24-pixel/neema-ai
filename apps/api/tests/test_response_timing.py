@@ -15,12 +15,27 @@ neither.
 """
 import logging
 
+import pytest
 from fastapi.testclient import TestClient
 
 import app.main as main_mod
 from app.main import app
 
 client = TestClient(app)
+
+
+@pytest.fixture(autouse=True)
+def _no_hub(monkeypatch):
+    """/api/health runs the price audit, which with no Redis cache fetches the
+    hub catalogue over the network (15 s timeout). On a CI runner where the
+    hub host drops packets that is 15,025 ms of "server time" and the quiet
+    test fails. The middleware under test does not need the hub: fail the
+    fetch at once so the route falls back to the local table."""
+    from app.core import hub_client
+
+    async def _unreachable(redis):
+        raise RuntimeError("no hub in this test")
+    monkeypatch.setattr(hub_client, "fetch_hub_catalog", _unreachable)
 
 
 def test_every_response_reports_its_server_time():
