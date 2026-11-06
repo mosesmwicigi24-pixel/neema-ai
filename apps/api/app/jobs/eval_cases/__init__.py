@@ -15,7 +15,9 @@ Schema (every key optional unless marked):
   id*           "cat-nnn", unique across files
   source*       "real-derived" (anonymised production thread) | "audit"
                 (from the 5–6 Nov audits) | "independent" (authored without
-                reading the implementation)
+                reading the implementation) | "developer" (regression and
+                near-miss cases written by the implementer — reported
+                separately, never the basis of a headline score)
   categories*   list from CATEGORIES
   lang          expected language of the customer: en | sw | ke-en (Kenyan
                 English) | sheng | fr | pt | hi | mixed
@@ -84,7 +86,7 @@ def _validate(case: dict, where: str) -> None:
     for key in ("id", "source", "categories", "turns"):
         if key not in case:
             raise ValueError(f"{where}: missing {key}")
-    if case["source"] not in ("real-derived", "audit", "independent"):
+    if case["source"] not in ("real-derived", "audit", "independent", "developer"):
         raise ValueError(f"{where}: bad source {case['source']}")
     bad = [c for c in case["categories"] if c not in CATEGORIES]
     if bad:
