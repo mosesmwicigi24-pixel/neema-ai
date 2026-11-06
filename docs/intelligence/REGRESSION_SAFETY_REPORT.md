@@ -22,6 +22,8 @@ ff8c3b5).
 | CI on 6954268 (PR #319 final head, merged as c6455d8) | GitHub Actions | CI and Build & Push green |
 | CI on 81f67db (PR #320 final head, merged as 7670de1) | GitHub Actions | CI and Build & Push green |
 | Production after 7670de1 (~20:48 UTC) | `/api/health` from outside | status ok, replies ok, outreach shadow with no enforced rules |
+| CI on 5b23827 (PR #321, docs only, merged as 09c80da) | GitHub Actions | first attempt: the ffmpeg apt step hit its 8-minute bound in both jobs before any test ran (a stalled mirror); one re-run of the failed jobs passed; Build & Push green |
+| Production after 09c80da (~21:58 UTC) | `/api/health` from outside | status ok, replies ok, outreach shadow (planned 39, needs_approval 598, unknown 0). The day's review tallies (passed 162 / rewritten 90 / soft 100 / held 3) include the owner's box evaluation run, which composes replies inside the same api container — 6 Nov production tallies are contaminated from ~21:00 UTC on |
 | Production after c6455d8 (~20:27 UTC) | `/api/health` from outside | status ok, replies ok, outreach shadow with no enforced rules |
 | Production after d084e91 (~19:55 UTC) | `/api/health` from outside | status ok, replies ok, review tallies populated, outreach shadow with no enforced rules |
 | Production after 34d371e (~19:22 UTC) | `/api/health` from outside | status ok, replies ok, review tallies populated, outreach shadow with no enforced rules |

@@ -8,6 +8,18 @@ from types import SimpleNamespace
 import app.main  # noqa: F401 — registers all SQLAlchemy models
 from app.models.conversation import InterceptMode
 from app.services import reply_sweeper as rs
+import pytest
+
+
+@pytest.fixture(autouse=True)
+def _opt_out_preference_is_readable(monkeypatch):
+    """Slice 5 (2026-11-06): an opt-out preference that cannot be READ now
+    means "do not send" (three-state read, fail closed). These worlds never
+    modelled the read at all, so it answers a readable "no" unless a test
+    patches the read itself."""
+    async def _no(db, redis, conv):
+        return "no"
+    monkeypatch.setattr("app.services.intent.opt_out_state", _no)
 
 
 def _conv(channel, ext, person="p1", last=None):

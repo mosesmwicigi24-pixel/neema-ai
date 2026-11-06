@@ -62,6 +62,13 @@ Production (the owner's VPS, "the box") runs the container built from main
 | Answer-checker models | main `claude-sonnet-5`; light `claude-haiku-4-5` | [IMPL] same |
 | Deploy path | GitHub Actions `Build & Push` on main → box pulls `:latest` (`scripts/box-deploy.sh`) | [REAL] five deploys today, each followed by a health check |
 
+**Correction (21:58 UTC):** the review tallies above were read at ~20:00 UTC.
+Later the same day they rose to passed 162 / rewritten 90 / soft 100 / held 3,
+because the owner's box evaluation run (`scripts/eval-blind.sh`) composes its
+replies inside the same api container and the gate counts them. Production
+review tallies for 6 Nov are therefore contaminated by the evaluation from
+about 21:00 UTC on; only the ~20:00 reading is a production figure.
+
 The review tallies are the only production signal of reply quality available
 to this dossier. "Held 1" means one reply in the day was stopped by the gate
 and routed to a person; "rewritten 17" means the checker rewrote 17 drafts

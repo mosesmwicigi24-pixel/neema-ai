@@ -183,8 +183,10 @@ def _dispatcher(monkeypatch, rows, *, verdicts=None, conv=None, deal=None):
     monkeypatch.setattr(act, "_compose_follow_up", compose)
     async def not_repeat(db, c, t, **k): return False
     monkeypatch.setattr(act, "_repeats_earlier", not_repeat)
-    async def not_opted(db, redis, c): return False
+    async def not_opted(db, redis, c, **kw): return False
     monkeypatch.setattr("app.services.intent.opted_out", not_opted)
+    async def readable_no(db, redis, c): return "no"
+    monkeypatch.setattr("app.services.intent.opt_out_state", readable_no)   # slice 5: the dispatcher reads the three-state form
     if verdicts is not None:
         async def decide(db, c, a, *, now): return verdicts.get(a.kind, ("go", ""))
         monkeypatch.setattr(act, "decide", decide)
