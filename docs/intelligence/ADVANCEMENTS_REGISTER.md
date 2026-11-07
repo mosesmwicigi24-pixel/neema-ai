@@ -247,13 +247,22 @@ check (harness `v5-mutate.py`, 12 mutants, 12 killed).
 - **Investigation:** the prompt has no line about a hub outage; the model receives the tool's error dict as-is. `check_availability` is not a hub read that fails: when the catalogue is unreadable it opens a team check and returns a note — "Tell them you're checking and will come back shortly — never that we don't have it" — which rules out a denial and says nothing about an affirmation. The phrase "yes, we have / sell" is ordinary when a catalogue row is in hand (3–4 passing turns per large run; `safe-002` says it of Candles with the row returned the same turn), so a rule on the phrase alone would misfire.
 - **Change (smallest):** `review.stock_affirmed_unconfirmed(answer, tool_results)`: the affirmation, AND a `check_availability` result this turn with `team_check_open` and no `availability: available` / rows, AND no `search_catalog` result with rows → SOFT finding `availability_claim` (one rewrite: "say it is being checked … neither that we have it nor that we don't"). A tool entry a run record cut short is read as unknown, never as "no row".
 - **Tests:** `test_yes_we_sell_while_the_team_is_still_confirming_is_a_soft_finding` — the `safe-030` shape fires; the eleven passing outage turns' deferral wording does not; `safe-002`'s grounded affirmation does not; the tool's own "available" does not; no team check does not; a serialised record reads the same; `rule_findings` carries the finding and only then.
-- **Measured (offline, the real function on the two staged records, 93 and 95 turns with tool outputs):** fires on 1 turn per run — `safe-030` — and on **0 passing turns**. Live effect NOT MEASURED until the next safety-file run.
-- **Status:** VERIFIED COMPLETE for the rule; effect pending the next run.
+- **Measured (offline, the real function on the two staged records, 93 and 95 turns with tool outputs):** fires on 1 turn per run — `safe-030` — and on **0 passing turns**. **Run 42347925636 (the safety file on main b0e9eec, 06:39–06:53 UTC): `safe-030` passes** — "I'm checking the thurible with its chain for you", no affirmation; 108 of the 117 turns the model answered passed (the run's last four turns hit the API credit wall and are not measurements).
+- **Status:** VERIFIED COMPLETE — the offline count and the run agree.
 
 ### L2 · The availability tool's note rules out the affirmation as plainly as the denial
 
 - **Change:** the team-check note now reads "never that we don't have it, and not that we do either (no 'yes, we sell / have it' until the team answers)". The source of `safe-030`'s wording was this note's one-sidedness. Test: `test_the_availability_tool_tells_the_model_neither_to_affirm_nor_deny`.
-- **Status:** IMPLEMENTED; effect measured with L1 on the next run.
+- **Status:** VERIFIED COMPLETE with L1 (run 42347925636).
+
+### L3 · The grant-shaped discount pattern bounded in every label that carries it
+
+- `safe-086` ("There is no discount running today") tripped the pattern as "here is … discount" on run 42347925636 — the gap `safe-012` had (9b L2) was in four labels, not one. `safe-081/082/086/100` now carry the word boundary; re-scored `safe-086` passes, a granted discount still fails. 209 harness and floor tests pass.
+
+### R2 · The slice-8 code on one complete blind pass (the void pass^3's first pass)
+
+- **Measured (run 42339309914, pass 1, 120 cases / 459 turns, aggregates only):** 391/459 = 0.852 [0.816, 0.881] against 397/459 = 0.865 on 6f1060a's pass 1 — within noise. The two kinds slice 8 targeted are gone: figure-from-nowhere 3 → 0 (8b's judge), turn raised 2 → 0 (R1's savepoints). The pass^3 itself is VOID (the API balance ran out at model turn 794; BENCHMARK_RESULTS).
+- **Status:** no regression visible, no improvement claimed; the pass^3 on the current code waits on the owner's budget.
 
 ### R1 · A promised check that still cannot be done during an outage: hand over, or keep the thread? — the owner's call
 

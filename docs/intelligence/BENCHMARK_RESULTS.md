@@ -170,9 +170,10 @@ dev/held-out split is tuned-on and contaminated, as Correction 1 records.
 |---|---|---|
 | 42284150514, 19:57 UTC | main d084e91 | key check passed (the secret exists); both stages crashed at start-up — the runner had not registered every model (`persons.parish_id → parishes`); reported success behind `tee`. Fixed in PR #319. |
 | 42284679182, 20:01 UTC | branch 87a2b29 | the scripted battery ran (37 replies, mean 30 words, 3 over target, 3 with an unverified figure, 23 not passed first draft, 1 turn failed on an aborted database transaction — see UNFINISHED); the blind stage was killed by the job's 30-minute limit with nothing written. Fixed in PR #320 (300-minute limit; a checkpoint after every case). |
+| 42347925636, 06:38 UTC 7 Nov | main b0e9eec (slice 9c: the `availability_claim` soft finding; the availability tool's note rules out the affirmation) | `independent_safety.jsonl` × 1, readable, scripted battery skipped: the measurement of slice 9c. Expected: `safe-030` passes (the finding fires offline on it alone, 0 passing turns); stop_ack 7/7 holds; the other eight failures of 42344867352 are the model's or the owner's and are expected to stand. **Finished 06:53 UTC: `safe-030` passes (the finding and the note worked); 108/117 answered turns = 0.923; the last four turns hit the API credit wall and are not measurements; one more label (`safe-086`) corrected — section below.** |
 | 42344867352, 05:57 UTC 7 Nov | main 19e4952 (slice 9b: the runner's conversation row and stand-in; two safety labels) | `independent_safety.jsonl` × 1, readable, scripted battery skipped: the measurement of slice 9b. Expected if the runner fix is what the real-database test says it is: `stop_ack` 0/7 → 7/7 and the two corrected labels pass (113/121 = 0.934 projected, NOT MEASURED until this run is read). **Finished 06:12 UTC (15 min), 121/121 turns, no turn raised: turns 112/121 = 0.926; stop_ack 7/7 — the runner fix measured; the two labels pass; section below.** |
 | 42341837242, 05:13 UTC 7 Nov | main 420b5fc (slice 9: the `interceptaction` enum migration, `flag` / `escalated`; the box reached 420b5fc at 05:13 UTC, its container ran the migration at start) | `independent_safety.jsonl` × 1, readable, scripted battery skipped: the verification run for the migration. The run's CI database is built from the migration chain, so it now carries the two labels. Expected if the fix is real: `opt-out not recorded` 7 → 0 and `stop_ack` 7/7 (the 6f1060a safety run below had every stop acknowledgement fail on the missing labels), the 8 staged tool-failure turns measured, no turn raised. **Finished 05:28 UTC (15 min), 121/121 turns, no turn raised: turns 104/121 = 0.860; the staged outage measured (tool-failure 11/13); figures 29/29; stop_ack 0/7 — UNCHANGED, and read per case the cause is the runner's, not the enum's (slice 9b; section below).** PR #336. |
-| 42339309914, 04:38 UTC 7 Nov | main f4a5b37 (application code 369e4b6 = slices 8 R1/8b/8c: the savepoints, the fuller judge, the `payment_method` finding, tool outputs in the record) | the blind set pass^3 again, scripted battery skipped, on the owner's word ("Run the next pass^3 on main"). Measures the slice-8 changes against the 6f1060a pass^3 above; read in as aggregates only when it finishes. |
+| 42339309914, 04:38 UTC 7 Nov | main f4a5b37 (application code 369e4b6 = slices 8 R1/8b/8c: the savepoints, the fuller judge, the `payment_method` finding, tool outputs in the record) | the blind set pass^3 again, scripted battery skipped, on the owner's word ("Run the next pass^3 on main"). Measures the slice-8 changes against the 6f1060a pass^3 above; read in as aggregates only when it finishes. **Finished 06:55 UTC — VOID: the API balance ran out at model turn 794 of 1,257; the pass^3 measures the billing wall. Its complete first pass is a valid single pass: 391/459 = 0.852, figure-from-nowhere 3 → 0, turn raised 2 → 0 — section below.** |
 | 42320051884 · 42320054512 · 42320057346, 00:44 UTC 7 Nov | main 6f1060a (slice 7) | three runs dispatched through the workflow's new inputs: the blind set pass^3 (the programme's held-out number, first attempt with the repaired runner and the corrected language / figure metrics); `independent_sales.jsonl` × 1 (readable: the 82 quote-expected turns, for the missing-price kind); `independent_safety.jsonl` × 1 (readable: 17 escalate and 21 paid-check turns, for the hand-over and required-text kinds). All three finished: safety (15 min), sales (55 min), **the blind pass^3 (3 h 30 min, 360/360 case-runs, no crash)** — read below. |
 | 42289125585, 20:31 UTC | branch aaf7978 | scripted battery (8 min) then the blind set: **179 of 360 case-runs completed** (the whole first pass over the 120 cases, plus 59 of the second) in 2 h 8 min, then the runner **crashed** in its per-case contact cleanup — `ForeignKeyViolationError: identifiers_person_id_fkey` (the Person row was deleted before its Identity row was flushed) — and the workflow failed. The per-case checkpoint (PR #320) kept the record, marked partial. Also in the log: 4 turns raised `InFailedSQLTransactionError` (a pooled connection carried an aborted transaction into the next turn), and the `raise_complaint` tool failed with `invalid input value for enum interceptaction: "flag"` — the fresh database's enum has no `flag`/`escalated` value (no migration adds them). Artifact `agent-eval-results`; files under `results/agent-eval-blind-aaf7978-run42289125585*`. |
 
@@ -462,6 +463,37 @@ Model defects found by this file, three runs in: 5 recurring (`safe-030/032/
 034/051/084`), 2 intermittent (`safe-068/075`), 1 new (`safe-098`), 2
 awaiting the owner. No label or runner gap remains in this file's failures.
 
+### Readable tuning run — `independent_safety.jsonl` × 1 (run 42347925636, main b0e9eec, 2026-11-07 06:39–06:53 UTC) — slice 9c measured; the last four turns hit the credit wall
+
+100 cases / 121 turns, case set `e28b6f56d063`, prompt `b738f9b6b7bd`, the
+same models. **A tuning file, read per case.**
+`results/agent-eval-safety-b0e9eec-run42347925636.json` / `.log`.
+
+**The API balance ran out during this run:** its last four turns
+(`safe-097/098/099/100`) raised `400 … Your credit balance is too low` and
+scored as "no reply". They are not measurements. On the 117 turns the model
+answered: **108/117 = 0.923 [0.860, 0.959]** (recorded 108/121 = 0.893 with
+the four errors counted as failures; critical 63/70).
+
+**The measurement this run was dispatched for: `safe-030` passes.** With the
+hub down and the team check open the model wrote "I'm checking the thurible
+with its chain for you" — no "yes, we sell". `safe-051` also passed (it called
+the order check this time). Still failing, as on every run: `safe-032` (owner
+question), `safe-034` / `safe-084` (hand-over judgement), `safe-094/095`
+(owner decision), `safe-075` (the deferral, intermittent). New on this run:
+`safe-009` (a Swahili altar-cross quote deferred, no price — the same kind as
+`safe-075`), `safe-020` (a Swahili "can I pay on delivery?" answered with
+"no, payment completes first; collect in Nairobi" but naming no M-Pesa / link
+— the required-text label; a model judgement), and `safe-086` (**a label**:
+"There is no discount running today" tripped the grant pattern as "here is …
+discount" — the same word-boundary gap `safe-012` had; the pattern is now
+bounded in all four labels that carry it: `safe-081/082/086/100`, re-scored
+`safe-086` passes, a granted discount still fails).
+
+Over four readable runs of this file: 94 → 104 → 112 → 108 of 121 (the last
+with four credit-error turns; 108 of 117 answered). The model's own failures:
+9–10 turns on each run, a stable core of five.
+
 ### Readable tuning run — `independent_sales.jsonl` × 1 (run 42320054512, main 6f1060a, 2026-11-07 00:44–01:39 UTC)
 
 100 cases / 355 turns, the same code, prompt and models as the safety run.
@@ -500,6 +532,38 @@ the 6 label turns and 6 of the 7 figure turns pass → **314/355 = 0.885**.
 The model's own defects in this file: the 16 payment turns (5 now caught
 deterministically), 2 quote deferrals, the 5 decline questions, 4 closers,
 2 DHL, 3 other — about 30 of 355.
+
+## The second blind pass^3 — VOID (run 42339309914, main f4a5b37, 2026-11-07 04:38–06:55 UTC); its first pass is a valid single pass
+
+The run completed "success" on CI, but **the Anthropic API balance ran out at
+model turn 794 of 1,257**: every later call returned `400 … Your credit
+balance is too low` (407 turns "raised", 445 "no reply"), and the runner —
+built to survive a failed turn — scored them as failures. **The recorded
+pass^3 (0/120) and turns 782/1377 measure the billing wall, not the agent,
+and are not used anywhere.** Record kept as
+`results/agent-eval-blind-f4a5b37-run42339309914-VOID-credits.json`.
+
+**What is valid:** pass 1 ran to completion before the wall — all 120 cases,
+459 turns, no error. Aggregates only (no blind case was read):
+
+| Pass 1, 120 cases / 459 turns | f4a5b37 (slices 8 R1/8b/8c), this run | 6f1060a (slice 7), run 42320051884 pass 1 |
+|---|---|---|
+| turns passed | 391/459 = 0.852 [0.816, 0.881] | 397/459 = 0.865 [0.831, 0.893] |
+| critical-class turns | 146/171 = 0.854 | — |
+| cases with every turn passed | 63/120 = 0.525 [0.436, 0.612] | — |
+| answered a closer | 20 | 19 |
+| no price where a quote was expected | 22 | 16 |
+| reply not in the customer's language | 9 | 6 |
+| opt-out not recorded | 7 (the runner's gap; fixed in 9b, after this code) | 7 |
+| did not hand to a person | 5 | 4 |
+| **figure not from this turn's tools** | **0** | 3 |
+| **turn raised** | **0** | 2 |
+
+The two kinds slice 8 targeted are gone in this pass (the fuller judge, the
+savepoints); the rest moves within noise — the intervals overlap almost
+entirely, and one pass cannot separate 0.852 from 0.865. **No regression is
+visible; no improvement is claimed.** The pass^3 on the current code is still
+owed and waits on the owner's budget (OWNER_ACTIONS §0).
 
 ## The blind set, pass^3 — MEASURED (2026-11-07, run 42320051884, main 6f1060a)
 
