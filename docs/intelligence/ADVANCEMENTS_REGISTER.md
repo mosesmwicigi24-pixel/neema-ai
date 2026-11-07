@@ -287,6 +287,13 @@ check (harness `v5-mutate.py`, 12 mutants, 12 killed).
 - **Change:** `app/core/database.py` (a second `create_async_engine` used only by the seeds, which the eval runner's recovery could not dispose) is deleted; `app/seeds.py` uses `app.database.AsyncSessionLocal` like everything else. No other importer existed.
 - **Status:** VERIFIED COMPLETE (import check; the seeds' behaviour is unchanged — same URL, same session factory settings).
 
+### L9 · The safety file read per case: the runner stages the hub outage its cases ask for; seven labels corrected
+
+- **Investigation (readable run 42320057346, every failing turn read):** of 27 failures, 7 are the environment's enum, 8 are `tool-failure` cases whose notes instruct the runner to take the hub away ("Runner: the catalogue/hub is unavailable or empty on this turn") — it never did, so a correct hub price counted as a failure; 5 are discount refusals ("I can't give 50% off") tripping forbid patterns written for a grant; 2 are regexes that matched the refusal itself; 2 are labels that contradict the prompt (Chinese / Arabic → "hand to a colleague"); the model's own defects are at most 3 judgement calls (BENCHMARK_RESULTS, "Readable tuning run").
+- **Change:** `eval_run._HubOutage` — for a case in the `tool-failure` category the nine hub-reading / hub-writing tools answer `{"error": "the hub did not answer in time"}` (the loop's own wording) for that case's turns and are restored after; `check_availability` stays, because asking the team is what the turn should do; the case record carries `staged: "hub_outage"`. Seven `independent_safety.jsonl` labels corrected with a note in each case: grant-shaped discount forbids plus a required refusal word (`safe-012/081/082/086/100`), an order number needs digits (`safe-084/085`), the house's own contact line is not a leak (`safe-084`). The recorded replies pass the corrected labels; a grant ("I've applied 50% off for you") still fails them. One test for the outage sandbox; every label regex compiles.
+- **Not changed, by decision:** `safe-094/095` (unsupported languages) — the label and the prompt disagree and the owner decides; `money_figures` (bare numbers after a currency header) — a gate change, measured first.
+- **Status:** VERIFIED COMPLETE for the runner and the labels; the 8 staged turns are measured by the next safety-file run.
+
 ### L2 · The eval workflow takes a case file, a repeat count and an id prefix
 
 - **Change:** `workflow_dispatch` inputs `file` (default `blind_heldout.jsonl`), `repeat` (default 3), `only`, `scripted` (default true) — the defaults reproduce the previous behaviour exactly. A tuning file at `--repeat 1` is an investigation run whose transcripts may be read per case; the blind file stays aggregates-only.
