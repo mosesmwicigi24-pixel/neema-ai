@@ -1,6 +1,6 @@
 # Final Release Readiness Report — slices 1–4 (2026-11-06)
 
-**Status: slices 1–7b, both eval fixes and the evidence dossier are LIVE (box on `c0c467d` at 01:05 UTC on 7 Nov; slice 7 = PR #324: the language metric and figure judge corrected, a lone "Sawa" no longer flips a customer's stored language, the eval workflow takes a case file; 7b = PR #325: enum-label drift check, second engine removed; earlier: slice 6 = PR #323: runner repairs and the deterministic silence for bare closers, measured on the blind floor 0.887 → 0.956)** — slice 1 (PR #316) squash-merged as `c8c3356` at 17:18 UTC
+**Status: slices 1–7c, both eval fixes and the evidence dossier are LIVE (box on `197704f` at ~01:17 UTC on 7 Nov; 7c = PR #326: the runner stages the hub outage its tool-failure cases ask for, seven safety labels corrected; slice 7 = PR #324: the language metric and figure judge corrected, a lone "Sawa" no longer flips a customer's stored language, the eval workflow takes a case file; 7b = PR #325: enum-label drift check, second engine removed; earlier: slice 6 = PR #323: runner repairs and the deterministic silence for bare closers, measured on the blind floor 0.887 → 0.956)** — slice 1 (PR #316) squash-merged as `c8c3356` at 17:18 UTC
 on the owner's word ("merge and deploy when green"), after the full suite
 (3,294 passed, 0 failed) and CI were green on its head. The box reported
 `version = c8c3356…` at ~17:52 UTC with `agent.replies = ok`, outreach still
