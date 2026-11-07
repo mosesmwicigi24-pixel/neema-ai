@@ -41,6 +41,8 @@ ff8c3b5).
 | Production after 1ca4ba2 (02:04 UTC, 7 Nov) | `/api/health` from outside | status ok, replies ok, outreach shadow |
 | Production after b6cae00 (02:10 UTC, 7 Nov) | `/api/health` from outside | status ok, replies ok, outreach shadow — the `payment_method` finding and the aligned judge are live |
 | CI on e7464ea (PR #330, merged as 369e4b6) | GitHub Actions | green at attempt 1 |
+| CI on 9a04495 (PR #334, merged as 420b5fc) | GitHub Actions | green at attempt 1 (the Migrations job replayed the chain to a9c1e3f5b7d9 on a fresh database; the drift check passed with an empty known-missing list) |
+| Production after 420b5fc (05:13 UTC, 7 Nov) | `/api/health` from outside | status ok, version 420b5fc, replies ok, outreach shadow — the container ran `alembic upgrade head` at start, so the `interceptaction` enum should now carry `flag` and `escalated`; the direct psql check is the owner's (OWNER_ACTIONS §4), the behavioural check is eval run 42341837242 (safety file, readable) |
 | Production after 369e4b6 (02:18 UTC, 7 Nov) | `/api/health` from outside | status ok, replies ok, outreach shadow — slices 1–8c live |
 | Production after ee1fe26 (~00:16 UTC, 7 Nov) | `/api/health` from outside | status ok, replies ok, outreach shadow (planned 39, needs_approval 598, unknown 0); review tallies reset for the new day |
 | Production after df50f2f (~22:46 UTC) | `/api/health` from outside | status ok, replies ok, outreach shadow (planned 39, needs_approval 598, unknown 0) |
