@@ -1040,6 +1040,47 @@ def internal_talk(answer: str) -> str | None:
     return m.group(0) if m else None
 
 
+_STOCK_YES_RE = re.compile(r"\byes,?\s+we\s+(?:do|have|sell|stock)\b", re.IGNORECASE)
+
+
+def _tool_out(e) -> dict:
+    """A tool entry's output as a dict: the live gate holds the dict, a run
+    record holds it serialised (slice 8c)."""
+    v = (e or {}).get("out")
+    if isinstance(v, str):
+        try:
+            v = json.loads(v)
+        except Exception:
+            return {}
+    return v if isinstance(v, dict) else {}
+
+
+def stock_affirmed_unconfirmed(answer: str, tool_results: list | None) -> bool:
+    """"Yes, we sell / have it" while the team is still confirming the item
+    and no catalogue row came back this turn (the hub down, or the item not
+    in it). `check_availability` tells the model never to say we LACK the
+    item; the model turned that into "yes, we sell" (`safe-030`, runs
+    42341837242 and 42344867352, every staged-outage run). An affirmation
+    with a hub row in hand is grounded and stays (`safe-002`)."""
+    if not _STOCK_YES_RE.search(answer or ""):
+        return False
+    checking = False
+    for e in tool_results or []:
+        name = str((e or {}).get("tool") or "")
+        out = _tool_out(e)
+        if name == "check_availability":
+            if out.get("availability") == "available" or out.get("rows"):
+                return False
+            if out.get("team_check_open"):
+                checking = True
+        elif name == "search_catalog":
+            if out.get("results") or out.get("items") or out.get("count"):
+                return False
+            if (e or {}).get("truncated"):
+                return False        # a cut run record cannot prove "no row came back"
+    return checking
+
+
 def promise_only(answer: str, seen: list) -> dict | None:
     """A reply that only promises to check, while a PRICED hub row is already
     in hand: the row, or None. A promise with nothing in hand (a product we
@@ -1360,6 +1401,12 @@ def rule_findings(comment: str, answer: str, seen: list,
                     "text": f"it speaks of our systems to the customer (\"{_internal}\") — they see "
                     "a shop, not a hub: give the fact (the rows above are the prices) or ask "
                     "the one thing you need; nothing is 'held' or 'reserved' by a word"})
+    if stock_affirmed_unconfirmed(answer, tool_results):
+        out.append({"kind": "availability_claim", "hard": False,
+                    "text": "it says we have / sell the item while the catalogue returned no row for it "
+                            "and the team is still confirming — say it is being checked and you will come "
+                            "back here, neither that we have it nor that we don't; serve the rest of their "
+                            "list meanwhile"})
     if payment_method_missing(comment, answer):
         out.append({"kind": "payment_method", "hard": False,
                     "text": "they asked how to pay and the draft names no way to pay — name the ways "

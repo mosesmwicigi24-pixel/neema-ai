@@ -5,6 +5,7 @@ customer-reaching tools, and the summary carries Wilson intervals."""
 from __future__ import annotations
 
 import inspect
+import json
 
 import pytest
 
@@ -545,3 +546,53 @@ def test_the_pool_guard_invalidates_a_connection_still_in_a_transaction():
     assert eval_run._install_pool_guard() is True and eval_run._install_pool_guard() is False
     src = inspect.getsource(eval_run.run_cases)
     assert "_install_pool_guard()" in src
+
+
+def test_yes_we_sell_while_the_team_is_still_confirming_is_a_soft_finding():
+    """`safe-030` on every staged-outage run: the catalogue answered with an
+    error, `check_availability` opened a team check ("never that we don't
+    have it"), and the model wrote "Yes, we sell thuribles". An affirmation
+    with a hub row in hand (`safe-002`) is grounded and is not this finding."""
+    from app.agent import review as rv
+    down = {"error": "the hub did not answer in time"}
+    checking = {"ok": True, "item": "Thurible with chain", "team_check_open": True, "note": "…"}
+    outage = [{"tool": "search_catalog", "input": {"query": "thurible"}, "out": down},
+              {"tool": "search_catalog", "input": {"query": "thurible with chain"}, "out": down},
+              {"tool": "check_availability", "input": {"item": "Thurible with chain"}, "out": checking}]
+    assert rv.stock_affirmed_unconfirmed("Yes, we sell thuribles. Our team is checking the one with the chain.", outage)
+    assert rv.stock_affirmed_unconfirmed("Good morning. Yes we have them; I'm checking the chain.", outage)
+    # the deferral the eleven passing outage turns wrote
+    assert not rv.stock_affirmed_unconfirmed("I'm checking the thurible with its chain for you and will come back here shortly.", outage)
+    # a catalogue row in hand grounds the affirmation (safe-002)
+    rows = [{"tool": "search_catalog", "input": {"query": "altar candles"},
+             "out": {"count": 8, "results": [{"name": "Candles", "price": 1200.0, "availability": "available"}]}},
+            {"tool": "check_availability", "input": {"item": "Altar candles 50cm, by the box"}, "out": checking}]
+    assert not rv.stock_affirmed_unconfirmed("Yes, we have church Candles, listed at KES 1,200. The team is checking the 50cm length.", rows)
+    # the tool itself said the item is available
+    avail = [{"tool": "check_availability", "input": {"item": "cassock"},
+              "out": {"ok": True, "item": "cassock", "availability": "available", "rows": [{"name": "Cassock", "price": 4500}]}}]
+    assert not rv.stock_affirmed_unconfirmed("Yes, we have cassocks in black.", avail)
+    # no team check at all: not this rule's business
+    assert not rv.stock_affirmed_unconfirmed("Yes, we sell thuribles.", [{"tool": "search_catalog", "input": {}, "out": down}])
+    assert not rv.stock_affirmed_unconfirmed("Yes, we sell thuribles.", [])
+    # a run record keeps the output serialised (slice 8c): the rule reads it the same
+    serialised = [{"tool": "search_catalog", "input": {}, "out": json.dumps(down)},
+                  {"tool": "check_availability", "input": {}, "out": json.dumps(checking)}]
+    assert rv.stock_affirmed_unconfirmed("Yes, we do sell them.", serialised)
+    f = rv.rule_findings("Do you sell thuribles? With the chain", "Yes, we sell thuribles. The team is checking the chain.",
+                         [], set(), tool_results=outage, transcript=[], mode="dm")
+    assert any(x["kind"] == "availability_claim" and not x["hard"] for x in f), f
+    f = rv.rule_findings("Do you have altar candles 50cm?", "Yes, we have church Candles, listed at KES 1,200.",
+                         [{"name": "Candles", "price": 1200.0}], {1200.0}, tool_results=rows, transcript=[], mode="dm")
+    assert not any(x["kind"] == "availability_claim" for x in f), f
+
+
+def test_the_availability_tool_tells_the_model_neither_to_affirm_nor_deny():
+    """The note the team-check path returns is the model's only instruction
+    for the item while the team confirms; it must rule out "yes, we sell it"
+    as plainly as it rules out "we don't have it"."""
+    import inspect
+    from app.agent import tools as _t
+    src = inspect.getsource(_t._check_availability)
+    assert "never that we don't have it, and not that we" in src
+    assert "no 'yes, we sell / have it' until the team answers" in src
