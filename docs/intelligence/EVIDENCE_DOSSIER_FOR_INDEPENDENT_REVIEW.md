@@ -757,6 +757,8 @@ not recorded 7 · figure not from this turn's tools 7 · required text
 missing 5 · did not hand to a person 5 · turn raised 3 · no reply where one
 was expected 3. Weak languages: Swahili 42/65 = 0.646, Hindi 3/6.
 
+> **Corrected in Addendum D (2026-11-07, 05:4x UTC):** the first of the two "environment defects" below was the evaluation runner's own gap — the enum was never reached. The stop_ack numbers stand as recorded; their cause does not.
+
 **Two environment defects contaminate the measurement** and are recorded in
 UNFINISHED and OWNER_ACTIONS: the CI database's `interceptaction` enum lacks
 the `flag` value the opt-out and escalation writes use (all 7 `stop_ack`
@@ -834,7 +836,7 @@ and the judge's arithmetic; before slices 8 R1/8b/8c), 120 blind cases × 3
 The three passes agree within a point (turns 0.863–0.871); 54 cases pass
 every time and 41 fail every time, so the failures are systematic. Failure
 kinds over three passes: answered a closer 57 · no price where a quote was
-expected 44 · opt-out not recorded 21 (the environment's enum) · required
+expected 44 · opt-out not recorded 21 (first read as the environment's enum; Addendum D: the runner's own gap) · required
 text 13 · did not hand to a person 13 · figure not from this turn's tools
 10 · no reply 10 · turn raised 8 (the probe defect, fixed after this run's
 code) · language 18 (sw 8, hi 7, pt 3) · other 5.
@@ -852,3 +854,37 @@ pass^3 measures.
 An independent reviewer can reproduce the aggregates from
 `results/agent-eval-blind-6f1060a-run42320051884-pass3.json` with
 `summarise()`; the per-case replies were not read by the developer.
+
+## Addendum D (2026-11-07, 05:4x UTC) — the migration's verification run, and a correction
+
+The owner approved the `interceptaction` enum migration; it shipped as
+420b5fc and the box reached it at 05:13 UTC. A readable run of the safety
+file on that code (run 42341837242, 121 turns, 15 min) was dispatched to
+verify it: turns 104/121 = 0.860 (from 94/121 on 6f1060a), the staged hub
+outage now measured (tool-failure 11/13), figures 29/29 — and **stop_ack 0/7,
+unchanged**.
+
+Read per case, the seven opt-out turns show the door firing, the
+acknowledgement sent, no error, and `intercept_mode: null`: the runner found
+no conversation row for the number. The live inbound webhook creates that row
+before any door runs; the runner inserted messages directly and never did.
+Its copy of the door skipped the record when no row existed and its read-back
+answered "not opted out" for the same reason. **The enum write was never
+reached, on any run, so Addenda A–C's attribution of these failures to the
+environment's enum was wrong; the counts (7, 7, 21) stand, their cause is the
+harness.** Production is unaffected: the live handler substitutes a stand-in
+and records on the person and in redis.
+
+The runner now creates the row per case and uses the live handler's stand-in;
+`tests/test_eval_runner_db.py` runs the real runner on a "STOP" case against
+a database built from the migration chain in CI and asserts the pass, the
+person's preference and the `intercepts` row with action `flag` (the label
+the migration added — the migration's behavioural proof in CI). A negative
+control against the pre-fix runner fails as the runs did. Two safety labels
+were corrected (`safe-012`, `safe-041`; notes in the cases). Re-scored
+offline: 106/121 = 0.876; with the runner fixed the seven opt-out turns are
+expected to pass (113/121 = 0.934), **not measured** until the next run of
+the file. Model defects found by this file: three clear (`safe-030/032/068`),
+one variance, two judgement calls, two awaiting the owner. Record:
+`results/agent-eval-safety-420b5fc-run42341837242.json`.
+
