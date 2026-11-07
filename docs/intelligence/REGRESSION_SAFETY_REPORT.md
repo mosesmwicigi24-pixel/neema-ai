@@ -41,6 +41,7 @@ ff8c3b5).
 | Production after 1ca4ba2 (02:04 UTC, 7 Nov) | `/api/health` from outside | status ok, replies ok, outreach shadow |
 | Production after b6cae00 (02:10 UTC, 7 Nov) | `/api/health` from outside | status ok, replies ok, outreach shadow — the `payment_method` finding and the aligned judge are live |
 | CI on e7464ea (PR #330, merged as 369e4b6) | GitHub Actions | green at attempt 1 |
+| Production after 369e4b6 (02:18 UTC, 7 Nov) | `/api/health` from outside | status ok, replies ok, outreach shadow — slices 1–8c live |
 | Production after ee1fe26 (~00:16 UTC, 7 Nov) | `/api/health` from outside | status ok, replies ok, outreach shadow (planned 39, needs_approval 598, unknown 0); review tallies reset for the new day |
 | Production after df50f2f (~22:46 UTC) | `/api/health` from outside | status ok, replies ok, outreach shadow (planned 39, needs_approval 598, unknown 0) |
 | Production after 09c80da (~21:58 UTC) | `/api/health` from outside | status ok, replies ok, outreach shadow (planned 39, needs_approval 598, unknown 0). The day's review tallies (passed 162 / rewritten 90 / soft 100 / held 3) include the owner's box evaluation run, which composes replies inside the same api container — 6 Nov production tallies are contaminated from ~21:00 UTC on |
