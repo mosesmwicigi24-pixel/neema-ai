@@ -62,9 +62,9 @@ silence, plus fail-closed safeguards that had been fail-open.
 - Retiring the legacy bridge order path and the expiring shortener (W9-4).
 - A DB idempotency key for orders (migration).
 
-Slices 1–10 plus the media-link fix are live on the box at ad5355c (13:21 UTC, 7 Nov).
+Slices 1–11 are live on the box at 4e01eb4 (13:44 UTC, 7 Nov).
 
-## Slice 11 (2026-11-07) — pending merge
+## Slice 11 (2026-11-07) — merged as 4e01eb4, live
 
 A prompt rule, two floor phrasings, a stricter `hold_ack` verdict in the two
 scorers, eleven cases, fourteen tests, no migration, no new sender. The

@@ -253,7 +253,7 @@ Full report: `COMMERCIAL_EI.md` (the directive's eight-part final report, the 25
 - **Tests:** `tests/test_commercial_ei.py` (14); 312 with the neighbouring suites; ruff clean. Floors model-free: `said` 0.859 → 0.863, `lang` 0.963 → 0.969, nothing lost (`results/floors-after-slice11-all.json`).
 - **Measured outcome:** the baseline (29%) is measured; the after is **NOT MEASURED — evaluation stopped on the owner's word**. First runs when lifted: `--file commercial_ei.jsonl` (~$1) and `--file independent_sales.jsonl` (~$8).
 - **Regressions checked:** the hold still blocks outreach and informs the next turn (26 stage-3 tests); the owner's reply passes the length (27/45) and pressure gates; no new sender; the bare-closer silence unchanged.
-- **Status:** IMPLEMENTED BUT NOT VERIFIED (with the model).
+- **Status:** IMPLEMENTED, LIVE (4e01eb4 on the box 13:44 UTC) — NOT VERIFIED with the model (evaluation stopped on the owner's word).
 
 ## Slice 10 (2026-11-07, 12:3x) · "are messages still arriving?" — the inbound heartbeat
 
