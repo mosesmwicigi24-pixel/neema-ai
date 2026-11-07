@@ -21,6 +21,8 @@ Sonnet 5.5 carrying the ~24k-token system prompt (cached) plus the Sonnet 5
 reviewer and a Haiku pass: 3–4 cents. Live customer replies are a rounding
 error (one gated reply today).
 
+**Standing word (owner, 2026-11-07, 07:1x UTC): "Stop the evaluation run until I will ask. Stop all the passes until requested by me."** No evaluation run, pass^1 or pass^3 is dispatched, by hand or otherwise, until the owner asks. Verified at that time: no run in progress or queued; the eval workflow starts only by hand (no schedule, no push trigger); CI never calls the model; the only scheduled task on this account is the read-only shadow health read-out.
+
 1. **Top up** (Plans & Billing). Nothing is dispatched until you say so.
 2. **Set an evaluation budget.** For scale: a safety-file run ≈ $4; a sales
    run ≈ $11; a blind pass^1 ≈ $15; a blind pass^3 ≈ $45.
