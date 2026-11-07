@@ -45,6 +45,7 @@ ff8c3b5).
 | Full API suite on 83cf55a (slice 9b: the runner's conversation row and stand-in, the new real-DB test, two safety labels) | `pytest tests` with Postgres and redis, alone on the services | **3,372 passed, 1 xpassed, 0 failed** (9 min 34 s) |
 | New real-database test `tests/test_eval_runner_db.py` (slice 9b: the runner's opt-out door, end to end, alembic-built database) | pytest with local Postgres and redis | 1 passed (5 s); negative control by hand against the pre-9b runner: fails at `opted_out is True`, the two CI runs' failure. With `test_cooling_probe_db.py` and `test_migrations.py`: 3 passed |
 | Harness and floor tests after the two label corrections (slice 9b) | `pytest tests/test_eval_harness.py tests/test_intelligence_floors.py` | 207 passed; `ruff check` clean on the changed files |
+| Production after b0e9eec (06:48 UTC, 7 Nov) | `/api/health` from outside | status ok, version b0e9eec, replies ok, outreach shadow — the `availability_claim` soft finding and the sharpened availability note are live |
 | Full API suite on 86e03a1 (slice 9c: the `availability_claim` finding, the availability tool's note) | `pytest tests` with Postgres and redis, alone on the services | **3,374 passed, 1 xpassed, 0 failed** (9 min 31 s) |
 | CI on 86e03a1 (PR #338, merged as b0e9eec) | GitHub Actions | green at attempt 1 |
 | CI on 2f8661c (PR #336, merged as 19e4952) | GitHub Actions | green at attempt 1 (the database job now runs `tests/test_eval_runner_db.py`) |
