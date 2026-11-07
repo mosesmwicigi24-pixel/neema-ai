@@ -32,6 +32,7 @@ import os
 import re
 import subprocess
 import time
+import types
 from datetime import datetime, timezone
 
 from app.core.config import settings
@@ -436,6 +437,15 @@ def summarise(results: list[dict], *, repeat: int) -> dict:
     return out
 
 
+def _conv_or_standin(conv, wa_id: str):
+    """The conversation, or the stand-in the live opt-out door uses when no
+    row exists yet (`runtime._handle_opt_out`): the preference still records
+    on, and reads from, the person the resolver makes for the number."""
+    if conv is not None:
+        return conv
+    return types.SimpleNamespace(id=None, person_id=None, channel="whatsapp", external_id=wa_id, wa_id=wa_id)
+
+
 def select_cases(selection: str = "all", *, only: str | None = None, limit: int | None = None,
                  file: str | None = None) -> list[dict]:
     """The cases one run covers. `file` names one case file and ignores the
@@ -603,7 +613,19 @@ async def run_cases(*, selection: str = "all", repeat: int = 1, only: str | None
                 if repeat > 1:
                     await _cleanup_contacts(redis, [wa_id])       # each repeat starts clean
                 async with AsyncSessionLocal() as db:
-                    await provision_user(db, wa_id)
+                    user = await provision_user(db, wa_id)
+                    # The conversation row the inbound webhook makes before any
+                    # door runs (messaging.upsert_message). The runner inserted
+                    # messages straight into the table and never made one, so
+                    # the opt-out door had nothing to record against and the
+                    # read-back answered "not opted out" on every stop_ack turn
+                    # (runs 42320057346 and 42341837242: 0/7 both — a harness
+                    # gap, not the enum the registers first blamed).
+                    conv = (await db.execute(select(Conversation).where(
+                        Conversation.wa_id == wa_id))).scalars().first()
+                    if conv is None:
+                        db.add(Conversation(wa_id=wa_id, channel="whatsapp",
+                                            person_id=getattr(user, "person_id", None)))
                     await db.commit()
                 case_res = {"id": case["id"], "repeat": rep + 1, "contact": "…" + wa_id[-4:],
                             "source": case["source"], "turns": [],
@@ -626,9 +648,12 @@ async def run_cases(*, selection: str = "all", repeat: int = 1, only: str | None
                             async with AsyncSessionLocal() as db:
                                 conv = (await db.execute(select(Conversation).where(
                                     Conversation.wa_id == wa_id))).scalars().first()
-                                if conv is not None:
-                                    await _intent.record_opt_out(db, redis, conv, text, channel="whatsapp", key=wa_id)
-                                    await db.commit()
+                                # the live door's stand-in when no row exists
+                                # (runtime._handle_opt_out): the preference is
+                                # recorded on the person, never skipped
+                                await _intent.record_opt_out(db, redis, _conv_or_standin(conv, wa_id), text,
+                                                             channel="whatsapp", key=wa_id)
+                                await db.commit()
                             reply = _intent.acknowledgement(text)
                             facts = {"tools": [], "review": None, "door": "opt_out"}
                         elif await closer_gate(redis, "whatsapp", wa_id, text):
@@ -646,7 +671,7 @@ async def run_cases(*, selection: str = "all", repeat: int = 1, only: str | None
                         async with AsyncSessionLocal() as db:
                             conv = (await db.execute(select(Conversation).where(
                                 Conversation.wa_id == wa_id))).scalars().first()
-                            opted = await _intent.opted_out(db, redis, conv) if conv is not None else False
+                            opted = await _intent.opted_out(db, redis, _conv_or_standin(conv, wa_id))
                             mode = getattr(conv.intercept_mode, "value", conv.intercept_mode) if conv is not None else None
                             if reply:
                                 db.add(Message(wa_id=wa_id, channel="whatsapp", direction=MsgDirection.outbound,

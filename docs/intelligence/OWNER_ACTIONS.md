@@ -93,4 +93,9 @@ and `/api/admin/settings/prompt-inputs` (the 22 flag values).
    a9c1e3f5b7d9 adds both labels (`ADD VALUE IF NOT EXISTS`, idempotent);
    the box applies it at the next container start. Run the command once
    after the deploy to confirm the list now has `flag` and `escalated`.
+   The safety-file run after the deploy (42341837242) could NOT stand in
+   for this check: its seven opt-out turns failed for a reason inside the
+   evaluation runner (slice 9b), and the run never reached the enum. This
+   line stays the only direct proof on the box; CI's new real-database
+   test proves the write on a database built from the migration chain.
 2. **(The CI pass^3 is in: 54/120 = 0.450, BENCHMARK_RESULTS.)** **Send the box run's files** (`eval-out/agent-eval-blind-7670de1-*.json` and `.log`) — they are the second independent measurement, on the production database.
