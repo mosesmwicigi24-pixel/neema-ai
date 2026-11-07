@@ -455,6 +455,24 @@ def select_cases(selection: str = "all", *, only: str | None = None, limit: int 
     return chosen
 
 
+def tool_outs_for_record(tool_log: list | None, *, limit: int = 1200) -> list[dict]:
+    """Each tool call's input and output, as the record keeps them (slice 8c):
+    the output serialised and cut at `limit` characters. Until now the record
+    kept tool NAMES only, so a figure or a deferral could not be re-scored or
+    diagnosed offline (L5, L10, `safe-075`). Hub rows, never customer text."""
+    out: list[dict] = []
+    for e in tool_log or []:
+        if not isinstance(e, dict):
+            continue
+        try:
+            raw = json.dumps(e.get("out"), ensure_ascii=False, default=str)
+        except Exception:
+            raw = str(e.get("out"))
+        out.append({"tool": str(e.get("tool") or ""), "input": e.get("input"),
+                    "out": raw[:limit], "truncated": len(raw) > limit})
+    return out
+
+
 def _write_record(record: dict, out_path: str, *, partial: bool, done: int = 0, of: int = 0) -> None:
     """The run record on disk — the final one, or a checkpoint marked
     `partial` with how far it got, so an interrupted run is still evidence
@@ -657,6 +675,7 @@ async def run_cases(*, selection: str = "all", repeat: int = 1, only: str | None
                             "critical": bool(case.get("critical")), "categories": case["categories"],
                             "lang": exp.get("lang") or case.get("lang") or "en",
                             "latency_s": latency, "error": facts.get("error"), "door": facts.get("door"),
+                            "tool_outs": tool_outs_for_record(facts.get("tools")),
                             "verdict": verdict,
                         })
                         mark = "ok " if verdict["passed"] else "FAIL"

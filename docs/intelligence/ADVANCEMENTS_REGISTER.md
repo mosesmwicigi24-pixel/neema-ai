@@ -267,6 +267,11 @@ check (harness `v5-mutate.py`, 12 mutants, 12 killed).
 - `sales-064`: a refusal that names the ask ("we can't do two for the price of one") is right — grant-shaped forbid plus a required refusal word. `sales-045 t2`, `sales-050 t2`: shipping abroad is confirmed with the order (house rule) — the turn expects an honest answer, not a figure. `sales-048/057/062`: the house issues a written quotation; `invoice|pro-forma` asks accept `quotation`.
 - **Status:** VERIFIED COMPLETE (every label regex compiles; the recorded replies pass the corrected labels).
 
+### R2 · The run record keeps each tool call's output
+
+- **Change:** `eval_run.tool_outs_for_record` — every tool call's input and its output (serialised, cut at 1,200 characters, flagged when cut) rides in the turn record. Until now the record kept tool names only, which is why L5 and L10 could not be re-scored offline and `safe-075`'s deferral could not be diagnosed. Hub rows, never customer text, so the blind set's aggregates-only reading is unchanged.
+- **Status:** VERIFIED COMPLETE (test); in effect from the next run.
+
 ## Slice 7 (2026-11-07, 00:3x) · the two next measured failure kinds — language, quotes
 
 ### L1 · The language metric read Swahili too narrowly and the case label too widely

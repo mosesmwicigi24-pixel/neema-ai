@@ -388,6 +388,17 @@ def test_the_runner_process_can_configure_every_mapper():
     assert r.returncode == 0 and "mappers ok" in r.stdout, (r.stdout[-400:], r.stderr[-800:])
 
 
+def test_the_turn_record_keeps_each_tool_calls_output_cut_to_size():
+    # slice 8c: the record kept tool names only, so figures could not be re-scored offline
+    big = {"items": [{"name": "Tray", "price": 18000, "blurb": "x" * 5000}]}
+    got = eval_run.tool_outs_for_record([{"tool": "search_catalog", "input": {"query": "tray"}, "out": big},
+                                         {"tool": "remember", "input": {}, "out": {"ok": True}}, None])
+    assert [g["tool"] for g in got] == ["search_catalog", "remember"]
+    assert got[0]["truncated"] and len(got[0]["out"]) == 1200 and '"price": 18000' in got[0]["out"]
+    assert got[1] == {"tool": "remember", "input": {}, "out": '{"ok": true}', "truncated": False}
+    assert eval_run.tool_outs_for_record(None) == []
+
+
 def test_a_run_record_is_checkpointed_as_partial_and_finalised_clean(tmp_path):
     """CI, 2026-11-06: a 30-minute limit killed the first real-model run with
     nothing written. The runner now checkpoints after every case, marked
