@@ -35,7 +35,7 @@ ff8c3b5).
 | Production after 6f1060a then c0c467d (00:54 and 01:05 UTC, 7 Nov) | `/api/health` from outside | status ok, version c0c467d, replies ok, outreach shadow (planned 39, needs_approval 598, unknown 0; enforced rules none); review tallies 0 for the new day |
 | Full API suite on 1979e28 (slice 7c: staged outage, safety labels) | `pytest tests` with Postgres and redis | **3,367 passed, 1 xpassed, 0 failed** (10 min 49 s) |
 | CI on 1979e28 (PR #326, merged as 197704f) | GitHub Actions | green at attempt 1 |
-| Production after 197704f (~01:17 UTC, 7 Nov) | `/api/health` from outside | status ok, version 197704f, replies ok, outreach shadow |
+| Production after 197704f (01:26 UTC, 7 Nov) | `/api/health` from outside | status ok, version 197704f, replies ok, outreach shadow |
 | Production after ee1fe26 (~00:16 UTC, 7 Nov) | `/api/health` from outside | status ok, replies ok, outreach shadow (planned 39, needs_approval 598, unknown 0); review tallies reset for the new day |
 | Production after df50f2f (~22:46 UTC) | `/api/health` from outside | status ok, replies ok, outreach shadow (planned 39, needs_approval 598, unknown 0) |
 | Production after 09c80da (~21:58 UTC) | `/api/health` from outside | status ok, replies ok, outreach shadow (planned 39, needs_approval 598, unknown 0). The day's review tallies (passed 162 / rewritten 90 / soft 100 / held 3) include the owner's box evaluation run, which composes replies inside the same api container — 6 Nov production tallies are contaminated from ~21:00 UTC on |
