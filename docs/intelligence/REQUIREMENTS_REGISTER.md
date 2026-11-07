@@ -73,14 +73,14 @@ Last update: 2026-11-06 (session 1, end: discovery, baseline, first implementati
 | R4.7 | Memory and context | newest rules kept; contradictions resolved; silence honoured; locked writes; context experiment NOT STARTED (needs model) | PARTIALLY COMPLETE |
 | R4.8 | Multilingual | language guess 0.528→0.930 on the blind set (intervals separated; the earlier held-out figure was withdrawn as contaminated, BENCHMARK_RESULTS Correction 1); deterministic continuity rule; 100 language cases; native review BLOCKED | PARTIALLY COMPLETE |
 | R4.9 | Autonomous execution | outcomes say customer_told; handoff rings; order idempotency and legacy path not changed (recorded) | PARTIALLY COMPLETE |
-| R4.10 | Continuous evaluation | agent_eval --cases, history in app_settings, dashboard reads it; no automatic prompt change exists. Run 42289125585 completed the first pass over the blind set (179/360 case-runs) and crashed in the runner's contact cleanup (FK ordering) — the checkpoint kept the record; no history row (the run did not finish) | VERIFIED COMPLETE (harness) / PARTIALLY COMPLETE (a full run has not finished) |
+| R4.10 | Continuous evaluation | agent_eval --cases, history in app_settings, dashboard reads it; no automatic prompt change exists. Run 42289125585 completed the first pass and crashed in cleanup; **run 42320051884 (7 Nov) completed 360/360 case-runs without a crash** (BENCHMARK_RESULTS, pass^3) | VERIFIED COMPLETE |
 
 ## §5 Independent intelligence baseline
 
 | ID | Requirement | Status |
 |---|---|---|
 | R5.1 | 300–500 cases covering the eleven listed categories | 453 tuning cases + 120 blind cases, all categories (EVALUATION_DATASET) | VERIFIED COMPLETE (no production-derived cases yet) |
-| R5.2 | Real model against controlled data, sends disabled | run 42289125585: a complete first pass over the 120 blind cases (459 turns), sends disabled — turns passed 0.800 [0.761, 0.834] as recorded, 0.828 [0.791, 0.860] re-scored under the corrected language metric (slice 7, same replies), critical 0.778 → 0.807, language 0.955 → 0.988, figures 0.854, length 0.881, first draft 0.473 (BENCHMARK_RESULTS); pass^3 NOT MEASURED (crashed at 179/360); two environment defects contaminate stop_ack and 3 turns | PARTIALLY COMPLETE (single pass measured; pass^3 not) |
+| R5.2 | Real model against controlled data, sends disabled | run 42289125585: a complete first pass over the 120 blind cases (459 turns), sends disabled — turns passed 0.800 [0.761, 0.834] as recorded, 0.828 [0.791, 0.860] re-scored under the corrected language metric (slice 7, same replies), critical 0.778 → 0.807, language 0.955 → 0.988, figures 0.854, length 0.881, first draft 0.473 (BENCHMARK_RESULTS); **pass^3 MEASURED: 54/120 = 0.450 [0.364, 0.539] (run 42320051884, 6f1060a); turns 0.866, critical 0.856, language 0.985, figures 0.907**; the enum defect contaminates stop_ack (21 turns) | VERIFIED COMPLETE (measured; the environment caveat recorded) |
 | R5.3 | Objective assertions + human evaluation where judgment is required | objective verdicts in eval_run; judged turns exported to a packet | PARTIALLY COMPLETE |
 | R5.4 | Blind comparison: Neema vs skilled humans vs reference agent | design only (INTERNATIONAL_ASSESSMENT) | NOT STARTED |
 | R5.5 | Record inputs, model version, prompt revision, traces, outcomes, criteria, limitations | eval_run record (git sha, model ids, prompt hashes, case-set hash, tool traces) | VERIFIED COMPLETE (harness) |
@@ -93,7 +93,7 @@ Last update: 2026-11-06 (session 1, end: discovery, baseline, first implementati
 | R6.1 | 10 dimensions, weights as given | EXCELLENCE_SCORE | VERIFIED COMPLETE |
 | R6.2 | Per metric: methodology, denominator, sample size, evaluator, evidence source, uncertainty | EXCELLENCE_SCORE table | VERIFIED COMPLETE |
 | R6.3 | NOT MEASURED where unreliable; no invented scores | applied |
-| R6.4 | ≥10-point verified improvement on a held-out set | floors only, on the blind set (the only uncontaminated held-out): language +40.2 points (0.528→0.930, separated); customer state +5.5 (0.725→0.780, intervals overlap); opt-out +5.9 (0.912→0.971, n=34, overlap); reply length +2.1 after the scorer correction. The real-model first pass gives a baseline (turns 0.800) but no before/after: the 'before' code was never run with the model, so a model-level improvement cannot be claimed. The 100-point aggregate is NOT MEASURED — the 10-point claim is NOT demonstrated | PARTIALLY COMPLETE |
+| R6.4 | ≥10-point verified improvement on a held-out set | floors only, on the blind set (the only uncontaminated held-out): language +40.2 points (0.528→0.930, separated); customer state +5.5 (0.725→0.780, intervals overlap); opt-out +5.9 (0.912→0.971, n=34, overlap); reply length +2.1 after the scorer correction. The real-model runs now give one before/after on the held-out set: silence next-action 0.346 (6 Nov, aaf7978) → 0.615 (7 Nov, 6f1060a, each of three passes), intervals separated — +27 points on that action from the slice-6 floor; turns 0.800 → 0.866 overall, part of it metric corrections. The 100-point aggregate is NOT MEASURED — the 10-point claim is NOT demonstrated | PARTIALLY COMPLETE |
 | R6.5 | Investigate the six preliminary targets | first real-model pass: language continuity 0.955 as recorded, 0.988 [0.972, 0.995] re-scored under the corrected metric (slice 7; the interval clears ≥0.95); next-action correctness per label 0.35–1.0 (≥0.95 met only for ask_one, care_first, confirm_paid_check, hold_ack; silence 0.346); recall ≥0.95 NOT MEASURED (memory category 0.843 at turn level); emotional ≥0.90 and sandbox completion ≥0.95 NOT MEASURED; conversion not measured | PARTIALLY COMPLETE |
 | R6.6 | Aggregate never excuses critical safety/financial errors | applied (gating rule in EXCELLENCE_SCORE) |
 
@@ -138,7 +138,7 @@ Last update: 2026-11-06 (session 1, end: discovery, baseline, first implementati
 | R11.1 | Verified Capability Baseline | CAPABILITY_BASELINE.md | VERIFIED COMPLETE |
 | R11.2 | Deep Investigation Report | INVESTIGATION_REPORT.md | VERIFIED COMPLETE |
 | R11.3 | Ten-Advancement Implementation Register | ADVANCEMENTS_REGISTER.md | VERIFIED COMPLETE (living) |
-| R11.4 | Intelligence Benchmark Results | BENCHMARK_RESULTS.md (floors measured; real-model first pass measured; pass^3 NOT MEASURED) | PARTIALLY COMPLETE |
+| R11.4 | Intelligence Benchmark Results | BENCHMARK_RESULTS.md (floors measured; real-model first pass measured; pass^3 MEASURED 0.450 [0.364, 0.539]; two readable tuning runs read turn by turn) | VERIFIED COMPLETE |
 | R11.5 | Customer Experience Assessment | needs the model run and raters | BLOCKED |
 | R11.6 | Performance Dashboard | /api/admin/performance + PerformanceView | VERIFIED COMPLETE |
 | R11.7 | Full Regression and Safety Report | REGRESSION_SAFETY_REPORT.md | see that file |
