@@ -101,6 +101,9 @@ async def process_payload(request: Request, raw: bytes, sig: str | None) -> Resp
     n, failed = await wa_native.handle_webhook(payload, redis)
     if n or failed:
         _log.info("WA native webhook: %d message(s) ingested, %d failed", n, failed)
+    if n:
+        from app.services import inbound_health
+        await inbound_health.stamp(redis, "whatsapp")     # a customer message arrived
     if failed:
         # Failed events released their dedup guard — bounce so Meta
         # redelivers them. Never acked-and-lost.

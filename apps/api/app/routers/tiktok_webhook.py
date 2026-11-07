@@ -130,6 +130,8 @@ async def _receive(db: AsyncSession, request: Request, event: dict, content: dic
         ident.raw_profile = {**(ident.raw_profile or {}), "tt_conversation_id": conv_tt}
     conv = await get_or_create_conversation(db, CHANNEL, from_user,
                                             person_id=ident.person_id)
+    from app.services import inbound_health
+    await inbound_health.stamp(getattr(request.app.state, "redis", None), "tiktok")
     # A type we can't read (a sticker, a voice message…) used to be stored as
     # "[unsupported message]": now calm words + TikTok's own type, kept.
     stored, raw_meta = text, None

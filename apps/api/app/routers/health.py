@@ -47,6 +47,15 @@ async def health(request: Request):
             out["agent"] = {"replies": "ok"}
     except Exception:
         pass
+    # ARE MESSAGES STILL ARRIVING? (2026-11-07): twice the owner reported
+    # "no new inbound chats" and nothing outside the box could say when the
+    # last customer message landed. Per channel: when, and how many in the
+    # rolling hour — a name, a time, a count; never a number or a text.
+    try:
+        from app.services import inbound_health
+        out["inbound"] = await inbound_health.read(getattr(request.app.state, "redis", None))
+    except Exception:
+        pass
     # CAN NEEMA STILL PLACE AN ORDER? (2026-10-05): the hub refused every
     # order for six weeks and nothing said so. The last probe / order outcome,
     # coarse only — never the token, the URL or the hub's reply.

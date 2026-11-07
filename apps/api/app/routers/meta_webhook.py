@@ -400,6 +400,8 @@ async def _capture_events(db: AsyncSession, channel: str, payload: dict, redis=N
                 transcript_status="queued" if is_voice else None,
                 created_at=row_at,
             ))
+            from app.services import inbound_health
+            await inbound_health.stamp(redis, channel)          # a customer message arrived
             if is_voice:
                 voice_jobs.append((row_id, media_url))
             conv.last_message_at = datetime.now(timezone.utc)
@@ -837,6 +839,8 @@ async def _capture_comment_events(db: AsyncSession, channel: str, payload: dict,
                 waba_msg_id=c["comment_id"],   # the comment id, so a reply can target it
                 comment_context=(ctx or None),
             ))
+            from app.services import inbound_health
+            await inbound_health.stamp(redis, "comment")        # a customer comment arrived
             conv.last_message_at = datetime.now(timezone.utc)
             conv.last_message_preview = ("💬 " + (c["text"] or "Commented on your post"))[:100]
             engage.append(c)
