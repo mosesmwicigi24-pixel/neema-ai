@@ -143,3 +143,11 @@ the precise dependency · status. Last update: 2026-11-06, end of session 1.
 | Directive scenarios 16 (production delay), 22 (conflicting prices), 23 (imperfect English), 25 (overlapping follow-ups) are thin in the readable case set | recorded in `COMMERCIAL_EI.md` §8 | a case-authoring pass; 25 is a dispatcher property proven by `test_outreach_stage1.py`, not a scripted-customer case |
 | The length floor gives a come-back message a 45-word room where the owner's shape is 27 | recorded; `length_kind` floor 0.570 | a hold-state target, measured first |
 | Stages 10–13 re-read against the directive's ten per-scenario criteria | not done in this slice (no confirmed weakness found in the inventory; the recorded runs were not re-read per scenario) | the model run plus the rater pass (`OWNER_ACTIONS.md` §3) |
+
+## Opened by the owner's note "we have rands in the catalogue (ZAR)" (2026-11-07, 13:4x UTC)
+
+| Item | Status | What closes it |
+|---|---|---|
+| South Africa priced in rand by Neema | not done — the market gate keeps ZA on USD (rand on request at the day's rate) because the hub carries ZAR for 5 of 110 products, no variants, and two of the five rows are far below their dollar price (`OWNER_ACTIONS.md` §4) | the owner's decision; then the one-line gate flip + search enum + fallback rate + prompt wording + tests (scoped, half a day) |
+| The website shows a South African viewer a mixed page (5 items in rand, 105 in dollars, variants in dollars under a rand card) | recorded; by design of the per-item public card | the same fill; or the public card using the market gate (one line) if the owner prefers one currency per page |
+| A rand guard like the USD one ("a hub row farther than 5% from KES ÷ rate is not quoted") | not built — no house KES/ZAR rate exists yet | with the switch |
