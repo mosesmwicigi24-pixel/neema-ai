@@ -95,6 +95,23 @@ and `/api/admin/settings/prompt-inputs` (the 22 flag values).
 ## 4. Decisions waiting in the registers
 
 - The `/api/health` hub wait (one function; production behaviour).
+- **Rand (ZAR) in the catalogue — switch South Africa to rand now, or after the hub is filled?** (your note, 2026-11-07 13:4x UTC)
+  What the live catalogue says today (read through the box's public catalogue, `?ccy=ZAR`): **5 of 110 products carry a ZAR row, no variant does.** The five do not agree with each other or with their USD rows — at today's rate (1 USD = 16.51 ZAR, 7 Nov):
+
+  | Product | Hub ZAR | USD row | USD row in rand today | Implied rand per dollar |
+  |---|---:|---:|---:|---:|
+  | Classic Princes Cassock Set | 3,230.77 | 190 | 3,138 | 17.0 |
+  | Straight Collar Shirt | 384.62 | 25 | 413 | 15.4 |
+  | Canon Gown | 2,000 | 130 | 2,147 | 15.4 |
+  | Small golden cups | 18.46 | 1.50 | 24.77 | 12.3 |
+  | Straight Collar | 61.54 | 8 | 132 | 7.7 |
+
+  The collar's rand row would charge less than half its dollar price; the cups a quarter less. Where this stands in the system: Neema does NOT quote these rows — the market gate (`core/countries.py`, `HUB_PRICED_CURRENCIES`) still prices South Africa in USD, with the rand conversion on request at the day's rate (the fx module), so no customer has been told a wrong rand figure by Neema. The **website** catalogue is different: a viewer placed in South Africa (or `?ccy=ZAR`) already sees the five in rand and the other 105 in dollars, and the Straight Collar's sizes in dollars under a rand card (the public card prices per item, by design).
+  Your decision, one of:
+  1. **Fill first, then switch (recommended).** Fill ZAR for every product and every variant in the hub at one rate (today 16.51 per USD; or the rate you want to hold, as the Kwacha was held at 5 KES), correct the collar and the cups, then say "switch South Africa to rand": the change is one line in the gate plus the search tool's currency list, a fallback rate setting (as `zmw_kes_rate`), the prompt's "Zambia the same" wording extended to South Africa, and the tests mirrored from Zambia's — half a day, already scoped. The rand guard would mirror the USD one (a hub row farther than 5% from KES ÷ rate is not quoted; the audit names it).
+  2. **Switch now.** South Africans would be quoted the five hub rows as they are (two of them wrong) and 105 products at a fallback KES ÷ rate I would have to set. Not recommended with the rows as they stand.
+  3. **Stay on USD** (today's behaviour) and leave the five rows for the website; nothing changes.
+  Until you say, nothing changes in code.
 - **A check promised yesterday that still cannot be done (the hub down):
   hand the thread to a person, or keep it and ping the team?** The safety
   case `safe-032` is labelled "hand to a colleague"; the system's
