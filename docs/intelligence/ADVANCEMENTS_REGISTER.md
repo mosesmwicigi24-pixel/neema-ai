@@ -248,6 +248,25 @@ check (harness `v5-mutate.py`, 12 mutants, 12 killed).
 - **Production reading:** the same probe runs in live turns. Production replies are being produced (health tallies), which says the production enum most likely HAS the labels — but that is an inference; the owner's one-line psql check (OWNER_ACTIONS) is the proof, and it now carries this weight.
 - **Status:** VERIFIED COMPLETE (reproduction before/after; real-database test).
 
+### L10 · The runner's judge takes the gate's facts in full (measurement)
+
+- **Investigation:** run 42320054512's 7 "figure not from this turn's tools" were the owner's KES 350 delivery line (2), figures already said in the conversation (3), the customer's own budget (1) and a TZS conversion (1) — every one a fact the gate's `allowed_figures` accepts (`prompt_figures`, `transcript_figures`, the comment's figures, `fx`) and the runner's `judge` did not pass.
+- **Change:** `judge(text, user_text, tools, transcript=, fx=)`: facts = tool figures ∪ the customer's own figures ∪ the transcript's; known = `prompt_figures()`; the run fetches today's rates once (`fx.rates`) and `check_turn` passes the case's earlier turns as the transcript. Tests for each fact. The label still reads "from this turn's tools" in the sense the gate means it: nothing from nowhere.
+- **Measured:** 6 of the 7 re-read as verified offline; the conversion needs the rates the next run fetches.
+- **Status:** VERIFIED COMPLETE (tests); effect on the measured kind by the next run.
+
+### L11 · A how-to-pay question answered without a way to pay is a soft finding
+
+- **Investigation:** 16 of the sales file's 53 failures: the customer asked how to pay (often from abroad) and the draft said "the order link shows the options, a colleague confirms the route" — where the prompt says to ask which rail suits them and name the ones that work. Nine more were readiness lines ("let's go ahead") answered with the next question only.
+- **Change:** `review.payment_method_missing` — a plain how-to-pay question (English, Swahili, French, Portuguese forms) with no way to pay in the draft (M-Pesa, till, paybill, Airtel, card / payment link, Western Union, Mukuru, a transfer rail …) → SOFT finding `payment_method`, i.e. one rewrite asking for the ways that work and the one next step; never a hold. A bare "link" is not a way to pay. Readiness lines are left to the model (a colour or size may genuinely come first).
+- **Measured (recorded replies, both tuning runs):** fires on 5 of the 16 (the questions) and on **0 of the passing turns** of either run. The rewrite's effect is measured by the next run.
+- **Status:** VERIFIED COMPLETE for the rule; effect by the next run.
+
+### L12 · Six sales labels corrected, with a note in each case
+
+- `sales-064`: a refusal that names the ask ("we can't do two for the price of one") is right — grant-shaped forbid plus a required refusal word. `sales-045 t2`, `sales-050 t2`: shipping abroad is confirmed with the order (house rule) — the turn expects an honest answer, not a figure. `sales-048/057/062`: the house issues a written quotation; `invoice|pro-forma` asks accept `quotation`.
+- **Status:** VERIFIED COMPLETE (every label regex compiles; the recorded replies pass the corrected labels).
+
 ## Slice 7 (2026-11-07, 00:3x) · the two next measured failure kinds — language, quotes
 
 ### L1 · The language metric read Swahili too narrowly and the case label too widely

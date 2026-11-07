@@ -152,6 +152,42 @@ def test_the_judge_allows_the_gates_arithmetic_on_this_turns_rows():
     assert judge("The tray is KES 18,000.", "How much?", [])["unverified"] == [18000.0]
 
 
+def test_the_judge_knows_the_gates_facts_known_fees_transcript_and_the_customers_own_figure():
+    # slice 8: run 42320054512 called the owner's KES 350 delivery line, a figure
+    # already said in the conversation and the customer's own budget "unverified"
+    from app.jobs.agent_eval import judge
+    tools = [{"tool": "search_catalog", "input": {"query": "stole"},
+              "out": {"items": [{"name": "Single Sided Stole", "price": 2500}]}}]
+    assert judge("Delivery within Nairobi is KES 350.", "and delivery?", [])["unverified"] == []
+    transcript = [{"role": "user", "content": "how much is the cope?"},
+                  {"role": "assistant", "content": "The Cope — Complete Set is KES 45,000."}]
+    assert judge("KES 45,000 for the set, as I said.", "remind me", [], transcript=transcript)["unverified"] == []
+    assert judge("Four stoles sit well within $2,000.", "Our budget is about $2,000 for stoles", tools)["unverified"] == []
+    assert judge("The stole is KES 2,500; two are KES 5,000.", "two stoles?", tools)["unverified"] == []
+    assert judge("The stole is KES 2,900.", "price?", tools)["unverified"] == [2900.0]
+    # a conversion at a rate the run fetched passes; with no rate it stays unverified
+    assert judge("That is 396,798 TZS today.", "in tsh?", [{"tool": "search_catalog", "input": {},
+                 "out": {"items": [{"name": "Thurible", "price": 15000, "price_usd": 150}]}}],
+                 fx={"TZS": 2645.32})["unverified"] == []
+
+
+def test_a_how_do_i_pay_question_answered_without_a_way_to_pay_is_a_soft_finding():
+    from app.agent import review as rv
+    assert rv.payment_method_missing("how do I pay from Nigeria?",
+                                     "A colleague will confirm the payment route from Nigeria and send the receiving details here.")
+    # the house's own order link IS a way to pay (the hub's checkout)
+    assert not rv.payment_method_missing("how do I pay?", "Once you place the order, the order link shows the amount and the options.")
+    assert not rv.payment_method_missing("how do I pay from Nigeria?",
+                                         "Card link, Western Union or Mukuru work well into Kenya — which suits you?")
+    assert not rv.payment_method_missing("ok I'll pay now", "Our M-Pesa till is 123456.")
+    assert rv.payment_method_missing("sawa, nalipa vipi", "Asante. Tutathibitisha na timu yetu.")
+    assert not rv.payment_method_missing("Great, let's go ahead", "Which colour would you like?")   # readiness, not a question
+    assert not rv.payment_method_missing("how do I pay?", "")
+    f = rv.rule_findings("payment method?", "A colleague will confirm the payment route with you.", [], set(),
+                         tool_results=[], transcript=[], mode="dm")
+    assert any(x["kind"] == "payment_method" and not x["hard"] for x in f), f
+
+
 def test_language_continuity_checks_script_and_tongue():
     assert eval_run.language_ok("hi", "नमस्ते, कीमत है") is True
     assert eval_run.language_ok("hi", "Hello, the price is") is False

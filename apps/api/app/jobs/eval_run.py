@@ -248,7 +248,8 @@ REPLY_EXPECTED = ("answer", "ask_one", "quote", "hold_ack", "care_first", "escal
 
 
 def check_turn(case: dict, i: int, turn: dict, reply: str, facts: dict, *,
-               opted_out: bool, intercept_mode: str | None, after_hold: bool) -> dict:
+               opted_out: bool, intercept_mode: str | None, after_hold: bool,
+               transcript: list | None = None, fx: dict | None = None) -> dict:
     """Objective verdict for one turn: {passed, failures[], observations{}}.
     A failure names the assertion; the observations are what a reader (or the
     dashboard) wants to see even when the turn passed."""
@@ -257,7 +258,7 @@ def check_turn(case: dict, i: int, turn: dict, reply: str, facts: dict, *,
     exp = turn.get("expect") or {}
     r = reply or ""
     tools = [str((e or {}).get("tool") or "") for e in (facts.get("tools") or [])]
-    j = judge(r, turn["user"], facts.get("tools"))
+    j = judge(r, turn["user"], facts.get("tools"), transcript=transcript, fx=fx)
     failures: list[str] = []
     nxt = exp.get("next")
 
@@ -555,6 +556,13 @@ async def run_cases(*, selection: str = "all", repeat: int = 1, only: str | None
         redis = None
 
     _install_pool_guard()
+    # today's rates, as the gate sees them (the live turn fetches the same);
+    # {} when the source is unreachable — then a conversion stays unverified
+    try:
+        from app.services import fx as _fx
+        fx_rates = await _fx.rates(redis)
+    except Exception:
+        fx_rates = {}
     contacts = {c["id"]: contact_for(c, n) for n, c in enumerate(chosen, 1)}
     await _cleanup_contacts(redis, list(contacts.values()))
 
@@ -633,8 +641,14 @@ async def run_cases(*, selection: str = "all", repeat: int = 1, only: str | None
                                                     tools=facts.get("tools"))
                         except Exception:
                             pass
+                        # the case's earlier turns, as the gate's transcript: a figure
+                        # already said in this conversation is not a figure from nowhere
+                        transcript = [m for t in case_res["turns"] for m in (
+                            {"role": "user", "content": t["user"]},
+                            {"role": "assistant", "content": t.get("reply") or ""})]
                         verdict = check_turn(case, i, turn, reply, facts, opted_out=bool(opted),
-                                             intercept_mode=mode, after_hold=after_hold)
+                                             intercept_mode=mode, after_hold=after_hold,
+                                             transcript=transcript, fx=fx_rates)
                         from app.services.customer_state import floor as _floor
                         if (_floor(text) or {}).get("customer_said") in ("needs_time", "comparing", "consulting"):
                             after_hold = True

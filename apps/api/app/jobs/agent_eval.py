@@ -190,15 +190,22 @@ def _rows_in(tools: list | None) -> list[dict]:
     return rows
 
 
-def judge(text: str, user_text: str, tools: list | None) -> dict:
+def judge(text: str, user_text: str, tools: list | None, *, transcript: list | None = None,
+          fx: dict | None = None) -> dict:
     """What to eyeball per reply: words, sentences, questions, the length
     target the writer was given, internal talk, and whether every money figure
     in the reply is a hub figure from this turn's own search."""
     from app.agent import reply_length as rl
-    from app.agent.review import money_figures, figures_in_results, _close, allowed_figures
+    from app.agent.review import (money_figures, figures_in_results, _close, allowed_figures,
+                                  transcript_figures, prompt_figures)
     m = rl.measure(text)
     target = rl.target_for(user_text)
-    facts = figures_in_results(tools or [])
+    # The gate's facts, exactly (slice 8): a tool's numbers, the customer's
+    # own figure in this message ("our budget is $2,000"), figures already
+    # said in this conversation, and the owner's stated fees (KES 350
+    # delivery) as known — run 42320054512 called all four unverified.
+    facts = figures_in_results(tools or []) | {round(v, 2) for v in money_figures(user_text or "")} \
+        | transcript_figures(transcript)
     said = money_figures(text or "")
     # The gate's own arithmetic (slice 7): a hub row's price, its USD at the
     # house rate, a quantity multiple, a half (a deposit), two rows together,
@@ -207,8 +214,8 @@ def judge(text: str, user_text: str, tools: list | None) -> dict:
     # KES 36,000" or the dollar price of a KES row unverified (4 of the 7
     # such failures in run 42289125585 had those ratios). No transcript
     # figures and no live fx: the label is still "from this turn's tools".
-    allowed = allowed_figures(_rows_in(tools), known=set(), facts=facts,
-                              comment=user_text or "", answer=text or "")
+    allowed = allowed_figures(_rows_in(tools), known=set(prompt_figures()), facts=facts,
+                              comment=user_text or "", answer=text or "", fx=fx)
     unverified = [f for f in said if not any(_close(f, v) for v in allowed)]
     low = (text or "").lower()
     return {**m, "target": target["words"], "kind": target["kind"],

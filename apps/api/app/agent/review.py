@@ -894,6 +894,29 @@ def _stock_figures(tool_results: list | None) -> set[int]:
     return out
 
 
+_PAY_ASK_RE = re.compile(
+    r"\b(?:how (?:do|can|should|would) (?:i|we) pay|how to pay|payment (?:method|option|detail|info)s?|"
+    r"pay(?:ment)? from [A-Z][a-z]+|ways? to pay|which (?:payment|method)|pay(?:ing)? now|"
+    r"send (?:me )?(?:the )?(?:till|paybill|bank|account|payment)|nalipa vipi|nilipe vipi|tulipe vipi|"
+    r"malipo vipi|na malipo|comment (?:je |puis-je |on )?pa(?:ie|yer)|como pag(?:o|ar))\b", re.I)
+_PAY_METHOD_RE = re.compile(
+    r"\b(?:m-?pesa|till|pay ?bill|airtel|card|(?:card|payment|pay|checkout|order) link|western union|mukuru|wise|"
+    r"paypal|bank transfer|transfer|swift|remitly|world ?remit|sendwave|cheque|cash|lipa)\b", re.I)
+
+
+def payment_method_missing(comment: str, answer: str) -> bool:
+    """They asked HOW TO PAY and the draft names no way to pay — not a till,
+    a paybill, M-Pesa, Airtel, a card link, a transfer rail. Slice 8
+    (2026-11-07): 16 of the 53 failing turns of the sales file were this —
+    "a colleague will confirm the route", "the order link shows the
+    options" — where the prompt says to ask which rail suits them and name
+    the ones that work. The rule reads a plain question only; a readiness
+    line ("let's go ahead") is left to the model."""
+    if not _PAY_ASK_RE.search(comment or "") or not (answer or "").strip():
+        return False
+    return not _PAY_METHOD_RE.search(answer or "")
+
+
 def manufactured_pressure(answer: str, tool_results: list | None) -> str | None:
     """The urgency or scarcity phrase the draft invented, or None: a recorded
     offer (apply_offer) or a stock figure a tool returned ("only 2 left" with
@@ -1337,6 +1360,12 @@ def rule_findings(comment: str, answer: str, seen: list,
                     "text": f"it speaks of our systems to the customer (\"{_internal}\") — they see "
                     "a shop, not a hub: give the fact (the rows above are the prices) or ask "
                     "the one thing you need; nothing is 'held' or 'reserved' by a word"})
+    if payment_method_missing(comment, answer):
+        out.append({"kind": "payment_method", "hard": False,
+                    "text": "they asked how to pay and the draft names no way to pay — name the ways "
+                    "that work for them (in Kenya: M-Pesa till / paybill, Airtel Money, the card "
+                    "link; from abroad: card link, Western Union, Mukuru or the transfer rail the "
+                    "prompt lists for their country), then the one next step"})
     _promised = promise_only(answer, seen)
     if _promised is not None:
         out.append({"kind": "promise", "hard": False,
