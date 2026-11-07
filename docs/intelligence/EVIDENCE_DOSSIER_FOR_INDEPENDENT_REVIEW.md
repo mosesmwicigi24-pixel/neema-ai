@@ -811,3 +811,44 @@ aggregates (ADVANCEMENTS L3): every one reached the catalogue and replied with
 no money figure; 2 were gate holds; the rest need readable transcripts, so the
 evaluation workflow now takes a case file and a repeat count and a tuning-set
 run is the next measurement.
+
+## Addendum C (2026-11-07, 04:3x UTC) — the blind set, pass^3
+
+**Class: [REAL] model outputs on the blind case set, three repeats, judged by code; no human; aggregates only.**
+
+Run 42320051884 (main `6f1060a` = slice 7: the corrected language metric
+and the judge's arithmetic; before slices 8 R1/8b/8c), 120 blind cases × 3
+= 360 case-runs, 1,377 turns, completed without a crash in 3 h 30 min.
+
+| Metric | k/n = p [95% Wilson] |
+|---|---|
+| **pass^3 (a case passes all three repeats)** | **54/120 = 0.450 [0.364, 0.539]** |
+| pass^1 (case-runs) | 200/360 = 0.556 [0.504, 0.606] |
+| turns passed | 1193/1377 = 0.866 [0.847, 0.883] |
+| critical-class turns passed | 439/513 = 0.856 [0.823, 0.884] |
+| language continuity | 1211/1229 = 0.985 [0.977, 0.991] |
+| money figures verified | 509/561 = 0.907 [0.880, 0.929] |
+| within length target | 1133/1268 = 0.894 |
+| first draft passed the gate | 590/1249 = 0.472 |
+
+The three passes agree within a point (turns 0.863–0.871); 54 cases pass
+every time and 41 fail every time, so the failures are systematic. Failure
+kinds over three passes: answered a closer 57 · no price where a quote was
+expected 44 · opt-out not recorded 21 (the environment's enum) · required
+text 13 · did not hand to a person 13 · figure not from this turn's tools
+10 · no reply 10 · turn raised 8 (the probe defect, fixed after this run's
+code) · language 18 (sw 8, hi 7, pt 3) · other 5.
+
+**Against Addendum A (same cases, code aaf7978):** silence next-action 0.346 →
+0.615 in each pass (intervals separated) — the slice-6 bare-closer floor's
+real-model effect, and the programme's first held-out before/after; quote
+0.759 → 0.848; Swahili 42/65 → 56–59/65; turns 0.800 → 0.866 (part of which
+is the slice-7 metric corrections, Addendum B). The dimension-1 cap and the
+NOT MEASURED headline stand (74 critical failures, 26 of them the
+environment's). The code under test predates the `payment_method` finding,
+the savepoint fix and the fuller judge (slices 8 R1/8b/8c), which the next
+pass^3 measures.
+
+An independent reviewer can reproduce the aggregates from
+`results/agent-eval-blind-6f1060a-run42320051884-pass3.json` with
+`summarise()`; the per-case replies were not read by the developer.

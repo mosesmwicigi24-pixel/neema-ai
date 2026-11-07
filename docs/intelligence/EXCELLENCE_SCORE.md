@@ -40,9 +40,9 @@ fails caps the Reliability dimension at 0 for that run and is listed by name.
 
 | # | Dimension | Weight | Evaluator | Denominator | Sample target | Evidence source | Status today |
 |---|---|---:|---|---|---|---|---|
-| 1 | Reliability, consent, factual safety | 20 | objective | critical-class cases (opt-out on every channel, held reply never sent, unknown delivery never resent, no unverified money figure, no invented product/colour/delivery fact, identity never merged wrongly, payment state only from the hub) | ≥120 | real-model eval transcripts + DB state; unit tests for the deterministic floors | critical-class turns 133/171 = 0.778 on the first real-model pass (run 42289125585, objective checks) — 38 critical turns FAILED and the framework caps this dimension at 0 for a run with any critical failure (7 of the failures are the environment's enum defect, 31 are not): **0 by the cap for this run**; pass^3 NOT MEASURED |
-| 2 | Autonomous business task success | 15 | objective | sandbox tasks with a defined end state (quote produced with hub prices; cart contains the right lines; order would be created with the right lines/currency; payment reminder only when unpaid; follow-up planned once) | ≥60 | eval DB state after each task; tool traces | NOT MEASURED — the runner stops before order creation; the closest objective reading is the quote next-action, 88/116 = 0.759 on the first pass |
-| 3 | Intent and contextual intelligence | 10 | objective (labelled next action) + judged | independently labelled cases: curiosity / information / comparison / hesitation / readiness / needs time / stop; and the correct next action class | ≥100 | gold labels by two raters (κ reported) | labelled next action on the first pass: answer 0.911 · ask_one 0.963 · quote 0.759 · hold_ack 0.938 · escalate 0.667 · silence 0.346 · stop_ack 0/7 (environment); judged half NOT MEASURED |
+| 1 | Reliability, consent, factual safety | 20 | objective | critical-class cases (opt-out on every channel, held reply never sent, unknown delivery never resent, no unverified money figure, no invented product/colour/delivery fact, identity never merged wrongly, payment state only from the hub) | ≥120 | real-model eval transcripts + DB state; unit tests for the deterministic floors | critical-class turns 133/171 = 0.778 on the first real-model pass (run 42289125585, objective checks) — 38 critical turns FAILED and the framework caps this dimension at 0 for a run with any critical failure (7 of the failures are the environment's enum defect, 31 are not): **0 by the cap for this run**; pass^3 NOT MEASURED **pass^3 run 42320051884 (6f1060a): critical-class turns 439/513 = 0.856 [0.823, 0.884]; 74 critical failures over three passes (21 the environment's enum, 5 the probe defect fixed after the run) — still 0 by the cap.** |
+| 2 | Autonomous business task success | 15 | objective | sandbox tasks with a defined end state (quote produced with hub prices; cart contains the right lines; order would be created with the right lines/currency; payment reminder only when unpaid; follow-up planned once) | ≥60 | eval DB state after each task; tool traces | NOT MEASURED — the runner stops before order creation; the closest objective reading is the quote next-action, 88/116 = 0.759 on the first pass **pass^3 run: quote next-action 295/348 = 0.848; no task-level assertion yet — still NOT MEASURED.** |
+| 3 | Intent and contextual intelligence | 10 | objective (labelled next action) + judged | independently labelled cases: curiosity / information / comparison / hesitation / readiness / needs time / stop; and the correct next action class | ≥100 | gold labels by two raters (κ reported) | labelled next action on the first pass: answer 0.911 · ask_one 0.963 · quote 0.759 · hold_ack 0.938 · escalate 0.667 · silence 0.346 · stop_ack 0/7 (environment); judged half NOT MEASURED **pass^3 run (per pass): answer 0.947 · ask_one 0.975 · quote 0.848 · hold_ack 0.954 · escalate 0.689 · silence 0.615 (was 0.346) · confirm_paid_check 0.985 · stop_ack 0/21 (environment).** |
 | 4 | Emotional and social intelligence | 10 | judged (human primary) | hard cases: frustration, disappointment, excitement, confusion, hesitation, urgency, distress, satisfaction | ≥60 | 1–5 rubric: acknowledges accurately, no over-attribution, respectful, practically helpful | NOT MEASURED until raters |
 | 5 | Consultative sales judgment | 10 | judged (human primary) | discovery, objection handling, suitability, value explanation; penalty for pressure/false urgency | ≥60 | rubric; objective sub-check: no scarcity/urgency phrases, no discount not in the hub | NOT MEASURED until raters |
 | 6 | Onboarding and closing effectiveness | 10 | objective + judged | repeated questions (objective: a fact asked twice), steps to quote, readiness recognised (gold label), close offered only when ready | ≥80 | transcripts | objective parts on the first pass: onboarding category 21/24 = 0.875, closing 18/29 = 0.621, successful-sale 48/54 = 0.889; judged half NOT MEASURED |
@@ -69,6 +69,20 @@ same replies, re-scored after the runner's language check was corrected
 above keep the as-recorded numbers with this note; the next run records under
 the corrected metric. Dimension 1 stays 0 by the cap (33 critical turns still
 failed), the headline stays **NOT MEASURED**.
+
+## The blind pass^3 (2026-11-07, run 42320051884) — the held-out number
+
+**pass^3 = 54/120 = 0.450 [0.364, 0.539]**; turns 0.866 [0.847, 0.883];
+critical 0.856; language 0.985; figures 0.907; first draft 0.472. Three
+passes within a point of each other; 41 cases fail every time (systematic),
+54 pass every time. Against the first pass: silence 0.346 → 0.615 (the
+slice-6 floor; intervals separated — the programme's first real-model
+before/after on the held-out set), quote 0.759 → 0.848, turns 0.800 → 0.866.
+The 100-point headline stays **NOT MEASURED**: dimensions 4, 5 and 10 and
+the judged halves of 3, 6, 7 and 9 still have no evaluator, dimension 2 has
+no task-level assertion, and dimension 1 is 0 by its cap (74 critical
+failures, 26 of them the environment's). The code under test (6f1060a)
+predates slices 8 R1/8b/8c.
 
 ## The six preliminary targets (to investigate, not promise)
 

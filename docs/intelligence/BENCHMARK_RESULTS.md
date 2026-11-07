@@ -170,7 +170,7 @@ dev/held-out split is tuned-on and contaminated, as Correction 1 records.
 |---|---|---|
 | 42284150514, 19:57 UTC | main d084e91 | key check passed (the secret exists); both stages crashed at start-up — the runner had not registered every model (`persons.parish_id → parishes`); reported success behind `tee`. Fixed in PR #319. |
 | 42284679182, 20:01 UTC | branch 87a2b29 | the scripted battery ran (37 replies, mean 30 words, 3 over target, 3 with an unverified figure, 23 not passed first draft, 1 turn failed on an aborted database transaction — see UNFINISHED); the blind stage was killed by the job's 30-minute limit with nothing written. Fixed in PR #320 (300-minute limit; a checkpoint after every case). |
-| 42320051884 · 42320054512 · 42320057346, 00:44 UTC 7 Nov | main 6f1060a (slice 7) | three runs dispatched through the workflow's new inputs: the blind set pass^3 (the programme's held-out number, first attempt with the repaired runner and the corrected language / figure metrics); `independent_sales.jsonl` × 1 (readable: the 82 quote-expected turns, for the missing-price kind); `independent_safety.jsonl` × 1 (readable: 17 escalate and 21 paid-check turns, for the hand-over and required-text kinds). The safety run (15 min) and the sales run (55 min) finished and are read below; the blind pass^3 is read in when it finishes. |
+| 42320051884 · 42320054512 · 42320057346, 00:44 UTC 7 Nov | main 6f1060a (slice 7) | three runs dispatched through the workflow's new inputs: the blind set pass^3 (the programme's held-out number, first attempt with the repaired runner and the corrected language / figure metrics); `independent_sales.jsonl` × 1 (readable: the 82 quote-expected turns, for the missing-price kind); `independent_safety.jsonl` × 1 (readable: 17 escalate and 21 paid-check turns, for the hand-over and required-text kinds). All three finished: safety (15 min), sales (55 min), **the blind pass^3 (3 h 30 min, 360/360 case-runs, no crash)** — read below. |
 | 42289125585, 20:31 UTC | branch aaf7978 | scripted battery (8 min) then the blind set: **179 of 360 case-runs completed** (the whole first pass over the 120 cases, plus 59 of the second) in 2 h 8 min, then the runner **crashed** in its per-case contact cleanup — `ForeignKeyViolationError: identifiers_person_id_fkey` (the Person row was deleted before its Identity row was flushed) — and the workflow failed. The per-case checkpoint (PR #320) kept the record, marked partial. Also in the log: 4 turns raised `InFailedSQLTransactionError` (a pooled connection carried an aborted transaction into the next turn), and the `raise_complaint` tool failed with `invalid input value for enum interceptaction: "flag"` — the fresh database's enum has no `flag`/`escalated` value (no migration adds them). Artifact `agent-eval-results`; files under `results/agent-eval-blind-aaf7978-run42289125585*`. |
 
 ## Real-model baseline — single pass MEASURED; pass^3 NOT MEASURED (2026-11-06, run 42289125585)
@@ -368,6 +368,80 @@ the 6 label turns and 6 of the 7 figure turns pass → **314/355 = 0.885**.
 The model's own defects in this file: the 16 payment turns (5 now caught
 deterministically), 2 quote deferrals, the 5 decline questions, 4 closers,
 2 DHL, 3 other — about 30 of 355.
+
+## The blind set, pass^3 — MEASURED (2026-11-07, run 42320051884, main 6f1060a)
+
+**The programme's held-out number.** 120 blind cases × 3 repeats = 360
+case-runs, 1,377 turns, **completed without a crash** (00:52–04:22 UTC).
+Code `6f1060a` (slice 7: the corrected language metric and the judge's
+arithmetic; NOT slices 8 R1/8b/8c), case set `f87e25bf0541`, prompt
+`b738f9b6b7bd`, producer `claude-sonnet-5-5`, light `claude-haiku-5-5`,
+reviewers `claude-sonnet-5` / `claude-haiku-4-5`, sends disabled, live hub
+data. Objective verdicts only; no judge, no rater. **Aggregates only — no
+blind case was read.** `results/agent-eval-blind-6f1060a-run42320051884-pass3.json` / `.log`.
+
+| Metric (objective checks, 95% Wilson) | k/n = p |
+|---|---|
+| **pass^3 — a case passes all three repeats** | **54/120 = 0.450 [0.364, 0.539]** |
+| pass^1 — case-runs passed | 200/360 = 0.556 [0.504, 0.606] |
+| turns passed | 1193/1377 = **0.866** [0.847, 0.883] |
+| critical-class turns passed | 439/513 = **0.856** [0.823, 0.884] |
+| language continuity (corrected metric) | 1211/1229 = **0.985** [0.977, 0.991] |
+| money figures verified | 509/561 = **0.907** [0.880, 0.929] |
+| within the length target | 1133/1268 = 0.894 [0.875, 0.909] |
+| internal-talk free | 1262/1268 = 0.995 [0.990, 0.998] |
+| first draft passed the gate | 590/1249 = 0.472 [0.445, 0.500] |
+
+Per repeat (turns · critical · cases · silence · quote · Swahili · raised):
+1 → 397/459 · 146/171 · 68/120 · 32/52 · 97/116 · 58/65 · 2;
+2 → 400/459 · 148/171 · 68/120 · 32/52 · 97/116 · 59/65 · 2;
+3 → 396/459 · 145/171 · 64/120 · 32/52 · 101/116 · 56/65 · 4.
+The three passes agree to within a point: the single-pass number is
+stable. Case stability: 54 cases pass 3 of 3, 13 pass 2, 12 pass 1, 41
+pass 0 — the failures are mostly SYSTEMATIC (the same case fails every
+time), not noise.
+
+By next action: answer 415/438 = 0.947 · ask_one 79/81 = 0.975 · quote
+295/348 = 0.848 · hold_ack 186/195 = 0.954 · care_first 26/27 · confirm_paid_check
+65/66 = 0.985 · **silence 96/156 = 0.615** · escalate 31/45 = 0.689 · **stop_ack
+0/21** (environment). By language: en 903/1029 = 0.878 · sw 173/195 = 0.887 ·
+pt 30/33 = 0.909 · fr 37/51 = 0.725 · sheng 25/33 = 0.758 · **hi 7/18 = 0.389**
+· ke-en 9/9 · mixed 9/9. By category (lowest first): uncertain-info 4/9 ·
+opt-out 68/99 = 0.687 (environment) · closing 63/87 = 0.724 · price-objection
+38/51 = 0.745 · complex-enquiry 56/75 = 0.747 · human-takeover 83/111 = 0.748 ·
+mistake 18/24 · multilingual 239/288 = 0.830 · … · successful-sale 154/162 = 0.951.
+
+Failure kinds (184 failing turns over three passes): answered a closer 57 ·
+no price where a quote was expected 44 · opt-out not recorded 21 (environment)
+· required text missing 13 · did not hand to a person 13 · figure not from
+this turn's tools 10 · no reply where one was expected 10 · turn raised 8
+(the probe defect, fixed in slice 8 R1 after this run's code) · reply not in
+the customer's language 18 (sw 8 · hi 7 · pt 3) · pitched after a request for
+time 2 · forbidden text 2 · two questions 1. Critical-class failures: 74, of
+which 21 are the environment's enum and 5 the probe defect.
+
+**Against the first pass (same case set, code aaf7978, 6 Nov):**
+
+| | first pass (as recorded → corrected metric) | this run, per pass |
+|---|---|---|
+| turns passed | 0.800 → 0.828 | 0.863–0.871 |
+| silence next-action | 18/52 = 0.346 | 32/52 = 0.615 (each pass) |
+| quote next-action | 88/116 = 0.759 | 97–101/116 = 0.836–0.871 |
+| Swahili turns | 42/65 → 54/65 | 56–59/65 |
+| critical-class turns | 0.778 → 0.807 | 0.848–0.865 |
+
+What moved between the two runs is code, not chance: the bare-closer
+silence (slice 6, 0.346 → 0.615 — the remaining 20 answered closers per
+pass are the decline-plus-thanks and waiting forms the floor leaves alone
+by design), the corrected language metric and the judge's arithmetic
+(slice 7). The silence improvement is the first REAL-MODEL before/after
+the programme can claim on the held-out set: +0.27 on that next action,
+intervals [0.222, 0.489] → [0.481, 0.734], separated.
+
+Caveats, as before: the enum defect contaminates stop_ack (21 turns) and
+opt-out (environment); 8 turns raised on the probe defect fixed after this
+run; the code under test predates slices 8 R1/8b/8c (the `payment_method`
+finding, the savepoints, the fuller judge), so the next pass^3 measures those.
 
 ### Command (unchanged)
 

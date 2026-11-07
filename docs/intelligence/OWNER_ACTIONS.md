@@ -92,4 +92,4 @@ and `/api/admin/settings/prompt-inputs` (the 22 flag values).
    command is the proof. Approving the one-line migration (`ADD VALUE IF NOT
    EXISTS`, idempotent, no table rewrite) fixes it; say "approve the enum
    migration" and it ships with the next slice.
-2. **Send the box run's files** (`eval-out/agent-eval-blind-7670de1-*.json` and `.log`) — they are the second independent measurement, on the production database.
+2. **(The CI pass^3 is in: 54/120 = 0.450, BENCHMARK_RESULTS.)** **Send the box run's files** (`eval-out/agent-eval-blind-7670de1-*.json` and `.log`) — they are the second independent measurement, on the production database.
