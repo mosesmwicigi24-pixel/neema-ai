@@ -36,6 +36,9 @@ ff8c3b5).
 | Full API suite on 1979e28 (slice 7c: staged outage, safety labels) | `pytest tests` with Postgres and redis | **3,367 passed, 1 xpassed, 0 failed** (10 min 49 s) |
 | CI on 1979e28 (PR #326, merged as 197704f) | GitHub Actions | green at attempt 1 |
 | Production after 197704f (01:26 UTC, 7 Nov) | `/api/health` from outside | status ok, version 197704f, replies ok, outreach shadow |
+| Full API suite on 2370777 (slice 8b) | `pytest tests` with Postgres and redis | **3,370 passed, 1 xpassed, 0 failed** (11 min 04 s). An earlier local run on a19b125 showed 7 failures while a second suite ran against the same local redis and Postgres at the same time; the two named failures pass alone, and CI (isolated) was green on a19b125 — concurrency artefacts, recorded here so they are not mistaken for a regression |
+| CI on a19b125 (PR #328, merged as 1ca4ba2) and on 2370777 (PR #329, merged as b6cae00) | GitHub Actions | green at attempt 1, both |
+| Production after 1ca4ba2 (02:04 UTC, 7 Nov) | `/api/health` from outside | status ok, replies ok, outreach shadow |
 | Production after ee1fe26 (~00:16 UTC, 7 Nov) | `/api/health` from outside | status ok, replies ok, outreach shadow (planned 39, needs_approval 598, unknown 0); review tallies reset for the new day |
 | Production after df50f2f (~22:46 UTC) | `/api/health` from outside | status ok, replies ok, outreach shadow (planned 39, needs_approval 598, unknown 0) |
 | Production after 09c80da (~21:58 UTC) | `/api/health` from outside | status ok, replies ok, outreach shadow (planned 39, needs_approval 598, unknown 0). The day's review tallies (passed 162 / rewritten 90 / soft 100 / held 3) include the owner's box evaluation run, which composes replies inside the same api container — 6 Nov production tallies are contaminated from ~21:00 UTC on |
