@@ -135,6 +135,23 @@ def test_figures_must_come_from_this_turns_tools():
     assert any("not from this turn's tools" in f for f in v["failures"])
 
 
+def test_the_judge_allows_the_gates_arithmetic_on_this_turns_rows():
+    # slice 7: a quantity multiple, a half, the USD of a KES row and two rows
+    # together all trace to this turn's tools; a stray figure still does not
+    from app.jobs.agent_eval import judge
+    from app.core.config import settings
+    tools = [{"tool": "search_catalog", "input": {"query": "tray"},
+              "out": {"items": [{"name": "Silver Communion Tray", "price": 18000},
+                                {"name": "Communion Cups (50)", "price": 4000}]}}]
+    assert judge("Two trays come to KES 36,000.", "How much for 2 trays?", tools)["unverified"] == []
+    assert judge("A deposit of KES 9,000 secures it.", "How much for a tray?", tools)["unverified"] == []
+    assert judge("Tray and cups together: KES 22,000.", "tray and cups?", tools)["unverified"] == []
+    usd = round(18000 / float(settings.usd_kes_rate or 100), 2)
+    assert judge(f"The tray is USD {usd:,.2f}.", "price in dollars?", tools)["unverified"] == []
+    assert judge("The tray is KES 36,500.", "How much for 2 trays?", tools)["unverified"] == [36500.0]
+    assert judge("The tray is KES 18,000.", "How much?", [])["unverified"] == [18000.0]
+
+
 def test_language_continuity_checks_script_and_tongue():
     assert eval_run.language_ok("hi", "नमस्ते, कीमत है") is True
     assert eval_run.language_ok("hi", "Hello, the price is") is False

@@ -171,17 +171,45 @@ def experience_checks(reply: str, user_text: str, *, after_hold: bool) -> list[s
     return flags
 
 
+def _rows_in(tools: list | None) -> list[dict]:
+    """The hub rows a turn's tools returned (anything with a price), as the
+    gate sees them in `seen` — nested lists and dicts included."""
+    rows: list[dict] = []
+
+    def _walk(o):
+        if isinstance(o, dict):
+            if "price" in o or "price_usd" in o or "price_kes" in o:
+                rows.append(o)
+            for v in o.values():
+                _walk(v)
+        elif isinstance(o, (list, tuple)):
+            for v in o:
+                _walk(v)
+    for entry in tools or []:
+        _walk((entry or {}).get("out"))
+    return rows
+
+
 def judge(text: str, user_text: str, tools: list | None) -> dict:
     """What to eyeball per reply: words, sentences, questions, the length
     target the writer was given, internal talk, and whether every money figure
     in the reply is a hub figure from this turn's own search."""
     from app.agent import reply_length as rl
-    from app.agent.review import money_figures, figures_in_results, _close
+    from app.agent.review import money_figures, figures_in_results, _close, allowed_figures
     m = rl.measure(text)
     target = rl.target_for(user_text)
     facts = figures_in_results(tools or [])
     said = money_figures(text or "")
-    unverified = [f for f in said if not any(_close(f, v) for v in facts)]
+    # The gate's own arithmetic (slice 7): a hub row's price, its USD at the
+    # house rate, a quantity multiple, a half (a deposit), two rows together,
+    # a fee on top — all trace to THIS turn's tools. Before this the runner
+    # accepted only the raw figures a tool returned, and called "2 trays =
+    # KES 36,000" or the dollar price of a KES row unverified (4 of the 7
+    # such failures in run 42289125585 had those ratios). No transcript
+    # figures and no live fx: the label is still "from this turn's tools".
+    allowed = allowed_figures(_rows_in(tools), known=set(), facts=facts,
+                              comment=user_text or "", answer=text or "")
+    unverified = [f for f in said if not any(_close(f, v) for v in allowed)]
     low = (text or "").lower()
     return {**m, "target": target["words"], "kind": target["kind"],
             "over": m["words"] > target["words"] * 1.5,
