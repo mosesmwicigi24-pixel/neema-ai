@@ -122,6 +122,25 @@ def test_the_note_asks_a_light_model_with_no_tools_and_uses_the_floor_first(monk
     assert out["source"] == "floor" and not calls
 
 
+def test_a_lone_sawa_never_flips_the_stored_language():
+    # slice 7: the live floor stores guess_language(inbound) when the note has none;
+    # a neutral "Sawa" from an English-speaking customer must leave "en" alone
+    from types import SimpleNamespace
+    person = SimpleNamespace(state={"contact_preferences": {"language": "en"}}, id="p1")
+
+    class _DB:
+        async def get(self, model, pk): return person
+        async def commit(self): pass
+        async def execute(self, q): raise AssertionError("no transcript needed")
+
+    conv = SimpleNamespace(id="c1", person_id="p1")
+    deal = SimpleNamespace(next_action=None, blocking=None)
+    out = run(cs.after_turn(_DB(), conv, deal, inbound_text="Sawa", reply="Noted.", llm=None))
+    assert person.state["contact_preferences"]["language"] == "en", out
+    out = run(cs.after_turn(_DB(), conv, deal, inbound_text="Naweza kulipa kwa kadi?", reply="Ndiyo.", llm=None))
+    assert person.state["contact_preferences"]["language"] == "sw", out
+
+
 def test_no_note_without_a_key(monkeypatch):
     from app.core.config import settings
     monkeypatch.setattr(settings, "anthropic_api_key", "", raising=False)

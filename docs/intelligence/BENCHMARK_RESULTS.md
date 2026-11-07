@@ -279,6 +279,19 @@ lines inside Swahili cases (9), a Swahili line inside an English case, and two
 others — the per-turn rule is in `eval_run.turn_language`. The next model run
 records under the corrected metric from the start.
 
+### Floors after slice 7 (2026-11-07) — `lang` only moved
+
+`guess_language`: neutral words first, 24 first-person / "have" forms added;
+the scorer no longer holds the guesser to a neutral-only turn. The full grid
+(old/new guesser × old/new scorer, both sets) is in ADVANCEMENTS L4. Recorded:
+tuning `lang` **337/348 = 0.968 [0.944, 0.982]** (was 342/355 = 0.963 under
+the old scorer; 336/348 = 0.966 under the new scorer with the old guesser);
+blind `lang` **412/427 = 0.965 [0.943, 0.979]** (was 414/445 = 0.930 old
+scorer; 410/427 = 0.960 new scorer, old guesser). said, silence, opt_out and
+length_kind unchanged on both sets. The gain that is the guesser's own is +1
+and +2 turns; the rest is the scorer no longer counting "ok"-type turns.
+`results/floors-tuning-after-slice7.json`, `results/floors-blind-after-slice7.json`.
+
 ### Command (unchanged)
 
 Command, once a key exists on the box or as the `ANTHROPIC_API_KEY`

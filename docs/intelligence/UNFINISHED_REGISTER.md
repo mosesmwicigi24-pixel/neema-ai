@@ -88,7 +88,7 @@ the precise dependency · status. Last update: 2026-11-06, end of session 1.
 | Item | What is known | What it needs |
 |---|---|---|
 | Reply gate's language finding is soft | 4 true / 0 false findings over 459 real-model turns; the one English reply to a Swahili line that it flagged still went out with a note | the owner's decision (OWNER_ACTIONS §4) |
-| `guess_language` places a lone "Sawa" / "poa" as Swahili | both words are in `_SW_EXTRA` and the shape rule runs before the neutral-words rule, against the docstring; the runner's `turn_language` works around it (neutral words keep the case's language) | reorder the two rules and re-measure the `lang` floor on both sets (a lone "Sawa" in a Swahili case then counts as unplaceable) |
-| `guess_language` cannot place first-person "na-" forms without a subject prefix | "Naweza kulipa kwa kadi?" → en (the verb regex wants ni-/u-/a-/tu-… first); the short list carries "nataka"/"nahitaji" only | add the common forms (naweza, nalipa, natafuta, naomba …) and re-measure the `lang` floor |
+| ~~`guess_language` places a lone "Sawa" / "poa" as Swahili~~ | done the same day (ADVANCEMENTS L4): neutral rule first; it was a live defect — an English customer's "Sawa" switched their stored language | — |
+| ~~`guess_language` cannot place first-person "na-" forms without a subject prefix~~ | done the same day (L4): 24 common forms added as words, not a looser regex | — |
 | 16 missing-price quote turns | all reached the catalogue, all replied with 0 figures; 2 were gate holds; 10 asked a question | a readable tuning run (`independent_sales.jsonl`, repeat 1) through the workflow's new inputs, then the smallest change |
 | The eval workflow's inputs | added; defaults reproduce the previous run exactly | a dispatched run that completes with non-default inputs |

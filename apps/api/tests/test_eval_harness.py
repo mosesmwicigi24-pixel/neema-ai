@@ -58,6 +58,15 @@ def test_the_floors_scorer_reports_misses_by_case():
     assert res["misses"] == []        # "Please stop messaging me" reads as English since W2
 
 
+def test_the_floors_scorer_does_not_hold_the_guesser_to_a_neutral_turn():
+    # slice 7: "ok" / "Sawa" alone is designed to place no language; it is not a miss
+    cases = [{"id": "t-2", "source": "independent", "categories": ["closing"], "lang": "sw",
+              "turns": [{"user": "Sawa", "expect": {"next": "silence", "lang": "sw"}},
+                        {"user": "Bei ya stola?", "expect": {"next": "quote", "lang": "sw"}}]}]
+    res = eval_floors.score(cases)
+    assert res["metrics"]["lang"]["all"]["n"] == 1 and res["metrics"]["lang"]["all"]["k"] == 1
+
+
 def _turn(next_, **exp):
     return {"user": "x", "expect": {"next": next_, **exp}}
 

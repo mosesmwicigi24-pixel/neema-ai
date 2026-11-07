@@ -151,9 +151,22 @@ def test_the_language_guess_covers_the_languages_customers_write(text, lang):
     assert guess_language(text) == lang, text
 
 
-@pytest.mark.parametrize("text", ["ok", "Okay", "yes", "hi", "👍"])
+@pytest.mark.parametrize("text", ["ok", "Okay", "yes", "hi", "👍", "Sawa", "Sawa.", "poa", "ok sawa"])
 def test_a_bare_acknowledgement_never_overwrites_a_stored_language(text):
+    # slice 7: "sawa" / "poa" are neutral words too — before, the shape rule ran
+    # first and a lone "Sawa" flipped an English customer's stored language to Swahili
     assert guess_language(text) is None
+
+
+@pytest.mark.parametrize("text", ["Naweza kulipa kwa kadi?", "Mna Biblia ya Kiswahili?", "Una stola nyeusi?",
+                                  "Kuna discount kwa vipande 50?"])
+def test_first_person_and_have_forms_without_a_subject_prefix_read_as_swahili(text):
+    assert guess_language(text) == "sw", text
+
+
+@pytest.mark.parametrize("text", ["Italian style?", "Nation of Islam chaplain here", "Tuna sandwich"])
+def test_english_words_that_look_like_swahili_prefixes_stay_english(text):
+    assert guess_language(text) == "en", text
 
 
 def test_french_with_two_je_is_not_swahili():

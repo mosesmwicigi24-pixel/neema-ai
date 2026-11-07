@@ -18,6 +18,7 @@ from __future__ import annotations
 import argparse
 import sys
 import json
+import re
 import math
 from collections import defaultdict
 
@@ -35,6 +36,12 @@ def wilson(k: int, n: int, z: float = 1.96) -> tuple[float, float, float]:
 
 
 _LANG_MAP = {"ke-en": "en", "sheng": None, "mixed": None}   # what guess_language can be held to
+
+
+def _neutral_only(text: str) -> bool:
+    from app.services.customer_state import _NEUTRAL_WORDS
+    toks = set(re.findall(r"[a-z']+", (text or "").lower()))
+    return bool(toks) and toks <= _NEUTRAL_WORDS
 
 
 def _runtime_target(text: str) -> dict:
@@ -71,7 +78,11 @@ def score(cases: list[dict]) -> dict:
                                    "expected": exp["said"], "got": got, "text": text[:120]})
             if exp.get("lang"):
                 want = _LANG_MAP.get(exp["lang"], exp["lang"])
-                if want is not None:
+                # a turn of neutral words alone ("ok", "Sawa", "noted") is one the
+                # guesser is designed NOT to place (it must never overwrite the
+                # language a customer has shown), so it is not held to a label
+                # (slice 7; before this, 14 blind "ok"-type turns counted as misses)
+                if want is not None and not _neutral_only(text):
                     got = guess_language(text)
                     ok = got == want
                     tally("lang", ok, keys)
