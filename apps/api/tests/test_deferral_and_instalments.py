@@ -1,11 +1,14 @@
-"""Owner's rules (2026-08-12): a customer who says "I'll get back to you".
+"""Owner's rules on a customer who says "I'll get back to you".
 
-Thank them and say we'll be waiting, and ask whether there's a time to remind
-them (booking it as a real promise). The instalment offer joins only when money
-is the reason they gave (owner, 2026-10-30: it is for when price or budget
-comes up, never a tail) — then it removes that reason without discounting a
-shilling. The scheduled check-in means the sale returns to us instead of
-relying on the customer to remember.
+2026-08-12: thank them, say we'll be waiting, and ask whether there's a time
+to remind them. 2026-11-07 (the collar case, slice 11) supersedes the asking
+half: keep the item, name the one step as a statement, and NEVER ask when to
+remind them — "take all the time you need, is there a day I should check
+back?" disengages and takes back the move they just claimed. The booking
+half stands: a time THEY name is booked with `schedule_check_in` in the same
+turn, one per matter. The instalment offer joins only when money is the
+reason they gave (owner, 2026-10-30: for when price or budget comes up, never
+a tail).
 """
 import app.main  # noqa: F401 — registers models before agent imports
 from app.agent.prompt import build_system_prompt
@@ -23,15 +26,18 @@ def test_a_deferral_is_answered_with_thanks_and_an_open_door():
     flat = _flat()
     assert "WHEN THEY SAY THEY WILL COME BACK" in flat
     assert "nitakujulisha" in flat                      # Swahili deferral too
-    assert "never a bare \"okay\" and never a chase" in flat
-    assert "THANK them and say plainly we'll be waiting" in flat
+    assert "never a bare \"okay\", never a chase" in flat
+    assert "ACCEPT in one warm clause and KEEP THE ITEM" in flat
+    assert "NAME THE ONE STEP that completes it, as a STATEMENT, not a question" in flat
 
 
-def test_the_reminder_time_is_asked_and_kept():
+def test_a_named_time_is_kept_and_a_reminder_is_never_asked_for():
     flat = _flat()
-    assert "Is there a day we should check back with you?" in flat
-    assert "This is your ONE question" in flat          # brevity contract holds
-    assert "call `schedule_check_in` with it" in flat
+    assert "Is there a day we should check back with you?" not in flat.replace(
+        'no "Is there a day we should check back', "")          # only as the banned example
+    assert "NEVER ask when to remind them" in flat
+    assert "no question of any kind" in flat                    # brevity contract holds
+    assert "call `schedule_check_in` with it IN THE SAME TURN" in flat
     assert "a named time is a promise the system keeps" in flat
 
 

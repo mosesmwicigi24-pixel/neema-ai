@@ -62,6 +62,17 @@ silence, plus fail-closed safeguards that had been fail-open.
 - Retiring the legacy bridge order path and the expiring shortener (W9-4).
 - A DB idempotency key for orders (migration).
 
+Slices 1–10 plus the media-link fix are live on the box at ad5355c (13:21 UTC, 7 Nov).
+
+## Slice 11 (2026-11-07) — pending merge
+
+A prompt rule, two floor phrasings, a stricter `hold_ack` verdict in the two
+scorers, eleven cases, fourteen tests, no migration, no new sender. The
+customer-visible change: on "I'll come back" Neema keeps the item and names
+the one step instead of asking when to be reminded; on a firm decline, one
+gracious line. Rollback: `git revert` of the squash commit. Measured after the
+owner lifts the evaluation stop (`COMMERCIAL_EI.md` §7).
+
 ## What ships in this slice if approved
 
 Code: PRs #316, #317, #318 (and #319, the eval runner fix). No migration. Android untouched. Web: the Performance view, the rule-proposals card, honest Settings panels.

@@ -649,3 +649,28 @@ docker compose -f docker-compose.yml -f docker-compose.vps.yml exec -T api \
   python -m app.jobs.agent_eval --cases --file blind_heldout.jsonl --repeat 3 \
   --out agent-eval-heldout.json --packet rater-packet.md --history
 ```
+
+## Slice 11 — the unprompted reminder question, replayed over every recorded run (2026-11-07, no model call)
+
+The come-back rule asked "Is there a day we should check back with you?" on
+every pause; the scorer only failed a date ask made after the customer had
+named a day. Re-reading the recorded runs with the new `hold_ack` check
+(`eval_run.asks_for_a_check_in`: a sentence ending in "?" that asks when to
+remind, check back or follow up; counted on the first hold in a case):
+
+| Recorded run | hold_ack turns | unprompted check-in asks |
+|---|---:|---:|
+| blind pass^3, 6f1060a (run 42320051884) | 195 | 59 (30%) |
+| blind first pass, aaf7978 (run 42289125585, partial 179/360) | 101 | 33 (33%) |
+| blind VOID run, f4a5b37 (run 42339309914; pass 1 valid) | 195 | 40 (21%) |
+| sales tuning, 6f1060a (run 42320054512) | 33 | 19 (58%) |
+| safety runs 420b5fc, 6f1060a, 19e4952, b0e9eec | 8 | 2 |
+| **all** | **532** | **153 (29%)** |
+
+Blind figures are aggregates only. From this slice on the `hold_ack` verdict
+carries this failure, so the next run's `hold_ack` line is read against 29%,
+not against earlier runs' (which could not see it). The after-measurement is
+NOT RUN: evaluation is stopped on the owner's word. Model-free floors after
+the slice: `results/floors-after-slice11-all.json` — `said` 436/505 = 0.863
+(was 0.859), `lang` 0.969 (0.963), `opt_out` 0.952, `silence` 0.991,
+`length_kind` 0.570 (0.566).

@@ -62,6 +62,7 @@ _NEEDS_TIME_RE = re.compile(
     r"je reviens vers vous|je vous tiens au courant|je vous recontacte|laissez[- ]moi r[ée]fl[ée]chir|pas (?:encore|maintenant)|"
     r"on va voir|vamos ver|depois (?:eu )?aviso|mais tarde|"
     r"(?:^|\b)will (?:revert|come back|get back|confirm|update you|let you know)|"
+    r"'ll (?:confirm|update you) (?:later|tomorrow|tonight|by|on|next|after|once|when|in)\b|"
     r"je (?:vous )?(?:reviens|reviendrai|r[ée]fl[ée]chis|vous [ée]cris demain)|volto a falar|vou pensar|"
     r"soch ke|sochta hoon|soch kar|don'?t send (?:it|them|anything) yet|not yet,? (?:i|we) need to|"
     r"(?:fundrais|raising (?:the )?(?:money|funds)|collecting (?:the )?money)|"
@@ -94,7 +95,9 @@ _CONSULTING_RE = re.compile(
     r"|\b(?:the |our |my )?" + _CONSULT_BODY + r"\b[^.?!\n]{0,30}?\b(?:will|must|has to|have to|needs? to|is yet to|are yet to|"
     r"wata|ata|ana|anasema|wanasema|itabidi|doit|doivent|vai|vão) (?:decide|approve|confirm|meet|discuss|sign|see|review|"
     r"amua|kubali|tungoje|décider|approuver|decidir|aprovar)\b"
-    r"|\b(?:committee|board|council|elders|kamati|bodi|wazee) (?:meets?|sits?|inakaa|itakaa|will meet|will sit)\b",
+    r"|\b(?:committee|board|council|elders|kamati|bodi|wazee) (?:meets?|sits?|inakaa|itakaa|will meet|will sit)\b"
+    # a bare "let me consult." with nobody named (slice 11): still a consultation
+    r"|\b(?:let me|i (?:need|have) to|i must|i'll|i will) consult(?: first)?\s*(?:[.!…]+\s*|$)",
     re.IGNORECASE)
 _PAID_RE = re.compile(
     r"\b(?:i(?:'ve| have)? (?:already |just )?paid|(?:just )?paid (?:by|via|with|through|using) \w+|"

@@ -67,6 +67,16 @@ Pick one:
   (model in the loop)** from the Actions tab. The results are the run's
   artifact `agent-eval-results`.
 
+### When you lift the evaluation stop — the two cheapest runs first (slice 11)
+
+The come-back rule is rewritten (your collar case). Its after-measurement
+is two readable tuning runs, in this order, from the Actions tab
+(`agent-eval.yml` → Run workflow): `file = commercial_ei.jsonl, repeat = 1`
+(≈ 23 model turns, about $1) and `file = independent_sales.jsonl, repeat = 1`
+(≈ 230 turns, about $8). Read against 29%: that is how often the recorded runs
+asked "is there a day we should check back?" on a pause (`BENCHMARK_RESULTS.md`,
+slice 11). Nothing is dispatched until you say so.
+
 ## 2. Save the dashboard credential (unblocks production-derived cases and the live flag values)
 
 From a browser (the phone app only shows Allow/Deny): open this session,

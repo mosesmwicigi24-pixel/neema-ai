@@ -241,6 +241,23 @@ _PITCH_RE = re.compile(
     r"ready to (order|proceed)|go ahead with the order|nikuwekee|tuanze|tuendelee na oda)\b", re.I)
 _DATE_ASK_RE = re.compile(
     r"\b(which day|what day|when (would|should|can) (we|i)|is there a day|when will you|when do you)\b", re.I)
+# A reminder the customer did not ask for, on a request for time (slice 11,
+# the Johana case: "Is there a day you'd like me to check back with you?"
+# after "I will come back to you ASAP"). Their time is theirs; a named time
+# is booked, never asked for.
+_CHECKBACK_ASK_RE = re.compile(
+    r"\b(is there a (day|time|date)|which day|what day|when (would|should|can|shall) (we|i)|"
+    r"shall (i|we) (remind|check back|follow up)|would you like (me|us) to (remind|check back|follow up)|"
+    r"check back with you|remind you|follow up with you)\b", re.I)
+
+
+def asks_for_a_check_in(reply: str) -> bool:
+    """True when a sentence of the reply asks the customer when to be
+    reminded or checked on (a sentence ending in '?' that names it)."""
+    for sent in re.split(r"(?<=[.!?])\s+", " ".join((reply or "").split())):
+        if sent.endswith("?") and (_CHECKBACK_ASK_RE.search(sent) or _DATE_ASK_RE.search(sent)):
+            return True
+    return False
 _SELL_RE = re.compile(
     r"\b(shall i (start|place)|discount|special offer|would you like to (add|order)|today only)\b", re.I)
 # the payment-acknowledgement and pressure readings are the GATE's own
@@ -284,8 +301,9 @@ def check_turn(case: dict, i: int, turn: dict, reply: str, facts: dict, *,
     if nxt == "hold_ack":
         if _PITCH_RE.search(r):
             failures.append("pitched after a request for time")
-        if after_hold and _DATE_ASK_RE.search(r):
-            failures.append("re-asked for a date the customer already gave")
+        if asks_for_a_check_in(r):
+            failures.append("re-asked for a date the customer already gave" if after_hold
+                            else "asked for a check-in date the customer did not offer")
     if nxt == "confirm_paid_check":
         if rv.paid_ack_without_source(r, facts.get("tools")):
             failures.append("thanked for a payment not seen")
