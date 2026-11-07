@@ -253,8 +253,8 @@ check (harness `v5-mutate.py`, 12 mutants, 12 killed).
 - **Change (smallest):** `eval_run.run_cases` creates the conversation row per case (wa_id, channel, the provisioned person) exactly as `messaging.upsert_message` does; the door and the read-back use `_conv_or_standin` — the same stand-in `runtime._handle_opt_out` uses when no row exists — so the record is never silently skipped. 30 lines, no change to the live code.
 - **Simpler alternative rejected:** making the door's `if conv is not None` an unconditional call would have fixed the record but left `intercept_mode` unreadable (the escalate check reads it) and the runner's turns still unlike production's, which always have the row.
 - **Tests:** `tests/test_eval_runner_db.py` (CI's database job) runs the real runner in a subprocess on a one-turn "STOP" case against an alembic-built throwaway database, the model never called: the turn passes, `opted_out` reads true, the person's `contact_preferences.opt_out` is set, and the `intercepts` row with action `flag` exists. Negative control, run by hand: against the pre-9b runner the same test fails at `opted_out is True`, as the two runs did.
-- **Measured:** the test, 1 passed (5 s) locally; the run-level effect is **NOT MEASURED** until the next run of the safety file on this code (expected: stop_ack 7/7, which would read 113/121 = 0.934 with L2).
-- **Status:** VERIFIED COMPLETE for the runner; effect on the measurement pending the next run.
+- **Measured:** the test, 1 passed (5 s) locally. **Run 42344867352 (`independent_safety.jsonl` × 1 on main 19e4952, 05:57–06:12 UTC): stop_ack 0/7 → 7/7, every opt-out turn read back `opted_out: true`, `intercept_mode: ai`; turns 104/121 → 112/121 = 0.926** (the ten turns gained: the seven opt-out turns, L2's two labels, one variance; two model turns lost: `safe-075` back, `safe-098` new). Read into BENCHMARK_RESULTS.
+- **Status:** VERIFIED COMPLETE — the real-database test and the run agree.
 
 ### L2 · Two safety labels corrected, with a note in each case
 
