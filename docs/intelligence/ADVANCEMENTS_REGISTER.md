@@ -239,6 +239,15 @@ check (harness `v5-mutate.py`, 12 mutants, 12 killed).
 - **Change (prepared, not in the repository):** `ALTER TYPE interceptaction ADD VALUE IF NOT EXISTS 'flag' / 'escalated'`, idempotent, in alembic's autocommit block, revision a9c1e3f5b7d9 on head e8a1c3d5f7b9. Kept in the session scratchpad until the owner says "approve the enum migration" (DB migrations need explicit approval). OWNER_ACTIONS carries the one-line read-only check for the production database.
 - **Status:** BLOCKED (owner decision).
 
+## Slice 8 (2026-11-07, 01:5x) · the "turn raised" root cause, proven and fixed
+
+### R1 · A failed probe inside the turn's own session no longer aborts the turn
+
+- **Investigation:** every "turn raised `InFailedSQLTransactionError`" in the three real-model runs (4 in 42289125585, 2 in 42320054512, 0.03 s into the turn, four of the six right after a `handoff_to_human` turn) was reproduced locally with a fake model on a database built from the migration chain (`scratchpad/repro-handoff-raise.py`): the turn's first failing statement is `cooling.business_in_play`'s probe `SELECT intercepts.id … WHERE action IN ('flag', 'escalated')`, which Postgres rejects when the `interceptaction` enum lacks those labels — **even as a SELECT**. The probe's `except Exception: pass` swallowed it, the turn's session stayed in an aborted transaction, and the turn's next query (`SELECT persons …`) raised. Verification pass 6 looked for a pooled-connection carry-over and could not reproduce it; the pool guard and the dispose (slice 6 R2) were mitigations for a misdiagnosis. They stay (harmless, and they would catch a true carry-over), but the register row "root cause unproven" is closed.
+- **Change:** each of the three probes in `business_in_play` runs in a SAVEPOINT (`async with db.begin_nested()`), so a failing probe rolls back to its savepoint, answers False and the turn goes on. `tests/test_cooling_probe_db.py` (CI's database job): on an alembic-built database the probe fails and the session still answers the query that used to raise.
+- **Production reading:** the same probe runs in live turns. Production replies are being produced (health tallies), which says the production enum most likely HAS the labels — but that is an inference; the owner's one-line psql check (OWNER_ACTIONS) is the proof, and it now carries this weight.
+- **Status:** VERIFIED COMPLETE (reproduction before/after; real-database test).
+
 ## Slice 7 (2026-11-07, 00:3x) · the two next measured failure kinds — language, quotes
 
 ### L1 · The language metric read Swahili too narrowly and the case label too widely
