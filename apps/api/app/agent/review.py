@@ -1375,9 +1375,17 @@ def rule_findings(comment: str, answer: str, seen: list,
     _lang = language_mismatch(comment, answer) if mode == "dm" else None
     if _lang:
         _name = {"hi": "Hindi", "sw": "Swahili", "fr": "French", "pt": "Portuguese"}[_lang]
-        out.append({"kind": "language", "hard": False,
+        # HARD (owner's decision, 2026-11-07): a plainly-English draft to a
+        # customer the floor placed in Hindi, Swahili, French or Portuguese is
+        # corrected by the rewrite; still wrong, the hold line goes out in
+        # THEIR language and a colleague is flagged (runtime._hold_dm_for).
+        # Bilingual replies and the hub's own product names are not flagged:
+        # the detector needs a draft that reads as English with none of the
+        # customer's language in it (language_mismatch).
+        out.append({"kind": "language", "hard": True,
                     "text": f"they wrote in {_name} and the draft is not — answer in {_name}, "
-                    "the same facts, the same length"})
+                    "the same facts, the same length (the hub's product names may stay as "
+                    "the hub names them)"})
     if paid_ack_without_source(answer, tool_results):
         out.append({"kind": "paid_ack", "hard": True,
                     "text": "it thanks for or confirms a payment the hub has not shown as paid in this "

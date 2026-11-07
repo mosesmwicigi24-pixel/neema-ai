@@ -239,6 +239,32 @@ check (harness `v5-mutate.py`, 12 mutants, 12 killed).
 - **Change (prepared, not in the repository):** `ALTER TYPE interceptaction ADD VALUE IF NOT EXISTS 'flag' / 'escalated'`, idempotent, in alembic's autocommit block, revision a9c1e3f5b7d9 on head e8a1c3d5f7b9. Kept in the session scratchpad until the owner says "approve the enum migration" (DB migrations need explicit approval). OWNER_ACTIONS carries the one-line read-only check for the production database.
 - **Status:** SHIPPED 2026-11-07 on the owner's word ("Approve the enum migration"): `alembic/versions/a9c1e3f5b7d9_interceptaction_flag_escalated.py`, replayed on a fresh database (the type gains both labels; the drift test's known-missing list is empty again). The box runs `alembic upgrade head` at container start, so it lands with the next image; the first safety-file run after the deploy measures `opt-out not recorded` (7 of 7 turns on every run so far). **Measured (slice 9 R1): 0/7 again — the eval's failures were the runner's, not the enum's; the migration stands on its own merits (the live writes) and its box effect is the owner's psql line.**
 
+## Slice 12 (2026-11-07, 15:xx–17:xx) · the owner's hybrid decision — accountable commitments, the person door, the hard language guard
+
+Full report: `ACCOUNTABLE_COMMITMENTS.md`.
+
+### D1 · A promised check that is still open is escalated with an owner while Neema stays on (safe-032)
+
+- **Baseline:** the team check (`deals.open_team_check`, written by `check_availability`) had no owner, no deadline, no age and no escalation; a customer back the next day met the same promise; `safe-032` failed on every run because its label said "hand to a colleague" and the tool is built not to park the thread.
+- **Owner's decision (verbatim principle):** "A customer should never experience our internal system limitations as a breakdown in our commitment to serve them" — neither the label nor the behaviour as they stood: Neema keeps the customer; a human is made accountable in parallel; a notification is never a resolution.
+- **Change:** `services/commitments.py` (reading → stage by age during staffed hours; one idempotent escalation per stage with the owner's name or "needs an owner", a flag row, the bell; the live-turn hook on a customer follow-up with the writer's owned-delay note; the 5-minute sweep with out-of-hours queueing; health counts). `deals.clear_team_check` keeps opened/age/escalation. Three settings. Runner: `setup.team_check` + `expect.commitment` read from the deal after the turn; `safe-032` relabelled to the customer-safe outcome (no hand-over, no re-promise, the escalation recorded).
+- **Tests:** `tests/test_commitments.py` (17), `tests/test_commitments_db.py` (4, CI database job). **Measured:** NOT with the model (stopped). Status: IMPLEMENTED BUT NOT VERIFIED (with the model).
+
+### D2 · An explicit request for a person is routed before the model
+
+- **Baseline:** no deterministic door; the model decided (5 of 15 blind hand-over turns failed on the first real-model pass; the candidate detector fired on 0 of 1,656 non-hand-over turns — recorded in slice 8's investigation, held for the owner).
+- **Change:** `intent.wants_a_person` (EN/SW/FR/PT requests; a bare "is this a bot?" is a question, `safe-039`) and `services/person_door.py`: human mode, flag, bell, one honest acknowledgement in their language, with the out-of-hours / nobody-available truth and the time the team is back; wired beside the opt-out door on both inbound paths and in the runner. The unclaimed ringer is the accountable follow-up.
+- **Tests:** `tests/test_person_door.py` (30) — 0 false positives on 1,238 readable non-hand-over turns; catches 8 of 30 hand-over turns. Status: IMPLEMENTED BUT NOT VERIFIED (with the model).
+
+### D3 · The language guard is hard, with a safe fallback
+
+- **Change:** `review.rule_findings` language → `hard: True`; `runtime._hold_dm_for` picks the held line by the customer's language (Swahili as before; French, Portuguese, Hindi added); safeguards unchanged (bilingual replies and product names pass).
+- **Tests:** `tests/test_language_gate_hard.py` (12) + the review suites (284 passed). Status: IMPLEMENTED BUT NOT VERIFIED (with the model); watch `review.held` after the deploy.
+
+### D4 · Chinese and Arabic are answered in their language
+
+- `safe-094`/`safe-095` relabelled `answer`, hub-only figures, no hand-over (owner: escalate uncertainty, never the language). No code change: the prompt already answers in the customer's language.
+
 ## Slice 11 (2026-11-07, 13:xx) · Commercial Emotional Intelligence — the pause, the consultation, the decline
 
 Full report: `COMMERCIAL_EI.md` (the directive's eight-part final report, the 25-scenario coverage map, the §11 dimensions).

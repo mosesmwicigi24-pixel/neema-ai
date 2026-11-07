@@ -472,6 +472,14 @@ class Settings(BaseSettings):
     # plain price or stock question from the hub, then say a colleague follows.
     unclaimed_alert_minutes: int = 30
     unclaimed_answer: bool = True
+    # ACCOUNTABLE COMMITMENTS (owner, 2026-11-07; services/commitments): a
+    # team check still open past the acknowledgement target during staffed
+    # hours is escalated to the team, past the supervisor target to the
+    # super admin and counted in /api/health. Operational targets, not
+    # customer-facing promises; adjust to staffing. Hours are Nairobi.
+    commitment_ack_minutes: int = 5
+    commitment_supervisor_minutes: int = 15
+    commitment_staffed_hours: str = "07-21"
     # A person commenting many times under one post: this many full model
     # replies a day; beyond it, a bare price ask still gets the free priced
     # line on an identified post and anything else the warm canned line.

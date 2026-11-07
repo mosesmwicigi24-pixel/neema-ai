@@ -1585,9 +1585,39 @@ async def _gate_turn_reply(reply: str, *, user_text: str, transcript: list, tool
         _log.info("held again for %s within hours: silence, the colleague is flagged", key)
         return "", all_issues, "held"
     money = any(("figure" in h) or ("asked for" in h) for h in hard)
-    if money:
-        return (_SW_REVIEW_HOLD_DM_PRICE if swahili else _REVIEW_HOLD_DM_PRICE), all_issues, "held"
-    return (_SW_REVIEW_HOLD_DM if swahili else _REVIEW_HOLD_DM), all_issues, "held"
+    return _hold_dm_for(user_text, swahili=swahili, money=money), all_issues, "held"
+
+
+_HOLD_DM_BY_LANG = {
+    "fr": ("Laissez-moi vérifier les détails exacts pour vous 🙏 Un membre de notre équipe "
+           "vous répondra ici sous peu.",
+           "Laissez-moi vérifier l'article exact et son prix pour vous 🙏 Un membre de notre "
+           "équipe vous répondra ici sous peu."),
+    "pt": ("Deixe-me confirmar os detalhes exatos para si 🙏 Um membro da nossa equipa "
+           "responde-lhe aqui em breve.",
+           "Deixe-me confirmar o artigo exato e o preço para si 🙏 Um membro da nossa equipa "
+           "responde-lhe aqui em breve."),
+    "hi": ("मैं आपके लिए सही विवरण की पुष्टि कर लेती हूँ 🙏 हमारी टीम का एक सदस्य जल्द ही यहीं आपको जवाब देगा।",
+           "मैं आपके लिए सही वस्तु और उसकी कीमत की पुष्टि कर लेती हूँ 🙏 हमारी टीम का एक सदस्य जल्द ही यहीं आपको जवाब देगा।"),
+}
+
+
+def _hold_dm_for(user_text: str | None, *, swahili: bool, money: bool) -> str:
+    """The held-reply line in the CUSTOMER's language (owner, 2026-11-07: the
+    language guard is hard, with a safe fallback — never an English hold line
+    to a Hindi, French or Portuguese customer). Swahili as before; unknown
+    languages get English."""
+    try:
+        from app.services.customer_state import guess_language
+        lang = guess_language(user_text or "")
+    except Exception:
+        lang = None
+    if swahili or lang == "sw":
+        return _SW_REVIEW_HOLD_DM_PRICE if money else _SW_REVIEW_HOLD_DM
+    pair = _HOLD_DM_BY_LANG.get(lang or "")
+    if pair:
+        return pair[1] if money else pair[0]
+    return _REVIEW_HOLD_DM_PRICE if money else _REVIEW_HOLD_DM
 
 
 _SENTENCE_END_RE = re.compile(r"[.!?…][\"'”’)\]]*(?=\s|$)")
@@ -2024,6 +2054,16 @@ async def run_turn(db: AsyncSession, redis, wa_id: str, user_text: str, llm: LLM
             turn_notes.append(_state)
     except Exception:
         pass
+    # An overdue commitment the customer is writing about is escalated NOW,
+    # with an owner, while Neema stays on the thread (owner's decision on
+    # safe-032, 2026-11-07; services/commitments). The note above already
+    # carries the writer's instruction. Never on a draft.
+    if not read_only and not scribe_only:
+        try:
+            from app.services import commitments as _cm
+            await _cm.customer_followed_up(db, redis, key, channel)
+        except Exception:
+            pass
 
     # Per-deal operator guidance ("no discount on this one") — obeyed for THIS
     # customer only; safety rules still win. Best-effort.
@@ -2985,6 +3025,43 @@ async def _handle_opt_out(redis, channel: str, key: str, text: str) -> None:
         _log.warning("opt-out handling failed for %s/…%s: %s", channel, str(key)[-4:], exc)
 
 
+async def _handle_person_request(redis, channel: str, key: str, text: str) -> None:
+    """THE PERSON DOOR (owner, 2026-11-07): an explicit request for a human is
+    routed before any model turn — human mode, the team flagged and rung,
+    one honest acknowledgement in their language (services/person_door)."""
+    from app.database import AsyncSessionLocal
+    from app.models.conversation import Conversation
+    from app.services import messaging as svc
+    from app.services import outreach_log as _ol
+    from app.services import person_door as _pd
+    from sqlalchemy import or_
+    try:
+        async with AsyncSessionLocal() as db:
+            where = (Conversation.wa_id == key) if channel == "whatsapp" else (
+                (Conversation.channel == channel) & or_(Conversation.external_id == key,
+                                                        Conversation.wa_id == key))
+            conv = (await db.execute(select(Conversation).where(where))).scalars().first()
+            if conv is None:
+                conv = types.SimpleNamespace(id=None, person_id=None, channel=channel,
+                                             external_id=key, wa_id=key if channel == "whatsapp" else None,
+                                             intercept_mode=None)
+            ack = await _pd.route(db, redis, conv, text, channel=channel, key=key)
+            _ol.decision("person_door", channel, key, "send", "customer asked for a person")
+            meta = _ol.stamp("person_door", _ol.ANSWER)
+            if channel == "whatsapp":
+                try:
+                    wamid = await svc._send_waba(key, ack)
+                except svc.SendOutcomeUnknown as exc:
+                    wamid, meta["delivery"] = None, {"status": "unknown", "error": str(exc)[:120]}
+                await svc.save_outbound_message(db, redis, key, ack, waba_msg_id=wamid, raw_meta=meta)
+            else:
+                from app.services.meta_send import send_to_channel
+                await send_to_channel(channel, key, ack)
+                await svc.save_outbound_channel_message(db, redis, channel, key, ack, raw_meta=meta)
+    except Exception as exc:
+        _log.warning("person door failed for %s/…%s: %s", channel, str(key)[-4:], exc)
+
+
 async def schedule_reply(redis, wa_id: str, text: str, dedup_id: str | None,
                          media: dict | None = None,
                          inbound_ids: list[str] | None = None) -> bool:
@@ -2996,6 +3073,9 @@ async def schedule_reply(redis, wa_id: str, text: str, dedup_id: str | None,
     from app.services import intent as _intent
     if _intent.is_opt_out(text):            # the words decide, photo or not (verification 1.4)
         await _handle_opt_out(redis, "whatsapp", wa_id, text)
+        return True
+    if _intent.wants_a_person(text):        # THE PERSON DOOR (owner, 2026-11-07): no model turn
+        await _handle_person_request(redis, "whatsapp", wa_id, text)
         return True
     if media is None and await closer_gate(redis, "whatsapp", wa_id, text):
         return False
@@ -3296,6 +3376,9 @@ async def schedule_meta_reply(redis, channel: str, external_id: str, text: str,
     from app.services import intent as _intent
     if _intent.is_opt_out(text):            # the words decide, photo or not (verification 1.4)
         await _handle_opt_out(redis, channel, external_id, text)
+        return True
+    if _intent.wants_a_person(text):        # THE PERSON DOOR (owner, 2026-11-07): no model turn
+        await _handle_person_request(redis, channel, external_id, text)
         return True
     if media is None and await closer_gate(redis, channel, external_id, text):
         return False

@@ -530,7 +530,15 @@ def turn_note(deal, person, *, now: datetime | None = None) -> str | None:
         except Exception:
             item = None
         if item:
-            bits.append(f"the team is still confirming '{item}' — never ask them to start, confirm "
+            overdue = None
+            try:
+                from app.services import commitments
+                _r = commitments.reading(deal, now=now)
+                overdue = commitments.writer_note(_r) if _r and _r.get("overdue") else None
+            except Exception:
+                overdue = None
+            bits.append(overdue or
+                        f"the team is still confirming '{item}' — never ask them to start, confirm "
                         "or pay for that item until the answer is in this chat")
         if (deal.blocking or "").startswith("Says they have paid"):
             bits.append("they say they have paid and the hub has not confirmed it — thank them, "

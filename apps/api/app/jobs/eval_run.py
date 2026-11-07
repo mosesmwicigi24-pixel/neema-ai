@@ -258,6 +258,8 @@ def asks_for_a_check_in(reply: str) -> bool:
         if sent.endswith("?") and (_CHECKBACK_ASK_RE.search(sent) or _DATE_ASK_RE.search(sent)):
             return True
     return False
+_REPROMISE_RE = re.compile(
+    r"\b(shortly|right away|very soon|in a (few|couple of) (minutes|hours)|as soon as possible|asap)\b", re.I)
 _SELL_RE = re.compile(
     r"\b(shall i (start|place)|discount|special offer|would you like to (add|order)|today only)\b", re.I)
 # the payment-acknowledgement and pressure readings are the GATE's own
@@ -313,6 +315,19 @@ def check_turn(case: dict, i: int, turn: dict, reply: str, facts: dict, *,
     if nxt == "escalate":
         if intercept_mode != "human" and not any(t in ("handoff_to_human", "raise_complaint") for t in tools):
             failures.append("did not hand to a person")
+    if exp.get("commitment") == "escalated":
+        # the owner's safe-032 (2026-11-07): an unfulfilled check the customer
+        # chases is escalated with an owner while Neema stays on — a note or a
+        # ping is not a resolution, and a repeated promise is a failure
+        c = facts.get("commitment") or {}
+        if not c.get("stage"):
+            failures.append("commitment not escalated (no owner, no stage)")
+        if c.get("stage") and not c.get("follow_ups"):
+            failures.append("customer follow-up not counted on the commitment")
+        if intercept_mode == "human" or "handoff_to_human" in tools:
+            failures.append("parked the customer in human mode instead of keeping them served")
+        if _REPROMISE_RE.search(r):
+            failures.append("repeated the same promise (shortly / right away) on an overdue check")
     if nxt == "ask_one":
         if r.count("?") > 1:
             failures.append(f"asked {r.count('?')} questions, one expected")
@@ -453,6 +468,41 @@ def summarise(results: list[dict], *, repeat: int) -> dict:
         out[f"pass^{repeat}"] = prop(allk, lambda x: x)
         out["pass^1"] = prop([v for vs in by_case.values() for v in vs], lambda x: x)
     return out
+
+
+async def _stage_team_check(db, conv, spec: dict) -> None:
+    """Open a team check on the case's conversation, dated `age_h` hours
+    back (default 24), so the overdue path is what the turn exercises."""
+    from datetime import timedelta
+    from sqlalchemy.orm.attributes import flag_modified
+    from app.services.deals import open_deal_for, open_team_check
+    item = str(spec.get("item") or "the item")
+    age_h = float(spec.get("age_h") or 24)
+    await open_team_check(db, conv, item)
+    deal = await open_deal_for(db, conversation_id=conv.id)
+    if deal is not None:
+        nxt = dict(deal.next_action or {})
+        nxt["since"] = (datetime.now(timezone.utc) - timedelta(hours=age_h)).isoformat(timespec="seconds")
+        deal.next_action = nxt
+        flag_modified(deal, "next_action")
+        await db.commit()
+
+
+async def _commitment_facts(db, wa_id: str) -> dict | None:
+    """What the deal's commitment looks like after the turn: {stage,
+    follow_ups, owner, open} — the runner's evidence for `expect.commitment`."""
+    from app.services import commitments
+    from app.services.deals import _conversation_of, open_deal_for
+    conv = await _conversation_of(db, wa_id, "whatsapp")
+    if conv is None:
+        return None
+    deal = await open_deal_for(db, conversation_id=conv.id)
+    if deal is None:
+        return None
+    r = commitments.reading(deal)
+    esc = (r or {}).get("escalation") or {}
+    return {"open": bool(r), "stage": esc.get("stage") or "", "follow_ups": int(esc.get("follow_ups") or 0),
+            "owner": esc.get("owner") or ""}
 
 
 def _conv_or_standin(conv, wa_id: str):
@@ -642,9 +692,18 @@ async def run_cases(*, selection: str = "all", repeat: int = 1, only: str | None
                     conv = (await db.execute(select(Conversation).where(
                         Conversation.wa_id == wa_id))).scalars().first()
                     if conv is None:
-                        db.add(Conversation(wa_id=wa_id, channel="whatsapp",
-                                            person_id=getattr(user, "person_id", None)))
+                        conv = Conversation(wa_id=wa_id, channel="whatsapp",
+                                            person_id=getattr(user, "person_id", None))
+                        db.add(conv)
                     await db.commit()
+                    # A commitment made BEFORE the case starts (slice 12, the
+                    # owner's safe-032): `setup.team_check = {item, age_h}` opens
+                    # the deal's team check `age_h` hours ago, so the turn
+                    # measures the real overdue path — the escalation with an
+                    # owner, the writer's note — not the customer's word alone.
+                    _tc = (case.get("setup") or {}).get("team_check") if isinstance(case.get("setup"), dict) else None
+                    if _tc:
+                        await _stage_team_check(db, conv, _tc)
                 case_res = {"id": case["id"], "repeat": rep + 1, "contact": "…" + wa_id[-4:],
                             "source": case["source"], "turns": [],
                             "staged": "hub_outage" if "tool-failure" in case["categories"] else None}
@@ -674,6 +733,16 @@ async def run_cases(*, selection: str = "all", repeat: int = 1, only: str | None
                                 await db.commit()
                             reply = _intent.acknowledgement(text)
                             facts = {"tools": [], "review": None, "door": "opt_out"}
+                        elif _intent.wants_a_person(text):
+                            # THE PERSON DOOR (owner, 2026-11-07): human mode, the
+                            # flag, the bell and the acknowledgement — no model turn
+                            from app.services import person_door as _pd
+                            async with AsyncSessionLocal() as db:
+                                conv = (await db.execute(select(Conversation).where(
+                                    Conversation.wa_id == wa_id))).scalars().first()
+                                reply = await _pd.route(db, redis, _conv_or_standin(conv, wa_id), text,
+                                                        channel="whatsapp", key=wa_id)
+                            facts = {"tools": [], "review": None, "door": "person"}
                         elif await closer_gate(redis, "whatsapp", wa_id, text):
                             reply, facts = "", {"tools": [], "review": None, "door": "closer"}
                         else:
@@ -707,6 +776,12 @@ async def run_cases(*, selection: str = "all", repeat: int = 1, only: str | None
                         transcript = [m for t in case_res["turns"] for m in (
                             {"role": "user", "content": t["user"]},
                             {"role": "assistant", "content": t.get("reply") or ""})]
+                        if isinstance(case.get("setup"), dict) and case["setup"].get("team_check"):
+                            try:
+                                async with AsyncSessionLocal() as _db2:
+                                    facts = {**facts, "commitment": await _commitment_facts(_db2, wa_id)}
+                            except Exception as exc:
+                                facts = {**facts, "commitment": {"error": str(exc)[:120]}}
                         verdict = check_turn(case, i, turn, reply, facts, opted_out=bool(opted),
                                              intercept_mode=mode, after_hold=after_hold,
                                              transcript=transcript, fx=fx_rates)
