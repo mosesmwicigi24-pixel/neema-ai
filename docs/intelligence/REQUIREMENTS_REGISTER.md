@@ -73,14 +73,14 @@ Last update: 2026-11-06 (session 1, end: discovery, baseline, first implementati
 | R4.7 | Memory and context | newest rules kept; contradictions resolved; silence honoured; locked writes; context experiment NOT STARTED (needs model) | PARTIALLY COMPLETE |
 | R4.8 | Multilingual | language guess 0.528→0.930 on the blind set (intervals separated; the earlier held-out figure was withdrawn as contaminated, BENCHMARK_RESULTS Correction 1); deterministic continuity rule; 100 language cases; native review BLOCKED | PARTIALLY COMPLETE |
 | R4.9 | Autonomous execution | outcomes say customer_told; handoff rings; order idempotency and legacy path not changed (recorded) | PARTIALLY COMPLETE |
-| R4.10 | Continuous evaluation | agent_eval --cases, history in app_settings, dashboard reads it; no automatic prompt change exists. The first CI run (19:57 UTC) crashed at start-up in the runner (models not all registered) — fixed in PR #319; the run on the fixed branch is in progress | VERIFIED COMPLETE (harness) / run IN PROGRESS |
+| R4.10 | Continuous evaluation | agent_eval --cases, history in app_settings, dashboard reads it; no automatic prompt change exists. Run 42289125585 completed the first pass over the blind set (179/360 case-runs) and crashed in the runner's contact cleanup (FK ordering) — the checkpoint kept the record; no history row (the run did not finish) | VERIFIED COMPLETE (harness) / PARTIALLY COMPLETE (a full run has not finished) |
 
 ## §5 Independent intelligence baseline
 
 | ID | Requirement | Status |
 |---|---|---|
 | R5.1 | 300–500 cases covering the eleven listed categories | 453 tuning cases + 120 blind cases, all categories (EVALUATION_DATASET) | VERIFIED COMPLETE (no production-derived cases yet) |
-| R5.2 | Real model against controlled data, sends disabled | the repository secret now exists (the key check passed at 19:57 UTC); the first run crashed in the runner before any case (fixed in PR #319); the run on the fixed branch is in progress | PARTIALLY COMPLETE (run in progress) |
+| R5.2 | Real model against controlled data, sends disabled | run 42289125585: a complete first pass over the 120 blind cases (459 turns), sends disabled — turns passed 0.800 [0.761, 0.834], critical 0.778, language 0.955, figures 0.854, length 0.881, first draft 0.473 (BENCHMARK_RESULTS); pass^3 NOT MEASURED (crashed at 179/360); two environment defects contaminate stop_ack and 3 turns | PARTIALLY COMPLETE (single pass measured; pass^3 not) |
 | R5.3 | Objective assertions + human evaluation where judgment is required | objective verdicts in eval_run; judged turns exported to a packet | PARTIALLY COMPLETE |
 | R5.4 | Blind comparison: Neema vs skilled humans vs reference agent | design only (INTERNATIONAL_ASSESSMENT) | NOT STARTED |
 | R5.5 | Record inputs, model version, prompt revision, traces, outcomes, criteria, limitations | eval_run record (git sha, model ids, prompt hashes, case-set hash, tool traces) | VERIFIED COMPLETE (harness) |
@@ -93,8 +93,8 @@ Last update: 2026-11-06 (session 1, end: discovery, baseline, first implementati
 | R6.1 | 10 dimensions, weights as given | EXCELLENCE_SCORE | VERIFIED COMPLETE |
 | R6.2 | Per metric: methodology, denominator, sample size, evaluator, evidence source, uncertainty | EXCELLENCE_SCORE table | VERIFIED COMPLETE |
 | R6.3 | NOT MEASURED where unreliable; no invented scores | applied |
-| R6.4 | ≥10-point verified improvement on a held-out set | floors only, on the blind set (the only uncontaminated held-out): language +40.2 points (0.528→0.930, separated); customer state +5.5 (0.725→0.780, intervals overlap); opt-out +5.9 (0.912→0.971, n=34, overlap); reply length +2.1 after the scorer correction. The 100-point aggregate is NOT MEASURED (model-dependent dimensions blocked) — the 10-point claim is NOT demonstrated | PARTIALLY COMPLETE |
-| R6.5 | Investigate the six preliminary targets | EXCELLENCE_SCORE §targets: the language GUESS is measurable now (0.930 floor on the blind set; continuity of the reply itself needs the model run), the rest need the model run | PARTIALLY COMPLETE |
+| R6.4 | ≥10-point verified improvement on a held-out set | floors only, on the blind set (the only uncontaminated held-out): language +40.2 points (0.528→0.930, separated); customer state +5.5 (0.725→0.780, intervals overlap); opt-out +5.9 (0.912→0.971, n=34, overlap); reply length +2.1 after the scorer correction. The real-model first pass gives a baseline (turns 0.800) but no before/after: the 'before' code was never run with the model, so a model-level improvement cannot be claimed. The 100-point aggregate is NOT MEASURED — the 10-point claim is NOT demonstrated | PARTIALLY COMPLETE |
+| R6.5 | Investigate the six preliminary targets | first real-model pass: language continuity 0.955 (target ≥0.95 met on this pass; the interval [0.931, 0.971] straddles it); next-action correctness per label 0.35–1.0 (≥0.95 met only for ask_one, care_first, confirm_paid_check, hold_ack; silence 0.346); recall ≥0.95 NOT MEASURED (memory category 0.843 at turn level); emotional ≥0.90 and sandbox completion ≥0.95 NOT MEASURED; conversion not measured | PARTIALLY COMPLETE |
 | R6.6 | Aggregate never excuses critical safety/financial errors | applied (gating rule in EXCELLENCE_SCORE) |
 
 ## §7 Executive performance dashboard
@@ -138,7 +138,7 @@ Last update: 2026-11-06 (session 1, end: discovery, baseline, first implementati
 | R11.1 | Verified Capability Baseline | CAPABILITY_BASELINE.md | VERIFIED COMPLETE |
 | R11.2 | Deep Investigation Report | INVESTIGATION_REPORT.md | VERIFIED COMPLETE |
 | R11.3 | Ten-Advancement Implementation Register | ADVANCEMENTS_REGISTER.md | VERIFIED COMPLETE (living) |
-| R11.4 | Intelligence Benchmark Results | BENCHMARK_RESULTS.md (floors measured; real-model NOT MEASURED) | PARTIALLY COMPLETE |
+| R11.4 | Intelligence Benchmark Results | BENCHMARK_RESULTS.md (floors measured; real-model first pass measured; pass^3 NOT MEASURED) | PARTIALLY COMPLETE |
 | R11.5 | Customer Experience Assessment | needs the model run and raters | BLOCKED |
 | R11.6 | Performance Dashboard | /api/admin/performance + PerformanceView | VERIFIED COMPLETE |
 | R11.7 | Full Regression and Safety Report | REGRESSION_SAFETY_REPORT.md | see that file |

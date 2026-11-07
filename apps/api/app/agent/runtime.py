@@ -667,6 +667,31 @@ async def closer_gate(redis, channel: str, key: str, text: str) -> bool:
     silence, not another blessing. Any substantive message clears the flag."""
     if is_silent_ack(text):
         _log.info("closer gate: a thumbs-up ends it for %s/%s", channel, key)
+        await _mark_silenced(redis, channel, key)       # a decision, never a miss for the sweep
+        return True
+    if is_bare_closer(text):
+        # A typed "ok" / "sawa" / "noted" right after OUR OWN question ("Shall
+        # I start your order?") is the answer, not a closer: it gets a turn
+        # (verification pass 6b, S1-2). The flag is set by mark_closer_answered
+        # whenever the reply we sent carried a question.
+        if redis is not None:
+            try:
+                if await redis.get(f"asked:{channel}:{key}"):
+                    _log.info("closer gate: '%s' answers our question for %s/%s — a turn runs",
+                              text[:20], channel, key)
+                    return False
+            except Exception:
+                pass
+        # The prompt's own rule, made deterministic (slice 6): a bare
+        # thanks / ok / blessing gets nothing back — the model was answering
+        # a third of them.
+        _log.info("closer gate: a bare closer gets silence for %s/%s", channel, key)
+        if redis is not None:
+            try:
+                await redis.set(f"closer:{channel}:{key}", "1", ex=_CLOSER_KEY_TTL)
+            except Exception:
+                pass
+        await _mark_silenced(redis, channel, key)       # pass 6b S1-1: or the sweep re-answers it
         return True
     if redis is None:
         return False
@@ -678,15 +703,32 @@ async def closer_gate(redis, channel: str, key: str, text: str) -> bool:
         if await redis.get(rkey):
             await redis.expire(rkey, _CLOSER_KEY_TTL)   # keep the lid on
             _log.info("closer gate: politeness ping-pong ended for %s/%s", channel, key)
+            await _mark_silenced(redis, channel, key)
             return True
     except Exception:
         return False
     return False
 
 
-async def mark_closer_answered(redis, channel: str, key: str, inbound_text: str) -> None:
-    """After WE replied to a closer, arm the gate so the next one is silence."""
-    if redis is None or not is_closer(inbound_text):
+_ASKED_KEY_TTL = 6 * 3600
+
+
+async def mark_closer_answered(redis, channel: str, key: str, inbound_text: str, reply: str = "") -> None:
+    """After WE replied: arm the gate when the inbound was a closer (the next
+    one is silence), and remember whether OUR reply asked a question — a
+    bare "ok" / "sawa" that follows one is an answer the model must read,
+    not a closer to silence (verification pass 6b, S1-2). An empty reply
+    (silence) clears the question flag."""
+    if redis is None:
+        return
+    try:
+        if "?" in (reply or ""):
+            await redis.set(f"asked:{channel}:{key}", "1", ex=_ASKED_KEY_TTL)
+        else:
+            await redis.delete(f"asked:{channel}:{key}")
+    except Exception:
+        pass
+    if not is_closer(inbound_text):
         return
     try:
         await redis.set(f"closer:{channel}:{key}", "1", ex=_CLOSER_KEY_TTL)
@@ -694,36 +736,12 @@ async def mark_closer_answered(redis, channel: str, key: str, inbound_text: str)
         pass
 
 
-_ACK_RE = re.compile(
-    r"^(?:(?:hmm+|mmh+|mm+|well|ah+|oh+|great|perfect|wonderful|super|lovely|sawa|ok(?:ay)?|"
-    r"ok(?:ay)? now i (?:understand|get it|see)|understood|got it)[,.!\s]+)?"
-    r"(?:(?:i'?m|i\s*am|am|just|i)\s*(?:saying|said|say)\s*)?"
-    r"(thanks?(?:\s*(?:a\s*lot|so\s*much|a\s*million|very\s*much))?|thank\s*you(?:\s*(?:very\s*much|so\s*much|a\s*lot))?|"
-    r"thanks?\s*for\s*(?:the|your|that|this)?\s*(?:help|helping|understanding|info|information|invoice|quote|quotation|"
-    r"reply|replying|response|update|time|patience|support|price|prices|details|clarification|explanation|"
-    r"photos?|pictures?|pics|link|answer|quick\s*(?:reply|response)|prompt\s*(?:reply|response))|"
-    r"much\s*appreciated|noted\s*with\s*thanks|cheers|"
-    r"asante(\s*sana)?([,\s]*mwanangu)?|shukran|merci(\s*beaucoup)?|obrigad[oa]|murakoze|mungu\s*akubariki(\s*sana)?([,\s]*mwanangu)?|"
-    r"god\s*bless(\s*you)?|que\s*dieu\s*vous\s*(?:b[ée]nisse|garde)|deus\s*aben[çc]oe|fique\s*com\s*deus|thank\s*you\s*ji|"
-    r"thx|ty|amen|ok(?:ay|ey|k)?|kk|sawa(?:\s*sawa)?|poa|"
-    r"got\s*it|noted|alright|aight|cool|"
-    r"👍+|🙏+|❤️*|😊+|👌+|🙌+|✅+)"
-    r"(?:[\s,]+(?:ok(?:ay)?|sawa|poa|thanks?|thank\s*you|asante(\s*sana)?|noted|cheers|merci(\s*beaucoup)?|god\s*bless|"
-    r"que\s*dieu\s*vous\s*(?:b[ée]nisse|garde)|deus\s*aben[çc]oe|fique\s*com\s*deus|tutaongea|tutawasiliana|👍|🙏))*[\s!.,🙏👍❤😊👌🙌✅💯]*$",
-    re.IGNORECASE,
-)
-# A thumbs-up, a folded hands, a heart — satisfaction, the end of the exchange
-# (owner, 2026-09-25: "when a thumb up is done, which means satisfaction, you
-# should not continue"). Messenger's Like sticker arrives as "👍" (the
-# webhook), any other sticker as "[sticker]". Silence, always — not even the
-# one warm line a typed "thanks" gets.
-_SILENT_ACK_RE = re.compile(r"^[\s👍🙏❤️👌🙌✅💯🔥😊🥰😍🤝♥]+$")
-
-
-def is_silent_ack(text: str) -> bool:
-    t = (text or "").strip()
-    return bool(t) and (bool(_SILENT_ACK_RE.match(t)) or t in ("[sticker]", "[like]"))
-
+# The acknowledgement / closer patterns and the deterministic silence
+# decision live in cooling.py (no model imports) so the floors scorer can
+# measure them without configuring the ORM; re-exported here for the
+# runtime's callers and the tests.
+from app.agent.cooling import _ACK_RE, is_silent_ack, is_bare_closer  # noqa: E402
+from app.agent.cooling import _SILENT_ACK_RE, _BARE_CLOSER_RE, silence_decision  # noqa: E402, F401  (re-exported)
 
 def route_model(user_text: str) -> str:
     """Return the model id to use for this turn.
@@ -2891,7 +2909,7 @@ async def _run_and_send(redis, wa_id: str, text: str, media: dict | None = None,
                 async with AsyncSessionLocal() as db2b:
                     await svc.save_outbound_message(db2b, redis, wa_id, facts["follow_up"],
                                                     waba_msg_id=wamid2)
-            await mark_closer_answered(redis, "whatsapp", wa_id, text)
+            await mark_closer_answered(redis, "whatsapp", wa_id, text, reply)
             _log.info("tier2 replied to %s (%d chars)", wa_id, len(reply))
             # She answered — so whatever a person was told to go and fix is fixed.
             from app.services.agent_health import record_turn_success
@@ -3228,7 +3246,7 @@ async def _run_and_send_meta(redis, channel: str, external_id: str, text: str,
                 async with AsyncSessionLocal() as db2b:
                     await svc.save_outbound_channel_message(db2b, redis, channel, external_id,
                                                             facts["follow_up"])
-            await mark_closer_answered(redis, channel, external_id, text)
+            await mark_closer_answered(redis, channel, external_id, text, reply)
             _log.info("tier2 replied on %s to %s (%d chars)", channel, external_id, len(reply))
             from app.services.agent_health import record_turn_success
             await record_turn_success(redis)

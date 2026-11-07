@@ -7,6 +7,8 @@ from __future__ import annotations
 
 import pytest
 
+import app.main  # noqa: F401  (every model registered: four tests here instantiate models, and a half-registered ORM poisons later modules)
+
 import inspect
 
 from app.agent import review as rv
@@ -332,3 +334,109 @@ async def test_apply_lifts_a_hold_on_a_location_question():
     changed = await cs.apply(_DB(), conv, deal, {"customer_said": "none"}, source="floor",
                              inbound_text="Where is your shop?")
     assert changed.get("hold_cleared") is True and "hold" not in (deal.next_action or {})
+
+
+# ── slice 6: a bare closer gets silence, deterministically ─────────────────
+
+def test_a_bare_closer_in_any_language_is_silenced_and_a_question_or_deferral_is_not():
+    """The first real-model pass answered 33 of 52 closers. The deterministic
+    detector now reaches the forms it missed on the tuning set; a closer that
+    carries a question, a buying word or a deferral still gets a turn."""
+    for text in ["Thank you very much.", "Thank you for your time", "Asante sana, Mungu awabariki.",
+                 "धन्यवाद।", "ठीक है।",
+                 "Poa, baadaye.", "Sawa nimeelewa.", "Mh. Nimesikia.", "I see.", "Aah, poa.", "Received", "...",
+                 "Blessed Sunday to you all 🙏", "ok", "👍", "Asante, Allah akubariki."]:
+        assert rt.silence_decision(text), text
+    # "we're waiting" forms are labelled both ways in the tuning set; they keep a turn
+    for text in ["God bless — how much is the stole?", "Thanks, can you send the photo?", "Sawa, nitakujulisha Jumatatu.",
+                 "Ok waiting", "Sawa nasubiri", "Thanks, awaiting", "Bien. J'attends.",
+                 "I'll get back to you", "Nitarudi.", "Thanks. Do you deliver to Kisumu?", "Welcome, I need a cassock",
+                 "ok send the link", "Thank you, I want to order"]:
+        assert not rt.silence_decision(text), text
+
+
+@pytest.mark.asyncio
+async def test_the_closer_gate_silences_a_bare_closer_without_redis_and_arms_the_flag_with_it():
+    assert await rt.closer_gate(None, "whatsapp", "254700000001", "Thank you for your time") is True
+    assert await rt.closer_gate(None, "whatsapp", "254700000001", "Thanks. Do you deliver to Kisumu?") is False
+
+    class _R:
+        def __init__(self): self.kv = {}
+        async def get(self, k): return self.kv.get(k)
+        async def set(self, k, v, ex=None): self.kv[k] = v
+        async def expire(self, k, ttl): pass
+        async def delete(self, k): self.kv.pop(k, None)
+    r = _R()
+    assert await rt.closer_gate(r, "whatsapp", "254700000001", "Asante sana.") is True
+    assert r.kv.get("closer:whatsapp:254700000001") == "1"          # the next closer is silence too
+    assert await rt.closer_gate(r, "whatsapp", "254700000001", "I need a stole") is False
+    assert "closer:whatsapp:254700000001" not in r.kv                # a substantive message clears it
+
+
+def test_the_floors_score_the_silence_decision():
+    from app.jobs import eval_floors
+    case = {"id": "x", "categories": ["closing"], "lang": "en", "turns": [
+        {"user": "How much is the stole?", "expect": {"next": "answer"}},
+        {"user": "Thank you for your time", "expect": {"next": "silence"}},
+        {"user": "Received", "expect": {"next": "hold_ack"}},              # a deliberate miss
+        {"user": "Ok waiting", "expect": {"next": "hold_ack"}},            # kept: a turn runs (pass 6b S2-4 pins the label)
+    ]}
+    out = eval_floors.score([case])
+    assert out["metrics"]["silence"]["all"]["k"] == 3 and out["metrics"]["silence"]["all"]["n"] == 4
+    assert [(m["metric"], m["turn"]) for m in out["misses"]] == [("silence", 2)]
+
+
+class _GateRedis:
+    def __init__(self):
+        self.kv = {}
+
+    async def get(self, k):
+        return self.kv.get(k)
+
+    async def set(self, k, v, ex=None, nx=False):
+        self.kv[k] = v
+        return True
+
+    async def expire(self, k, ttl):
+        return True
+
+    async def delete(self, k):
+        self.kv.pop(k, None)
+
+
+@pytest.mark.asyncio
+async def test_a_gate_silence_is_marked_for_the_sweep_and_the_sweep_never_rescues_it():
+    """Pass 6b S1-1: a silenced closer must not be read as a missed reply 90 s
+    later — the gate marks it, and the sweeper's own filter skips it too."""
+    from app.services.reply_sweeper import _answerable_turn
+    r = _GateRedis()
+    assert await rt.closer_gate(r, "whatsapp", "254700000001", "Received") is True
+    assert "agent:missed:silenced:whatsapp:254700000001" in r.kv
+    r2 = _GateRedis()
+    assert await rt.closer_gate(r2, "messenger", "P1", "👍") is True
+    assert "agent:missed:silenced:messenger:P1" in r2.kv
+    for t in ("Received", "I see.", "Thank you for your time", "Nimeelewa.", "Mungu awabariki", "धन्यवाद।"):
+        assert _answerable_turn(t, None, None) == (None, None), t
+    assert _answerable_turn("Ok waiting", None, None) == ("Ok waiting", None)
+    assert _answerable_turn("How much is the stole?", None, None) == ("How much is the stole?", None)
+
+
+@pytest.mark.asyncio
+async def test_a_bare_ok_after_our_own_question_is_an_answer_not_a_closer():
+    """Pass 6b S1-2: "Shall I start your order?" → "ok" must reach the model."""
+    r = _GateRedis()
+    await rt.mark_closer_answered(r, "whatsapp", "254700000001", "I want the gold one",
+                                  "Lovely. Shall I start your order?")
+    assert r.kv.get("asked:whatsapp:254700000001") == "1"
+    assert await rt.closer_gate(r, "whatsapp", "254700000001", "ok") is False
+    assert await rt.closer_gate(r, "whatsapp", "254700000001", "sawa") is False
+    # a thumbs-up stays silence (owner, 2026-09-25) even after a question
+    assert await rt.closer_gate(r, "whatsapp", "254700000001", "👍") is True
+    # a reply without a question clears the flag: the next bare closer is silence again
+    await rt.mark_closer_answered(r, "whatsapp", "254700000001", "ok", "Your order is in. God bless.")
+    assert "asked:whatsapp:254700000001" not in r.kv
+    assert await rt.closer_gate(r, "whatsapp", "254700000001", "ok") is True
+    # and silence itself (an empty reply) clears it too
+    await rt.mark_closer_answered(r, "whatsapp", "254700000001", "Any colour?", "Blue or gold?")
+    await rt.mark_closer_answered(r, "whatsapp", "254700000001", "thanks", "")
+    assert "asked:whatsapp:254700000001" not in r.kv

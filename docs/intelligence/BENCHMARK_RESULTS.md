@@ -120,6 +120,7 @@ Files: `results/floors-blind-before.json`, `results/floors-blind-after.json`.
 | language guess vs gold | 235/445 = 0.528 [0.482, 0.574] | **414/445 = 0.930 [0.903, 0.950]** | **yes** (+40 points) |
 | opt-out recognition | 31/34 = 0.912 [0.770, 0.970] | **33/34 = 0.971 [0.851, 0.995]** | no — n is small; one false negative left |
 | reply-length kind | 211/459 = 0.460 | 218/459 = 0.475 | unchanged by design (W9 evidence) — see Correction 2: the scorer under-read complaints; corrected 221/459 = 0.481 |
+| silence decision vs gold next action (new floor, slice 6) | 407/459 = 0.887 [0.854, 0.913] | **439/459 = 0.956 [0.934, 0.972]** | **yes** (+6.9 points; 0 false silences both before and after; missed closers 52 → 20) |
 
 Reading: the language guesser's gain is the one this slice can claim
 cleanly. The customer-state floor improved on the blind set less than the
@@ -169,9 +170,83 @@ dev/held-out split is tuned-on and contaminated, as Correction 1 records.
 |---|---|---|
 | 42284150514, 19:57 UTC | main d084e91 | key check passed (the secret exists); both stages crashed at start-up — the runner had not registered every model (`persons.parish_id → parishes`); reported success behind `tee`. Fixed in PR #319. |
 | 42284679182, 20:01 UTC | branch 87a2b29 | the scripted battery ran (37 replies, mean 30 words, 3 over target, 3 with an unverified figure, 23 not passed first draft, 1 turn failed on an aborted database transaction — see UNFINISHED); the blind stage was killed by the job's 30-minute limit with nothing written. Fixed in PR #320 (300-minute limit; a checkpoint after every case). |
-| 42289125585, 20:31 UTC | branch aaf7978 | in progress: scripted battery, then the blind set pass^3. |
+| 42289125585, 20:31 UTC | branch aaf7978 | scripted battery (8 min) then the blind set: **179 of 360 case-runs completed** (the whole first pass over the 120 cases, plus 59 of the second) in 2 h 8 min, then the runner **crashed** in its per-case contact cleanup — `ForeignKeyViolationError: identifiers_person_id_fkey` (the Person row was deleted before its Identity row was flushed) — and the workflow failed. The per-case checkpoint (PR #320) kept the record, marked partial. Also in the log: 4 turns raised `InFailedSQLTransactionError` (a pooled connection carried an aborted transaction into the next turn), and the `raise_complaint` tool failed with `invalid input value for enum interceptaction: "flag"` — the fresh database's enum has no `flag`/`escalated` value (no migration adds them). Artifact `agent-eval-results`; files under `results/agent-eval-blind-aaf7978-run42289125585*`. |
 
-## Real-model baseline — NOT MEASURED (run in progress)
+## Real-model baseline — single pass MEASURED; pass^3 NOT MEASURED (2026-11-06, run 42289125585)
+
+The first complete real-model pass over the blind set. Code `aaf7978` (= main
+`7670de1` plus the eval-runner checkpoint), case set `f87e25bf0541`, prompt
+`b738f9b6b7bd`, producer `claude-sonnet-5-5`, light turns `claude-haiku-5-5`,
+reviewer `claude-sonnet-5` / `claude-haiku-4-5`, sends disabled, business
+data from the live hub. Objective verdicts only (`check_turn`); no model
+judge, no human rater. The run crashed after 179 of 360 case-runs (see the
+log above), so **pass^3 is NOT MEASURED**; the first pass (all 120 cases,
+459 turns) is complete and is the baseline below. Aggregates were computed
+with `summarise()` from the partial record; the per-case replies were not
+read, so the set stays blind for tuning.
+
+**Measurement caveat.** Two of the failure kinds are at least partly the
+evaluation environment's, not the model's: the 7 `stop_ack` turns all failed
+"opt-out not recorded" because recording an opt-out writes an `intercepts`
+row with action `flag`, which the fresh CI database's enum does not have (the
+write raised, the preference was rolled back); and 3 turns "raised" on an
+aborted pooled connection. Both are recorded in UNFINISHED and OWNER_ACTIONS
+(the enum needs a migration). Whether the production database has the value
+is **unknown from here** — the owner is asked to check it.
+
+### First pass, 120 blind cases / 459 turns (objective checks, 95% Wilson)
+
+| Metric | k/n = p [95% Wilson] |
+|---|---|
+| turns passed (every objective check for that turn) | 367/459 = **0.800** [0.761, 0.834] |
+| critical-class turns passed | 133/171 = **0.778** [0.710, 0.834] |
+| language continuity (reply in the customer's language) | 405/424 = **0.955** [0.931, 0.971] |
+| money figures verified against the turn's tool results | 164/192 = **0.854** [0.797, 0.897] |
+| within the length target | 385/437 = **0.881** [0.847, 0.908] |
+| internal-talk free | 434/437 = **0.993** [0.980, 0.998] |
+| first draft passed the gate (no rewrite, no soft note) | 212/448 = **0.473** [0.427, 0.519] |
+| pass^3 (a case passes all three repeats) | **NOT MEASURED** — the run stopped at 59 cases of the second repeat |
+
+By expected next action (turn passed): answer 133/146 = 0.911 · ask_one 26/27
+= 0.963 · quote 88/116 = 0.759 · hold_ack 61/65 = 0.938 · care_first 9/9 ·
+confirm_paid_check 22/22 · escalate 10/15 = 0.667 · **silence 18/52 = 0.346**
+· **stop_ack 0/7** (environment, see caveat).
+
+By language (turn passed): en 287/343 = 0.837 · sw 42/65 = 0.646 · fr 12/17
+= 0.706 · pt 8/11 = 0.727 · sheng 9/11 = 0.818 · hi 3/6 = 0.500 · ke-en 3/3 ·
+mixed 3/3. Swahili and Hindi are the weak languages; n is small for all but
+en and sw.
+
+By category (turn passed, selected): simple-enquiry 87/95 = 0.916 ·
+successful-sale 48/54 = 0.889 · onboarding 21/24 = 0.875 · memory 75/89 =
+0.843 · payment 86/108 = 0.796 · org-purchase 79/99 = 0.798 · complaint 21/26
+= 0.808 · emotional 13/14 = 0.929 · human-takeover 26/37 = 0.703 ·
+multilingual 67/96 = 0.698 · opt-out 22/33 = 0.667 (environment) ·
+price-objection 11/17 = 0.647 · closing 18/29 = 0.621 · needs-silence 24/31 =
+0.774 · mistake 5/8 = 0.625.
+
+Failure kinds (first pass, 92 failing turns, a turn can carry more than one):
+answered a closer 33 · reply not in the customer's language 19 · no price
+given where a quote was expected 16 · opt-out not recorded 7 (environment) ·
+figure not from this turn's tools 7 · required text missing 5 · did not hand
+to a person 5 · turn raised 3 (environment) · no reply where one was expected 3.
+
+**What this says.** The single largest failure is *answering a closer* (33
+turns; silence 0.346): the model speaks when the customer has closed the
+conversation. The second is *language* (19 turns; Swahili 0.646): the
+deterministic language floor is 0.930 but the reply itself follows the
+customer's language only 0.955 of the time, and the Swahili replies fail
+other checks too. The third is *quoting* (16 turns without a price where one
+was expected). Money figures are verified 0.854 of the time by the gate's
+own check (the rest were rewritten or held, not sent wrong). These three
+are the next advancement targets; none of them is a judged dimension.
+
+The 179 case-runs together (first pass + 59 of the second; not a clean
+denominator): turns 578/701 = 0.825 [0.795, 0.851]; critical 200/246 = 0.813;
+language 634/659 = 0.962; figures 265/308 = 0.860; length 598/673 = 0.889;
+first draft 317/689 = 0.460.
+
+### Command (unchanged)
 
 Command, once a key exists on the box or as the `ANTHROPIC_API_KEY`
 repository secret:

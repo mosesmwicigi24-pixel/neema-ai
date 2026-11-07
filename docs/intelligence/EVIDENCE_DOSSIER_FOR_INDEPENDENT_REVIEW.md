@@ -182,7 +182,7 @@ tuning set.
 |---|---|---|
 | 42284150514 | 6 Nov, 19:57 (main `d084e91`) | Key check passed (the secret exists). **Crashed** in the runner before any case: `NoReferencedTableError persons.parish_id → parishes` (the runner imported models piecemeal). The workflow still reported success because the error was behind a `tee`. Fixed in PR #319 (`import app.main`, `pipefail`). |
 | 42284679182 | 6 Nov, 20:01 | Scripted battery completed (37 replies, see §3); **cancelled by the 30-minute workflow limit** before the blind set. Fixed in PR #320 (`timeout-minutes: 300`, a checkpoint written after every case). |
-| 42289125585 | 6 Nov, 20:31 | **In progress** at the time of writing: scripted battery, then the blind set with `--repeat 3` (pass^3). |
+| 42289125585 | 6 Nov, 20:31 | **Completed the first pass** over all 120 blind cases, then crashed at case-run 180 of 360 in the runner's contact cleanup (foreign-key ordering); the per-case checkpoint kept the record. First-pass numbers: see the Addendum. pass^3 NOT MEASURED. |
 | Box run (`scripts/eval-blind.sh` at 7670de1) | 6 Nov, ~20:58 | **In progress** on the owner's VPS; outputs land in `eval-out/` on the box and must be copied back by the owner. |
 
 Until one of these completes, every model-dependent number in this dossier
@@ -699,7 +699,7 @@ table) · `results/floors-{baseline,after,blind-before,blind-after,rescored-*}.j
 |---|---|---|
 | 42284150514 | main d084e91 | crashed; log only |
 | 42284679182 | 87a2b29 | `agent-eval-results` (transcript of the scripted battery — the §3 examples) |
-| 42289125585 | aaf7978 | pending |
+| 42289125585 | aaf7978 | `agent-eval-results` → `results/agent-eval-blind-aaf7978-run42289125585-partial179of360.json`, `.log`, transcript |
 | box run, 7670de1 | — | `eval-out/agent-eval-blind-7670de1-….json` and `.log` on the owner's VPS, pending |
 
 ### 10.6 Reproducing the measurements
@@ -731,6 +731,49 @@ defects.
 
 ---
 
-*End of dossier. Addendum to follow when real-model run 42289125585 or the
+## Addendum A (23:00 UTC) — the first real-model pass
+
+**Class: [REAL] model outputs on the blind case set, judged by code; no human.**
+
+Run 42289125585 (code `aaf7978` = main 7670de1 + the runner checkpoint; producer
+`claude-sonnet-5-5`; sends disabled; live hub data) completed one full pass
+over the 120 blind cases (459 turns) and 59 cases of the second repeat, then
+crashed in its own contact cleanup. pass^3 is therefore **NOT MEASURED**.
+The first pass is complete and is the baseline:
+
+| Metric (first pass, objective checks) | k/n = p [95% Wilson] |
+|---|---|
+| turns passed | 367/459 = 0.800 [0.761, 0.834] |
+| critical-class turns passed | 133/171 = 0.778 [0.710, 0.834] |
+| language continuity | 405/424 = 0.955 [0.931, 0.971] |
+| money figures verified | 164/192 = 0.854 [0.797, 0.897] |
+| within length target | 385/437 = 0.881 [0.847, 0.908] |
+| internal-talk free | 434/437 = 0.993 [0.980, 0.998] |
+| first draft passed the gate | 212/448 = 0.473 [0.427, 0.519] |
+
+Failure kinds (92 failing turns): answered a closer 33 · reply not in the
+customer's language 19 · no price where a quote was expected 16 · opt-out
+not recorded 7 · figure not from this turn's tools 7 · required text
+missing 5 · did not hand to a person 5 · turn raised 3 · no reply where one
+was expected 3. Weak languages: Swahili 42/65 = 0.646, Hindi 3/6.
+
+**Two environment defects contaminate the measurement** and are recorded in
+UNFINISHED and OWNER_ACTIONS: the CI database's `interceptaction` enum lacks
+the `flag` value the opt-out and escalation writes use (all 7 `stop_ack`
+turns failed for that reason; whether production has the value is unknown
+from here), and a pooled connection carried an aborted transaction into 3
+turns.
+
+**What changes in the sections above.** §2.5: the run is no longer pending.
+§9: dimension 1 is **0 by the framework's own cap** for this run (38 critical
+turns failed); the objective halves of dimensions 3, 6, 7, 8 and 9 now have
+first-pass readings (EXCELLENCE_SCORE.md); the 100-point score remains
+**NOT MEASURED** (no judged dimension has an evaluator; pass^3 missing). §7:
+three new defects. Nothing in this addendum is a before/after claim: the
+earlier code was never run with the model.
+
+*End of dossier (with Addendum A). A second addendum will follow with the owner's box run on the production database and the pass^3 re-run.*
+
+~~*End of dossier. Addendum to follow when real-model run 42289125585 or the
 box run completes: blind-set pass^3 results, per-dimension figures, and the
-first computable Excellence Score, with the same conventions.*
+first computable Excellence Score, with the same conventions.*~~

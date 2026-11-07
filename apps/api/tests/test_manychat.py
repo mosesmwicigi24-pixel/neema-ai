@@ -206,8 +206,9 @@ def test_agent_failure_returns_hold_line_and_flags(monkeypatch):
 
 
 def test_closer_gate_silences_politeness_pingpong(monkeypatch):
-    """Second bare 'asante' in a row → empty reply, model never called: on
-    TikTok silence is also a saved message from the 10-per-48h budget."""
+    """A bare 'asante' → empty reply, model never called — on the first one
+    too since slice 6 (before: one warm line, then silence); on TikTok silence
+    is also a saved message from the 10-per-48h budget."""
     class _Redis:
         def __init__(self):
             self.store = {}
@@ -236,5 +237,8 @@ def test_closer_gate_silences_politeness_pingpong(monkeypatch):
     first = asyncio.run(mc.manychat_webhook(body, _req(redis), db))
     second = asyncio.run(mc.manychat_webhook(body, _req(redis), db))
 
-    assert first["reply"] == "Karibu sana 🙏" and ran["count"] == 1
-    assert second == {"reply": "", "handled_by": "ai"} and ran["count"] == 1
+    # slice 6 (2026-11-06): a bare "asante" is silence at the gate on the FIRST
+    # message too — no model call at all, which on TikTok also saves a message
+    # from the 10-per-48h budget
+    assert first == {"reply": "", "handled_by": "ai"} and ran["count"] == 0
+    assert second == {"reply": "", "handled_by": "ai"} and ran["count"] == 0

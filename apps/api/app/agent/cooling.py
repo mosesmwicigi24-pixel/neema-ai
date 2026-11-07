@@ -498,3 +498,87 @@ async def decide(redis, db, *, channel: str, key: str, text: str, has_media: boo
         await record(redis, "economy", channel)
         return {"action": "economy", "note": pacing_note(drift), "hour": hour, "day": day}
     return None
+
+
+# ── acknowledgements, closers, and the silence decision (moved from runtime.py, slice 6) ──
+
+_ACK_RE = re.compile(
+    r"^(?:(?:hmm+|mmh+|mm+|well|ah+|oh+|great|perfect|wonderful|super|lovely|sawa|ok(?:ay)?|"
+    r"ok(?:ay)? now i (?:understand|get it|see)|understood|got it)[,.!\s]+)?"
+    r"(?:(?:i'?m|i\s*am|am|just|i)\s*(?:saying|said|say)\s*)?"
+    r"(thanks?(?:\s*(?:a\s*lot|so\s*much|a\s*million|very\s*much))?|thank\s*you(?:\s*(?:very\s*much|so\s*much|a\s*lot))?|"
+    r"thanks?\s*for\s*(?:the|your|that|this)?\s*(?:help|helping|understanding|info|information|invoice|quote|quotation|"
+    r"reply|replying|response|update|time|patience|support|price|prices|details|clarification|explanation|"
+    r"photos?|pictures?|pics|link|answer|quick\s*(?:reply|response)|prompt\s*(?:reply|response))|"
+    r"much\s*appreciated|noted\s*with\s*thanks|cheers|"
+    r"asante(\s*sana)?([,\s]*mwanangu)?|shukran|merci(\s*beaucoup)?|obrigad[oa]|murakoze|mungu\s*akubariki(\s*sana)?([,\s]*mwanangu)?|"
+    r"god\s*bless(\s*you)?|que\s*dieu\s*vous\s*(?:b[ée]nisse|garde)|deus\s*aben[çc]oe|fique\s*com\s*deus|thank\s*you\s*ji|"
+    r"thx|ty|amen|ok(?:ay|ey|k)?|kk|sawa(?:\s*sawa)?|poa|"
+    r"got\s*it|noted|alright|aight|cool|"
+    r"👍+|🙏+|❤️*|😊+|👌+|🙌+|✅+)"
+    r"(?:[\s,]+(?:ok(?:ay)?|sawa|poa|thanks?|thank\s*you|asante(\s*sana)?|noted|cheers|merci(\s*beaucoup)?|god\s*bless|"
+    r"que\s*dieu\s*vous\s*(?:b[ée]nisse|garde)|deus\s*aben[çc]oe|fique\s*com\s*deus|tutaongea|tutawasiliana|👍|🙏))*[\s!.,🙏👍❤😊👌🙌✅💯]*$",
+    re.IGNORECASE,
+)
+# A thumbs-up, a folded hands, a heart — satisfaction, the end of the exchange
+# (owner, 2026-09-25: "when a thumb up is done, which means satisfaction, you
+# should not continue"). Messenger's Like sticker arrives as "👍" (the
+# webhook), any other sticker as "[sticker]". Silence, always — not even the
+# one warm line a typed "thanks" gets.
+_SILENT_ACK_RE = re.compile(r"^[\s👍🙏❤️👌🙌✅💯🔥😊🥰😍🤝♥]+$")
+
+
+def is_silent_ack(text: str) -> bool:
+    t = (text or "").strip()
+    return bool(t) and (bool(_SILENT_ACK_RE.match(t)) or t in ("[sticker]", "[like]"))
+
+
+# Bare closers the acknowledgement pattern does not reach: a thank-you "for
+# your time", a Hindi thanks or "ok", a Sheng "later", "received", "I see",
+# an ellipsis, a blessing for the day. NOT "we're waiting" / "nasubiri" /
+# "j'attends": the tuning set labels those both ways (silence and a one-line
+# hold acknowledgement), and a wrongful silence to a customer who is waiting
+# on us is the worse error — they still get a turn.
+# Measured on the tuning set (slice 6, 2026-11-06): the first real-model
+# pass answered 33 of 52 closers; the deterministic detector reached 132 of
+# the 153 silence-expected tuning turns before this, 21 of them in Swahili,
+# French, Portuguese, Hindi or Sheng.
+_BARE_CLOSER_RE = re.compile(
+    r"^(?:(?:ok(?:ay)?|sawa|poa|aah?|mh+|hmm+|well|bien|est[áa]\s*bem|ठीक\s*है|thanks?|thank\s*you|asante(?:\s*sana)?)[,.!।\s]*)*"
+    r"(?:thank\s*you\s*for\s*(?:your|the)\s*(?:time|help|patience|reply|response|info|information|update|support)|"
+    r"thanks?,?\s*noted|"
+    r"nimeelewa|nimesikia|tumeelewa|tumesikia|baadaye|tutaonana|"
+    r"धन्यवाद|शुक्रिया|ठीक\s*है|"
+    r"mungu\s*awabariki|allah\s*akubariki|asante(?:\s*sana)?|"
+    r"blessed\s*(?:sunday|day|week|evening|night)(?:\s*to\s*you(?:\s*all)?)?|"
+    r"received|i\s*see|noted|\.{2,}|…|"
+    r"ok(?:ay)?|sawa(?:\s*sawa)?|poa|thanks?|thank\s*you|cheers|amen)"
+    r"(?:[\s,.!]+(?:ok(?:ay)?|sawa|poa|thanks?|thank\s*you|asante(?:\s*sana)?|mungu\s*awabariki|god\s*bless(?:\s*you)?|🙏|👍))*"
+    r"[\s!.,।॥🙏👍❤😊👌🙌✅💯]*$",
+    re.IGNORECASE,
+)
+
+
+def is_bare_closer(text: str) -> bool:
+    """A pleasantry that ends the exchange and asks for nothing: a thanks, an
+    acknowledgement, a blessing, "we're waiting" — in English, Swahili,
+    Sheng, French, Portuguese or Hindi. Never one that carries a question or
+    a buying word ("God bless — how much is the stole?"), and never a
+    deferral ("I'll get back to you", "nitakujulisha"): those still get a
+    turn, so the promise is scribed."""
+    t = " ".join((text or "").split())
+    if not t or "?" in t:
+        return False
+    if not (_ACK_RE.match(t) or _BARE_CLOSER_RE.match(t)):
+        return False
+    return not buying_signal(t)
+
+
+def silence_decision(text: str) -> bool:
+    """The deterministic half of the closer gate, with no redis and no
+    history: True when this message gets nothing back. A thumbs-up or a
+    sticker (owner, 2026-09-25) and a bare closer (the prompt's own rule:
+    'a bare thanks/ok/amen gets NOTHING back') — measured as the `silence`
+    floor in eval_floors."""
+    return is_silent_ack(text) or is_bare_closer(text)
+

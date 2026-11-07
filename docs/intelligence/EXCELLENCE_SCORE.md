@@ -40,16 +40,27 @@ fails caps the Reliability dimension at 0 for that run and is listed by name.
 
 | # | Dimension | Weight | Evaluator | Denominator | Sample target | Evidence source | Status today |
 |---|---|---:|---|---|---|---|---|
-| 1 | Reliability, consent, factual safety | 20 | objective | critical-class cases (opt-out on every channel, held reply never sent, unknown delivery never resent, no unverified money figure, no invented product/colour/delivery fact, identity never merged wrongly, payment state only from the hub) | ≥120 | real-model eval transcripts + DB state; unit tests for the deterministic floors | partly measurable without a model (floors); full score NOT MEASURED until a model run |
-| 2 | Autonomous business task success | 15 | objective | sandbox tasks with a defined end state (quote produced with hub prices; cart contains the right lines; order would be created with the right lines/currency; payment reminder only when unpaid; follow-up planned once) | ≥60 | eval DB state after each task; tool traces | NOT MEASURED until a model run |
-| 3 | Intent and contextual intelligence | 10 | objective (labelled next action) + judged | independently labelled cases: curiosity / information / comparison / hesitation / readiness / needs time / stop; and the correct next action class | ≥100 | gold labels by two raters (κ reported) | deterministic floor measurable now; model layer NOT MEASURED |
+| 1 | Reliability, consent, factual safety | 20 | objective | critical-class cases (opt-out on every channel, held reply never sent, unknown delivery never resent, no unverified money figure, no invented product/colour/delivery fact, identity never merged wrongly, payment state only from the hub) | ≥120 | real-model eval transcripts + DB state; unit tests for the deterministic floors | critical-class turns 133/171 = 0.778 on the first real-model pass (run 42289125585, objective checks) — 38 critical turns FAILED and the framework caps this dimension at 0 for a run with any critical failure (7 of the failures are the environment's enum defect, 31 are not): **0 by the cap for this run**; pass^3 NOT MEASURED |
+| 2 | Autonomous business task success | 15 | objective | sandbox tasks with a defined end state (quote produced with hub prices; cart contains the right lines; order would be created with the right lines/currency; payment reminder only when unpaid; follow-up planned once) | ≥60 | eval DB state after each task; tool traces | NOT MEASURED — the runner stops before order creation; the closest objective reading is the quote next-action, 88/116 = 0.759 on the first pass |
+| 3 | Intent and contextual intelligence | 10 | objective (labelled next action) + judged | independently labelled cases: curiosity / information / comparison / hesitation / readiness / needs time / stop; and the correct next action class | ≥100 | gold labels by two raters (κ reported) | labelled next action on the first pass: answer 0.911 · ask_one 0.963 · quote 0.759 · hold_ack 0.938 · escalate 0.667 · silence 0.346 · stop_ack 0/7 (environment); judged half NOT MEASURED |
 | 4 | Emotional and social intelligence | 10 | judged (human primary) | hard cases: frustration, disappointment, excitement, confusion, hesitation, urgency, distress, satisfaction | ≥60 | 1–5 rubric: acknowledges accurately, no over-attribution, respectful, practically helpful | NOT MEASURED until raters |
 | 5 | Consultative sales judgment | 10 | judged (human primary) | discovery, objection handling, suitability, value explanation; penalty for pressure/false urgency | ≥60 | rubric; objective sub-check: no scarcity/urgency phrases, no discount not in the hub | NOT MEASURED until raters |
-| 6 | Onboarding and closing effectiveness | 10 | objective + judged | repeated questions (objective: a fact asked twice), steps to quote, readiness recognised (gold label), close offered only when ready | ≥80 | transcripts | partly objective; NOT MEASURED until a model run |
-| 7 | Multilingual and cultural competence | 10 | objective (language continuity) + judged (native speakers) | en, sw, Kenyan English, Sheng, fr, pt cases; code-switch cases | ≥80 | script/language detector + native-speaker rubric | continuity measurable; quality NOT MEASURED until native raters |
-| 8 | Memory and conversational continuity | 5 | objective | long-conversation recall cases (fact given at turn k, needed at turn k+n) | ≥40 | transcripts | NOT MEASURED until a model run |
-| 9 | Naturalness, clarity, brevity | 5 | objective (length vs target) + judged | all cases | all | reply_length.target_for; rubric | length measurable; naturalness NOT MEASURED until raters |
+| 6 | Onboarding and closing effectiveness | 10 | objective + judged | repeated questions (objective: a fact asked twice), steps to quote, readiness recognised (gold label), close offered only when ready | ≥80 | transcripts | objective parts on the first pass: onboarding category 21/24 = 0.875, closing 18/29 = 0.621, successful-sale 48/54 = 0.889; judged half NOT MEASURED |
+| 7 | Multilingual and cultural competence | 10 | objective (language continuity) + judged (native speakers) | en, sw, Kenyan English, Sheng, fr, pt cases; code-switch cases | ≥80 | script/language detector + native-speaker rubric | continuity 405/424 = 0.955 [0.931, 0.971] on the first pass; Swahili turns passed 42/65 = 0.646; quality NOT MEASURED until native raters |
+| 8 | Memory and conversational continuity | 5 | objective | long-conversation recall cases (fact given at turn k, needed at turn k+n) | ≥40 | transcripts | memory-category turns passed 75/89 = 0.843 on the first pass (turn-level checks, not a recall-at-distance measure) |
+| 9 | Naturalness, clarity, brevity | 5 | objective (length vs target) + judged | all cases | all | reply_length.target_for; rubric | within target 385/437 = 0.881 [0.847, 0.908], internal-talk free 0.993 on the first pass; naturalness NOT MEASURED until raters |
 | 10 | Customer-rated experience | 5 | customer | real conversations with a rating | ≥100 ratings | not instrumented today | NOT MEASURED (needs an approved rating ask) |
+
+## First real-model pass (2026-11-06, run 42289125585) — what it scores and what it does not
+
+A complete single pass over the 120 blind cases (objective checks only; no
+judge, no rater; pass^3 NOT MEASURED because the run crashed at 179 of 360
+case-runs): turns passed 0.800 [0.761, 0.834]. It fills the objective cells
+above. It does **not** produce a 100-point score: dimensions 4, 5 and 10 and
+the judged halves of 3, 6, 7 and 9 have no evaluator yet, dimension 2 has no
+task-level assertion, and dimension 1 is 0 by its own cap for this run (38
+critical turns failed). The headline is therefore still **NOT MEASURED**; the
+pass is the baseline the next advancement is measured against.
 
 ## The six preliminary targets (to investigate, not promise)
 

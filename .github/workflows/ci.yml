@@ -57,21 +57,30 @@ jobs:
       # The transcription engine decodes real audio with ffmpeg (as the API
       # image does — apps/api/Dockerfile installs it); its tests skip without.
       - name: Install ffmpeg
-        # Bounded: this apt step hung for 20+ minutes twice on 2026-11-06
-        # (a stalled mirror), holding the whole deploy. A retry with a
-        # time limit beats an unbounded wait before any test has run.
-        # 16 minutes covers three worst-case attempts (3 × ~305 s); an
-        # attempt killed mid-install can leave dpkg interrupted, so each
-        # attempt first lets dpkg finish (verification pass 3b, #6).
-        timeout-minutes: 16
+        # Bounded: this apt step stalled on the runner's default mirror five
+        # times on 2026-11-06 (20+ minutes unbounded; then three bounded
+        # attempts that all stalled on the same runner while the neighbouring
+        # job installed in 46 s). Retrying the same mirror does not help: the
+        # second attempt switches the runner's apt sources to Ubuntu's main
+        # archive (the same packages, a different host). An attempt killed
+        # mid-install can leave dpkg interrupted, so each attempt first lets
+        # dpkg finish (verification pass 3b, #6).
+        timeout-minutes: 12
         run: |
           command -v ffmpeg && exit 0
-          for i in 1 2 3; do
+          for i in 1 2; do
             sudo timeout 60 dpkg --configure -a || true
-            sudo timeout 150 apt-get update -q -o Acquire::Retries=3 \
-              && sudo timeout 150 apt-get install -y -q --no-install-recommends -o Acquire::Retries=3 ffmpeg \
+            sudo timeout 120 apt-get update -q -o Acquire::Retries=3 \
+              && sudo timeout 240 apt-get install -y -q --no-install-recommends -o Acquire::Retries=3 ffmpeg \
               && exit 0
-            echo "apt attempt $i failed or stalled; retrying"; sleep 5
+            # The runner's apt reads its mirror from /etc/apt/apt-mirrors.txt
+            # (a mirror+file: source), not from the sources files — the stall
+            # on 2026-11-06 was in the PACKAGE download from the azure mirror
+            # after 30 of 81 packages, twice in a row on the same runner.
+            echo "apt attempt $i failed or stalled; switching the mirror list to archive.ubuntu.com"
+            printf 'http://archive.ubuntu.com/ubuntu/\tpriority:1\n' | sudo tee /etc/apt/apt-mirrors.txt >/dev/null
+            sudo sed -i 's#http://azure.archive.ubuntu.com/ubuntu/#http://archive.ubuntu.com/ubuntu/#g' \
+              /etc/apt/sources.list /etc/apt/sources.list.d/*.sources /etc/apt/sources.list.d/*.list 2>/dev/null || true
           done
           exit 1
 
@@ -158,21 +167,30 @@ jobs:
       # The voice-note battery decodes real audio (as the API image does); the
       # step below fails on any skip, so ffmpeg must be here too.
       - name: Install ffmpeg
-        # Bounded: this apt step hung for 20+ minutes twice on 2026-11-06
-        # (a stalled mirror), holding the whole deploy. A retry with a
-        # time limit beats an unbounded wait before any test has run.
-        # 16 minutes covers three worst-case attempts (3 × ~305 s); an
-        # attempt killed mid-install can leave dpkg interrupted, so each
-        # attempt first lets dpkg finish (verification pass 3b, #6).
-        timeout-minutes: 16
+        # Bounded: this apt step stalled on the runner's default mirror five
+        # times on 2026-11-06 (20+ minutes unbounded; then three bounded
+        # attempts that all stalled on the same runner while the neighbouring
+        # job installed in 46 s). Retrying the same mirror does not help: the
+        # second attempt switches the runner's apt sources to Ubuntu's main
+        # archive (the same packages, a different host). An attempt killed
+        # mid-install can leave dpkg interrupted, so each attempt first lets
+        # dpkg finish (verification pass 3b, #6).
+        timeout-minutes: 12
         run: |
           command -v ffmpeg && exit 0
-          for i in 1 2 3; do
+          for i in 1 2; do
             sudo timeout 60 dpkg --configure -a || true
-            sudo timeout 150 apt-get update -q -o Acquire::Retries=3 \
-              && sudo timeout 150 apt-get install -y -q --no-install-recommends -o Acquire::Retries=3 ffmpeg \
+            sudo timeout 120 apt-get update -q -o Acquire::Retries=3 \
+              && sudo timeout 240 apt-get install -y -q --no-install-recommends -o Acquire::Retries=3 ffmpeg \
               && exit 0
-            echo "apt attempt $i failed or stalled; retrying"; sleep 5
+            # The runner's apt reads its mirror from /etc/apt/apt-mirrors.txt
+            # (a mirror+file: source), not from the sources files — the stall
+            # on 2026-11-06 was in the PACKAGE download from the azure mirror
+            # after 30 of 81 packages, twice in a row on the same runner.
+            echo "apt attempt $i failed or stalled; switching the mirror list to archive.ubuntu.com"
+            printf 'http://archive.ubuntu.com/ubuntu/\tpriority:1\n' | sudo tee /etc/apt/apt-mirrors.txt >/dev/null
+            sudo sed -i 's#http://azure.archive.ubuntu.com/ubuntu/#http://archive.ubuntu.com/ubuntu/#g' \
+              /etc/apt/sources.list /etc/apt/sources.list.d/*.sources /etc/apt/sources.list.d/*.list 2>/dev/null || true
           done
           exit 1
 

@@ -61,3 +61,14 @@ candidates for a second rater (κ to be reported).
 - Native-speaker review of the Swahili, French, Portuguese and Sheng cases
   has not happened; the language author flagged specific items to check.
 - The real-model layer has not run (no key in the session).
+
+## Label note (slice 6, 2026-11-06)
+
+"We're waiting" closers are labelled both ways by the independent authors:
+`Ok waiting` / `Sawa nasubiri` (ctx-021, ctx-037, ctx-050, ctx-058, sales-056)
+expect a one-line `hold_ack`, while `Sawa, tunasubiri.` / `Bien. J'attends.` /
+`Está bem, fico à espera.` / `Thanks, awaiting` (lang-011, lang-020, lang-030,
+sales-052) expect `silence`. The deterministic silence decision keeps these
+forms OUT (a turn is run), so the four `silence`-labelled ones count as misses
+in the `silence` floor. The labels are left as written (no relabelling after
+measurement); a native-speaker review should settle the convention.

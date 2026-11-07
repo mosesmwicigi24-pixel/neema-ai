@@ -214,6 +214,31 @@ check (harness `v5-mutate.py`, 12 mutants, 12 killed).
 - **Change:** `timeout-minutes: 16` (three attempts × ~305 s) and `sudo dpkg --configure -a || true` before each attempt, in both jobs that install ffmpeg. The 8-minute bound was hit again on PR #321 (docs-only; a stalled mirror; the re-run passed).
 - **Status:** IMPLEMENTED BUT NOT VERIFIED — proven only by the next stalled-mirror run.
 
+## Slice 6 (2026-11-06, 23:1x) · the eval runner after its first real run
+
+### R1 · Contact cleanup in FK order, one transaction per contact
+
+- **Change (corrected by verification pass 6):** the crash was the never-deleted `identifiers` rows, not flush order — the first diagnosis was wrong and the two flushes it added were redundant (removed). `_cleanup_contacts` now deletes messages, the conversation (intercepts and activity cascade), the user, the WhatsApp identity, and — only when no other identity still points at the person — its identifiers and the person; one transaction per contact; a failing contact is rolled back, logged and skipped.
+- **Status:** VERIFIED COMPLETE — `tests/test_eval_cleanup_db.py` against a real Postgres (every row of the contact goes; a person with another identity stays; a Messenger identity with the same digits is untouched; an unrelated contact is untouched), plus the recording-session shape test.
+
+### R2 · A failed turn drops its pooled connections
+
+- **Change (extended after verification pass 6):** `_recover_from_failed_turn` (rollback + pool dispose after a raising turn) AND a pool `checkout` guard, `_guard_pool_checkout`, installed by `run_cases`, which invalidates any pooled connection handed out while still inside a transaction — three of the four casualties in run 42289125585 followed turns that did NOT raise, so the first mitigation alone could not have covered them.
+- **Status:** IMPLEMENTED BUT NOT VERIFIED against the real symptom: the carry-over is not reproducible locally (eight scenarios, pass 6) and its root cause is unproven (UNFINISHED); both helpers are tested.
+
+### R4 · A bare closer gets silence, deterministically (the first measured failure kind)
+
+- **Investigation:** the first real-model pass answered 33 of 52 closers (silence next-action 0.346). The closer gate silenced only a thumbs-up or a *second* closer; a typed "thanks" went to the model with the prompt's rule "a bare thanks/ok/amen gets NOTHING back", which the model honoured about two thirds of the time. On the tuning set the deterministic detectors reached 132 of 153 silence-expected turns; the 21 misses were mostly Swahili, French, Portuguese, Hindi and Sheng closers.
+- **Change:** `cooling.is_bare_closer` (a thanks / ack / blessing / "received" / "I see" in six languages, never with a question, a buying word or a deferral) and `cooling.silence_decision`; `closer_gate` returns silence for a bare closer immediately and arms the ping-pong flag. "We're waiting" forms (`ok waiting`, `nasubiri`, `j'attends`) are deliberately NOT silenced: the tuning set labels them both ways and a wrongful silence to a customer waiting on us is the worse error. The acknowledgement patterns moved from runtime.py to cooling.py (no model imports) so the floors scorer can measure them.
+- **Measured (new `silence` floor = the gate's deterministic decision against the gold next action, every labelled turn):** blind set **407/459 = 0.887 [0.854, 0.913] → 439/459 = 0.956 [0.934, 0.972]**, intervals separated, false silences 0 → 0, missed closers 52 → 20; tuning set 1097/1243 = 0.883 → 1231/1243 = 0.990, false silences 0 → 0. The real-model effect (the 33 answered closers) is measured by the next model run.
+- **Verification pass 6b found two S1 defects in the wiring, both fixed the same day:** (1) a gate-silenced closer was re-answered by the missed-reply sweeper 90–240 s later — the gate now marks every silence for the sweep and the sweeper's filter skips the silence decision too; (2) a bare "ok"/"sawa" answering Neema's own yes/no close was silenced — the senders now record whether the reply they sent asked a question, and the gate yields to a turn while that flag stands (a thumbs-up stays silence by the owner's rule). The "?" and buying-word guards are vacuous for the anchored pattern and are kept as defence only; the adversarial probe (0 of 132 should-reply inputs silenced) is the protection.
+- **Status:** VERIFIED COMPLETE for the floor and the wiring (VERIFICATION_PASS_6B with the response table); the real-model effect is measured by the next run. `results/floors-blind-after-slice6.json`.
+
+### R3 · The `interceptaction` enum migration — HELD for the owner's approval
+
+- **Change (prepared, not in the repository):** `ALTER TYPE interceptaction ADD VALUE IF NOT EXISTS 'flag' / 'escalated'`, idempotent, in alembic's autocommit block, revision a9c1e3f5b7d9 on head e8a1c3d5f7b9. Kept in the session scratchpad until the owner says "approve the enum migration" (DB migrations need explicit approval). OWNER_ACTIONS carries the one-line read-only check for the production database.
+- **Status:** BLOCKED (owner decision).
+
 ## Verification pass 1 — further repairs (2026-11-06)
 
 - **W1-5 (sync channels):** web chat and the ManyChat relay re-check the takeover after composing and return the human line if a colleague took the thread.

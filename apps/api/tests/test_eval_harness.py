@@ -4,6 +4,8 @@ verdicts judge what they claim, the sandbox swaps and restores the
 customer-reaching tools, and the summary carries Wilson intervals."""
 from __future__ import annotations
 
+import inspect
+
 import pytest
 
 from app.jobs import eval_cases, eval_floors, eval_run
@@ -249,11 +251,20 @@ def test_the_runner_process_can_configure_every_mapper():
     API process does. This pins that registration (the old list happened to
     resolve in the local environment, so this is a guard, not a reproduction;
     the workflow run is the proof)."""
-    import importlib
-    from sqlalchemy.orm import clear_mappers, configure_mappers
-    importlib.import_module("app.jobs.agent_eval")
-    configure_mappers()                      # raises NoReferencedTableError when a model is missing
-    assert clear_mappers is not None
+    # In a fresh PROCESS, as the runner runs — not in this test process,
+    # whose registry an earlier test module may already have poisoned by
+    # instantiating a model with only part of the models imported (the
+    # failure is sticky in SQLAlchemy; slice 6 found the order dependence).
+    import os
+    import subprocess
+    import sys
+    code = ("import app.jobs.agent_eval\n"
+            "from sqlalchemy.orm import configure_mappers\n"
+            "configure_mappers()\n"            # raises NoReferencedTableError when a model is missing
+            "print('mappers ok')\n")
+    r = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True,
+                       cwd=os.getcwd(), env={**os.environ, "PYTHONPATH": os.getcwd()}, timeout=120)
+    assert r.returncode == 0 and "mappers ok" in r.stdout, (r.stdout[-400:], r.stderr[-800:])
 
 
 def test_a_run_record_is_checkpointed_as_partial_and_finalised_clean(tmp_path):
@@ -269,3 +280,136 @@ def test_a_run_record_is_checkpointed_as_partial_and_finalised_clean(tmp_path):
     eval_run._write_record(rec, str(out), partial=False)
     assert "partial" not in json.loads(out.read_text())
     assert not (tmp_path / "run.json.tmp").exists()
+
+
+def test_cleanup_deletes_the_person_only_after_its_restrict_rows_are_flushed(monkeypatch):
+    """Run 42289125585 died at case-run 180 of 360: `identifiers_person_id_fkey`
+    fired because the cleanup never deleted `identifiers` (verification pass 6
+    corrected the first diagnosis, which blamed flush order). It now deletes
+    messages, conversation, user, identity, identifiers, person — one
+    transaction per contact — and a contact whose cleanup fails is logged and
+    skipped, never allowed to end the run. The predicates themselves are
+    proven against a real database in test_eval_cleanup_db.py; this fake sees
+    only the shape."""
+    import asyncio
+    import types
+    from app.jobs import agent_eval
+
+    calls = []
+    user = types.SimpleNamespace(wa_id="254700000901")
+    ident = types.SimpleNamespace(id="i1", person_id="p1", channel="whatsapp", external_id="254700000901")
+    person = types.SimpleNamespace(id="p1")
+
+    class _Res:
+        def __init__(self, one=None, first=None):
+            self._one, self._first = one, first
+
+        def scalar_one_or_none(self):
+            return self._one
+
+        def scalars(self):
+            return types.SimpleNamespace(first=lambda: self._first)
+
+    class _Sess:
+        def __init__(self, fail_commit=False):
+            self.n = 0
+            self.fail_commit = fail_commit
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *a):
+            return False
+
+        async def execute(self, stmt):
+            self.n += 1
+            text = str(stmt).lower()
+            if text.startswith("delete from messages"):
+                calls.append("delete messages")
+                return _Res()
+            if text.startswith("delete from conversations"):
+                calls.append("delete conversation")
+                return _Res()
+            if text.startswith("delete from identifiers"):
+                calls.append("delete identifiers")
+                return _Res()
+            if "from users" in text:
+                return _Res(one=user)
+            if "from identities" in text and "external_id" in text:
+                return _Res(one=ident)
+            if "from identities" in text:
+                return _Res(first=None)                      # no other identity → the person goes too
+            raise AssertionError(text)
+
+        async def delete(self, obj):
+            calls.append(f"delete {'user' if obj is user else 'identity' if obj is ident else 'person'}")
+
+        async def flush(self):
+            calls.append("flush")
+
+        async def get(self, model, pk):
+            return person if pk == "p1" else None
+
+        async def commit(self):
+            if self.fail_commit:
+                raise RuntimeError("deadlock detected")
+            calls.append("commit")
+
+    sessions = iter([_Sess(), _Sess(fail_commit=True), _Sess()])
+    monkeypatch.setattr(agent_eval, "AsyncSessionLocal", lambda: next(sessions))
+    asyncio.run(agent_eval._cleanup_contacts(None, ["254700000901", "254700000902", "254700000903"]))
+    first = calls[:calls.index("commit") + 1]
+    assert first == ["delete messages", "delete conversation", "delete user", "delete identity",
+                     "delete identifiers", "delete person", "commit"]
+    # the second contact's commit raised; the third still ran to its commit
+    assert calls.count("commit") == 2
+
+
+def test_a_failed_turn_rolls_back_and_drops_the_pool(monkeypatch):
+    """Run 42289125585: three turns raised "current transaction is aborted"
+    within 0.03 s of starting. After a failed turn the runner rolls the
+    session back and disposes the engine's pool, so the next turn's
+    connection is clean."""
+    import asyncio
+    import types
+    from app import database
+    from app.jobs import eval_run
+
+    seen = []
+
+    class _DB:
+        async def rollback(self):
+            seen.append("rollback")
+
+    async def _dispose():
+        seen.append("dispose")
+    monkeypatch.setattr(database, "engine", types.SimpleNamespace(dispose=_dispose))
+    asyncio.run(eval_run._recover_from_failed_turn(_DB()))
+    assert seen == ["rollback", "dispose"]
+
+    class _BadDB:
+        async def rollback(self):
+            raise RuntimeError("connection is closed")
+    asyncio.run(eval_run._recover_from_failed_turn(_BadDB()))      # never raises
+    assert seen[-1] == "dispose"
+    src = inspect.getsource(eval_run.run_cases)
+    assert "await _recover_from_failed_turn(db)" in src
+
+
+
+def test_the_pool_guard_invalidates_a_connection_still_in_a_transaction():
+    """Pass 6 finding 3: three of the four aborted-transaction turns followed
+    turns that did not raise, so the guard sits on the pool itself."""
+    import types
+    from sqlalchemy import exc
+    from app.jobs import eval_run
+
+    busy = types.SimpleNamespace(_connection=types.SimpleNamespace(is_in_transaction=lambda: True))
+    idle = types.SimpleNamespace(_connection=types.SimpleNamespace(is_in_transaction=lambda: False))
+    with pytest.raises(exc.DisconnectionError):
+        eval_run._guard_pool_checkout(busy, None, None)
+    eval_run._guard_pool_checkout(idle, None, None)                    # nothing
+    eval_run._guard_pool_checkout(types.SimpleNamespace(), None, None)  # no probe → never blocks
+    assert eval_run._install_pool_guard() is True and eval_run._install_pool_guard() is False
+    src = inspect.getsource(eval_run.run_cases)
+    assert "_install_pool_guard()" in src
