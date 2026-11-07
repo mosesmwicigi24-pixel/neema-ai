@@ -82,3 +82,15 @@ the precise dependency · status. Last update: 2026-11-06, end of session 1.
 - whether to retire the 360 parked outreach rows older than 30 days;
 - Android inbox fields (customer state, badge) — API exposes them, app untouched by instruction;
 - whether the Sunday house-voice refresh stays automatic.
+
+## Opened by slice 7 (2026-11-07)
+
+| Item | What is known | What it needs |
+|---|---|---|
+| Reply gate's language finding is soft | 4 true / 0 false findings over 459 real-model turns; the one English reply to a Swahili line that it flagged still went out with a note | the owner's decision (OWNER_ACTIONS §4) |
+| ~~`guess_language` places a lone "Sawa" / "poa" as Swahili~~ | done the same day (ADVANCEMENTS L4): neutral rule first; it was a live defect — an English customer's "Sawa" switched their stored language | — |
+| ~~`guess_language` cannot place first-person "na-" forms without a subject prefix~~ | done the same day (L4): 24 common forms added as words, not a looser regex | — |
+| 16 missing-price quote turns | all reached the catalogue, all replied with 0 figures; 2 were gate holds; 10 asked a question | a readable tuning run (`independent_sales.jsonl`, repeat 1) through the workflow's new inputs, then the smallest change |
+| The eval workflow's inputs | added; defaults reproduce the previous run exactly | a dispatched run that completes with non-default inputs |
+| 5 hand-over failures (escalate 10/15) | 4 are asks Neema cannot fulfil, 1 an explicit request; a detector for the explicit kind is measured (L6) and not built | the owner's decision on the door; the tuning run's transcripts for the judgement-call kind |
+| 3 of the 7 unverified-figure failures | not explained by the gate's arithmetic (L5) | the next run's transcripts (tuning) |

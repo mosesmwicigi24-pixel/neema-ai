@@ -62,6 +62,14 @@ task-level assertion, and dimension 1 is 0 by its own cap for this run (38
 critical turns failed). The headline is therefore still **NOT MEASURED**; the
 pass is the baseline the next advancement is measured against.
 
+**Re-score under the corrected language metric (2026-11-07, slice 7).** The
+same replies, re-scored after the runner's language check was corrected
+(BENCHMARK_RESULTS, "Re-score"): turns passed 0.828 [0.791, 0.860], critical
+0.807, language continuity 0.988 [0.972, 0.995], Swahili 54/65. The cells
+above keep the as-recorded numbers with this note; the next run records under
+the corrected metric. Dimension 1 stays 0 by the cap (33 critical turns still
+failed), the headline stays **NOT MEASURED**.
+
 ## The six preliminary targets (to investigate, not promise)
 
 | Target | How it will be measured | Current knowledge |

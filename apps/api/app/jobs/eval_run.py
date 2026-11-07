@@ -118,11 +118,66 @@ _FR_RE = re.compile(r"\b(le|la|les|des|vous|nous|prix|merci|bonjour|pour|avec|es
 _PT_RE = re.compile(r"\b(obrigad[oa]|preço|preços|você|para|com|bom dia|boa tarde|sim|não|temos|custa)\b", re.I)
 
 
+_PLACEABLE = ("en", "sw", "hi", "fr", "pt")
+
+
+def turn_language(case_lang: str | None, user_text: str) -> str | None:
+    """The language the reply must be in for THIS turn — the house rule reads
+    per message (prompt: "Reply in Swahili ONLY when the customer wrote their
+    message in Swahili … a customer writing French gets their own language"),
+    so a case's label is the default and the customer's own words override
+    it (slice 7, 2026-11-07: 9 of 65 blind Swahili-case turns were written in
+    English and were scored against the case label).
+    - the floor cannot place the turn, or it is neutral words only ("Sawa",
+      "ok") → the case's language;
+    - the turn is in the case's language → that language;
+    - the turn is plainly Hindi / French / Portuguese → that language;
+    - otherwise (an English line in a Swahili case, a Swahili line in an
+      English case — "Kenyan customers switch freely", the gate leaves these
+      alone and the rule is silent on continuity) → None: not counted.
+    A sheng / mixed label is never placeable and stays None."""
+    from app.services.customer_state import _NEUTRAL_WORDS, guess_language
+    case_lang = {"ke-en": "en"}.get(case_lang or "", case_lang)
+    if case_lang not in _PLACEABLE:
+        return None
+    toks = set(re.findall(r"[a-z']+", (user_text or "").lower()))
+    if not toks or toks <= _NEUTRAL_WORDS:
+        return case_lang
+    got = guess_language(user_text)
+    if got is None or got == case_lang:
+        return case_lang
+    if got in ("hi", "fr", "pt"):
+        return got
+    return None
+
+
+def _reads_swahili(reply: str) -> bool:
+    """Swahili by the short word list OR by verb shape (ni-ta-, tu-me-) and
+    the calendar / courtesy words — a 25-word Swahili quote with one listed
+    word is still Swahili (slice 7: 11 of 15 blind "not in the customer's
+    language" failures were Swahili replies the word list alone missed)."""
+    from app.agent.voice import looks_swahili
+    from app.services.customer_state import guess_language
+    return looks_swahili(reply) or guess_language(reply) == "sw"
+
+
 def language_ok(expected: str | None, reply: str) -> bool | None:
     """True/False when the reply's language can be checked against the
     customer's; None when it cannot (sheng, mixed, unknown) — not counted."""
     if not expected or not (reply or "").strip():
         return None
+    r = reply
+    if expected == "hi":
+        return bool(_DEVANAGARI.search(r))
+    if expected == "sw":
+        return _reads_swahili(r)
+    if expected == "fr":
+        return len(_FR_RE.findall(r)) >= 2
+    if expected == "pt":
+        return len(_PT_RE.findall(r)) >= 1
+    if expected in ("en", "ke-en"):
+        return not _reads_swahili(r) and not _DEVANAGARI.search(r)
+    return None
     from app.agent.voice import looks_swahili
     r = reply
     if expected == "hi":
@@ -227,9 +282,11 @@ def check_turn(case: dict, i: int, turn: dict, reply: str, facts: dict, *,
             failures.append(f"did not call {tool}")
     if rv.manufactured_pressure(r, facts.get("tools")):
         failures.append("manufactured urgency or scarcity")
-    lang_ok = language_ok(exp.get("lang") or case.get("lang"), r)
+    # the author's per-turn label wins; else the customer's own words decide
+    want_lang = exp.get("lang") or turn_language(case.get("lang"), turn.get("user") or "")
+    lang_ok = language_ok(want_lang, r)
     if lang_ok is False:
-        failures.append(f"reply not in the customer's language ({exp.get('lang') or case.get('lang')})")
+        failures.append(f"reply not in the customer's language ({want_lang})")
 
     return {
         "passed": not failures, "failures": failures,

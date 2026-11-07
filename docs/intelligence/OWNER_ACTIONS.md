@@ -44,6 +44,23 @@ and `/api/admin/settings/prompt-inputs` (the 22 flag values).
 ## 4. Decisions waiting in the registers
 
 - The `/api/health` hub wait (one function; production behaviour).
+- **Whether an explicit "I want a person" hands the thread over before the
+  model runs.** A deterministic detector (English, Swahili, French,
+  Portuguese forms of "talk to a real person / put me through / can someone
+  call me / am I talking to a robot") fires on 0 of 1,656 non-hand-over
+  turns across both case sets. It would force human mode — Neema stops
+  replying on that thread until a person does — and it covers 1 of the 5
+  measured hand-over failures (the other 4 are judgement calls: bank
+  details, supplier documents, an account, artwork). Say "build the person
+  door" and it ships; otherwise the model keeps the decision.
+- **Whether the reply gate's language finding becomes hard.** Today an
+  English draft answering a Swahili / Hindi / French / Portuguese line gets a
+  rewrite request and, if the rewrite is still English, goes out with a note.
+  Over the whole first real-model pass the finding fired 4 times, all correct,
+  0 false. Hard would mean: still English after the rewrite → the hold DM (in
+  Swahili where the customer wrote Swahili) and a flagged colleague, never an
+  English reply to a Swahili customer. Say "make the language finding hard"
+  and it ships with the next slice; otherwise it stays soft.
 - An index on `messages.waba_msg_id` and a DB idempotency key for orders
   (migrations).
 - Whether a DB error during Meta comment capture should make Meta redeliver.

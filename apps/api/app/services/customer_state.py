@@ -223,6 +223,8 @@ _SW_EXTRA = frozenset("""
     nitakujulisha nitarudi nitawasiliana nimelipa nimeshalipa
     mungu akubariki akubarikie mko wapi niko tuko kesho leo sasa jioni asubuhi ngapi shilingi
     nimesikia nitalipa tutalipa ngoja subiri sitaki nataka nahitaji tunahitaji kiasi gani
+    naweza nalipa natafuta naomba nauliza napenda natuma nakuja nasubiri nangoja nafikiri
+    naona nasikia najua nashukuru nachukua naagiza nahitajika nipo mna una kuna hakuna ina zina
     unipunguzie punguza mambo niaje poa haya hapana ndiyo ndio sana rangi nyeupe nyeusi
     kitambaa nakshi kushonwa imeshonwa mwakani mzee baba mama bwana bibi mkuu kwaya
 """.split())
@@ -284,6 +286,11 @@ def guess_language(text: str | None) -> str | None:
     if looks_swahili(t):
         return "sw"
     toks = set(re.findall(r"[a-zàâçéèêëîïôûùüÿœãõáíóúâêôç'-]+", t.lower()))
+    # a bare "ok" / "yes" / "hi" / "sawa" belongs to every language: never let
+    # it overwrite the language a customer has already shown (slice 7: this
+    # ran after the shape rule, so a lone "Sawa" / "poa" read as Swahili)
+    if toks and toks <= _NEUTRAL_WORDS:
+        return None
     en = toks & _EN_WORDS
     # Swahili by its verb shape (ni-ta-kujulisha, tu-me-pata) and its calendar
     # words — the short word list in voice.py misses a sentence with no price in it.
@@ -307,10 +314,6 @@ def guess_language(text: str | None) -> str | None:
         return "fr"
     if len(pt) >= 1 and not en and not fr:
         return "pt"
-    # a bare "ok" / "yes" / "hi" belongs to every language: never let it
-    # overwrite the language a customer has already shown
-    if toks and toks <= _NEUTRAL_WORDS:
-        return None
     if en - _NEUTRAL_WORDS:
         return "en"
     # plain ASCII with nothing of the other languages reads as English

@@ -246,6 +246,52 @@ denominator): turns 578/701 = 0.825 [0.795, 0.851]; critical 200/246 = 0.813;
 language 634/659 = 0.962; figures 265/308 = 0.860; length 598/673 = 0.889;
 first draft 317/689 = 0.460.
 
+### Re-score of the same first pass under the corrected language metric (2026-11-07, slice 7)
+
+The language check in `check_turn` had two measurement defects (ADVANCEMENTS
+L1): it read a Swahili reply with the short word list only, and it scored
+every turn against the case's language label even when the customer's own
+line was in another language. The recorded replies of run 42289125585 were
+re-scored with the corrected check (`turn_language` + `_reads_swahili`);
+**nothing was re-run and no reply changed**, so the differences below are
+corrections of the measurement, not improvements of the model.
+
+| Metric | as recorded (old metric) | re-scored (corrected metric) |
+|---|---|---|
+| turns passed | 367/459 = 0.800 [0.761, 0.834] | **380/459 = 0.828 [0.791, 0.860]** |
+| critical-class turns passed | 133/171 = 0.778 [0.710, 0.834] | **138/171 = 0.807 [0.741, 0.859]** |
+| language continuity | 405/424 = 0.955 [0.931, 0.971] | **407/412 = 0.988 [0.972, 0.995]** (12 turns no longer counted: the customer's line was not in the case's language) |
+| cases passed (every turn) | 46/120 = 0.383 | **53/120 = 0.442 [0.356, 0.531]** |
+| Swahili turns passed | 42/65 = 0.646 | **54/65 = 0.831** |
+| Hindi turns passed | 3/6 | 4/6 |
+
+Failure kinds after the re-score (79 failing turns): answered a closer 33 ·
+no price where a quote was expected 16 · figure not from this turn's tools
+7 · opt-out not recorded 7 · reply not in the customer's language **5** (was
+19) · did not hand to a person 5 · required text missing 5 · turn raised 3 ·
+no reply where one was expected 3. By next action: answer 137/146 · quote
+94/116 · hold_ack 64/65 · escalate 10/15 · silence 18/52 · stop_ack 0/7
+(unchanged where no language failure was involved).
+
+The 11 reclassified Swahili turns were Swahili replies with at most one word
+from the short list (verb-shape Swahili); the 12 uncounted turns were English
+lines inside Swahili cases (9), a Swahili line inside an English case, and two
+others — the per-turn rule is in `eval_run.turn_language`. The next model run
+records under the corrected metric from the start.
+
+### Floors after slice 7 (2026-11-07) — `lang` only moved
+
+`guess_language`: neutral words first, 24 first-person / "have" forms added;
+the scorer no longer holds the guesser to a neutral-only turn. The full grid
+(old/new guesser × old/new scorer, both sets) is in ADVANCEMENTS L4. Recorded:
+tuning `lang` **337/348 = 0.968 [0.944, 0.982]** (was 342/355 = 0.963 under
+the old scorer; 336/348 = 0.966 under the new scorer with the old guesser);
+blind `lang` **412/427 = 0.965 [0.943, 0.979]** (was 414/445 = 0.930 old
+scorer; 410/427 = 0.960 new scorer, old guesser). said, silence, opt_out and
+length_kind unchanged on both sets. The gain that is the guesser's own is +1
+and +2 turns; the rest is the scorer no longer counting "ok"-type turns.
+`results/floors-tuning-after-slice7.json`, `results/floors-blind-after-slice7.json`.
+
 ### Command (unchanged)
 
 Command, once a key exists on the box or as the `ANTHROPIC_API_KEY`

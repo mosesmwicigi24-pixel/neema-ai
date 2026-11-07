@@ -58,6 +58,15 @@ def test_the_floors_scorer_reports_misses_by_case():
     assert res["misses"] == []        # "Please stop messaging me" reads as English since W2
 
 
+def test_the_floors_scorer_does_not_hold_the_guesser_to_a_neutral_turn():
+    # slice 7: "ok" / "Sawa" alone is designed to place no language; it is not a miss
+    cases = [{"id": "t-2", "source": "independent", "categories": ["closing"], "lang": "sw",
+              "turns": [{"user": "Sawa", "expect": {"next": "silence", "lang": "sw"}},
+                        {"user": "Bei ya stola?", "expect": {"next": "quote", "lang": "sw"}}]}]
+    res = eval_floors.score(cases)
+    assert res["metrics"]["lang"]["all"]["n"] == 1 and res["metrics"]["lang"]["all"]["k"] == 1
+
+
 def _turn(next_, **exp):
     return {"user": "x", "expect": {"next": next_, **exp}}
 
@@ -126,6 +135,23 @@ def test_figures_must_come_from_this_turns_tools():
     assert any("not from this turn's tools" in f for f in v["failures"])
 
 
+def test_the_judge_allows_the_gates_arithmetic_on_this_turns_rows():
+    # slice 7: a quantity multiple, a half, the USD of a KES row and two rows
+    # together all trace to this turn's tools; a stray figure still does not
+    from app.jobs.agent_eval import judge
+    from app.core.config import settings
+    tools = [{"tool": "search_catalog", "input": {"query": "tray"},
+              "out": {"items": [{"name": "Silver Communion Tray", "price": 18000},
+                                {"name": "Communion Cups (50)", "price": 4000}]}}]
+    assert judge("Two trays come to KES 36,000.", "How much for 2 trays?", tools)["unverified"] == []
+    assert judge("A deposit of KES 9,000 secures it.", "How much for a tray?", tools)["unverified"] == []
+    assert judge("Tray and cups together: KES 22,000.", "tray and cups?", tools)["unverified"] == []
+    usd = round(18000 / float(settings.usd_kes_rate or 100), 2)
+    assert judge(f"The tray is USD {usd:,.2f}.", "price in dollars?", tools)["unverified"] == []
+    assert judge("The tray is KES 36,500.", "How much for 2 trays?", tools)["unverified"] == [36500.0]
+    assert judge("The tray is KES 18,000.", "How much?", [])["unverified"] == [18000.0]
+
+
 def test_language_continuity_checks_script_and_tongue():
     assert eval_run.language_ok("hi", "नमस्ते, कीमत है") is True
     assert eval_run.language_ok("hi", "Hello, the price is") is False
@@ -135,6 +161,50 @@ def test_language_continuity_checks_script_and_tongue():
     assert eval_run.language_ok("en", "The stole is KES 2,500.") is True
     assert eval_run.language_ok("sheng", "Niaje, poa.") is None
     assert eval_run.language_ok("sw", "") is None
+
+
+def test_a_swahili_reply_is_read_by_its_verb_shape_not_only_the_word_list():
+    # slice 7: 11 of 15 blind "not in the customer's language" failures were
+    # Swahili replies with one listed word — verb shape (ni-ta-, tu-na-) counts
+    reply = "Nitakujulisha kesho. Tunasafirisha kote duniani kwa DHL."
+    from app.agent.voice import looks_swahili
+    assert not looks_swahili(reply)            # the short list alone misses it
+    assert eval_run.language_ok("sw", reply) is True
+    assert eval_run.language_ok("en", reply) is False
+    assert eval_run.language_ok("en", "Noted. The Silver Communion Tray is KES 18,000.") is True
+
+
+def test_the_expected_language_follows_the_customers_own_turn():
+    tl = eval_run.turn_language
+    assert tl("sw", "Bei gani?") == "sw"
+    assert tl("sw", "Sawa") == "sw"                       # neutral words keep the case's language
+    assert tl("sw", "ok") == "sw"
+    assert tl("sw", "Can I pay by card instead?") is None  # an English line in a Swahili case: not held
+    assert tl("en", "Nimelipa, asante sana") is None       # a Swahili line in an English case: not held
+    assert tl("ke-en", "How much for the stole?") == "en"
+    assert tl("en", "Bonjour, quel est le prix de la chasuble?") == "fr"
+    assert tl("sw", "Bom dia, qual é o preço?") == "pt"
+    assert tl("sheng", "Niaje, bei ni ngapi?") is None
+    assert tl("mixed", "ok") is None
+    assert tl(None, "hello") is None
+
+
+def test_check_turn_scores_language_against_the_turn_not_only_the_case_label():
+    case = {"id": "c", "lang": "sw", "critical": False, "categories": ["multilingual"]}
+    facts = {"tools": [], "review": "pass"}
+    english_turn = {"user": "Can I pay by card instead?", "expect": {"next": "answer"}}
+    v = eval_run.check_turn(case, 1, english_turn, "Yes — card or M-Pesa, whichever suits you.", facts,
+                            opted_out=False, intercept_mode="ai", after_hold=False)
+    assert not any("customer's language" in f for f in v["failures"]), v["failures"]
+    swahili_turn = {"user": "Ninaweza kulipa kwa kadi?", "expect": {"next": "answer"}}
+    v = eval_run.check_turn(case, 1, swahili_turn, "Yes — card or M-Pesa, whichever suits you.", facts,
+                            opted_out=False, intercept_mode="ai", after_hold=False)
+    assert any("customer's language (sw)" in f for f in v["failures"]), v["failures"]
+    # the author's per-turn label still wins over the floor's reading
+    labelled = {"user": "Can I pay by card instead?", "expect": {"next": "answer", "lang": "sw"}}
+    v = eval_run.check_turn(case, 1, labelled, "Yes — card or M-Pesa, whichever suits you.", facts,
+                            opted_out=False, intercept_mode="ai", after_hold=False)
+    assert any("customer's language (sw)" in f for f in v["failures"]), v["failures"]
 
 
 @pytest.mark.asyncio
