@@ -25,6 +25,7 @@ separate step and never the sole basis for a judged dimension.
 """
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import json
 import os
@@ -56,6 +57,14 @@ def contact_for(case: dict, idx: int) -> str:
 # ── sandboxed tools ──────────────────────────────────────────────────────────
 
 SANDBOXED = ("send_product_cards", "send_measurement_guide", "create_order")
+# The hub-reading and hub-writing tools a staged outage takes away (slice 7c):
+# a case in the `tool-failure` category is run with these answering as the
+# live tools do when the hub does not answer — the model sees the error the
+# loop would show it. `check_availability` stays: asking the team is exactly
+# what such a turn should do.
+HUB_TOOLS = ("search_catalog", "check_order_status", "get_cart", "update_cart", "create_order",
+             "prepare_quotation", "apply_offer", "share_catalog", "whatsapp_checkout_link")
+HUB_OUTAGE = {"error": "the hub did not answer in time"}
 
 # Case authors name tools by intent; the runner maps those names onto the
 # registered tools so a label never depends on an internal name.
@@ -74,6 +83,37 @@ def canonical_tool(name: str) -> str:
     core = n[1:] if bang else n
     core = TOOL_ALIASES.get(core, core)
     return ("!" + core) if bang else core
+
+
+class _HubOutage:
+    """The catalogue / order system is down for the turns inside the block —
+    what twelve `tool-failure` cases ask of the runner in their notes
+    ("Runner: the catalogue/hub is unavailable or empty on this turn") and
+    what it never did until slice 7c: every one of them was scored against
+    a reachable hub, so a correct price counted as a failure."""
+
+    def __init__(self) -> None:
+        self.calls: list[dict] = []
+        self._saved: dict = {}
+
+    def __enter__(self):
+        from app.agent import tools as _t
+        for name in HUB_TOOLS:
+            if name in _t._HANDLERS:
+                self._saved[name] = _t._HANDLERS[name]
+                _t._HANDLERS[name] = self._make(name)
+        return self
+
+    def __exit__(self, *exc):
+        from app.agent import tools as _t
+        for name, fn in self._saved.items():
+            _t._HANDLERS[name] = fn
+
+    def _make(self, name: str):
+        async def _down(args: dict, ctx) -> dict:
+            self.calls.append({"tool": name, "args": args})
+            return dict(HUB_OUTAGE)
+        return _down
 
 
 class _Sandbox:
@@ -540,70 +580,74 @@ async def run_cases(*, selection: str = "all", repeat: int = 1, only: str | None
                     await provision_user(db, wa_id)
                     await db.commit()
                 case_res = {"id": case["id"], "repeat": rep + 1, "contact": "…" + wa_id[-4:],
-                            "source": case["source"], "turns": []}
+                            "source": case["source"], "turns": [],
+                            "staged": "hub_outage" if "tool-failure" in case["categories"] else None}
                 after_hold = False
-                for i, turn in enumerate(case["turns"]):
-                    text = turn["user"]
-                    exp = turn.get("expect") or {}
-                    t0 = time.monotonic()
-                    reply, facts, opted = "", {}, False
-                    async with AsyncSessionLocal() as db:
-                        db.add(Message(wa_id=wa_id, channel="whatsapp", direction=MsgDirection.inbound,
-                                       sender=MsgSender.user, text=text))
-                        await db.commit()
-                    # the live door, minus the send
-                    if _intent.is_opt_out(text):
+                with contextlib.ExitStack() as _stage:
+                    if case_res["staged"]:
+                        _stage.enter_context(_HubOutage())
+                    for i, turn in enumerate(case["turns"]):
+                        text = turn["user"]
+                        exp = turn.get("expect") or {}
+                        t0 = time.monotonic()
+                        reply, facts, opted = "", {}, False
+                        async with AsyncSessionLocal() as db:
+                            db.add(Message(wa_id=wa_id, channel="whatsapp", direction=MsgDirection.inbound,
+                                           sender=MsgSender.user, text=text))
+                            await db.commit()
+                        # the live door, minus the send
+                        if _intent.is_opt_out(text):
+                            async with AsyncSessionLocal() as db:
+                                conv = (await db.execute(select(Conversation).where(
+                                    Conversation.wa_id == wa_id))).scalars().first()
+                                if conv is not None:
+                                    await _intent.record_opt_out(db, redis, conv, text, channel="whatsapp", key=wa_id)
+                                    await db.commit()
+                            reply = _intent.acknowledgement(text)
+                            facts = {"tools": [], "review": None, "door": "opt_out"}
+                        elif await closer_gate(redis, "whatsapp", wa_id, text):
+                            reply, facts = "", {"tools": [], "review": None, "door": "closer"}
+                        else:
+                            async with AsyncSessionLocal() as db:
+                                try:
+                                    reply = await run_turn(db, redis, wa_id, text, build_llm(purpose="job:eval"),
+                                                           turn_facts=facts)
+                                except Exception as exc:
+                                    reply = ""
+                                    facts = {**facts, "error": str(exc)[:200]}
+                                    await _recover_from_failed_turn(db)
+                        latency = round(time.monotonic() - t0, 2)
                         async with AsyncSessionLocal() as db:
                             conv = (await db.execute(select(Conversation).where(
                                 Conversation.wa_id == wa_id))).scalars().first()
-                            if conv is not None:
-                                await _intent.record_opt_out(db, redis, conv, text, channel="whatsapp", key=wa_id)
+                            opted = await _intent.opted_out(db, redis, conv) if conv is not None else False
+                            mode = getattr(conv.intercept_mode, "value", conv.intercept_mode) if conv is not None else None
+                            if reply:
+                                db.add(Message(wa_id=wa_id, channel="whatsapp", direction=MsgDirection.outbound,
+                                               sender=MsgSender.ai, text=reply))
                                 await db.commit()
-                        reply = _intent.acknowledgement(text)
-                        facts = {"tools": [], "review": None, "door": "opt_out"}
-                    elif await closer_gate(redis, "whatsapp", wa_id, text):
-                        reply, facts = "", {"tools": [], "review": None, "door": "closer"}
-                    else:
-                        async with AsyncSessionLocal() as db:
-                            try:
-                                reply = await run_turn(db, redis, wa_id, text, build_llm(purpose="job:eval"),
-                                                       turn_facts=facts)
-                            except Exception as exc:
-                                reply = ""
-                                facts = {**facts, "error": str(exc)[:200]}
-                                await _recover_from_failed_turn(db)
-                    latency = round(time.monotonic() - t0, 2)
-                    async with AsyncSessionLocal() as db:
-                        conv = (await db.execute(select(Conversation).where(
-                            Conversation.wa_id == wa_id))).scalars().first()
-                        opted = await _intent.opted_out(db, redis, conv) if conv is not None else False
-                        mode = getattr(conv.intercept_mode, "value", conv.intercept_mode) if conv is not None else None
-                        if reply:
-                            db.add(Message(wa_id=wa_id, channel="whatsapp", direction=MsgDirection.outbound,
-                                           sender=MsgSender.ai, text=reply))
-                            await db.commit()
-                    try:
-                        from app.services.deals import scribe_update
-                        async with AsyncSessionLocal() as db:
-                            await scribe_update(db, wa_id, "whatsapp", reply or "", inbound_text=text,
-                                                tools=facts.get("tools"))
-                    except Exception:
-                        pass
-                    verdict = check_turn(case, i, turn, reply, facts, opted_out=bool(opted),
-                                         intercept_mode=mode, after_hold=after_hold)
-                    from app.services.customer_state import floor as _floor
-                    if (_floor(text) or {}).get("customer_said") in ("needs_time", "comparing", "consulting"):
-                        after_hold = True
-                    case_res["turns"].append({
-                        "i": i, "user": text, "reply": reply, "next": exp.get("next"),
-                        "critical": bool(case.get("critical")), "categories": case["categories"],
-                        "lang": exp.get("lang") or case.get("lang") or "en",
-                        "latency_s": latency, "error": facts.get("error"), "door": facts.get("door"),
-                        "verdict": verdict,
-                    })
-                    mark = "ok " if verdict["passed"] else "FAIL"
-                    print(f"[{mark}] {case['id']} t{i} ({exp.get('next')}) {verdict['observations']['words']}w "
-                          f"{latency}s" + ("  — " + "; ".join(verdict["failures"]) if verdict["failures"] else ""))
+                        try:
+                            from app.services.deals import scribe_update
+                            async with AsyncSessionLocal() as db:
+                                await scribe_update(db, wa_id, "whatsapp", reply or "", inbound_text=text,
+                                                    tools=facts.get("tools"))
+                        except Exception:
+                            pass
+                        verdict = check_turn(case, i, turn, reply, facts, opted_out=bool(opted),
+                                             intercept_mode=mode, after_hold=after_hold)
+                        from app.services.customer_state import floor as _floor
+                        if (_floor(text) or {}).get("customer_said") in ("needs_time", "comparing", "consulting"):
+                            after_hold = True
+                        case_res["turns"].append({
+                            "i": i, "user": text, "reply": reply, "next": exp.get("next"),
+                            "critical": bool(case.get("critical")), "categories": case["categories"],
+                            "lang": exp.get("lang") or case.get("lang") or "en",
+                            "latency_s": latency, "error": facts.get("error"), "door": facts.get("door"),
+                            "verdict": verdict,
+                        })
+                        mark = "ok " if verdict["passed"] else "FAIL"
+                        print(f"[{mark}] {case['id']} t{i} ({exp.get('next')}) {verdict['observations']['words']}w "
+                              f"{latency}s" + ("  — " + "; ".join(verdict["failures"]) if verdict["failures"] else ""))
                 record["results"].append(case_res)
                 # A checkpoint after every case: a run killed by a time limit
                 # (CI, 2026-11-06: 30 min, nothing written) still leaves what

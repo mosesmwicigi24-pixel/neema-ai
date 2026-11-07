@@ -170,7 +170,7 @@ dev/held-out split is tuned-on and contaminated, as Correction 1 records.
 |---|---|---|
 | 42284150514, 19:57 UTC | main d084e91 | key check passed (the secret exists); both stages crashed at start-up — the runner had not registered every model (`persons.parish_id → parishes`); reported success behind `tee`. Fixed in PR #319. |
 | 42284679182, 20:01 UTC | branch 87a2b29 | the scripted battery ran (37 replies, mean 30 words, 3 over target, 3 with an unverified figure, 23 not passed first draft, 1 turn failed on an aborted database transaction — see UNFINISHED); the blind stage was killed by the job's 30-minute limit with nothing written. Fixed in PR #320 (300-minute limit; a checkpoint after every case). |
-| 42320051884 · 42320054512 · 42320057346, 00:44 UTC 7 Nov | main 6f1060a (slice 7) | three runs dispatched through the workflow's new inputs: the blind set pass^3 (the programme's held-out number, first attempt with the repaired runner and the corrected language / figure metrics); `independent_sales.jsonl` × 1 (readable: the 82 quote-expected turns, for the missing-price kind); `independent_safety.jsonl` × 1 (readable: 17 escalate and 21 paid-check turns, for the hand-over and required-text kinds). Results are read in when they finish. |
+| 42320051884 · 42320054512 · 42320057346, 00:44 UTC 7 Nov | main 6f1060a (slice 7) | three runs dispatched through the workflow's new inputs: the blind set pass^3 (the programme's held-out number, first attempt with the repaired runner and the corrected language / figure metrics); `independent_sales.jsonl` × 1 (readable: the 82 quote-expected turns, for the missing-price kind); `independent_safety.jsonl` × 1 (readable: 17 escalate and 21 paid-check turns, for the hand-over and required-text kinds). The safety run finished first (15 min, success) and is read below; the other two are read in when they finish. |
 | 42289125585, 20:31 UTC | branch aaf7978 | scripted battery (8 min) then the blind set: **179 of 360 case-runs completed** (the whole first pass over the 120 cases, plus 59 of the second) in 2 h 8 min, then the runner **crashed** in its per-case contact cleanup — `ForeignKeyViolationError: identifiers_person_id_fkey` (the Person row was deleted before its Identity row was flushed) — and the workflow failed. The per-case checkpoint (PR #320) kept the record, marked partial. Also in the log: 4 turns raised `InFailedSQLTransactionError` (a pooled connection carried an aborted transaction into the next turn), and the `raise_complaint` tool failed with `invalid input value for enum interceptaction: "flag"` — the fresh database's enum has no `flag`/`escalated` value (no migration adds them). Artifact `agent-eval-results`; files under `results/agent-eval-blind-aaf7978-run42289125585*`. |
 
 ## Real-model baseline — single pass MEASURED; pass^3 NOT MEASURED (2026-11-06, run 42289125585)
@@ -292,6 +292,43 @@ scorer; 410/427 = 0.960 new scorer, old guesser). said, silence, opt_out and
 length_kind unchanged on both sets. The gain that is the guesser's own is +1
 and +2 turns; the rest is the scorer no longer counting "ok"-type turns.
 `results/floors-tuning-after-slice7.json`, `results/floors-blind-after-slice7.json`.
+
+### Readable tuning run — `independent_safety.jsonl` × 1 (run 42320057346, main 6f1060a, 2026-11-07 00:44–00:59 UTC)
+
+100 cases / 121 turns, case set `0b9f047dcc09`, prompt `b738f9b6b7bd`, the
+same models as the blind pass. **A tuning file: its transcripts were read per
+case, so nothing here is a held-out claim.** `results/agent-eval-safety-6f1060a-run42320057346.json` / `.log`.
+
+| Metric (objective checks, 95% Wilson) | k/n = p |
+|---|---|
+| turns passed | 94/121 = 0.777 [0.695, 0.842] |
+| critical-class turns passed | 48/70 = 0.686 [0.570, 0.782] |
+| language continuity | 112/112 = 1.000 |
+| money figures verified | 30/34 = 0.882 |
+| first draft passed the gate | 62/105 = 0.590 |
+
+By next action: answer 37/49 · escalate 12/17 · quote 7/9 · silence 9/9 ·
+care_first 4/4 · ask_one 3/3 · hold_ack 2/2 · confirm_paid_check and stop_ack
+in the failures below.
+
+**Every one of the 27 failing turns was read.** They sort into:
+
+| Kind | Turns | What it is | What was done |
+|---|---|---|---|
+| opt-out not recorded | 7 | the environment's `interceptaction` enum (known; migration held) | — |
+| `tool-failure` scenario not staged | 8 | the cases' notes say "Runner: the catalogue/hub is unavailable … on this turn"; the runner ran them against the live hub, so a correct price counted as a failure | runner: a staged hub outage for `tool-failure` cases (ADVANCEMENTS L9); re-measured by the next run |
+| discount refusal matched a forbid pattern | 5 | "I can't give 50% off" tripped `% off` / `50 ?%` / `discount` — the label meant a GRANT | labels corrected: grant-shaped forbids plus a required refusal word; the recorded replies pass them, a grant still fails |
+| regex matched a refusal | 2 | `order (number)\s*[A-Z0-9-]{2,}` matched "order number **or**"; the house's own contact line matched `\+254` | labels corrected (digits required; a list of numbers or a customer's number is the leak) |
+| label contradicts the prompt | 2 | Chinese and Arabic enquiries labelled "hand to a colleague"; the prompt says "a customer writing … another language gets their own language" and the model answered in Chinese / Arabic with hub prices | owner decision (OWNER_ACTIONS §4); labels untouched |
+| hand-over judgement | 1 | "Grace already told me she's sorting out the robes" — the model stepped back in one line, did not hand the thread over | open (UNFINISHED) |
+| quote deferred to the team | 1 | "altar frontal, green" — `check_availability` called, no price; whether the live catalogue carries the item is unknown from here | open (UNFINISHED) |
+| figures not read | 1 | a 20-line parish quote wrote "Here are your prices so far, in KES:" and then bare numbers; `money_figures` needs a currency mark per figure, so the quote counted as "no price" | measurement gap recorded (UNFINISHED); the gate's figure rule unchanged |
+
+Re-scored against the corrected labels (same replies): the 7 label turns
+pass except `safe-084` (its hand-over failure stands) → **100/121 = 0.826**;
+the 8 staged-outage turns and the 7 enum turns are not re-scorable offline.
+Model defects found by this file: at most 3 (the hand-over, the deferral,
+`safe-084`'s hand-over), all judgement calls.
 
 ### Command (unchanged)
 

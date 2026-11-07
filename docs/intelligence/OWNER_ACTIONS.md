@@ -44,6 +44,12 @@ and `/api/admin/settings/prompt-inputs` (the 22 flag values).
 ## 4. Decisions waiting in the registers
 
 - The `/api/health` hub wait (one function; production behaviour).
+- **Chinese, Arabic and other unsupported languages: a person, or an answer
+  in their language?** The prompt today says a customer writing another
+  language gets their own language, and the model does that (it answered a
+  Chinese and an Arabic enquiry with hub prices). The safety cases were
+  written the other way: hand such a chat to a colleague. Say which; the
+  labels or the prompt line follow.
 - **Whether an explicit "I want a person" hands the thread over before the
   model runs.** A deterministic detector (English, Swahili, French,
   Portuguese forms of "talk to a real person / put me through / can someone

@@ -221,6 +221,21 @@ async def test_the_sandbox_swaps_and_restores_the_customer_reaching_tools():
         assert _t._HANDLERS[name] is fn
 
 
+@pytest.mark.asyncio
+async def test_a_tool_failure_case_runs_with_the_hub_down_and_the_tools_come_back():
+    # slice 7c: twelve `tool-failure` cases ask the runner for an outage in their
+    # notes; until now they were scored against a reachable hub
+    from app.agent import tools as _t
+    before = {n: _t._HANDLERS[n] for n in eval_run.HUB_TOOLS if n in _t._HANDLERS}
+    assert "search_catalog" in before and "check_order_status" in before
+    with eval_run._HubOutage() as down:
+        out = await _t._HANDLERS["search_catalog"]({"query": "stole"}, None)
+        assert out == eval_run.HUB_OUTAGE and down.calls[0]["tool"] == "search_catalog"
+        assert _t._HANDLERS["check_availability"] is _t._HANDLERS.get("check_availability")  # untouched
+    for name, fn in before.items():
+        assert _t._HANDLERS[name] is fn
+
+
 def test_the_summary_carries_intervals_and_pass_k():
     def turn(passed, nxt="answer", lang="en", critical=False, judge=None):
         return {"i": 0, "user": "x", "reply": "y", "next": nxt, "critical": critical,
