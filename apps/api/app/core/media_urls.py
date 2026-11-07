@@ -27,6 +27,7 @@ import hashlib
 import hmac
 import json
 import logging
+import math
 import re
 import time
 from urllib.parse import urlsplit
@@ -89,7 +90,10 @@ def canonical_media_url(url: str | None) -> str | None:
 def _expiry(ttl: int, now: float | None = None) -> int:
     ttl = max(60, int(ttl))
     bucket = max(60, ttl // 4)
-    t = int(now if now is not None else time.time()) + ttl
+    # Round `now` UP to the second first: truncating it would let a link signed
+    # at hh:mm:00.5 expire half a second short of the promised lifetime
+    # whenever int(now) + ttl already sits on a bucket boundary.
+    t = math.ceil(now if now is not None else time.time()) + ttl
     return -(-t // bucket) * bucket                # ceil to the bucket boundary
 
 
