@@ -89,7 +89,8 @@ and `/api/admin/settings/prompt-inputs` (the 22 flag values).
    thread probe could abort the turn the same way the evaluation runs'
    turns aborted (reproduced; the probe is a SELECT on those labels). That
    production replies are flowing suggests the box HAS the labels; this
-   command is the proof. Approving the one-line migration (`ADD VALUE IF NOT
-   EXISTS`, idempotent, no table rewrite) fixes it; say "approve the enum
-   migration" and it ships with the next slice.
+   command is the proof. **Approved and shipped (2026-11-07):** migration
+   a9c1e3f5b7d9 adds both labels (`ADD VALUE IF NOT EXISTS`, idempotent);
+   the box applies it at the next container start. Run the command once
+   after the deploy to confirm the list now has `flag` and `escalated`.
 2. **(The CI pass^3 is in: 54/120 = 0.450, BENCHMARK_RESULTS.)** **Send the box run's files** (`eval-out/agent-eval-blind-7670de1-*.json` and `.log`) — they are the second independent measurement, on the production database.
