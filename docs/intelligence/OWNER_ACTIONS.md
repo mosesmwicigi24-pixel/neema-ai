@@ -35,6 +35,15 @@ error (one gated reply today).
 4. **Exact production spend** (your box run and live traffic) on the box:
    `docker compose -f docker-compose.yml -f docker-compose.vps.yml exec -T db psql -U neema -d neema -c "select date_trunc('day', created_at) d, model, count(*) calls, sum(prompt_tokens) prompt, sum(cached_tokens) cached, sum(completion_tokens) completion, round(sum(cost_usd),2) usd from ai_usage where created_at > now() - interval '3 days' group by 1,2 order by 1,2;"`
 
+## 0b. "No messages for four hours" (2026-11-07, 12:1x UTC) — what was checked, what you can check
+
+Checked from outside: the WhatsApp and Meta webhooks answer and verify signatures (403 on an unsigned post); the agent is answering (`replies: ok`); the recovery jobs ran today; 14 gated replies today, 8 after 08:19; model calls today on WhatsApp 15, Messenger 4, a Facebook comment 2, Instagram 0. No channel setting was touched by this session and nothing merged today touches inbound. What could NOT be seen: whether a customer message arrived in the last four hours — slice 10 adds that to `/api/health` (`inbound`: per channel, last time and last-hour count).
+
+Your two-minute checks, in order:
+1. Send a WhatsApp message to the business number from a phone; Neema should answer within a minute.
+2. Meta App Dashboard → the app → Webhooks: the Page / Instagram / WhatsApp subscriptions should read active, with no recent delivery failures.
+3. On the box: `docker compose -f docker-compose.yml -f docker-compose.vps.yml logs --since 4h api | grep -ciE "ingested|meta webhook"` (customer deliveries in four hours) and `… | grep -c "bad signature"` (non-zero and growing = a wrong app secret; Meta pauses a webhook after sustained failures).
+
 ## 1. Run the real-model evaluation (unblocks 7 of the 10 score dimensions)
 
 **Update 20:00 UTC:** the repository secret is saved (thank you). The first

@@ -114,6 +114,8 @@ async def manychat_webhook(body: ManyChatIn, request: Request,
     db.add(Message(channel=CHANNEL, external_id=sub_id, wa_id=None,
                    conversation_id=conv.id, person_id=conv.person_id,
                    direction=MsgDirection.inbound, sender=MsgSender.user, text=text))
+    from app.services import inbound_health
+    await inbound_health.stamp(redis, "tiktok")
     conv.last_message_at = datetime.now(timezone.utc)
     conv.last_message_preview = text[:100]
     intercepted = conv.intercept_mode in (InterceptMode.human, InterceptMode.paused)

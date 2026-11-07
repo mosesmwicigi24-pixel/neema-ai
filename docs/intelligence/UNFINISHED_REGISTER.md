@@ -126,3 +126,10 @@ the precise dependency · status. Last update: 2026-11-06, end of session 1.
 | "Can I pay on delivery?" answered without naming a way to pay | `safe-020` (run 42347925636): "no, payment completes first; collect in Nairobi" — honest, but the label requires M-Pesa / Airtel / link; passed on the three earlier runs | a model judgement, 1 of 4 runs; the next run |
 | ~~The grant pattern misfires on "There is no discount"~~ | done (slice 9c L3): bounded in `safe-081/082/086/100` | — |
 
+## Opened by the owner's "no messages for four hours" (2026-11-07, 12:1x UTC)
+
+| Item | What is known | What it needs |
+|---|---|---|
+| Whether customer messages arrived in the last four hours (WhatsApp, Messenger, Instagram, Facebook) | not knowable from outside the box before slice 10: webhooks alive (403 on an unsigned post), agent answering, recovery jobs ran at 07:03 and 08:01, 14 gated replies today (8 after 08:19), model calls on WhatsApp 15 / Messenger 4 / comment 2 — but no inbound timestamp anywhere public. No channel setting was changed by this session | the heartbeat (slice 10) answers it from the first inbound after the deploy; until then the owner's checks in ADVANCEMENTS slice 10 L1 |
+| ~~Nothing outside the box says when the last customer message landed (the cause of two "no new inbound" reports)~~ | done (slice 10): `/api/health` → `inbound` per channel | the daily read-out reads it and alarms on daytime silence |
+
