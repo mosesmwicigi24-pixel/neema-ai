@@ -84,7 +84,10 @@ def test_language_continuity_is_checked_without_the_model_reviewer():
                            "The stole is KES 2,500 each, so two would be KES 5,000. Shall I add them?",
                            [], tool_results=[], mode="dm")
     kinds = {o["kind"]: o for o in out}
-    assert "language" in kinds and not kinds["language"]["hard"]
+    # W8-1 made the finding deterministic (soft); the owner's decision of
+    # 2026-11-07 made it HARD, with the held line in the customer's language
+    # (slice 12, tests/test_language_gate_hard.py)
+    assert "language" in kinds and kinds["language"]["hard"]
 
 
 @pytest.mark.asyncio
