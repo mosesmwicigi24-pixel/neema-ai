@@ -44,6 +44,10 @@ Your two-minute checks, in order:
 2. Meta App Dashboard → the app → Webhooks: the Page / Instagram / WhatsApp subscriptions should read active, with no recent delivery failures.
 3. On the box: `docker compose -f docker-compose.yml -f docker-compose.vps.yml logs --since 4h api | grep -ciE "ingested|meta webhook"` (customer deliveries in four hours) and `… | grep -c "bad signature"` (non-zero and growing = a wrong app secret; Meta pauses a webhook after sustained failures).
 
+## 0c. Two customer commitments need an owner now (slice 12's first sweep, 16:26 UTC, 7 Nov)
+
+The new `commitments` block found **two availability checks promised to customers and still unanswered — the oldest 31 hours old — with nobody assigned**. Both are flagged in the Activity log ("⏳/🚨 UNANSWERED CHECK … needs an owner") and the supervisor bell rang. What closes each: a colleague replies in that thread with the answer (the team-answer button or a plain reply); the customer has been told, if they wrote back, that it is referred for a manual check. Until then they stay counted as overdue in `/api/health`.
+
 ## 1. Run the real-model evaluation (unblocks 7 of the 10 score dimensions)
 
 **Update 20:00 UTC:** the repository secret is saved (thank you). The first
