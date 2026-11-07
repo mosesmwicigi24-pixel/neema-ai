@@ -2285,7 +2285,8 @@ async def _check_availability(args: dict, ctx: ToolContext) -> dict:
 
     return {"ok": True, "item": item, "team_check_open": True,
             "note": "The team has been asked to confirm. Tell them you're checking and "
-                    "will come back shortly — never that we don't have it. Until the "
+                    "will come back shortly — never that we don't have it, and not that we "
+                    "do either (no 'yes, we sell / have it' until the team answers). Until the "
                     "team's answer is in this chat, do NOT ask them to start, confirm or "
                     "pay for THIS item (no 'shall I start the order?' for it); serve the "
                     "rest of their list meanwhile — and in the "

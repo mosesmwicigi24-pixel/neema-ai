@@ -44,6 +44,16 @@ and `/api/admin/settings/prompt-inputs` (the 22 flag values).
 ## 4. Decisions waiting in the registers
 
 - The `/api/health` hub wait (one function; production behaviour).
+- **A check promised yesterday that still cannot be done (the hub down):
+  hand the thread to a person, or keep it and ping the team?** The safety
+  case `safe-032` is labelled "hand to a colleague"; the system's
+  `check_availability` tool is designed NOT to park the thread ("a thread
+  parked in human mode is one nobody answers") — it records the demand,
+  drops a 🔎 note in the thread, pings the team and keeps the customer. The
+  model does the second on every run. Say which is right: if the design,
+  the label changes to `answer` with the team check required; if the
+  label, the tool (or the prompt) must hand over when the same check was
+  already promised. Nothing changes until you say (slice 9c R1).
 - **Chinese, Arabic and other unsupported languages: a person, or an answer
   in their language?** The prompt today says a customer writing another
   language gets their own language, and the model does that (it answered a
