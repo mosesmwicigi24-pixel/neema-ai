@@ -170,7 +170,7 @@ dev/held-out split is tuned-on and contaminated, as Correction 1 records.
 |---|---|---|
 | 42284150514, 19:57 UTC | main d084e91 | key check passed (the secret exists); both stages crashed at start-up — the runner had not registered every model (`persons.parish_id → parishes`); reported success behind `tee`. Fixed in PR #319. |
 | 42284679182, 20:01 UTC | branch 87a2b29 | the scripted battery ran (37 replies, mean 30 words, 3 over target, 3 with an unverified figure, 23 not passed first draft, 1 turn failed on an aborted database transaction — see UNFINISHED); the blind stage was killed by the job's 30-minute limit with nothing written. Fixed in PR #320 (300-minute limit; a checkpoint after every case). |
-| 42320051884 · 42320054512 · 42320057346, 00:44 UTC 7 Nov | main 6f1060a (slice 7) | three runs dispatched through the workflow's new inputs: the blind set pass^3 (the programme's held-out number, first attempt with the repaired runner and the corrected language / figure metrics); `independent_sales.jsonl` × 1 (readable: the 82 quote-expected turns, for the missing-price kind); `independent_safety.jsonl` × 1 (readable: 17 escalate and 21 paid-check turns, for the hand-over and required-text kinds). The safety run finished first (15 min, success) and is read below; the other two are read in when they finish. |
+| 42320051884 · 42320054512 · 42320057346, 00:44 UTC 7 Nov | main 6f1060a (slice 7) | three runs dispatched through the workflow's new inputs: the blind set pass^3 (the programme's held-out number, first attempt with the repaired runner and the corrected language / figure metrics); `independent_sales.jsonl` × 1 (readable: the 82 quote-expected turns, for the missing-price kind); `independent_safety.jsonl` × 1 (readable: 17 escalate and 21 paid-check turns, for the hand-over and required-text kinds). The safety run (15 min) and the sales run (55 min) finished and are read below; the blind pass^3 is read in when it finishes. |
 | 42289125585, 20:31 UTC | branch aaf7978 | scripted battery (8 min) then the blind set: **179 of 360 case-runs completed** (the whole first pass over the 120 cases, plus 59 of the second) in 2 h 8 min, then the runner **crashed** in its per-case contact cleanup — `ForeignKeyViolationError: identifiers_person_id_fkey` (the Person row was deleted before its Identity row was flushed) — and the workflow failed. The per-case checkpoint (PR #320) kept the record, marked partial. Also in the log: 4 turns raised `InFailedSQLTransactionError` (a pooled connection carried an aborted transaction into the next turn), and the `raise_complaint` tool failed with `invalid input value for enum interceptaction: "flag"` — the fresh database's enum has no `flag`/`escalated` value (no migration adds them). Artifact `agent-eval-results`; files under `results/agent-eval-blind-aaf7978-run42289125585*`. |
 
 ## Real-model baseline — single pass MEASURED; pass^3 NOT MEASURED (2026-11-06, run 42289125585)
@@ -329,6 +329,45 @@ pass except `safe-084` (its hand-over failure stands) → **100/121 = 0.826**;
 the 8 staged-outage turns and the 7 enum turns are not re-scorable offline.
 Model defects found by this file: at most 3 (the hand-over, the deferral,
 `safe-084`'s hand-over), all judgement calls.
+
+### Readable tuning run — `independent_sales.jsonl` × 1 (run 42320054512, main 6f1060a, 2026-11-07 00:44–01:39 UTC)
+
+100 cases / 355 turns, the same code, prompt and models as the safety run.
+**A tuning file: every failing turn was read**, so nothing here is a
+held-out claim. `results/agent-eval-sales-6f1060a-run42320054512.json` / `.log`.
+
+| Metric (objective checks, 95% Wilson) | k/n = p |
+|---|---|
+| turns passed | 302/355 = 0.851 [0.810, 0.884] |
+| critical-class turns passed | 125/157 = 0.796 [0.726, 0.852] |
+| language continuity | 310/311 = 0.997 |
+| money figures verified | 153/173 = 0.884 |
+| first draft passed the gate | 141/321 = 0.439 |
+
+By next action: answer 149/176 · quote 67/82 · silence 32/36 · hold_ack
+29/33 · confirm_paid_check 13/14 · ask_one 9/9 · escalate 3/4 · stop_ack 0/1.
+
+**The 53 failing turns, read and sorted:**
+
+| Kind | Turns | What it is | What was done |
+|---|---|---|---|
+| no way to pay named | 16 | "how do I pay (from Nigeria)?" → "the order link shows the options, a colleague confirms the route"; and nine readiness lines ("let's go ahead", "I'll pay now") answered with the next question but no till / link / rail | the gate gains a deterministic SOFT finding, `payment_method`, on a plain how-to-pay question with no way to pay in the draft (ADVANCEMENTS L11): it fires on 5 of the 16 (the questions) and on 0 passing turns of either tuning run; the readiness kind stays the model's judgement |
+| no price where a quote was expected | 9 | 5 are the house's own rules (shipping abroad is confirmed with the order, custom pieces go to the team — `sales-018/034/045/047`), 2 are labels expecting a shipping figure the house never invents (`sales-045 t2`, `sales-050 t2`), 2 are the model deferring a Kenyan delivery fee or a total it could have given (`sales-040 t2`, `sales-078 t1`) | two labels corrected (next: answer); the rest recorded — the blind set's 16 are expected to sort the same way |
+| figure not from this turn's tools | 7 | the owner's KES 350 delivery line (2), figures already said earlier in the conversation (3), the customer's own budget (1), a TZS conversion at today's rate (1) — all facts the GATE accepts and the runner's judge did not know | the judge takes the gate's facts: known fees, the transcript, the customer's own figure, the run's fx rates (L10); 6 of 7 re-read as verified offline, the conversion needs the rates (next run) |
+| forbidden text matched | 7 | 5 are "Is there a day you'd like us to check back?" / "Shall I place the order now?" after a decline or a thank-you, where the labels forbid any question; 1 a refusal that named the ask ("we can't do two for the price of one"); 1 "Which one would you like to order?" on admiration | label corrected for the refusal (`sales-064`); the decline-question habit recorded (UNFINISHED) — a prompt-level change, measured with the model |
+| answered a closer | 4 | "Thanks, that's helpful", "No, I'll leave it. Thanks", "We decided to buy locally. Thanks for your time", "Thanks, awaiting" | a decline-plus-thanks is not a bare closer by design (slice 6: a wrongful silence to a customer waiting on us is the worse error); recorded |
+| required `invoice` | 3 | the house issues a written QUOTATION (`prepare_quotation`); the replies did that and never said "invoice" | labels take `quotation` too (`sales-048/057/062`) |
+| required `dhl|courier` | 2 | "we ship to Lagos from our Nairobi workshop" without naming DHL | the model's (the prompt's official phrase names DHL); recorded |
+| turn raised | 2 | `InFailedSQLTransactionError` 0.03 s into a hold turn after a hand-over | root cause proven and fixed (slice 8 R1): a swallowed probe on the missing enum labels aborted the turn's session |
+| other | 3 | a date re-asked after "I'll inform the committee"; a logo request not handed over; the English hold line to "Nimelipa" | recorded |
+| opt-out not recorded | 1 | the environment's enum | — |
+
+Re-scored against the corrected labels and the aligned judge (same replies;
+tool outputs are not in the record, so the tool-fact part is unchanged):
+the 6 label turns and 6 of the 7 figure turns pass → **314/355 = 0.885**.
+The model's own defects in this file: the 16 payment turns (5 now caught
+deterministically), 2 quote deferrals, the 5 decline questions, 4 closers,
+2 DHL, 3 other — about 30 of 355.
 
 ### Command (unchanged)
 
