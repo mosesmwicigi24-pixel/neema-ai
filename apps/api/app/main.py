@@ -447,6 +447,24 @@ async def lifespan(app: FastAPI):
 
     app.state._unclaimed_task = _asyncio.create_task(_unclaimed_loop())
 
+    # ACCOUNTABLE COMMITMENTS (owner, 2026-11-07): an open team check past
+    # the acknowledgement target is escalated to the team, past the
+    # supervisor target to the super admin; out of staffed hours it is
+    # queued for the next staffed start (services/commitments). Redis-locked.
+    async def _commitments_loop(interval: int = 300):
+        await _asyncio.sleep(150)
+        while True:
+            try:
+                if redis is None or await redis.set("agent:commitments:tick", "1",
+                                                    nx=True, ex=interval - 30):
+                    from app.services.commitments import sweep as _sweep_commitments
+                    await _sweep_commitments(redis)
+            except Exception as exc:
+                logger.warning("commitments tick failed: %s", exc)
+            await _asyncio.sleep(interval)
+
+    app.state._commitments_task = _asyncio.create_task(_commitments_loop())
+
     # Hub event agency: quiet-hours-deferred celebrations drain each morning
     # (leader-locked; no-op while HUB_EVENTS_SECRET is unset).
     from app.services import hub_events as _hub_events

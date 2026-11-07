@@ -1,0 +1,345 @@
+"""ACCOUNTABLE COMMITMENTS (owner's decision, 2026-11-07 — safe-032).
+
+A check Neema promised the team would do ("I'm confirming the cope with the
+team and will come back to you") is a commitment the business made. Until
+this slice it lived as the deal's open `team_check` (services/deals.py): the
+scheduler held sales nudges and the next turn was told not to close on the
+item — but nobody OWNED it, nothing measured its age, and a customer who came
+back the next day ("any news?") met the same promise again. The owner's rule:
+
+    A customer should never experience our internal system limitations as
+    a breakdown in our commitment to serve them.
+
+So here a commitment that is overdue is ESCALATED, accountably, while Neema
+stays on the thread:
+
+  * `reading(deal)` — the open check with its age and whether it is overdue
+    (older than the acknowledgement target during staffed hours).
+  * `escalate(...)` — one durable, idempotent intervention per stage: the
+    deal's `next_action["escalation"]` (stage, when, why, how many times the
+    customer has followed up), a flag row in the Activity log naming the
+    owner (the assigned colleague, or "needs an owner"), and the dashboard
+    bell. Stage `team` at the acknowledgement target, stage `supervisor` at
+    the supervisor target (the super admin's bell, and an operational
+    failure counted in /api/health). Never human mode: a thread parked
+    there is one nobody answers (services/unclaimed.py).
+  * `customer_followed_up(...)` — the live turn's hook: a customer writing
+    while a check is overdue escalates it NOW (whatever the sweeper's clock
+    says) and the writer is told to own the delay in one line, say it is
+    referred for a manual check, and never promise "shortly" again.
+  * `sweep(...)` — the scheduler's half: every tick, every overdue open
+    check is escalated to the stage its age earns; outside staffed hours
+    nothing rings — the check is queued and rings at the next staffed start.
+  * `health_view()` — open / overdue / unowned / oldest, for /api/health.
+
+What closes a commitment is unchanged: a colleague's reply in the thread or
+the team-answer endpoint (`deals.clear_team_check`), which now keeps the
+opened time and the age so time-to-answer is measurable. A notification is
+never counted as a resolution; only that reply is.
+"""
+from __future__ import annotations
+
+import json
+import logging
+from datetime import datetime, timedelta, timezone
+
+from app.core.config import settings
+
+_log = logging.getLogger("neema.commitments")
+
+STAGES = ("team", "supervisor")
+_NAIROBI = timedelta(hours=3)                   # Kenya is UTC+3 year-round
+
+
+def _aware(dt: datetime | None) -> datetime | None:
+    if dt is None:
+        return None
+    return dt if dt.tzinfo is not None else dt.replace(tzinfo=timezone.utc)
+
+
+def staffed_hours() -> tuple[int, int]:
+    """(start_hour, end_hour) in Nairobi time from `commitment_staffed_hours`
+    ("07-21"); a malformed setting means always staffed (never silently off)."""
+    raw = str(getattr(settings, "commitment_staffed_hours", "") or "")
+    try:
+        a, b = raw.split("-", 1)
+        start, end = int(a), int(b)
+        if 0 <= start < end <= 24:
+            return start, end
+    except (TypeError, ValueError):
+        pass
+    return 0, 24
+
+
+def staffed_now(now: datetime | None = None) -> bool:
+    now = _aware(now) or datetime.now(timezone.utc)
+    hour = (now + _NAIROBI).hour
+    start, end = staffed_hours()
+    return start <= hour < end
+
+
+def next_staffed_start(now: datetime | None = None) -> datetime:
+    """The next moment the team is on duty (UTC), for a check that fell due
+    out of hours."""
+    now = _aware(now) or datetime.now(timezone.utc)
+    start, _ = staffed_hours()
+    local = now + _NAIROBI
+    candidate = local.replace(hour=start, minute=0, second=0, microsecond=0)
+    if candidate <= local:
+        candidate += timedelta(days=1)
+    return candidate - _NAIROBI
+
+
+def ack_minutes() -> int:
+    return int(getattr(settings, "commitment_ack_minutes", 5) or 5)
+
+
+def supervisor_minutes() -> int:
+    return int(getattr(settings, "commitment_supervisor_minutes", 15) or 15)
+
+
+def reading(deal, *, now: datetime | None = None) -> dict | None:
+    """The open commitment on this deal, or None: {item, since, age_min,
+    overdue, stage_due, escalation}. `stage_due` is the stage the age earns
+    during staffed hours ("" when not yet due); `escalation` is what was
+    already recorded."""
+    from app.services.deals import team_check_open
+    item = team_check_open(deal, now=now)
+    if not item:
+        return None
+    nxt = deal.next_action if isinstance(getattr(deal, "next_action", None), dict) else {}
+    now = _aware(now) or datetime.now(timezone.utc)
+    try:
+        since = _aware(datetime.fromisoformat(nxt.get("since")))
+    except (TypeError, ValueError):
+        since = None
+    age_min = int((now - since).total_seconds() // 60) if since else 0
+    stage_due = ""
+    if age_min >= supervisor_minutes():
+        stage_due = "supervisor"
+    elif age_min >= ack_minutes():
+        stage_due = "team"
+    esc = nxt.get("escalation") if isinstance(nxt.get("escalation"), dict) else {}
+    return {"item": item, "since": since.isoformat(timespec="seconds") if since else None,
+            "age_min": age_min, "overdue": bool(stage_due), "stage_due": stage_due,
+            "escalation": esc}
+
+
+def _age_words(age_min: int) -> str:
+    if age_min >= 2880:
+        return f"{age_min // 1440} days"
+    if age_min >= 1440:
+        return "a day"
+    if age_min >= 120:
+        return f"{age_min // 60} hours"
+    if age_min >= 60:
+        return "an hour"
+    return f"{age_min} min"
+
+
+def writer_note(r: dict) -> str:
+    """What the live turn is told about an OVERDUE commitment — the owner's
+    shape: own the delay once, say it is now referred for a manual check,
+    keep serving, never the same promise again, never a claim it is done."""
+    item = r.get("item") or "the item"
+    age = _age_words(int(r.get("age_min") or 0))
+    return (f"the check on '{item}' was promised {age} ago and is still unanswered — "
+            f"it has been referred to the team for a manual check with an owner (the system "
+            f"recorded it; you need not call any tool for it). Say so in ONE line: a brief "
+            f"apology that we promised to check and have not confirmed yet, that it is now "
+            f"referred directly to our team, and that they will hear here once it is confirmed. "
+            f"NEVER 'shortly' or 'right away' again, NEVER say it is confirmed or available, "
+            f"NEVER a price for it; keep helping with everything else they ask")
+
+
+async def _owner_of(db, conv) -> str:
+    """'<name>' of the colleague assigned to this chat, or 'needs an owner'."""
+    agent_id = getattr(conv, "assigned_agent_id", None)
+    if agent_id is None:
+        return "needs an owner"
+    try:
+        from app.models.agent import Agent
+        a = await db.get(Agent, agent_id)
+        name = (getattr(a, "name", None) or getattr(a, "email", None) or str(agent_id)) if a else str(agent_id)
+        return str(name)
+    except Exception:
+        return str(agent_id)
+
+
+async def _ring(redis, conv, *, stage: str, item: str, age_min: int, owner: str,
+                follow_ups: int) -> None:
+    if redis is None:
+        return
+    ext = getattr(conv, "wa_id", None) or getattr(conv, "external_id", None) or "?"
+    title = (f"🚨 Unanswered check — {_age_words(age_min)}: {item}" if stage == "supervisor"
+             else f"⏳ Check still open — {_age_words(age_min)}: {item}")
+    body = (f"{ext} — owner: {owner}. "
+            + (f"The customer has followed up {follow_ups}×. " if follow_ups else "")
+            + ("Supervisor: this commitment is past the escalation target."
+               if stage == "supervisor" else "Please confirm and reply in the thread."))
+    try:
+        await redis.publish("ws:channel:agents:all", json.dumps({
+            "event": "notification", "type": f"commitment_{stage}",
+            "title": title[:120], "body": body[:200],
+            "conversationId": str(conv.id), "conv_id": str(conv.id), "wa_id": str(ext),
+        }))
+    except Exception as exc:
+        _log.info("commitment bell not sent for %s: %s", ext, exc)
+
+
+async def escalate(db, redis, conv, deal, *, stage: str, reason: str,
+                   followed_up: bool = False, now: datetime | None = None) -> dict | None:
+    """Record ONE intervention at `stage` (idempotent: a stage already
+    recorded is not recorded again; a follow-up still counts and re-rings).
+    Returns the escalation record, or None when nothing was due."""
+    if stage not in STAGES:
+        return None
+    r = reading(deal, now=now)
+    if r is None:
+        return None
+    now = _aware(now) or datetime.now(timezone.utc)
+    nxt = dict(deal.next_action or {})
+    esc = dict(nxt.get("escalation") or {})
+    already = esc.get("stage") or ""
+    rank = {"": 0, "team": 1, "supervisor": 2}
+    follow_ups = int(esc.get("follow_ups") or 0) + (1 if followed_up else 0)
+    new_stage = rank[stage] > rank.get(already, 0)
+    if not new_stage and not followed_up:
+        return esc or None
+    owner = await _owner_of(db, conv)
+    if new_stage:
+        esc.update({"stage": stage, "at": now.isoformat(timespec="seconds"), "reason": reason,
+                    "owner": owner})
+        esc.setdefault("first_at", esc["at"])
+    esc["follow_ups"] = follow_ups
+    if followed_up:
+        esc["last_follow_up"] = now.isoformat(timespec="seconds")
+    nxt["escalation"] = esc
+    deal.next_action = nxt
+    try:
+        from sqlalchemy.orm.attributes import flag_modified
+        flag_modified(deal, "next_action")
+    except Exception:
+        pass
+    if new_stage or followed_up:
+        try:
+            from app.models.intercept import Intercept, InterceptAction
+            what = ("🚨 UNANSWERED CHECK (supervisor)" if stage == "supervisor"
+                    else "⏳ UNANSWERED CHECK")
+            note = (f"{what} — '{r['item']}' promised {_age_words(r['age_min'])} ago, "
+                    f"still open. Owner: {owner}. "
+                    + (f"The customer followed up ({follow_ups}×); Neema told them it is "
+                       f"referred for a manual check. " if follow_ups else "")
+                    + "Please confirm the item and reply in the thread — that reply closes it.")
+            db.add(Intercept(conversation_id=conv.id, action=InterceptAction.flag, note=note[:2000]))
+        except Exception:
+            _log.info("commitment flag not recorded", exc_info=True)
+    await db.commit()
+    await _ring(redis, conv, stage=stage, item=r["item"], age_min=r["age_min"], owner=owner,
+                follow_ups=follow_ups)
+    _log.info("commitment escalated: conv=%s stage=%s age=%smin owner=%s follow_ups=%s",
+              getattr(conv, "id", "?"), stage, r["age_min"], owner, follow_ups)
+    return esc
+
+
+async def customer_followed_up(db, redis, key: str, channel: str, *,
+                               now: datetime | None = None) -> dict | None:
+    """The live turn's hook: when the customer writes while a commitment is
+    OVERDUE, escalate it now (the stage its age earns, at least `team`),
+    count the follow-up, and return the writer's note. None when no check is
+    open or it is not yet overdue (the ordinary team-check note stands)."""
+    from app.services.deals import _conversation_of, open_deal_for
+    conv = await _conversation_of(db, key, channel)
+    if conv is None:
+        return None
+    deal = await open_deal_for(db, conversation_id=conv.id)
+    if deal is None:
+        return None
+    r = reading(deal, now=now)
+    if not r or not r["overdue"]:
+        return None
+    stage = r["stage_due"] or "team"
+    await escalate(db, redis, conv, deal, stage=stage, reason="customer followed up",
+                   followed_up=True, now=now)
+    return writer_note(r)
+
+
+async def _open_checks(db, limit: int = 200) -> list:
+    from sqlalchemy import select
+    from app.models.conversation import Conversation
+    from app.models.deal import Deal
+    q = (select(Deal, Conversation)
+         .join(Conversation, Conversation.id == Deal.conversation_id)
+         .where(Deal.status == "open", Deal.next_action["kind"].astext == "team_check")
+         .order_by(Deal.updated_at.asc()).limit(limit))
+    return (await db.execute(q)).all()
+
+
+async def sweep(redis=None, *, now: datetime | None = None, limit: int = 200) -> dict:
+    """Escalate every overdue open check to the stage its age earns. Outside
+    staffed hours nothing rings: the check is marked queued for the next
+    staffed start and rings then. Returns counts. Best-effort."""
+    from app.database import AsyncSessionLocal
+    now = _aware(now) or datetime.now(timezone.utc)
+    out = {"open": 0, "overdue": 0, "team": 0, "supervisor": 0, "queued": 0}
+    try:
+        async with AsyncSessionLocal() as db:
+            rows = await _open_checks(db, limit)
+            for deal, conv in rows:
+                r = reading(deal, now=now)
+                if r is None:
+                    continue
+                out["open"] += 1
+                if not r["overdue"]:
+                    continue
+                out["overdue"] += 1
+                if not staffed_now(now):
+                    nxt = dict(deal.next_action or {})
+                    esc = dict(nxt.get("escalation") or {})
+                    if not esc.get("queued_for"):
+                        esc["queued_for"] = next_staffed_start(now).isoformat(timespec="seconds")
+                        nxt["escalation"] = esc
+                        deal.next_action = nxt
+                        try:
+                            from sqlalchemy.orm.attributes import flag_modified
+                            flag_modified(deal, "next_action")
+                        except Exception:
+                            pass
+                        await db.commit()
+                    out["queued"] += 1
+                    continue
+                stage = r["stage_due"]
+                before = (r["escalation"] or {}).get("stage") or ""
+                esc = await escalate(db, redis, conv, deal, stage=stage,
+                                     reason="sweep: past the target", now=now)
+                if esc and (esc.get("stage") or "") != before:
+                    out[stage] += 1
+    except Exception:
+        _log.warning("commitments sweep failed", exc_info=True)
+    return out
+
+
+async def health_view(now: datetime | None = None) -> dict:
+    """Counts only — never a handle, an item or a text."""
+    from app.database import AsyncSessionLocal
+    now = _aware(now) or datetime.now(timezone.utc)
+    view = {"open": 0, "overdue": 0, "unowned": 0, "oldest_min": 0,
+            "escalated": {"team": 0, "supervisor": 0}, "staffed": staffed_now(now)}
+    try:
+        async with AsyncSessionLocal() as db:
+            for deal, conv in await _open_checks(db):
+                r = reading(deal, now=now)
+                if r is None:
+                    continue
+                view["open"] += 1
+                view["oldest_min"] = max(view["oldest_min"], r["age_min"])
+                if r["overdue"]:
+                    view["overdue"] += 1
+                if getattr(conv, "assigned_agent_id", None) is None:
+                    view["unowned"] += 1
+                st = (r["escalation"] or {}).get("stage")
+                if st in view["escalated"]:
+                    view["escalated"][st] += 1
+    except Exception:
+        _log.info("commitments health view unavailable", exc_info=True)
+    return view

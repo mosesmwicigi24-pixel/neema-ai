@@ -151,3 +151,12 @@ the precise dependency · status. Last update: 2026-11-06, end of session 1.
 | South Africa priced in rand by Neema | not done — the market gate keeps ZA on USD (rand on request at the day's rate) because the hub carries ZAR for 5 of 110 products, no variants, and two of the five rows are far below their dollar price (`OWNER_ACTIONS.md` §4) | the owner's decision; then the one-line gate flip + search enum + fallback rate + prompt wording + tests (scoped, half a day) |
 | The website shows a South African viewer a mixed page (5 items in rand, 105 in dollars, variants in dollars under a rand card) | recorded; by design of the per-item public card | the same fill; or the public card using the market gate (one line) if the owner prefers one currency per page |
 | A rand guard like the USD one ("a hub row farther than 5% from KES ÷ rate is not quoted") | not built — no house KES/ZAR rate exists yet | with the switch |
+
+## Opened by slice 12 (2026-11-07, the owner's hybrid decision)
+
+| Item | Status | What closes it |
+|---|---|---|
+| safe-032, the person door, the hard language guard and the Chinese/Arabic labels measured with the model | NOT MEASURED — evaluation stopped on the owner's word | `agent_eval --cases --file independent_safety.jsonl` when lifted |
+| "Commercial recovery" (orders after an escalated-then-closed check) | NOT YET MEASURED; the deals table carries the closed record with age and escalation; no Performance-view column yet | a column on the Performance view, after the first weeks of data |
+| The acknowledgement / supervisor targets (5 / 15 min) against real staffing | first proposals | the owner adjusts the three settings after watching `commitments` in health for a week |
+| The 22 hand-over turns the door does not catch (asks Neema cannot fulfil: bank details, artwork, documents) | by design the model's judgement | the model run; a second deterministic door only if a phrase family emerges |

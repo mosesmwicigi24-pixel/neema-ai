@@ -84,6 +84,51 @@ def is_opt_out(text: str | None) -> bool:
     return bool(_OPT_OUT_RE.search(t))
 
 
+# THE PERSON DOOR (owner's decision, 2026-11-07): an explicit request for a
+# human is routed BEFORE the model answers — nobody argues with Neema to reach
+# a person. Explicit means the words, not a hard question: "talk to a real
+# person", "put me through to someone", "nataka kuongea na mtu", "parler à
+# quelqu'un". A bare "is this a bot?" is a question and gets an honest answer,
+# not a hand-over (the independent case safe-039). Measured on the case set:
+# 0 of the non-hand-over turns match (tests/test_person_door.py keeps it so).
+_PERSON_RE = re.compile(
+    r"(?:\b(?:talk|speak|chat)\s+(?:to|with)\s+(?:a\s+|an\s+|the\s+)?(?:real\s+|actual\s+|live\s+)?"
+    r"(?:person|human|human\s+being|agent|someone|somebody|staff|manager|supervisor)\b"
+    r"|\bput\s+me\s+through(?:\s+to\s+(?:a\s+|an\s+|the\s+)?(?:person|human|agent|someone|somebody|manager|team))?"
+    r"|\b(?:can|could|may)\s+(?:someone|somebody|a\s+person|an?\s+(?:agent|human))\s+(?:call|phone|ring|contact|talk\s+to|speak\s+to)\s+me\b"
+    r"|\b(?:i\s+(?:want|need|would\s+like|\'d\s+like)\s+(?:to\s+(?:talk|speak)\s+(?:to|with)\s+)?(?:a\s+|an\s+)?(?:real\s+|actual\s+)?(?:person|human|human\s+being|agent)\b)"
+    # "is this a bot?" / "am I talking to a robot?" are QUESTIONS, answered
+    # honestly (safe-039) — only a request moves the thread
+    r"|\b(?:no\s+more\s+bots?|not\s+a\s+bot\s+please|stop\s+the\s+bot|enough\s+of\s+the\s+(?:bot|robot))\b"
+    # Swahili
+    r"|\b(?:nataka|naomba|nahitaji|ningependa)\s+(?:kuongea|kuzungumza|kusema)\s+na\s+(?:mtu|binadamu|mhudumu|meneja)\b"
+    r"|\bsi\s+roboti\b|\bnipe\s+mtu\b"
+    # French
+    r"|\b(?:parler|discuter)\s+(?:à|a|avec)\s+(?:quelqu\'un|une?\s+(?:vraie?\s+)?(?:personne|humaine?|conseill(?:er|ère)|agent))\b"
+    r"|\bje\s+veux\s+(?:une?\s+)?(?:humain|personne|conseiller)\b"
+    # Portuguese
+    r"|\bfalar\s+com\s+(?:uma\s+pessoa|alguém|um\s+humano|uma?\s+atendente)\b|\bquero\s+(?:uma\s+pessoa|um\s+humano)\b"
+    r")", re.IGNORECASE)
+# a "person" that is the product's wearer or a head-count, never a request:
+# "for one person", "how many persons does the tray serve", "a person's size"
+_PERSON_NOT_RE = re.compile(
+    r"\b(?:for\s+(?:one|a|each|every|\d+)\s+person|persons?\s+(?:does|can|serves?|per)|per\s+person|"
+    r"person\'?s\s+(?:size|measurements?|height|chest)|in\s+person\b|personal(?:ly|i[sz]ed)?)\b", re.IGNORECASE)
+
+
+def wants_a_person(text: str | None) -> bool:
+    """True when the customer explicitly asks for a human (not a product
+    question that merely contains the word)."""
+    t = " ".join((text or "").split())
+    if not t or len(t) > 300:
+        return False
+    if not _PERSON_RE.search(t):
+        return False
+    if _PERSON_NOT_RE.search(t) and not re.search(r"\b(?:robot|bot|human|real\s+person|put\s+me\s+through)\b", t, re.I):
+        return False
+    return True
+
+
 # ── the durable record ───────────────────────────────────────────────────────
 
 def _key(channel: str, key: str) -> str:

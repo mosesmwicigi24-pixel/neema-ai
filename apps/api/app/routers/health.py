@@ -143,4 +143,11 @@ async def health(request: Request):
         out["recovery_jobs"] = await _recovery_view(getattr(request.app.state, "redis", None))
     except Exception:
         pass
+    # Commitments the team owes customers (open availability checks): how
+    # many, how many overdue or unowned, the oldest — counts only.
+    try:
+        from app.services.commitments import health_view as _commitments_view
+        out["commitments"] = await _commitments_view()
+    except Exception:
+        pass
     return out

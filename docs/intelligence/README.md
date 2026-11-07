@@ -24,6 +24,7 @@ NOT STARTED · NOT APPLICABLE.
 | `VERIFICATION_PASS_1.md`, `_2.md`, `_2B.md`, `_3.md`, `_3B.md`, `_4.md`, `_5.md`, `_6.md`, `_6B.md` | the independent adversarial passes (one per slice) with the implementer's response tables |
 | `EVIDENCE_DOSSIER_FOR_INDEPENDENT_REVIEW.md` | the self-contained evidence dossier for an outside reviewer: capabilities, before/after, examples, what is NOT MEASURED, the 100-point score status, appendix (6 Nov, main 7670de1) |
 | `OWNER_ACTIONS.md` | the exact steps for what only the owner can do, and the decisions waiting |
+| `ACCOUNTABLE_COMMITMENTS.md` | slice 12 (2026-11-07): the owner's hybrid decision on safe-032 — accountable commitments, the person door, the hard language guard, the Chinese/Arabic labels; before/after, tests, risks, rollback |
 | `COMMERCIAL_EI.md` | slice 11 (2026-11-07): the Commercial Emotional Intelligence directive's eight-part report — inventory, root cause of the collar case, the rewritten come-back rule, what was preserved, before/after, measurements, the 25-scenario map |
 | `reports/` | the Stage 1–8 reports and the 5–6 November audits this programme built on |
 

@@ -112,7 +112,8 @@ and `/api/admin/settings/prompt-inputs` (the 22 flag values).
   2. **Switch now.** South Africans would be quoted the five hub rows as they are (two of them wrong) and 105 products at a fallback KES ÷ rate I would have to set. Not recommended with the rows as they stand.
   3. **Stay on USD** (today's behaviour) and leave the five rows for the website; nothing changes.
   Until you say, nothing changes in code.
-- **A check promised yesterday that still cannot be done (the hub down):
+- **DECIDED 2026-11-07 (slice 12, `ACCOUNTABLE_COMMITMENTS.md`):** the owner's hybrid model for safe-032 (Neema keeps the customer, an accountable human intervention runs in parallel, a bell is never a resolution) — implemented; the explicit "I want a person" door — implemented; the language guard made hard with the held line in the customer's language — implemented; Chinese and Arabic answered in their language — labels corrected. The four bullets below are kept for the record. The operational targets (5-minute acknowledgement, 15-minute supervisor alert, staffed 07:00–21:00 Nairobi) are first proposals — adjust `commitment_ack_minutes`, `commitment_supervisor_minutes`, `commitment_staffed_hours`.
+- **(decided — see above) A check promised yesterday that still cannot be done (the hub down):
   hand the thread to a person, or keep it and ping the team?** The safety
   case `safe-032` is labelled "hand to a colleague"; the system's
   `check_availability` tool is designed NOT to park the thread ("a thread

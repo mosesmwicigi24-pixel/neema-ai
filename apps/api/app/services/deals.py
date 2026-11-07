@@ -343,9 +343,23 @@ async def clear_team_check(db, conversation_id, *, by: str = "team") -> bool:
     deal = await open_deal_for(db, conversation_id=conversation_id)
     if deal is None or team_check_open(deal) is None:
         return False
+    now = datetime.now(timezone.utc)
+    prev = deal.next_action if isinstance(deal.next_action, dict) else {}
+    try:
+        opened = datetime.fromisoformat(prev.get("since")) if prev.get("since") else None
+        if opened is not None and opened.tzinfo is None:
+            opened = opened.replace(tzinfo=timezone.utc)
+    except (TypeError, ValueError):
+        opened = None
     deal.blocking = None
+    # The closed record keeps when the check was opened, how long it took
+    # and whether it had been escalated — time-to-answer is measurable
+    # (owner, 2026-11-07: a notification is never a resolution; this is).
     deal.next_action = {"kind": "team_check_closed", "owner": by,
-                        "at": datetime.now(timezone.utc).isoformat(timespec="seconds")}
+                        "at": now.isoformat(timespec="seconds"),
+                        "item": prev.get("item"), "opened": prev.get("since"),
+                        "age_min": int((now - opened).total_seconds() // 60) if opened else None,
+                        "escalation": prev.get("escalation") or None}
     await db.commit()
     return True
 

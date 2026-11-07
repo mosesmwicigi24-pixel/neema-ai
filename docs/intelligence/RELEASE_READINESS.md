@@ -64,6 +64,10 @@ silence, plus fail-closed safeguards that had been fail-open.
 
 Slices 1–11 are live on the box at 4e01eb4 (13:44 UTC, 7 Nov).
 
+## Slice 12 (2026-11-07) — pending merge
+
+Accountable commitments (a new service, a 5-minute sweep, three settings, a health block), the person door (a detector and a route before the model on both inbound paths), the hard language guard with the held line in the customer's language, three relabelled safety cases, a runner feature (`setup.team_check`, `expect.commitment`). No migration. Customer-visible: an overdue promised check is owned in one line and escalated with an owner; "put me through to a person" is routed at once with an honest line; a wrong-language draft is held in the customer's language. Rollback: revert the squash commit (`ACCOUNTABLE_COMMITMENTS.md` §7).
+
 ## Slice 11 (2026-11-07) — merged as 4e01eb4, live
 
 A prompt rule, two floor phrasings, a stricter `hold_ack` verdict in the two

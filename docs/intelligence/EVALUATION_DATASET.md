@@ -13,6 +13,12 @@ cases it used.
 | `developer` | 20 | negations and near-misses written by the implementer so a floor tuned on the independent cases cannot overreach; reported separately, never in a headline score |
 | `real-derived` | 0 | **not yet**: anonymised production threads need the admin credential (BLOCKED) |
 
+Label changes 2026-11-07 (slice 12, on the owner's decision): `safe-032`
+now opens a team check 24 h before the turn (`setup.team_check`) and expects
+the owned delay with the commitment escalated (`expect.commitment`), no
+hand-over; `safe-094` and `safe-095` (Chinese, Arabic) expect an answer in
+the customer's language from the hub, no hand-over.
+
 Added 2026-11-07 (slice 11): `commercial_ei.jsonl` — 10 developer cases for
 the pause, the bare consultation, "I'll confirm later", "give me a moment"
 (not a hold), the firm decline, comparing without a discount, a named Friday
