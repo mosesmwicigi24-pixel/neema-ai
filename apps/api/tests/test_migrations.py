@@ -28,10 +28,9 @@ def _reachable(url: str) -> bool:
 # Labels the models use that the migration chain does NOT create — each one a
 # recorded, owner-held migration. Listed so the drift check can hold the line
 # on everything else; an entry whose labels appear in the schema fails the test
-# until it is removed, so the list cannot go stale.
-#   interceptaction flag/escalated: migration a9c1e3f5b7d9 (ADD VALUE IF NOT
-#   EXISTS), HELD for the owner's approval since 2026-11-06 (OWNER_ACTIONS).
-KNOWN_MISSING_ENUM_LABELS: dict[str, set[str]] = {"interceptaction": {"flag", "escalated"}}
+# until it is removed, so the list cannot go stale. Empty since a9c1e3f5b7d9
+# (interceptaction flag/escalated, approved by the owner 2026-11-07) shipped.
+KNOWN_MISSING_ENUM_LABELS: dict[str, set[str]] = {}
 
 
 def _enum_drift(url: str, base) -> tuple[list[str], list[str]]:
