@@ -3,6 +3,34 @@
 Everything below is blocked on access or a decision the implementer does not
 have. Each item says what it unblocks and the exact step.
 
+## 0. The API balance is exhausted (2026-11-07, ~06:30 UTC) — the live agent is down on it
+
+Every model call returns `400 … Your credit balance is too low` since about
+06:30 UTC. The box uses the same balance: the next customer message fails
+until it is topped up (health will read `replies: failing, needs_a_human`).
+The second blind pass^3 (run 42339309914) is VOID from model turn 794 on; the
+slice-9c safety run lost its last four turns.
+
+**Where the ~$137 went (estimate from the run records; the CI runs keep no
+token log — the Console's Usage page has the exact split):** about 4,000
+model turns of evaluation since 6 Nov 20:31 — the first blind pass that
+crashed (~740 turns), your own box run (~400), the blind pass^3 (1,257), the
+sales and safety readable runs (428), three safety-file runs (~310), and the
+second pass^3's 794 turns before the wall. A turn is ~3 producer calls on
+Sonnet 5.5 carrying the ~24k-token system prompt (cached) plus the Sonnet 5
+reviewer and a Haiku pass: 3–4 cents. Live customer replies are a rounding
+error (one gated reply today).
+
+1. **Top up** (Plans & Billing). Nothing is dispatched until you say so.
+2. **Set an evaluation budget.** For scale: a safety-file run ≈ $4; a sales
+   run ≈ $11; a blind pass^1 ≈ $15; a blind pass^3 ≈ $45.
+3. **Levers, none applied:** pass^1 for routine checks and pass^3 only for
+   the headline; the workflow's `only` input to re-run just the cases a fix
+   touches; trimming the system prompt (the dominant token on every call,
+   production included).
+4. **Exact production spend** (your box run and live traffic) on the box:
+   `docker compose -f docker-compose.yml -f docker-compose.vps.yml exec -T db psql -U neema -d neema -c "select date_trunc('day', created_at) d, model, count(*) calls, sum(prompt_tokens) prompt, sum(cached_tokens) cached, sum(completion_tokens) completion, round(sum(cost_usd),2) usd from ai_usage where created_at > now() - interval '3 days' group by 1,2 order by 1,2;"`
+
 ## 1. Run the real-model evaluation (unblocks 7 of the 10 score dimensions)
 
 **Update 20:00 UTC:** the repository secret is saved (thank you). The first

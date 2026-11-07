@@ -899,3 +899,25 @@ staged outage, the labels and the runner's door — not the model — moved the
 number, and the model's own failures stayed at nine or ten turns. Record:
 `results/agent-eval-safety-19e4952-run42344867352.json`.
 
+## Addendum E (2026-11-07, 07:0x UTC) — the credit wall; slice 9c measured; the second pass^3 void
+
+The Anthropic API balance ran out at about 06:30 UTC. Two runs were in
+flight. The second blind pass^3 (run 42339309914, main f4a5b37) is **void**
+from model turn 794 of 1,257: its recorded pass^3 (0/120) measures the
+billing wall and is used nowhere. Its complete first pass (120 cases, 459
+turns, no error) is a valid single pass on the slice-8 code: **391/459 =
+0.852 [0.816, 0.881]** against 397/459 = 0.865 on 6f1060a's first pass —
+within noise; the two kinds slice 8 targeted are gone (figure-from-nowhere
+3 → 0, turn raised 2 → 0). No regression visible, no improvement claimed;
+the pass^3 on current code is owed. The slice-9c safety run (42347925636)
+lost its last four turns to the same error; on the 117 turns answered,
+108 passed (0.923), and `safe-030` — the outage stock claim slice 9c
+targeted — passes. One more label (`safe-086`) carried the grant-pattern gap
+corrected on `safe-012`; it is bounded in all four labels now.
+
+Spend: about 4,000 evaluation model turns since 6 Nov 20:31, at roughly 3–4
+cents a turn (an estimate from the run records and the measured ~24k-token
+system prompt; the CI runs keep no token log). Records:
+`results/agent-eval-safety-b0e9eec-run42347925636.json`,
+`results/agent-eval-blind-f4a5b37-run42339309914-VOID-credits.json`.
+
