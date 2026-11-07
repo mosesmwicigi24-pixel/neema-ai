@@ -276,6 +276,17 @@ check (harness `v5-mutate.py`, 12 mutants, 12 killed).
 - **Not done, and why:** a door that forces `intercept_mode=human` before the model runs silences Neema on that thread ("a thread parked in human mode is one nobody answers" — the codebase's own warning), which is a policy decision; and it would move at most 1 of the 5 measured failures. Put to the owner (OWNER_ACTIONS §4) with the numbers. The judgement-call hand-overs need the readable tuning run's transcripts (the same run as the quotes) to see what the model does instead.
 - **Status:** NOT STARTED (change) / measured.
 
+### L7 · The schema drift test compares enum LABELS, with a self-expiring list of the one known gap
+
+- **Investigation:** `tests/test_migrations.py` compared table and column names only, which is how `interceptaction` went without `flag` / `escalated` from the initial migration on (every opt-out record, held-reply flag and escalation write failing silently on a database built from the chain).
+- **Change:** `_enum_drift` reads `pg_enum` on the freshly migrated database and compares it with every model Enum column's members. The one known gap is listed in `KNOWN_MISSING_ENUM_LABELS` with its held migration (a9c1e3f5b7d9) — the test fails on any OTHER missing label today, and fails again the moment the listed labels appear in the schema until the entry is removed, so the exception cannot outlive its reason. Verified locally on a fresh database: the type exists, exactly the two known labels are missing, nothing else drifts.
+- **Status:** VERIFIED COMPLETE (the test runs in CI's Migrations job on a fresh Postgres).
+
+### L8 · The second async engine is gone
+
+- **Change:** `app/core/database.py` (a second `create_async_engine` used only by the seeds, which the eval runner's recovery could not dispose) is deleted; `app/seeds.py` uses `app.database.AsyncSessionLocal` like everything else. No other importer existed.
+- **Status:** VERIFIED COMPLETE (import check; the seeds' behaviour is unchanged — same URL, same session factory settings).
+
 ### L2 · The eval workflow takes a case file, a repeat count and an id prefix
 
 - **Change:** `workflow_dispatch` inputs `file` (default `blind_heldout.jsonl`), `repeat` (default 3), `only`, `scripted` (default true) — the defaults reproduce the previous behaviour exactly. A tuning file at `--repeat 1` is an investigation run whose transcripts may be read per case; the blind file stays aggregates-only.

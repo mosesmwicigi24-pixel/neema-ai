@@ -25,6 +25,45 @@ def _reachable(url: str) -> bool:
         return False
 
 
+# Labels the models use that the migration chain does NOT create — each one a
+# recorded, owner-held migration. Listed so the drift check can hold the line
+# on everything else; an entry whose labels appear in the schema fails the test
+# until it is removed, so the list cannot go stale.
+#   interceptaction flag/escalated: migration a9c1e3f5b7d9 (ADD VALUE IF NOT
+#   EXISTS), HELD for the owner's approval since 2026-11-06 (OWNER_ACTIONS).
+KNOWN_MISSING_ENUM_LABELS: dict[str, set[str]] = {"interceptaction": {"flag", "escalated"}}
+
+
+def _enum_drift(url: str, base) -> tuple[list[str], list[str]]:
+    """(labels a model Enum column has and the database type lacks, minus the
+    known-held ones; known-held labels the database now HAS)."""
+    eng = sa.create_engine(url)
+    with eng.connect() as c:
+        rows = c.execute(sa.text(
+            "select t.typname, e.enumlabel from pg_type t join pg_enum e on e.enumtypid = t.oid")).all()
+    db: dict[str, set[str]] = {}
+    for typname, label in rows:
+        db.setdefault(typname, set()).add(label)
+    missing: list[str] = []
+    stale: list[str] = []
+    seen: set[str] = set()
+    for t in base.metadata.sorted_tables:
+        for col in t.columns:
+            typ = col.type
+            if not isinstance(typ, sa.Enum) or not typ.name or typ.name in seen:
+                continue
+            seen.add(typ.name)
+            want = set(typ.enums)
+            have = db.get(typ.name)
+            if have is None:
+                missing.append(f"TYPE {typ.name} ({t.name}.{col.name})")
+                continue
+            known = KNOWN_MISSING_ENUM_LABELS.get(typ.name, set())
+            missing += sorted(f"{typ.name}.{v}" for v in (want - have - known))
+            stale += sorted(f"{typ.name}.{v}" for v in (known & have))
+    return missing, stale
+
+
 @pytest.mark.skipif(not _sync_url() or not _reachable(_sync_url()),
                     reason="needs a reachable Postgres (run in the Docker verify harness)")
 def test_chain_replays_fresh_and_schema_matches_models():
@@ -60,6 +99,14 @@ def test_chain_replays_fresh_and_schema_matches_models():
             cols = {c["name"] for c in insp.get_columns(t.name)}
             missing += [f"{t.name}.{c.name}" for c in t.columns if c.name not in cols]
         assert not missing, f"model↔migration drift (write a migration!): {missing}"
+        # Enum LABELS too (slice 7): names and columns matching is not enough —
+        # the code wrote `interceptaction` values the migrated type never had
+        # (`flag`, `escalated`), and every such write failed silently from the
+        # initial migration on. Compare each Enum column's members with pg_enum.
+        missing_labels, stale_known = _enum_drift(fresh_url, Base)
+        assert not missing_labels, ("enum label drift (write an ALTER TYPE … ADD VALUE migration!): "
+                                    f"{missing_labels}")
+        assert not stale_known, f"KNOWN_MISSING_ENUM_LABELS entries now present — remove them: {stale_known}"
     finally:
         with admin.connect() as c:
             c.execute(sa.text(

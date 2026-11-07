@@ -8,7 +8,7 @@ from sqlalchemy.exc import ProgrammingError
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from app.models.agent import Agent
 from app.models.catalog import Catalog
-from app.core.database import AsyncSessionLocal
+from app.database import AsyncSessionLocal
 from app.core.security import hash_password
 
 
