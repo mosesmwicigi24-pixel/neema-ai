@@ -9,6 +9,19 @@ name: Agent eval (model in the loop)
 
 on:
   workflow_dispatch:
+    inputs:
+      file:
+        description: "Case file to run (blind_heldout.jsonl is the programme's held-out number; a tuning file is readable per case)"
+        default: blind_heldout.jsonl
+      repeat:
+        description: "Runs per case (pass^k)"
+        default: "3"
+      only:
+        description: "Case id prefix filter (empty = every case in the file)"
+        default: ""
+      scripted:
+        description: "Also run the scripted battery first (true/false)"
+        default: "true"
 
 jobs:
   eval:
@@ -65,13 +78,20 @@ jobs:
       # `pipefail`: a crash behind `tee` must fail the step (2026-11-06: both
       # stages died at start-up and the run still reported success).
       - name: Scripted scenarios (the original battery)
+        if: ${{ inputs.scripted != 'false' }}
         shell: bash
         run: set -o pipefail; python -m app.jobs.agent_eval 2>&1 | tee agent-eval-transcript.txt
-      - name: The blind held-out case set, pass^3 (the programme's held-out number)
+      # Defaults: the blind held-out set, pass^3 — the programme's held-out
+      # number. A tuning file with --repeat 1 is an investigation run whose
+      # transcripts may be read per case (slice 7).
+      - name: The case set (default blind held-out, pass^3)
         shell: bash
         run: |
           set -o pipefail
-          python -m app.jobs.agent_eval --cases --file blind_heldout.jsonl --repeat 3 \
+          ONLY=""
+          if [ -n "${{ inputs.only }}" ]; then ONLY="--only ${{ inputs.only }}"; fi
+          python -m app.jobs.agent_eval --cases --file "${{ inputs.file || 'blind_heldout.jsonl' }}" \
+            --repeat "${{ inputs.repeat || '3' }}" $ONLY \
             --out agent-eval-blind.json --packet rater-packet.md 2>&1 | tee agent-eval-blind.log
       - uses: actions/upload-artifact@v4
         if: always()

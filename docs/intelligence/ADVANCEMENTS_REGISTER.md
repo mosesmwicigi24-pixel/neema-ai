@@ -239,6 +239,28 @@ check (harness `v5-mutate.py`, 12 mutants, 12 killed).
 - **Change (prepared, not in the repository):** `ALTER TYPE interceptaction ADD VALUE IF NOT EXISTS 'flag' / 'escalated'`, idempotent, in alembic's autocommit block, revision a9c1e3f5b7d9 on head e8a1c3d5f7b9. Kept in the session scratchpad until the owner says "approve the enum migration" (DB migrations need explicit approval). OWNER_ACTIONS carries the one-line read-only check for the production database.
 - **Status:** BLOCKED (owner decision).
 
+## Slice 7 (2026-11-07, 00:3x) · the two next measured failure kinds — language, quotes
+
+### L1 · The language metric read Swahili too narrowly and the case label too widely
+
+- **Investigation (aggregates over the blind run record; no case text read):** of the 19 "reply not in the customer's language" failures, 15 were Swahili cases. On 11 of those 15 the reply was Swahili by verb shape (`guess_language` → sw; ni-ta-, tu-na-, the calendar and courtesy words) but had at most one word from the short list the runner's `language_ok` used (`looks_swahili`), so the runner called a Swahili reply English. On 9 of the 65 Swahili-case turns the customer's own line was English (`guess_language` → en); the runner scored those replies against the case label, though the house rule reads per message ("Reply in Swahili ONLY when the customer wrote their message in Swahili") and the gate deliberately leaves English and mixed lines alone. The tuning set's authors had labelled such switches per turn (`expect.lang`, 17 turns); the blind set's had not. The remaining real failures were 3–4 English replies to Swahili lines; the gate's deterministic language finding fired on 4 turns in the whole run (1 sw, 2 pt, 1 hi), every one correct, 0 false findings — but it is soft, so the English reply went out with a note.
+- **Change:** `eval_run.turn_language(case_lang, user_text)` — the author's per-turn label wins; else the customer's own words decide (neutral words alone keep the case's language; a plainly Hindi / French / Portuguese line expects that language; an English line in a Swahili case or a Swahili line in an English case is not counted — the rule is silent on continuity and the gate leaves them alone); `_reads_swahili` = the short list OR `guess_language` → sw, used by both the Swahili and the English checks. Three tests (`test_eval_harness.py`): verb-shape Swahili, the per-turn expected language, and `check_turn` scoring against the turn.
+- **Measured — the same recorded replies re-scored (nothing re-run):** language continuity 405/424 = 0.955 → **407/412 = 0.988 [0.972, 0.995]**; turns passed 367/459 = 0.800 → **380/459 = 0.828 [0.791, 0.860]**; Swahili turns 42/65 = 0.646 → **54/65 = 0.831**; cases passed 46/120 → 53/120. These are measurement corrections, not model improvements: the replies did not change. Recorded as such in BENCHMARK_RESULTS and the dossier's Addendum B. The floors are untouched (`guess_language` was not changed).
+- **Not done (UNFINISHED):** the gate's language finding stays soft — promoting it to hard means a Swahili hold DM and a flagged colleague for a language slip, which is a policy change the owner decides (OWNER_ACTIONS §4, with the 4 true / 0 false tally); `guess_language` places a lone "Sawa" / "poa" as Swahili (its own docstring says neutral words never decide) and cannot place first-person "na-" forms without a subject prefix ("Naweza kulipa kwa kadi?" → en).
+- **Status:** VERIFIED COMPLETE for the metric (tests + re-score); the real-model effect on the remaining 5 language failures is measured by the next run.
+
+### L2 · The eval workflow takes a case file, a repeat count and an id prefix
+
+- **Change:** `workflow_dispatch` inputs `file` (default `blind_heldout.jsonl`), `repeat` (default 3), `only`, `scripted` (default true) — the defaults reproduce the previous behaviour exactly. A tuning file at `--repeat 1` is an investigation run whose transcripts may be read per case; the blind file stays aggregates-only.
+- **Why:** the 16 "no price given where a quote was expected" failures cannot be diagnosed from aggregates (below) and the blind transcripts may not be read; the readable tuning set has 211 quote-expected turns.
+- **Status:** IMPLEMENTED BUT NOT VERIFIED until a dispatched run completes with the inputs.
+
+### L3 · "No price where a quote was expected" — investigated, not yet changed
+
+- **What the aggregates say (16 failing quote turns of 116):** every one called `search_catalog` (so the catalogue was reached); every reply carried **0 money figures**; 10 of 16 asked one question; the gate's verdicts were pass 5 · soft 4 · rewritten 5 · **held 2** (the 100 passing quote turns: pass 32 · soft 43 · rewritten 25 · held 0); 7 of 16 also called `check_availability`; languages en 10 · fr 4 · sw 2; categories org-purchase 7 · complex-enquiry 5 · multilingual 5. Reading: in 2 the gate held the draft (a hold DM carries no price); in the other 14 the model answered without a price — a clarifying question or an availability deferral where the label expected a quote. Which of those is the model's fault and which is the label's cannot be decided from counts.
+- **Next step:** a readable tuning run (`independent_sales.jsonl`, repeat 1) through the workflow's new inputs; the transcripts of its quote failures decide the smallest change (prompt precedence for "price first, then the one question", or a label correction).
+- **Status:** NOT STARTED (change) / investigation recorded.
+
 ## Verification pass 1 — further repairs (2026-11-06)
 
 - **W1-5 (sync channels):** web chat and the ManyChat relay re-check the takeover after composing and return the human line if a colleague took the thread.

@@ -44,6 +44,14 @@ and `/api/admin/settings/prompt-inputs` (the 22 flag values).
 ## 4. Decisions waiting in the registers
 
 - The `/api/health` hub wait (one function; production behaviour).
+- **Whether the reply gate's language finding becomes hard.** Today an
+  English draft answering a Swahili / Hindi / French / Portuguese line gets a
+  rewrite request and, if the rewrite is still English, goes out with a note.
+  Over the whole first real-model pass the finding fired 4 times, all correct,
+  0 false. Hard would mean: still English after the rewrite → the hold DM (in
+  Swahili where the customer wrote Swahili) and a flagged colleague, never an
+  English reply to a Swahili customer. Say "make the language finding hard"
+  and it ships with the next slice; otherwise it stays soft.
 - An index on `messages.waba_msg_id` and a DB idempotency key for orders
   (migrations).
 - Whether a DB error during Meta comment capture should make Meta redeliver.

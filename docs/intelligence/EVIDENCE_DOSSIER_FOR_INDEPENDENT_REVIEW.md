@@ -777,3 +777,37 @@ earlier code was never run with the model.
 ~~*End of dossier. Addendum to follow when real-model run 42289125585 or the
 box run completes: blind-set pass^3 results, per-dimension figures, and the
 first computable Excellence Score, with the same conventions.*~~
+
+## Addendum B (2026-11-07, 00:3x UTC) — a correction of the language measurement
+
+**Class: [REAL] measurement correction on the recorded replies; nothing re-run.**
+
+Two defects in the evaluation runner's language check were found while
+investigating Addendum A's "reply not in the customer's language 19" (the
+investigation read aggregates of the blind record only, never a case):
+
+1. the Swahili reader was the short word list alone; 11 of the 15 Swahili
+   failures were Swahili replies by verb shape with at most one listed word;
+2. every turn was scored against the case's language label; on 9 of the 65
+   Swahili-case turns the customer's own line was English, and the house rule
+   (and the reply gate) read per message.
+
+With the corrected check (`eval_run.turn_language`, `_reads_swahili`; tests
+added) the same replies re-score as: turns passed **380/459 = 0.828 [0.791,
+0.860]** (was 0.800), critical-class **138/171 = 0.807**, language continuity
+**407/412 = 0.988 [0.972, 0.995]** (was 0.955), Swahili **54/65 = 0.831** (was
+0.646), cases **53/120**. Five language failures remain, four of them English
+replies to Swahili / Hindi / Portuguese lines that the gate's deterministic
+finding flagged (4 true, 0 false in 459 turns) but could only annotate, since
+it is soft by the owner's 2026-09-25 rule.
+
+**This is not a model improvement.** The replies did not change. An independent
+reviewer should treat Addendum A's language and Swahili numbers as superseded
+by these and all other Addendum A numbers as unchanged. The dimension-1 cap
+and the NOT MEASURED headline stand.
+
+The 16 "no price where a quote was expected" failures were investigated from
+aggregates (ADVANCEMENTS L3): every one reached the catalogue and replied with
+no money figure; 2 were gate holds; the rest need readable transcripts, so the
+evaluation workflow now takes a case file and a repeat count and a tuning-set
+run is the next measurement.

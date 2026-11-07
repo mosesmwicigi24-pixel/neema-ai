@@ -137,6 +137,50 @@ def test_language_continuity_checks_script_and_tongue():
     assert eval_run.language_ok("sw", "") is None
 
 
+def test_a_swahili_reply_is_read_by_its_verb_shape_not_only_the_word_list():
+    # slice 7: 11 of 15 blind "not in the customer's language" failures were
+    # Swahili replies with one listed word — verb shape (ni-ta-, tu-na-) counts
+    reply = "Nitakujulisha kesho. Tunasafirisha kote duniani kwa DHL."
+    from app.agent.voice import looks_swahili
+    assert not looks_swahili(reply)            # the short list alone misses it
+    assert eval_run.language_ok("sw", reply) is True
+    assert eval_run.language_ok("en", reply) is False
+    assert eval_run.language_ok("en", "Noted. The Silver Communion Tray is KES 18,000.") is True
+
+
+def test_the_expected_language_follows_the_customers_own_turn():
+    tl = eval_run.turn_language
+    assert tl("sw", "Bei gani?") == "sw"
+    assert tl("sw", "Sawa") == "sw"                       # neutral words keep the case's language
+    assert tl("sw", "ok") == "sw"
+    assert tl("sw", "Can I pay by card instead?") is None  # an English line in a Swahili case: not held
+    assert tl("en", "Nimelipa, asante sana") is None       # a Swahili line in an English case: not held
+    assert tl("ke-en", "How much for the stole?") == "en"
+    assert tl("en", "Bonjour, quel est le prix de la chasuble?") == "fr"
+    assert tl("sw", "Bom dia, qual é o preço?") == "pt"
+    assert tl("sheng", "Niaje, bei ni ngapi?") is None
+    assert tl("mixed", "ok") is None
+    assert tl(None, "hello") is None
+
+
+def test_check_turn_scores_language_against_the_turn_not_only_the_case_label():
+    case = {"id": "c", "lang": "sw", "critical": False, "categories": ["multilingual"]}
+    facts = {"tools": [], "review": "pass"}
+    english_turn = {"user": "Can I pay by card instead?", "expect": {"next": "answer"}}
+    v = eval_run.check_turn(case, 1, english_turn, "Yes — card or M-Pesa, whichever suits you.", facts,
+                            opted_out=False, intercept_mode="ai", after_hold=False)
+    assert not any("customer's language" in f for f in v["failures"]), v["failures"]
+    swahili_turn = {"user": "Ninaweza kulipa kwa kadi?", "expect": {"next": "answer"}}
+    v = eval_run.check_turn(case, 1, swahili_turn, "Yes — card or M-Pesa, whichever suits you.", facts,
+                            opted_out=False, intercept_mode="ai", after_hold=False)
+    assert any("customer's language (sw)" in f for f in v["failures"]), v["failures"]
+    # the author's per-turn label still wins over the floor's reading
+    labelled = {"user": "Can I pay by card instead?", "expect": {"next": "answer", "lang": "sw"}}
+    v = eval_run.check_turn(case, 1, labelled, "Yes — card or M-Pesa, whichever suits you.", facts,
+                            opted_out=False, intercept_mode="ai", after_hold=False)
+    assert any("customer's language (sw)" in f for f in v["failures"]), v["failures"]
+
+
 @pytest.mark.asyncio
 async def test_the_sandbox_swaps_and_restores_the_customer_reaching_tools():
     from app.agent import tools as _t
