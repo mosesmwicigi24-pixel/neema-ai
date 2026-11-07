@@ -13,6 +13,14 @@ cases it used.
 | `developer` | 20 | negations and near-misses written by the implementer so a floor tuned on the independent cases cannot overreach; reported separately, never in a headline score |
 | `real-derived` | 0 | **not yet**: anonymised production threads need the admin credential (BLOCKED) |
 
+Added 2026-11-07 (slice 11): `commercial_ei.jsonl` — 10 developer cases for
+the pause, the bare consultation, "I'll confirm later", "give me a moment"
+(not a hold), the firm decline, comparing without a discount, a named Friday
+that books the check-in, the return after the pause, money as the reason, and
+the pause in Swahili; `audit.jsonl` gains `audit-011`, the owner's collar
+case. Every `hold_ack` turn forbids a question and the reminder phrasings and
+requires the item's name. Totals after: 464 non-blind cases, 1,268 turns.
+
 Totals: 430 cases, 1,220 turns, 161 critical. Languages (case level): en 210,
 Kenyan English 116, Swahili 49, mixed 18, French 15, Portuguese 11, Sheng 7,
 Hindi 4. Categories cover all eleven the directive lists (coverage table in

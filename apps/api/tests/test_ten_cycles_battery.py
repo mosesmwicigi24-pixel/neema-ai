@@ -36,8 +36,8 @@ def test_the_prompt_reads_as_one_mind():
     assert "THE OBJECTION LADDER" in p and "3. THE OFFER YOU ARE HOLDING (below)" in p
     assert "THE OFFER YOU ARE HOLDING" not in _p(offer="")
     assert "3. No offer is running today" in _p(offer="")
-    # deferrals: three-part once, then one line, then silence
-    assert 'A first "I\'ll get back to\n  you" with an item in play gets the three-part message' in p
+    # deferrals: the come-back message once (keep the item, one step, no question), then one line, then silence
+    assert 'A first "I\'ll get back to\n  you" with an item in play gets the come-back message' in p
     # one figure per item, beside the scope rule
     assert "ONE figure per item: a hub row has one price" in p
     # measurement timing, several wearers, the written quotation

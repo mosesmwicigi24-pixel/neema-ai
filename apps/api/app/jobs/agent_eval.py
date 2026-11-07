@@ -157,8 +157,11 @@ def experience_checks(reply: str, user_text: str, *, after_hold: bool) -> list[s
     said = reading.get("customer_said")
     if said in ("needs_time", "comparing", "consulting") and _PITCH_RE.search(r):
         flags.append("PITCH AFTER A REQUEST FOR TIME")
+    from app.jobs.eval_run import asks_for_a_check_in
     if after_hold and _DATE_ASK_RE.search(r):
         flags.append("RE-ASKED FOR A DATE")
+    elif said in ("needs_time", "comparing", "consulting") and asks_for_a_check_in(r):
+        flags.append("ASKED FOR A CHECK-IN DATE THEY DID NOT OFFER")
     if said == "stop" and r and len(r.split()) > 40:
         flags.append("LONG OPT-OUT ACKNOWLEDGEMENT")
     lang = guess_language(user_text)
