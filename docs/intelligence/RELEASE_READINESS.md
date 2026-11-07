@@ -1,6 +1,6 @@
 # Final Release Readiness Report — slices 1–4 (2026-11-06)
 
-**Status: slices 1–5, both eval fixes and the evidence dossier are LIVE (box on `df50f2f` at ~22:46 UTC; slice 5 = PR #322)** — slice 1 (PR #316) squash-merged as `c8c3356` at 17:18 UTC
+**Status: slices 1–6, both eval fixes and the evidence dossier are LIVE (box on `ee1fe26` at ~00:16 UTC on 7 Nov; slice 6 = PR #323: runner repairs and the deterministic silence for bare closers, measured on the blind floor 0.887 → 0.956)** — slice 1 (PR #316) squash-merged as `c8c3356` at 17:18 UTC
 on the owner's word ("merge and deploy when green"), after the full suite
 (3,294 passed, 0 failed) and CI were green on its head. The box reported
 `version = c8c3356…` at ~17:52 UTC with `agent.replies = ok`, outreach still
