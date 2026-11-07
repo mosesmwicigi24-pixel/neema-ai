@@ -104,6 +104,18 @@ def test_links_signed_within_one_bucket_are_identical_and_last_at_least_the_ttl(
     assert t0 + 600 + 3600 <= exp <= t0 + 1 + 3600 + 900
 
 
+def test_a_link_signed_a_fraction_after_a_bucket_boundary_still_lasts_the_full_ttl():
+    """Regression: with `now` truncated to the second, now = boundary + 0.5 s
+    gave exp = boundary + ttl, half a second short of now + ttl (CI run
+    42373668954 hit it live)."""
+    from app.core import media_urls as mu
+    t0 = 1_800_000_000.0                       # a 900 s bucket boundary
+    for now in (t0, t0 + 0.5, t0 + 0.999, t0 + 899.9):
+        exp, _ = _qs(mu.sign_media_url(NAME, 3600, now=now))
+        assert now + 3600 <= exp <= now + 3600 + 900, now
+    assert _qs(mu.sign_media_url(NAME, 3600, now=t0))[0] == t0 + 3600
+
+
 def test_meta_links_carry_the_long_lifetime_dashboard_links_the_short_one():
     from app.core import media_urls as mu
     now = time.time()
