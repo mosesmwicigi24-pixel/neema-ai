@@ -3,7 +3,9 @@
 Everything below is blocked on access or a decision the implementer does not
 have. Each item says what it unblocks and the exact step.
 
-## 0. The API balance is exhausted (2026-11-07, ~06:30 UTC) — the live agent is down on it
+## 0. The API balance ran out (2026-11-07, ~06:30 UTC) — topped up ~08:00, the live agent recovered at 08:04 UTC; evaluation stays STOPPED on the owner's word
+
+**Resolved for production (08:04 UTC):** after the top-up a customer turn completed, the "credit" state cleared, and the missed-reply sweep answered the threads left hanging (gated replies 2 → 5 between 08:05 and 08:09, then flat). The evaluation stop stands until the owner asks. The paragraphs below are the record of the outage.
 
 Every model call returns `400 … Your credit balance is too low` since about
 06:30 UTC. The box uses the same balance: the next customer message fails
