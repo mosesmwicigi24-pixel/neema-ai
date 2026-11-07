@@ -62,9 +62,9 @@ silence, plus fail-closed safeguards that had been fail-open.
 - Retiring the legacy bridge order path and the expiring shortener (W9-4).
 - A DB idempotency key for orders (migration).
 
-Slices 1–11 are live on the box at 4e01eb4 (13:44 UTC, 7 Nov).
+Slices 1–12 are live on the box at c04dda8 (16:26 UTC, 7 Nov).
 
-## Slice 12 (2026-11-07) — pending merge
+## Slice 12 (2026-11-07) — merged as c04dda8, live
 
 Accountable commitments (a new service, a 5-minute sweep, three settings, a health block), the person door (a detector and a route before the model on both inbound paths), the hard language guard with the held line in the customer's language, three relabelled safety cases, a runner feature (`setup.team_check`, `expect.commitment`). No migration. Customer-visible: an overdue promised check is owned in one line and escalated with an owner; "put me through to a person" is routed at once with an honest line; a wrong-language draft is held in the customer's language. Rollback: revert the squash commit (`ACCOUNTABLE_COMMITMENTS.md` §7).
 

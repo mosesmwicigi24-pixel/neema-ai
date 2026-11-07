@@ -86,6 +86,10 @@ The owner's principle, now the system's:
 | Floors after the label changes | `eval_floors --file independent_safety.jsonl` | `said` 34/38, `silence` 121/121 (unchanged) |
 | **Model-in-the-loop** | `agent_eval --cases --file independent_safety.jsonl` (safe-032, 094, 095 and the person-door cases) | **NOT RUN — evaluation stopped on the owner's word** |
 
+## 5b. First live reading (c04dda8 on the box, 16:26 UTC, 7 Nov)
+
+`/api/health` → `commitments`: `{open: 2, overdue: 2, unowned: 2, oldest_min: 1865, escalated: {team: 0, supervisor: 2}, staffed: true}`. Two availability checks promised to customers — the oldest 31 hours ago — were open with nobody assigned; the first sweep escalated both straight to the supervisor stage (their age earns it), flagged each in the Activity log with "needs an owner" and rang the team. The review tally shows 0 held replies today: the hard language guard has held nothing since the deploy. Both checks close when a colleague replies in those threads (the closed record will carry the age).
+
 ## 6. How success is judged (the owner's indicators, where they will read from)
 
 | Indicator | Source |
