@@ -85,7 +85,11 @@ and `/api/admin/settings/prompt-inputs` (the 22 flag values).
 
    If the list lacks `flag` or `escalated`, every opt-out record, held-reply
    flag and escalation write on the box has been failing silently (each is
-   wrapped in a try). Approving the one-line migration (`ADD VALUE IF NOT
+   wrapped in a try) — and, until slice 8 R1 is live, a live turn's
+   thread probe could abort the turn the same way the evaluation runs'
+   turns aborted (reproduced; the probe is a SELECT on those labels). That
+   production replies are flowing suggests the box HAS the labels; this
+   command is the proof. Approving the one-line migration (`ADD VALUE IF NOT
    EXISTS`, idempotent, no table rewrite) fixes it; say "approve the enum
    migration" and it ships with the next slice.
 2. **Send the box run's files** (`eval-out/agent-eval-blind-7670de1-*.json` and `.log`) — they are the second independent measurement, on the production database.

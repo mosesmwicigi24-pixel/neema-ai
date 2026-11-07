@@ -197,44 +197,54 @@ async def business_in_play(db, channel: str, key: str) -> bool:
     sale in progress and is never cooled. Best-effort: any failure → not."""
     if db is None:
         return False
+    # Each probe runs in a SAVEPOINT: this is the caller's own session (the
+    # live turn's), and a probe that fails is swallowed — which left the
+    # transaction ABORTED and the turn's next query raising "current
+    # transaction is aborted" (every "turn raised" in the evaluation runs of
+    # 6–7 Nov 2026: the flag/escalated probe below fails on a database whose
+    # `interceptaction` enum lacks those labels, even as a SELECT). A failed
+    # probe now rolls back to its savepoint and the turn goes on.
     try:
-        from app.agent import cart as cartmod
-        cart = await cartmod.get_cart(db, key, channel)
-        if cart and (cart.get("items") or []):
-            return True
+        async with db.begin_nested():
+            from app.agent import cart as cartmod
+            cart = await cartmod.get_cart(db, key, channel)
+            if cart and (cart.get("items") or []):
+                return True
     except Exception:
         pass
     try:
-        from datetime import timedelta
-        from sqlalchemy import select
-        from app.models.order_event import OrderEvent
-        since = datetime.now(timezone.utc) - timedelta(days=7)
-        row = (await db.execute(
-            select(OrderEvent.id).where(OrderEvent.wa_id == key,
-                                        OrderEvent.payment_status == "unpaid",
-                                        OrderEvent.created_at > since).limit(1))).scalar_one_or_none()
-        if row:
-            return True
+        async with db.begin_nested():
+            from datetime import timedelta
+            from sqlalchemy import select
+            from app.models.order_event import OrderEvent
+            since = datetime.now(timezone.utc) - timedelta(days=7)
+            row = (await db.execute(
+                select(OrderEvent.id).where(OrderEvent.wa_id == key,
+                                            OrderEvent.payment_status == "unpaid",
+                                            OrderEvent.created_at > since).limit(1))).scalar_one_or_none()
+            if row:
+                return True
     except Exception:
         pass
     try:
-        from datetime import timedelta
-        from sqlalchemy import select
-        from app.services.deals import _conversation_of, open_deal_for
-        from app.models.intercept import Intercept, InterceptAction
-        conv = await _conversation_of(db, key, channel)
-        if conv is not None:
-            deal = await open_deal_for(db, conversation_id=conv.id)
-            if deal is not None and (deal.stage or "new") not in ("new", "lost"):
-                return True
-            since = datetime.now(timezone.utc) - timedelta(hours=24)
-            flag = (await db.execute(
-                select(Intercept.id).where(
-                    Intercept.conversation_id == conv.id,
-                    Intercept.action.in_((InterceptAction.flag, InterceptAction.escalated)),
-                    Intercept.created_at > since).limit(1))).scalar_one_or_none()
-            if flag:
-                return True
+        async with db.begin_nested():
+            from datetime import timedelta
+            from sqlalchemy import select
+            from app.services.deals import _conversation_of, open_deal_for
+            from app.models.intercept import Intercept, InterceptAction
+            conv = await _conversation_of(db, key, channel)
+            if conv is not None:
+                deal = await open_deal_for(db, conversation_id=conv.id)
+                if deal is not None and (deal.stage or "new") not in ("new", "lost"):
+                    return True
+                since = datetime.now(timezone.utc) - timedelta(hours=24)
+                flag = (await db.execute(
+                    select(Intercept.id).where(
+                        Intercept.conversation_id == conv.id,
+                        Intercept.action.in_((InterceptAction.flag, InterceptAction.escalated)),
+                        Intercept.created_at > since).limit(1))).scalar_one_or_none()
+                if flag:
+                    return True
     except Exception:
         pass
     return False
