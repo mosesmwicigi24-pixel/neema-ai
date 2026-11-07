@@ -237,7 +237,7 @@ check (harness `v5-mutate.py`, 12 mutants, 12 killed).
 ### R3 · The `interceptaction` enum migration — HELD for the owner's approval
 
 - **Change (prepared, not in the repository):** `ALTER TYPE interceptaction ADD VALUE IF NOT EXISTS 'flag' / 'escalated'`, idempotent, in alembic's autocommit block, revision a9c1e3f5b7d9 on head e8a1c3d5f7b9. Kept in the session scratchpad until the owner says "approve the enum migration" (DB migrations need explicit approval). OWNER_ACTIONS carries the one-line read-only check for the production database.
-- **Status:** BLOCKED (owner decision).
+- **Status:** SHIPPED 2026-11-07 on the owner's word ("Approve the enum migration"): `alembic/versions/a9c1e3f5b7d9_interceptaction_flag_escalated.py`, replayed on a fresh database (the type gains both labels; the drift test's known-missing list is empty again). The box runs `alembic upgrade head` at container start, so it lands with the next image; the first safety-file run after the deploy measures `opt-out not recorded` (7 of 7 turns on every run so far).
 
 ## Slice 8 (2026-11-07, 01:5x) · the "turn raised" root cause, proven and fixed
 

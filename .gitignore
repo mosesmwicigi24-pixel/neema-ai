@@ -26,3 +26,6 @@ redis_data/
 .idea/
 # Server-side env backups
 .env.bak*
+
+# redis snapshots written by a local server during test runs
+dump.rdb

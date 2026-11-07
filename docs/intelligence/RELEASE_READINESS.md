@@ -51,6 +51,7 @@ silence, plus fail-closed safeguards that had been fail-open.
 ## Items requiring owner approval
 
 - ~~Merge and deploy PR #316 (production deployment).~~ Done, c8c3356 live.
+- **Database migration a9c1e3f5b7d9** (the `interceptaction` enum gains `flag` and `escalated`) ships with the slice-9 image on the owner's approval of 2026-11-07; the container runs `alembic upgrade head` before uvicorn, the statement is `ADD VALUE IF NOT EXISTS` (idempotent, no table rewrite, no row lock).
 - The `/api/health` hub wait (UNFINISHED_REGISTER): a one-function change to serve only the cached price audit — production behaviour, waits for the owner's word.
 - ~~A model key on the box or as the repository secret~~ — the secret exists; the first run crashed in the runner (fixed in PR #319); the run on the fixed branch is in progress.
 - Saving the dashboard credential from a browser (for production-derived cases).
