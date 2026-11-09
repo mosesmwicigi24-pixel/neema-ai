@@ -33,11 +33,25 @@ def normalise_stage(s: str | None) -> str:
     return "negotiation" if s == "negotiating" else s
 
 
-def derive_lead_stage(user: User, orders: list) -> str:
-    """A stage from concrete signals — the AI's read of where this lead is."""
+def _placed_by_their_own_details(user: User, person_state: dict | None) -> bool:
+    """Something the CUSTOMER gave us about where they are: a stated or
+    operator-confirmed location (users.location, or the geography record's
+    probable / confirmed reading). A dialling prefix is not that — every
+    WhatsApp contact has one, so it qualified nobody in particular."""
+    if getattr(user, "location", None):
+        return True
+    geo = ((person_state or {}).get("geo") or {})
+    return any((geo.get(k) or {}).get("value") for k in ("confirmed_residence", "probable_country"))
+
+
+def derive_lead_stage(user: User, orders: list, person_state: dict | None = None) -> str:
+    """A stage from concrete signals — the AI's read of where this lead is.
+    "Qualified" needs the customer's OWN details: a name and an email or a
+    location they (or an operator) gave — not the country their number
+    implies (slice 14; audit §5)."""
     if any(getattr(o, "hub_order_id", None) for o in orders):
         return "negotiation"                       # placed an order, awaiting payment
-    if user and user.name and (user.email or user.country):
+    if user and user.name and (user.email or _placed_by_their_own_details(user, person_state)):
         return "qualified"                         # a real prospect with details
     if orders or (user and getattr(user, "last_message_at", None)):
         return "contacted"                         # has engaged
@@ -74,7 +88,15 @@ async def refresh_lead_signals(db: AsyncSession, wa_id: str) -> None:
         orders = (await db.execute(
             select(OrderEvent).where(OrderEvent.wa_id == wa_id)
         )).scalars().all()
-        derived = derive_lead_stage(user, orders)
+        person_state = None
+        if getattr(user, "person_id", None) is not None:
+            try:
+                from app.models.person import Person
+                _p = await db.get(Person, user.person_id)
+                person_state = (_p.state or None) if _p is not None else None
+            except Exception:
+                person_state = None
+        derived = derive_lead_stage(user, orders, person_state)
         # Decided on the copy we hold (most turns change nothing, and take no
         # lock), written on the row as it is now.
         if apply_signals(user.state, derived, user.country)[1]:

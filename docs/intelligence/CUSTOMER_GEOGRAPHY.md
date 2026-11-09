@@ -3,8 +3,8 @@
 The first implementation slice of the owner's directive "Unified Customer
 Intelligence, Geographic Discovery & Commercial Profiling" (2026-11-09),
 following the Phase 1 audit (`CUSTOMER_INTELLIGENCE_AUDIT.md` §8, item 1).
-Written from the code on the branch at the time of the PR; the "live" row is
-filled in after the deploy. No evaluation run was dispatched (the owner's
+Merged as d402c0a (PR #350) and live on the box at 11:35 UTC on 9 Nov; the
+suite, CI and production rows are in `REGRESSION_SAFETY_REPORT.md`. No evaluation run was dispatched (the owner's
 standing stop). No migration: the record is JSONB on `persons.state`.
 
 ## 1. What the owner saw, and what it means now

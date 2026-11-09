@@ -5,8 +5,9 @@ from app.services.lead_signals import derive_lead_stage, apply_signals
 
 
 class _U:
-    def __init__(self, name=None, email=None, country=None, last=None):
+    def __init__(self, name=None, email=None, country=None, last=None, location=None):
         self.name, self.email, self.country, self.last_message_at = name, email, country, last
+        self.location = location
 
 
 def _order(hub=None):
@@ -16,7 +17,16 @@ def _order(hub=None):
 def test_derive_lead_stage_from_signals():
     assert derive_lead_stage(_U(), []) == "new"
     assert derive_lead_stage(_U(last=object()), []) == "contacted"
-    assert derive_lead_stage(_U(name="Moses", country="Kenya"), []) == "qualified"
+    # A dialling-prefix country qualifies nobody (slice 14): every WhatsApp
+    # contact has one. The customer's OWN details do — an email, a stated or
+    # confirmed location, or the geography record's probable/confirmed reading.
+    assert derive_lead_stage(_U(name="Moses", country="Kenya", last=object()), []) == "contacted"
+    assert derive_lead_stage(_U(name="Moses", email="m@x.ke"), []) == "qualified"
+    assert derive_lead_stage(_U(name="Moses", location="Nakuru"), []) == "qualified"
+    geo = {"geo": {"probable_country": {"value": "KE", "by": "stated", "confidence": "high"}}}
+    assert derive_lead_stage(_U(name="Moses"), [], geo) == "qualified"
+    tel_only = {"geo": {"telephone_country": {"value": "KE", "by": "phone", "confidence": "confirmed"}}}
+    assert derive_lead_stage(_U(name="Moses", last=object()), [], tel_only) == "contacted"
     assert derive_lead_stage(_U(name="Moses", country="Kenya"), [_order(hub=92)]) == "negotiation"
 
 

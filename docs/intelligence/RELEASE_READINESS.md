@@ -62,9 +62,13 @@ silence, plus fail-closed safeguards that had been fail-open.
 - Retiring the legacy bridge order path and the expiring shortener (W9-4).
 - A DB idempotency key for orders (migration).
 
-Slices 1–12 are live on the box at c04dda8 (16:26 UTC, 7 Nov). Slice 13 is in PR (not yet merged).
+Slices 1–13 are live on the box at d402c0a (11:35 UTC, 9 Nov). Slice 14 is in PR (#351).
 
-## Slice 13 (2026-11-09) — in PR
+## Slice 14 (2026-11-09) — in PR
+
+Insights from evidence (`services/insights.py`, `CUSTOMER_INSIGHTS.md`): paid and unpaid orders kept apart with the hub's paid states; one set of score inputs shared by the panel and the leads list (the list now reads person-wide in four bulk queries); "qualified" needs the customer's own details, never a dialling prefix; the commercial snapshot with ONE next best action by precedence (opt-out, overdue check, payment claim, complaint, hold, unpaid order, live cart, readiness, interest, cold cart, buying rhythm). No model call, no migration, nothing stored. Customer-visible: nothing (operator views only). Operator-visible: the "Right now" section on Insights, paid/unpaid rows, a changed score for customers whose only orders are unpaid. Tests: 16 new (1 on Postgres in the CI database job); the lead-stage test updated to the new rule. Rollback: revert the squash commit.
+
+## Slice 13 (2026-11-09) — merged as d402c0a, live
 
 Geography with provenance (`services/geography.py`, `CUSTOMER_GEOGRAPHY.md`): one record on the person for the telephone country, the probable country, a confirmed residence, the shipping destination and the city, each with source, confidence and time; one decision shared by the WhatsApp turn, the shared catalogue link, the Meta evidence chain and the profile. No migration (JSONB). Customer-visible: a WhatsApp customer who says they are in Kenya or Zambia is quoted in that market from that turn, whatever their number's country; the profile shows the decided country with its source on hover and the telephone country beside it when they differ. Operator-visible: a country typed by name now sets the ISO and flag; an edit is recorded as confirmed. Tests: 31 new (4 on Postgres in the CI database job); adjacent suites green; web typecheck clean. Rollback: revert the squash commit; the `geo` key is ignored by the previous code.
 
