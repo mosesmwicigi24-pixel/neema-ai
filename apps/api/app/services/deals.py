@@ -361,6 +361,22 @@ async def clear_team_check(db, conversation_id, *, by: str = "team") -> bool:
                         "age_min": int((now - opened).total_seconds() // 60) if opened else None,
                         "escalation": prev.get("escalation") or None}
     await db.commit()
+    # A customer-level event on the timeline (services/timeline): the promised
+    # check is answered, with how long it took.
+    try:
+        from app.models.conversation import Conversation
+        from app.services import timeline as _tl
+        conv = await db.get(Conversation, conversation_id)
+        if conv is not None:
+            age = deal.next_action.get("age_min")
+            await _tl.note(db, channel=conv.channel or "whatsapp",
+                           contact=(conv.wa_id or conv.external_id or ""), kind="commitment",
+                           summary="Promised check answered",
+                           detail=(f"'{prev.get('item')}' — answered by {by}"
+                                   + (f" after {age} min" if age is not None else "")),
+                           args={"item": prev.get("item"), "by": by, "age_min": age})
+    except Exception:
+        pass
     return True
 
 

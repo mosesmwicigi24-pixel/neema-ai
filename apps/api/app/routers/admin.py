@@ -1417,6 +1417,8 @@ async def get_conversation_activity(
     conv_id: str,
     db: AsyncSession = Depends(get_db),
     agent: Agent = Depends(get_current_agent),
+    level: str | None = None,
+    fold: bool = True,
 ):
     """The customer's journey, person-scoped — everything the system did and
     observed for this human across channels: pickups/escalations, the check-ins
@@ -1548,8 +1550,14 @@ async def get_conversation_activity(
             select(AgentActivity).where(AgentActivity.conversation_id.in_(conv_ids))
             .order_by(AgentActivity.created_at.desc()).limit(60))).scalars().all()
         for t in acts_rows:
+            # A state-change event the trail writes (geography, stage,
+            # commitment, customer_state) keeps its own kind; a tool call is
+            # "tool". services/timeline gives each its level.
+            _tool = str(getattr(t, "tool", "") or "")
             events.append({
-                "id": f"tool-{t.id}", "kind": "tool",
+                "id": f"tool-{t.id}",
+                "kind": (_tool if _tool in ("geography", "stage", "commitment", "customer_state")
+                         else "tool"),
                 "label": t.summary,
                 "detail": t.detail,
                 "at": t.created_at.isoformat() if t.created_at else None,
@@ -1578,7 +1586,10 @@ async def get_conversation_activity(
             })
 
     events.sort(key=lambda x: x["at"] or "", reverse=True)
-    return {"events": events[:80]}
+    # Two levels (customer / technical), the repeated technical steps folded,
+    # an optional filter — services/timeline (directive of 2026-11-09, §5).
+    from app.services import timeline as _tl
+    return _tl.annotate(events[:120], level=level, fold=fold) | {"events_cut": 120}
 
 
 @router.get("/conversations/{conv_id}/latest-draft")

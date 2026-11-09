@@ -286,6 +286,18 @@ export interface ApiActivityEvent {
     label: string;
     detail?: string | null;
     at: string | null;
+    /** "customer" (what happened to them) or "technical" (how Neema got there). */
+    level?: "customer" | "technical";
+    /** Set on a folded row: how many repeated technical steps it stands for. */
+    count?: number;
+    details?: string[];
+    first_at?: string | null;
+}
+
+export interface ApiActivity {
+    events: ApiActivityEvent[];
+    /** Counts per level before any filter. Absent on older API builds. */
+    levels?: { customer: number; technical: number };
 }
 const del = <T>(path: string) => req<T>("DELETE", path);
 
@@ -444,8 +456,8 @@ export const conversationsApi = {
     summary: () => get<InboxSummary>(`/admin/conversations/summary`),
 
     /** The person-scoped journey ledger the Activity Log panel renders. */
-    activity: (id: string) =>
-        get<{ events: ApiActivityEvent[] }>(`/admin/conversations/${id}/activity`),
+    activity: (id: string, level?: "customer" | "technical") =>
+        get<ApiActivity>(`/admin/conversations/${id}/activity${level ? `?level=${level}` : ""}`),
 
     /** Fetch ONE PAGE of the merged message + system-event timeline.
      *  Default: the newest 50 (plus the full event timeline). Pass `before`

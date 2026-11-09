@@ -103,10 +103,19 @@ async def refresh_lead_signals(db: AsyncSession, wa_id: str) -> None:
             user = await lock_for_write(db, user)
             if user is None:
                 return
+            before = normalise_stage((user.state or {}).get("lead_stage", "new"))
             new_state, changed = apply_signals(user.state, derived, user.country)
             if changed:
                 user.state = new_state
                 flag_modified(user, "state")
             await db.commit()
+            after = normalise_stage(new_state.get("lead_stage", "new"))
+            if changed and after != before:
+                # A customer-level event on the timeline (services/timeline).
+                from app.services import timeline as _tl
+                await _tl.note(db, channel="whatsapp", contact=wa_id, kind="stage",
+                               summary=f"Stage moved to {after}",
+                               detail=f"from {before}, by Neema's read of the signals",
+                               args={"from": before, "to": after})
     except Exception:
         _log.warning("refresh_lead_signals failed for %s", wa_id, exc_info=False)

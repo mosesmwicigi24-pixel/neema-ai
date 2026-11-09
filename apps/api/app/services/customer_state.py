@@ -424,6 +424,7 @@ async def apply(db, conv, deal, reading: dict, *, source: str, inbound_text: str
 
     # ── the person: language and the latest state ────────────────────────
     person = None
+    prev_said = None
     if getattr(conv, "person_id", None) is not None:
         from app.models.person import Person
         person = await db.get(Person, conv.person_id)
@@ -434,6 +435,8 @@ async def apply(db, conv, deal, reading: dict, *, source: str, inbound_text: str
         except Exception:
             pass
         state = dict(person.state or {})
+        prev_said = ((state.get("customer_state") or {}).get("said")
+                     if isinstance(state.get("customer_state"), dict) else None)
         prefs = dict(state.get("contact_preferences") or {})
         lang = reading.get("language") or guess_language(inbound_text)
         if lang and prefs.get("language") != lang:
@@ -450,8 +453,10 @@ async def apply(db, conv, deal, reading: dict, *, source: str, inbound_text: str
             pass
 
     # ── the deal: holds and claims ───────────────────────────────────────
+    prev_hold_said = None
     if deal is not None:
         nxt = dict(deal.next_action or {}) if isinstance(deal.next_action, dict) else {}
+        prev_hold_said = (nxt.get("hold") or {}).get("said") if isinstance(nxt.get("hold"), dict) else None
         if said in HOLD_STATES:
             until = None
             if reading.get("hold_until"):
@@ -487,6 +492,23 @@ async def apply(db, conv, deal, reading: dict, *, source: str, inbound_text: str
         except Exception:
             pass
     await db.commit()
+    # A customer-level event on the timeline (services/timeline) when what
+    # they said changes what we do: a hold, a payment claim, a complaint, a
+    # stop. Only on a change of state — the same reading again is not news.
+    try:
+        if said in HOLD_STATES + ("paid_claim", "complaint", "stop") and said != prev_said \
+                and said != prev_hold_said and getattr(conv, "id", None) is not None:
+            from app.services import timeline as _tl
+            from app.services.insights import STATE_LABELS
+            until = changed.get("hold_until")
+            await _tl.note(db, channel=getattr(conv, "channel", None) or "whatsapp",
+                           contact=(getattr(conv, "wa_id", None) or getattr(conv, "external_id", None) or ""),
+                           kind="customer_state", summary=STATE_LABELS.get(said) or said,
+                           detail=(f"on hold until {until[:10]}" if until else
+                                   ("waiting on " + str(reading.get("waiting_on")) if reading.get("waiting_on") else None)),
+                           args={"said": said, "source": source})
+    except Exception:
+        pass
     return changed
 
 

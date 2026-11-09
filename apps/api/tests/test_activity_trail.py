@@ -193,5 +193,5 @@ def test_the_activity_ledger_serves_the_trail():
     from app.routers import admin
     src = inspect.getsource(admin.get_conversation_activity)
     assert "AgentActivity" in src
-    assert '"kind": "tool"' in src
+    assert 'else "tool")' in src          # a tool call stays kind "tool"; state-change rows keep their own kind (slice 15)
     assert "except Exception" in src.split("AgentActivity", 1)[1][:900]

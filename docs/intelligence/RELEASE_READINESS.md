@@ -62,9 +62,13 @@ silence, plus fail-closed safeguards that had been fail-open.
 - Retiring the legacy bridge order path and the expiring shortener (W9-4).
 - A DB idempotency key for orders (migration).
 
-Slices 1–13 are live on the box at d402c0a (11:35 UTC, 9 Nov). Slice 14 is in PR (#351).
+Slices 1–13 are live on the box at d402c0a (11:35 UTC, 9 Nov). Slice 14 merged as 345a20b (11:51 UTC; the box's pick-up is recorded in REGRESSION_SAFETY_REPORT when read). Slice 15 is in PR.
 
-## Slice 14 (2026-11-09) — in PR
+## Slice 15 (2026-11-09) — in PR
+
+The customer timeline (`services/timeline.py`, `CUSTOMER_TIMELINE.md`): a level (customer / technical) on every event of the activity ledger, repeated technical steps folded into one row with a count, `?level=` and `fold=` on the endpoint, and new customer-level rows written through the existing trail when a stage moves, a promised check is escalated or answered, or the customer asks for time / claims payment / complains / asks to stop (once per change). The panel's Activity tab gains a Timeline section (customer level, Neema's steps behind a toggle); the conversation view's Activity log keeps every step with a toggle to hide them. No model call, no migration. Tests: 10 new (1 on Postgres in the CI database job), one source pin updated. Rollback: revert the squash commit; the new rows render as plain lines under the previous code.
+
+## Slice 14 (2026-11-09) — merged as 345a20b
 
 Insights from evidence (`services/insights.py`, `CUSTOMER_INSIGHTS.md`): paid and unpaid orders kept apart with the hub's paid states; one set of score inputs shared by the panel and the leads list (the list now reads person-wide in four bulk queries); "qualified" needs the customer's own details, never a dialling prefix; the commercial snapshot with ONE next best action by precedence (opt-out, overdue check, payment claim, complaint, hold, unpaid order, live cart, readiness, interest, cold cart, buying rhythm). No model call, no migration, nothing stored. Customer-visible: nothing (operator views only). Operator-visible: the "Right now" section on Insights, paid/unpaid rows, a changed score for customers whose only orders are unpaid. Tests: 16 new (1 on Postgres in the CI database job); the lead-stage test updated to the new rule. Rollback: revert the squash commit.
 

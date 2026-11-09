@@ -184,3 +184,13 @@ the precise dependency · status. Last update: 2026-11-06, end of session 1.
 | Mixed-currency totals are summed as stored | recorded; the currencies are listed | a conversion at a house rate, if the owner wants one figure |
 | A stored score history (trend) | not built; the score is recomputed on every read | a nightly snapshot row per customer, if a trend is wanted |
 | The quote (what was priced, when) is planned as a follow-up action, not shown on the snapshot | recorded | read the pending `quote_follow_up` action onto the snapshot |
+
+## Opened by slice 15 (2026-11-09, the customer timeline)
+
+| Item | Status | What closes it |
+|---|---|---|
+| Segmentation by country / language / channel on Reports | NOT STARTED — audit §8 item 5 | the next slice |
+| Trail rows with no resolvable conversation are never shown | unchanged (rare: the trail resolves by handle) | a person-keyed fallback in the ledger query |
+| No per-day headers on the timeline; "x minutes ago" only | by design for now | a day divider if the operators ask |
+| The in-thread system-event dividers (conversation view) are untouched by the levels | recorded | nothing unless the owner wants them filtered too |
+| The directive's validation list (Phase 9) run as one pass | the per-slice tests cover the model-free items; the model-dependent ones wait for the owner's lift | the evaluation stop lifted |
