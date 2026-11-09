@@ -576,11 +576,15 @@ export const conversationsApi = {
         convId: string,
         file: File,
         caption?: string,
+        opts?: { voice?: boolean },
     ): Promise<Message> => {
         const token = await authToken();
         const form  = new FormData();
         form.append("file", file);
         if (caption) form.append("caption", caption);
+        // A recording from the composer's microphone: the API re-encodes it
+        // to the channel's voice-note format (services/audio_convert.py).
+        if (opts?.voice) form.append("voice", "true");
 
         const res = await fetch(
             `${BASE}/admin/conversations/${convId}/upload-media`,
