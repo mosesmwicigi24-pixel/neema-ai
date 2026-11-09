@@ -173,3 +173,14 @@ the precise dependency · status. Last update: 2026-11-06, end of session 1.
 | `shipping_country` from free-text delivery notes only | the hub holds the structured address; Neema has none | a structured destination on the order tool, if the owner wants it |
 | Towns outside Kenya in `iso_from_text` (R2) | not done — "Lusaka", "Kampala" alone still read as nothing | the town table per market (one day) |
 | Measured with the model | NOT MEASURED — evaluation stopped on the owner's word | the geography cases when lifted |
+
+## Opened by slice 14 (2026-11-09, insights from evidence)
+
+| Item | Status | What closes it |
+|---|---|---|
+| Segmentation by country / language / channel on Reports | NOT STARTED — audit §8 item 5 | its own slice |
+| Activity as a levelled timeline | NOT STARTED — audit §8 item 3 | the next slice |
+| A hub-linked customer's `total_spent` is the hub's lifetime figure and may include unpaid orders the hub lists; the paid figure covers only the orders the hub returns | recorded, labelled "Paid (of N listed)" in the panel | the hub exposing paid totals in its customer summary (hub side) |
+| Mixed-currency totals are summed as stored | recorded; the currencies are listed | a conversion at a house rate, if the owner wants one figure |
+| A stored score history (trend) | not built; the score is recomputed on every read | a nightly snapshot row per customer, if a trend is wanted |
+| The quote (what was priced, when) is planned as a follow-up action, not shown on the snapshot | recorded | read the pending `quote_follow_up` action onto the snapshot |

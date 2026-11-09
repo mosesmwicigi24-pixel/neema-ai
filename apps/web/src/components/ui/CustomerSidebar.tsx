@@ -61,6 +61,37 @@ export interface PanelOrder {
     source?: "hub" | "whatsapp";
 }
 
+export interface OpenOrder {
+    id?: string;
+    number?: string | null;
+    total?: number | null;
+    currency?: string | null;
+    payment_status?: string | null;
+    created_at?: string | null;
+    age_days?: number | null;
+    link?: string | null;
+}
+
+export interface CommercialSnapshot {
+    stage?: string | null;
+    stage_source?: string | null;
+    customer_state?: { said?: string; label?: string | null; at?: string | null; source?: string | null } | null;
+    hold?: { said?: string; label?: string | null; until?: string | null } | null;
+    commitment?: { item?: string; age_min?: number; overdue?: boolean; escalation?: string | null } | null;
+    open_order?: OpenOrder | null;
+    interest?: string | null;
+    deal_blocking?: string | null;
+    cart_items?: number;
+    paid_orders?: number;
+    paid_total?: number;
+    unpaid_orders?: number;
+    unpaid_total?: number;
+    currencies?: string[];
+    orders_listed?: number;
+    days_since_contact?: number | null;
+    next_best_action?: { kind: string; action: string; reason: string } | null;
+}
+
 export interface CustomerProfile {
     id: string;
     wa_id: string;
@@ -94,6 +125,17 @@ export interface CustomerProfile {
     cart_items?: number;
     /** The itemised score, computed server-side so the panel matches the ranking. */
     lead_score_breakdown?: { label: string; pts: number; max: number }[];
+    /** Paid and unpaid kept apart (services/insights): confirmed spend is the
+     *  paid total over the orders listed; open_order is the newest unpaid one
+     *  inside the follow-up window. Absent on older API builds. */
+    paid_orders?: number;
+    paid_spent?: number;
+    unpaid_orders?: number;
+    unpaid_spent?: number;
+    orders_listed?: number;
+    open_order?: OpenOrder | null;
+    /** The commercial snapshot with ONE next best action, from recorded facts. */
+    snapshot?: CommercialSnapshot | null;
     /** The institution behind the individual — the priest orders, the parish buys. */
     parish?: { id: string; name: string; location?: string | null } | null;
     channels: CustomerChannel[];
@@ -2467,6 +2509,87 @@ export function CustomerSidebar({
 
                 {activeTab === "insights" && (
                     <>
+                        {profile.snapshot && (
+                            <Section title="Right now">
+                                {/* The commercial snapshot — every line a recorded fact
+                                    (the deal, the customer-state floor, the orders with
+                                    their payment status, the open commitment), and ONE
+                                    next best action with its reason. No model behind it. */}
+                                {profile.snapshot.next_best_action && (
+                                    <div
+                                        className="rounded-md px-2.5 py-2 mb-2 text-[11px]"
+                                        style={{
+                                            backgroundColor:
+                                                profile.snapshot.next_best_action.kind === "none" ? "#f8fafc" : "#eef7e3",
+                                            border: "1px solid #e2e8f0",
+                                            color: "#16270c",
+                                        }}
+                                        title={profile.snapshot.next_best_action.reason}
+                                    >
+                                        <div className="font-semibold">
+                                            {profile.snapshot.next_best_action.action}
+                                        </div>
+                                        <div className="text-[10px] mt-0.5" style={{ color: "#334155" }}>
+                                            {profile.snapshot.next_best_action.reason}
+                                        </div>
+                                    </div>
+                                )}
+                                <div className="space-y-1.5">
+                                    {[
+                                        profile.snapshot.customer_state?.label && {
+                                            label: "They said",
+                                            value: profile.snapshot.customer_state.label,
+                                            title: profile.snapshot.customer_state.at
+                                                ? `${timeAgo(profile.snapshot.customer_state.at)} · read by the ${profile.snapshot.customer_state.source ?? "floor"}`
+                                                : undefined,
+                                        },
+                                        profile.snapshot.hold?.until && {
+                                            label: "On hold until",
+                                            value: fmtDate(profile.snapshot.hold.until),
+                                            title: "No outreach until then; the scheduled check-in returns",
+                                        },
+                                        profile.snapshot.commitment?.item && {
+                                            label: "Promised check",
+                                            value: `${profile.snapshot.commitment.item}${profile.snapshot.commitment.overdue ? " · overdue" : ""}`,
+                                            title: profile.snapshot.commitment.escalation
+                                                ? `Escalated to the ${profile.snapshot.commitment.escalation}`
+                                                : "Open with the team",
+                                        },
+                                        profile.snapshot.open_order && {
+                                            label: "Unpaid order",
+                                            value: `${profile.snapshot.open_order.number ? `#${profile.snapshot.open_order.number} · ` : ""}${fmtCurrency(profile.snapshot.open_order.total ?? 0)}`,
+                                            title: `Placed ${profile.snapshot.open_order.age_days ?? 0} day(s) ago · ${profile.snapshot.open_order.payment_status ?? "unpaid"}`,
+                                        },
+                                        profile.snapshot.interest && {
+                                            label: "Interest",
+                                            value: profile.snapshot.interest,
+                                            title: profile.snapshot.deal_blocking ?? "From the deal record",
+                                        },
+                                        (profile.snapshot.cart_items ?? 0) > 0 && {
+                                            label: "In the cart",
+                                            value: `${profile.snapshot.cart_items} item(s)`,
+                                            title: undefined,
+                                        },
+                                    ]
+                                        .filter((r): r is { label: string; value: string; title: string | undefined } => Boolean(r))
+                                        .map((row) => (
+                                            <div
+                                                key={row.label}
+                                                className="flex items-start justify-between gap-2"
+                                                title={row.title}
+                                            >
+                                                <span className="text-xs flex-shrink-0" style={{ color: "#334155" }}>
+                                                    {row.label}
+                                                </span>
+                                                <span className="text-xs font-semibold text-right" style={{ color: "#16270c" }}>
+                                                    {row.value}
+                                                </span>
+                                            </div>
+                                        ))}
+                                </div>
+                            </Section>
+                        )}
+
                         <Section title="Purchase Summary">
                             <div className="space-y-2">
                                 {[
@@ -2480,6 +2603,18 @@ export function CustomerSidebar({
                                         label: "Total spent",
                                         value: fmtCurrency(totalSpent),
                                     },
+                                    ...(profile.paid_orders != null
+                                        ? [
+                                              {
+                                                  label: `Paid (of ${profile.orders_listed ?? 0} listed)`,
+                                                  value: `${profile.paid_orders} · ${fmtCurrency(profile.paid_spent ?? 0)}`,
+                                              },
+                                              {
+                                                  label: "Unpaid / open",
+                                                  value: `${profile.unpaid_orders ?? 0} · ${fmtCurrency(profile.unpaid_spent ?? 0)}`,
+                                              },
+                                          ]
+                                        : []),
                                     {
                                         label: "Avg order value",
                                         value: profile.avg_order_value

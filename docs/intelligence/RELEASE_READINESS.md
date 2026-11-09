@@ -62,7 +62,11 @@ silence, plus fail-closed safeguards that had been fail-open.
 - Retiring the legacy bridge order path and the expiring shortener (W9-4).
 - A DB idempotency key for orders (migration).
 
-Slices 1–12 are live on the box at c04dda8 (16:26 UTC, 7 Nov). Slice 13 is in PR (not yet merged).
+Slices 1–12 are live on the box at c04dda8 (16:26 UTC, 7 Nov). Slice 13 merged as d402c0a (11:20 UTC, 9 Nov; the box's pick-up is recorded in REGRESSION_SAFETY_REPORT when read). Slice 14 is in PR.
+
+## Slice 14 (2026-11-09) — in PR
+
+Insights from evidence (`services/insights.py`, `CUSTOMER_INSIGHTS.md`): paid and unpaid orders kept apart with the hub's paid states; one set of score inputs shared by the panel and the leads list (the list now reads person-wide in four bulk queries); "qualified" needs the customer's own details, never a dialling prefix; the commercial snapshot with ONE next best action by precedence (opt-out, overdue check, payment claim, complaint, hold, unpaid order, live cart, readiness, interest, cold cart, buying rhythm). No model call, no migration, nothing stored. Customer-visible: nothing (operator views only). Operator-visible: the "Right now" section on Insights, paid/unpaid rows, a changed score for customers whose only orders are unpaid. Tests: 16 new (1 on Postgres in the CI database job); the lead-stage test updated to the new rule. Rollback: revert the squash commit.
 
 ## Slice 13 (2026-11-09) — in PR
 

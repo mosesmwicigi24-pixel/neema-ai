@@ -108,7 +108,7 @@ _LEADER_ROLE_RE = re.compile(
 def _lead_score_parts(user: User, order_count: int, total_spent: float,
                       channel_count: int, phone_verified: bool = False,
                       cart_items: int = 0, days_since_contact: float | None = None,
-                      role: str | None = None) -> list[dict]:
+                      role: str | None = None, open_orders: int = 0) -> list[dict]:
     """The lead score, itemised — ONE definition, returned to the panel so the
     breakdown can never drift from the maths that ranks the list.
 
@@ -116,7 +116,13 @@ def _lead_score_parts(user: User, order_count: int, total_spent: float,
     Past purchase is still the strongest proof of a real customer, but it no
     longer dominates: a live buying signal — items sitting in their cart, and a
     conversation that is still warm — now outweighs a dormant past buyer. Reach
-    (a verified phone, more than one channel) breaks the ties."""
+    (a verified phone, more than one channel) breaks the ties.
+
+    `order_count` and `total_spent` are PAID orders and PAID spend (slice 14:
+    an unpaid order used to score like a paid one); an unpaid order inside
+    the follow-up window is its own row, `open_orders`, so the breakdown says
+    which is which. Callers build the inputs with `services.insights
+    .score_inputs`, the one builder the panel and the leads list share."""
     spend_pts = 15 if total_spent > 10000 else 8 if total_spent > 3000 else 0
     if days_since_contact is None:
         recency = 0
@@ -128,7 +134,8 @@ def _lead_score_parts(user: User, order_count: int, total_spent: float,
         recency = 0
     return [
         {"label": "Active cart",     "pts": 25 if cart_items else 0,        "max": 25},
-        {"label": "Orders",          "pts": min(order_count * 10, 25),      "max": 25},
+        {"label": "Paid orders",     "pts": min(order_count * 10, 25),      "max": 25},
+        {"label": "Open order (unpaid)", "pts": 10 if open_orders else 0,   "max": 10},
         {"label": "Recent contact",  "pts": recency,                        "max": 15},
         {"label": "Spend level",     "pts": spend_pts,                      "max": 15},
         {"label": "Phone verified",  "pts": 10 if phone_verified else 0,    "max": 10},
@@ -142,10 +149,10 @@ def _lead_score_parts(user: User, order_count: int, total_spent: float,
 def _compute_lead_score(user: User, order_count: int, total_spent: float,
                         channel_count: int, phone_verified: bool = False,
                         cart_items: int = 0, days_since_contact: float | None = None,
-                        role: str | None = None) -> int:
+                        role: str | None = None, open_orders: int = 0) -> int:
     return min(sum(p["pts"] for p in _lead_score_parts(
         user, order_count, total_spent, channel_count, phone_verified,
-        cart_items, days_since_contact, role)), 100)
+        cart_items, days_since_contact, role, open_orders)), 100)
 
 
 def _profile_of(person_state: dict | None, user_state: dict | None) -> dict:
@@ -184,7 +191,13 @@ def _map_local_order(o) -> dict:
         "id":             o.id,
         "order_number":   o.hub_order_number,
         "status":         o.status,
-        "payment_status": o.payment_status,
+        # The hub's word on payment first (mirrored by the order webhook), else
+        # the local flag — the same precedence services/insights uses, so a
+        # hub-paid order reads as paid here too (slice 14).
+        "payment_status": (getattr(o, "hub_payment_status", None) or o.payment_status),
+        "hub_payment_status": getattr(o, "hub_payment_status", None),
+        "hub_public_url": getattr(o, "hub_public_url", None),
+        "hub_payment_url": getattr(o, "hub_payment_url", None),
         "total":          float(o.subtotal or 0),
         "subtotal":       float(o.subtotal or 0),
         "currency_code":  o.currency,
@@ -247,7 +260,11 @@ def _build_profile(
     person_state: dict | None = None,
     person_name: str | None = None,
     parish: dict | None = None,
+    deal=None,
+    commitment: dict | None = None,
+    opted_out: bool = False,
 ) -> dict:
+    from app.services import insights as _ins
     # Orders + spend: the hub is the source of truth (every channel — POS, web
     # AND WhatsApp). Fall back to Neema's local WhatsApp order_events only when
     # the hub can't resolve this customer or is unreachable.
@@ -300,23 +317,23 @@ def _build_profile(
 
     channels = list(channel_map.values())
     phone_verified = _phone_verified(user, identities)
-    # Live buying signals: what's sitting in their cart right now, and how warm the
-    # conversation still is — the difference between "has bought" and "is buying".
-    cart_items = _cart_size(person_state, user.state)
-    last_contact = max((c.last_message_at for c in conversations if c.last_message_at),
-                       default=None)
-    days_since_contact = _days_since(last_contact)
-    score_parts = _lead_score_parts(user, order_count, total_spent, len(channels),
-                                    phone_verified=phone_verified, cart_items=cart_items,
-                                    days_since_contact=days_since_contact,
-                                    role=_profile_of(person_state, user.state).get("role"))
+    # The score's inputs come from ONE builder shared with the leads list
+    # (services/insights.score_inputs): PAID orders and PAID spend, an unpaid
+    # order inside the window as its own signal, the cart, the warmth of the
+    # conversation, the role. The listed orders (hub when linked, else local)
+    # carry their payment status.
+    inputs = _ins.score_inputs(user=user, orders=order_list, conversations=conversations,
+                               identities=identities, person_state=person_state)
+    cart_items = inputs["cart_items"]
+    score_parts = _lead_score_parts(user, **inputs)
     lead_score = min(sum(p["pts"] for p in score_parts), 100)
     rhythm = _buying_rhythm(order_dates)
     tier = _customer_tier(order_count, total_spent, rhythm["days_since_last"])
     # Suggested stage stays on the local WhatsApp order_events — a pending
     # WhatsApp order (hub_order_id set) is what signals "negotiating".
     from app.services.lead_signals import derive_lead_stage
-    suggested_stage = derive_lead_stage(user, orders)
+    suggested_stage = derive_lead_stage(user, orders, person_state)
+    money = _ins.spend(order_list)
 
     # Extra fields stored in user.state
     state       = user.state or {}
@@ -364,6 +381,24 @@ def _build_profile(
         "lead_score":     lead_score,
         "phone_verified": phone_verified,
         "cart_items":     cart_items,
+        # Paid and unpaid, kept apart (slice 14): confirmed spend is the paid
+        # total over the orders listed; `open_order` is the newest unpaid one
+        # inside the follow-up window.
+        "paid_orders":    money["paid_orders"],
+        "paid_spent":     money["paid_total"],
+        "unpaid_orders":  money["unpaid_orders"],
+        "unpaid_spent":   money["unpaid_total"],
+        "orders_listed":  money["listed"],
+        "open_order":     money["open_order"],
+        # The commercial snapshot: stage and who set it, what they said last,
+        # a hold, the open commitment, the interest, and ONE next best action
+        # with its reason — rules over recorded facts (services/insights).
+        "snapshot":       _ins.snapshot(user=user, person_state=person_state, deal=deal,
+                                        orders=order_list, conversations=conversations,
+                                        commitment=commitment, rhythm=rhythm,
+                                        lead_stage=lead_stage,
+                                        lead_stage_source=state.get("lead_stage_source"),
+                                        opted_out=opted_out),
         # The institution behind the individual — the priest orders, the parish buys.
         "parish":         parish,
         # Sizes on file — so the team can see them without digging through the chat.
@@ -646,9 +681,29 @@ async def get_customer(
                     channel="whatsapp", external_id=ph.value,
                     display_name=user.name, source=ph.source,
                     confidence=ph.confidence)]
+    # The open deal (the scribe's record of what is being bought, the hold, the
+    # team check) and slice 12's commitment reading — for the snapshot.
+    deal, commitment = None, None
+    try:
+        from app.services import commitments as _cm
+        from app.services.deals import open_deal_for
+        if user.person_id is not None:
+            deal = await open_deal_for(db, person_id=user.person_id)
+        if deal is None:
+            conv_ids = [c.id for c in conversations]
+            if conv_ids:
+                from app.models.deal import Deal
+                deal = (await db.execute(select(Deal).where(
+                    Deal.status == "open", Deal.conversation_id.in_(conv_ids))
+                    .order_by(Deal.updated_at.desc()).limit(1))).scalar_one_or_none()
+        commitment = _cm.reading(deal) if deal is not None else None
+    except Exception:
+        deal, commitment = None, None
+    opted_out = bool(((person_state or {}).get("contact_preferences") or {}).get("opt_out"))
     return _build_profile(user, orders, conversations, history, hub=hub,
                           identities=identities, person_state=person_state,
-                          person_name=person_name, parish=parish_info)
+                          person_name=person_name, parish=parish_info,
+                          deal=deal, commitment=commitment, opted_out=opted_out)
 
 
 # ── Identity spine health (ops trust the backfill in prod) ────────────────────
@@ -1664,53 +1719,68 @@ async def list_leads(
         select(Person.id).where(Person.merged_into_id.isnot(None))
     )).scalars().all())
 
+    # The same inputs the panel scores from (services/insights.score_inputs),
+    # gathered in bulk: orders by handle OR person, conversations by handle OR
+    # person (a Messenger thread has no wa_id), identities for the reachable
+    # phone, the person's state for the cart and the role. The list used to
+    # read orders and conversations by wa_id alone with a user-only phone
+    # check, so the same customer ranked differently here and in the panel.
+    from collections import defaultdict
+    from app.services import insights as _ins
+    from app.services.lead_signals import normalise_stage
+    live = [u for u in users
+            if not (u.state or {}).get("merged_into") and u.person_id not in tombstoned]
+    person_ids = {u.person_id for u in live if u.person_id is not None}
+    wa_ids = {u.wa_id for u in live if u.wa_id}
+    orders_by_wa, orders_by_person = defaultdict(list), defaultdict(list)
+    for o in (await db.execute(select(OrderEvent).where(or_(
+            OrderEvent.wa_id.in_(wa_ids or {"-"}),
+            OrderEvent.person_id.in_(person_ids or {_uuid.uuid4()}))))).scalars().all():
+        orders_by_wa[o.wa_id].append(o)
+        if o.person_id is not None:
+            orders_by_person[o.person_id].append(o)
+    convs_by_wa, convs_by_person = defaultdict(list), defaultdict(list)
+    for c in (await db.execute(select(Conversation).where(or_(
+            Conversation.wa_id.in_(wa_ids or {"-"}),
+            Conversation.person_id.in_(person_ids or {_uuid.uuid4()}))))).scalars().all():
+        if c.wa_id:
+            convs_by_wa[c.wa_id].append(c)
+        if c.person_id is not None:
+            convs_by_person[c.person_id].append(c)
+    idents_by_person = defaultdict(list)
+    for i in (await db.execute(select(Identity).where(
+            Identity.person_id.in_(person_ids or {_uuid.uuid4()})))).scalars().all():
+        idents_by_person[i.person_id].append(i)
+    persons = {p.id: p for p in (await db.execute(select(Person).where(
+        Person.id.in_(person_ids or {_uuid.uuid4()})))).scalars().all()}
+
     leads = []
-    for user in users:
+    for user in live:
         state = user.state or {}
-
-        # Skip users merged into another (state contract) or whose person was
-        # tombstoned by a real/reconciler merge.
-        if state.get("merged_into") or (user.person_id in tombstoned):
-            continue
-
-        from app.services.lead_signals import normalise_stage
         lead_stage = normalise_stage(state.get("lead_stage", "new"))
         if stage and lead_stage != stage:
             continue
 
-        # Get order stats (lightweight — just count and sum)
-        orders_result = await db.execute(
-            select(OrderEvent).where(OrderEvent.wa_id == user.wa_id)
-        )
-        orders = orders_result.scalars().all()
+        def _dedupe(rows):
+            seen, out = set(), []
+            for r in rows:
+                if r.id not in seen:
+                    seen.add(r.id)
+                    out.append(r)
+            return out
+        orders = _dedupe(orders_by_wa.get(user.wa_id, []) + orders_by_person.get(user.person_id, []))
+        convs = _dedupe(convs_by_wa.get(user.wa_id, []) + convs_by_person.get(user.person_id, []))
+        channels = list({getattr(c, "channel", "whatsapp") or "whatsapp" for c in convs})
+        lead_person_state = None
+        if user.person_id in persons:
+            lead_person_state = persons[user.person_id].state or None
+        inputs = _ins.score_inputs(user=user, orders=orders, conversations=convs,
+                                   identities=idents_by_person.get(user.person_id, []),
+                                   person_state=lead_person_state)
+        lead_score = _compute_lead_score(user, **inputs)
         total_spent = sum(float(o.subtotal or 0) for o in orders)
         order_count = len(orders)
-
-        # Channel list from conversations
-        convs_result = await db.execute(
-            select(Conversation).where(Conversation.wa_id == user.wa_id)
-        )
-        convs = convs_result.scalars().all()
-        channels = list({getattr(c, "channel", "whatsapp") or "whatsapp" for c in convs})
-
-        # Score on the SAME context the profile uses — the cart now lives on the
-        # PERSON, so scoring from users.state alone zeroed the strongest signal
-        # for exactly the hottest leads (and the list disagreed with the panel).
-        lead_person_state = None
-        if user.person_id is not None:
-            try:
-                _lp = await db.get(Person, user.person_id)
-                lead_person_state = (_lp.state or None) if _lp is not None else None
-            except Exception:
-                lead_person_state = None
-        lead_score = _compute_lead_score(
-            user, order_count, total_spent, len(channels),
-            phone_verified=_phone_verified(user),
-            cart_items=_cart_size(lead_person_state, state),
-            days_since_contact=_days_since(
-                max((c.last_message_at for c in convs if c.last_message_at), default=None)),
-            role=_profile_of(lead_person_state, state).get("role"),
-        )
+        money = _ins.spend(orders)
         rhythm = _buying_rhythm([o.created_at for o in orders])
         tier = _customer_tier(order_count, total_spent, rhythm["days_since_last"])
 
@@ -1729,6 +1799,10 @@ async def list_leads(
             "channels":     channels,
             "total_orders": order_count,
             "total_spent":  total_spent,
+            "paid_orders":  money["paid_orders"],
+            "paid_spent":   money["paid_total"],
+            "unpaid_orders": money["unpaid_orders"],
+            "open_order":   bool(money["open_order"]),
             "buying_rhythm": rhythm,
             "last_seen_at": user.last_message_at.isoformat() if user.last_message_at else None,
             "notes":        state.get("crm_notes"),
