@@ -277,6 +277,18 @@ async def report_recovery(
     return await recovery_results.results(db, days)
 
 
+@router.get("/reports/segments")
+async def report_segments(
+    db: AsyncSession = Depends(get_db),
+    agent: Agent = Depends(get_current_agent),
+):
+    """Customers by market (the geography decision, confirmed kept apart
+    from inferred), by language and by channel — counts only
+    (services/segments; the directive of 2026-11-09, Phase 4)."""
+    from app.services import segments
+    return await segments.report(db)
+
+
 @router.get("/reports/unanswered")
 async def report_unanswered(
     min_age_h: int = 24,

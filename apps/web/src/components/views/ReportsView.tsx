@@ -3,7 +3,7 @@
 
 import React, { useState, useEffect, useCallback } from "react";
 import { fmtCurrency, fmtDate, timeAgo, formatPhone, displayName } from "@/lib/utils";
-import { apiErrorDetail, conversationsApi, mapConversation, reportsApi, type PacingItem, type PacingReport, type PhotoCheckItem, type PhotoChecks, type PhotoVerdict, type RecoveryResults, type UnansweredItem } from "@/lib/api";
+import { apiErrorDetail, conversationsApi, mapConversation, reportsApi, type PacingItem, type PacingReport, type PhotoCheckItem, type PhotoChecks, type PhotoVerdict, type RecoveryResults, type SegmentsReport, type UnansweredItem } from "@/lib/api";
 import { mediaSrc } from "@/lib/callCard";
 import type { Conversation, Agent, Order, SharedViewProps } from "@/types";
 
@@ -13,10 +13,11 @@ interface ReportsViewProps extends SharedViewProps {
 }
 
 type Range = "7d" | "30d" | "90d" | "custom";
-type ReportTab = "overview" | "conversations" | "orders" | "agents" | "unanswered" | "followups" | "photos" | "pacing";
+type ReportTab = "overview" | "conversations" | "orders" | "agents" | "unanswered" | "followups" | "photos" | "pacing" | "customers";
 const TAB_LABEL: Record<ReportTab, string> = {
     overview: "Overview", conversations: "Conversations", orders: "Orders", agents: "Agents",
     unanswered: "Never answered", followups: "Follow-ups", photos: "Photo checks", pacing: "Pacing",
+    customers: "Customers",
 };
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000/api";
 
@@ -492,6 +493,67 @@ function FollowUpsPanel() {
     );
 }
 
+// Who the customers are, in aggregate (slice 16): by market with confirmed
+// placements kept apart from inferred ones, by language, by channel. Counts
+// only — the API sends no handle, name or message.
+function CustomersPanel() {
+    const [data, setData] = useState<SegmentsReport | null>(null);
+    const [failed, setFailed] = useState<string | null>(null);
+    useEffect(() => {
+        let alive = true;
+        reportsApi.segments().then((r) => { if (alive) setData(r); })
+            .catch((e) => { if (alive) setFailed(apiErrorDetail(e) || "Couldn't load the customer segments"); });
+        return () => { alive = false; };
+    }, []);
+    if (failed) return <p className="px-4 py-6 text-sm text-[#b91c1c]">{failed}</p>;
+    if (!data) return <p className="px-4 py-6 text-sm text-[#699a32]">Loading…</p>;
+    const pctOf = (n: number) => (data.customers ? `${Math.round((n / data.customers) * 100)}%` : "—");
+    return (
+        <div className="space-y-4">
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+                <StatBox label="Customers" value={data.customers} sub={`as of ${fmtDate(data.as_of)}`} />
+                <StatBox label="Market confirmed" value={data.confirmed_market} sub="said or confirmed by a person" accent="border-l-emerald-500" />
+                <StatBox label="Market inferred" value={data.inferred_market} sub="the number, the connection or a locale" accent="border-l-amber-400" />
+                <StatBox label="Market unknown" value={data.unknown_market} sub="nothing places them yet" accent="border-l-stone-300" />
+            </div>
+            <div className="grid lg:grid-cols-3 gap-4">
+                <div className="bg-white rounded-xl border border-[#cee6b2] shadow-sm overflow-hidden lg:col-span-1">
+                    <div className="px-4 py-3 border-b border-[#e6f3d8]" title={data.basis.market}>
+                        <span className="text-xs font-bold text-[#699a32] uppercase tracking-wider">By market</span>
+                        <p className="text-[11px] text-[#78716c] mt-0.5">Where Neema treats each customer as being; confirmed apart from inferred.</p>
+                    </div>
+                    <Table cols={["Country", "Customers", "Confirmed", "Inferred"]}
+                        rows={data.countries.slice(0, 25).map((c) => [
+                            <span key="c" className="inline-flex items-center gap-1.5">
+                                <img src={`https://flagcdn.com/w20/${c.iso.toLowerCase()}.png`} alt="" className="w-4 h-3 rounded-sm object-cover" />
+                                {c.name}
+                            </span>,
+                            <span key="n"><b>{c.customers}</b> <span className="text-[#78716c]">({pctOf(c.customers)})</span></span>,
+                            c.confirmed, c.inferred,
+                        ])}
+                        emptyText="No customer is placed yet" />
+                </div>
+                <div className="bg-white rounded-xl border border-[#cee6b2] shadow-sm overflow-hidden">
+                    <div className="px-4 py-3 border-b border-[#e6f3d8]" title={data.basis.language}>
+                        <span className="text-xs font-bold text-[#699a32] uppercase tracking-wider">By language</span>
+                        <p className="text-[11px] text-[#78716c] mt-0.5">The language each customer writes in.</p>
+                    </div>
+                    <Table cols={["Language", "Customers"]}
+                        rows={data.languages.map((l) => [l.name, <span key="n"><b>{l.customers}</b> <span className="text-[#78716c]">({pctOf(l.customers)})</span></span>])} />
+                </div>
+                <div className="bg-white rounded-xl border border-[#cee6b2] shadow-sm overflow-hidden">
+                    <div className="px-4 py-3 border-b border-[#e6f3d8]" title={data.basis.channel}>
+                        <span className="text-xs font-bold text-[#699a32] uppercase tracking-wider">By channel</span>
+                        <p className="text-[11px] text-[#78716c] mt-0.5">A customer counts once per channel they have written on.</p>
+                    </div>
+                    <Table cols={["Channel", "Customers"]}
+                        rows={data.channels.map((c) => [<span key="c" className="capitalize">{c.channel}</span>, <span key="n"><b>{c.customers}</b> <span className="text-[#78716c]">({pctOf(c.customers)})</span></span>])} />
+                </div>
+            </div>
+        </div>
+    );
+}
+
 export function ReportsView({ agents, orders, onToast, isMobile }: ReportsViewProps) {
     // Reports aggregate a date range over EVERY conversation, so they fetch
     // the full list themselves, only while this view is open. The dashboard
@@ -757,6 +819,9 @@ export function ReportsView({ agents, orders, onToast, isMobile }: ReportsViewPr
 
             {/* ── FOLLOW-UPS ────────────────────────────────────────────────── */}
             {tab === "followups" && <FollowUpsPanel />}
+
+            {/* ── CUSTOMERS (markets, languages, channels) ─────────────────── */}
+            {tab === "customers" && <CustomersPanel />}
 
             {/* ── AGENTS ────────────────────────────────────────────────────── */}
             {tab === "agents" && (

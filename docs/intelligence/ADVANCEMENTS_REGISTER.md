@@ -507,3 +507,13 @@ Full report: `CUSTOMER_TIMELINE.md`. Audit: `CUSTOMER_INTELLIGENCE_AUDIT.md` §6
 - **Baseline (audit §6):** the panel's Activity tab showed orders and channel counts, not events; the conversation view's ledger flattened every source to one level (eleven "Searched the catalogue" rows beside the order); nothing was written for a discovery, a stage change, a commitment or a hold.
 - **Change:** `services/timeline.py` — `level_of` (customer / technical by kind and by the trail's label), `group` (runs of the same technical step within 10 minutes fold into one row with a count, the first three details and the member ids), `annotate` (levels, counts, filter, fold), `note` (one customer-level row through the trail). `admin.get_conversation_activity` takes `level` and `fold`, keeps the state-change rows' own kinds (geography, stage, commitment, customer_state) and returns `levels`. Writers: `lead_signals.refresh_lead_signals` (stage moved), `commitments.escalate` (escalated, once per stage), `deals.clear_team_check` (answered, with the time it took), `customer_state.apply` (a hold, a payment claim, a complaint, a stop — only on a change, read from the person's last state or the deal's hold). Web: the sidebar's Timeline section with the technical toggle; the conversation view's toggle and the ×N marker; four new dot colours.
 - **Tests:** `tests/test_timeline.py` (9), `tests/test_timeline_db.py` (1, CI database job; it found the hold event firing twice on a conversation without a person, fixed by reading the deal's hold as well). **Measured:** deterministic. Status: IMPLEMENTED BUT NOT VERIFIED in production (live after merge).
+
+## Slice 16 (2026-11-09) · Customer Intelligence, Phase 4 — customers in aggregate
+
+Full report: `CUSTOMER_SEGMENTS.md`. Audit: `CUSTOMER_INTELLIGENCE_AUDIT.md` §7.
+
+### S1 · By market (confirmed apart from inferred), by language, by channel
+
+- **Baseline (audit §7):** no endpoint or page aggregated customers by country or language; inferred and confirmed geography were indistinguishable.
+- **Change:** `services/segments.py` — `place` (the geography decision per customer with its basis: confirmed / inferred / unknown), `summarise` (pure aggregates with a `basis` block), `report` (three bulk reads, merged rows excluded); `GET /admin/reports/segments`; the Customers tab on Reports with four stat boxes and three tables. Counts only.
+- **Tests:** `tests/test_segments.py` (5). **Measured:** deterministic. Status: IMPLEMENTED BUT NOT VERIFIED in production (live after merge).

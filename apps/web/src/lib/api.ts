@@ -918,7 +918,21 @@ export interface RecoveryResults {
     jobs: RecoveryJobResult[];
 }
 
+export interface SegmentsReport {
+    as_of: string;
+    customers: number;
+    countries: { iso: string; name: string; customers: number; confirmed: number; inferred: number }[];
+    unknown_market: number;
+    confirmed_market: number;
+    inferred_market: number;
+    languages: { code: string; name: string; customers: number }[];
+    channels: { channel: string; customers: number }[];
+    basis: { market: string; language: string; channel: string };
+}
+
 export const reportsApi = {
+    /** Customers by market (confirmed apart from inferred), language and channel — counts only. */
+    segments: () => get<SegmentsReport>("/admin/reports/segments"),
     /** What each kind of follow-up achieved: sent, answered within 72 h, then ordered / paid. */
     recovery: (days = 30) => get<RecoveryResults>(`/admin/reports/recovery?days=${days}`),
     pacing: (days = 7, decision = "") =>
