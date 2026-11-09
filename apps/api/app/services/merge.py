@@ -122,6 +122,24 @@ async def merge_persons(
         for _k in ("lead_source", "ad_ref"):
             if s.get(_k) and not pst.get(_k):
                 pst[_k] = s[_k]
+        # GEOGRAPHY carries attribute by attribute with its provenance: a
+        # reading the primary lacks is taken, a stronger one replaces a weaker
+        # one, and the history keeps both (services/geography).
+        from app.services import geography as _geo
+        pst, _ = _geo.carry_on_merge(pst, s)
+        # CONTACT PREFERENCES: an opt-out on EITHER side is an opt-out of the
+        # merged person (the safer reading); the language fills when missing.
+        s_pref, p_pref = (s.get("contact_preferences") or {}), dict(pst.get("contact_preferences") or {})
+        if s_pref:
+            if s_pref.get("opt_out") and not p_pref.get("opt_out"):
+                p_pref["opt_out"] = s_pref["opt_out"]      # {at, channel, said}
+            if s_pref.get("language") and not p_pref.get("language"):
+                p_pref["language"] = s_pref["language"]
+            if p_pref != (pst.get("contact_preferences") or {}):
+                pst["contact_preferences"] = p_pref
+        # CUSTOMER STATE (needs time, consulting…) fills when the primary has none.
+        if s.get("customer_state") and not pst.get("customer_state"):
+            pst["customer_state"] = s["customer_state"]
         primary.state = pst
         flag_modified(primary, "state")
         # PARISH affiliation carries too: the institution follows the person.

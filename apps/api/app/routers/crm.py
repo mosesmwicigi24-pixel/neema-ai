@@ -395,7 +395,21 @@ def _build_profile(
         "notes":          notes,
         "created_at":     user.created_at.isoformat() if user.created_at else None,
         **_country_fields(user, person_state, phone_display),
+        # Every geographic attribute with its source, confidence and time —
+        # telephone country, probable country, confirmed residence, shipping,
+        # city, language — plus the decision and whether the number and the
+        # decision disagree (services/geography; the directive of 2026-11-09).
+        "geo":            _geo_view(person_state, phone_display),
     }
+
+
+def _geo_view(person_state: dict | None, phone: str | None) -> dict:
+    from app.services import geography as _geo
+    lang = (((person_state or {}).get("contact_preferences") or {}).get("language"))
+    try:
+        return _geo.view(person_state, handle=phone, language=lang)
+    except Exception:
+        return {"decision": {"country_iso": None}, "discrepancy": False, "history": []}
 
 
 def _country_fields(user, person_state: dict | None, phone: str | None) -> dict:
@@ -405,7 +419,15 @@ def _country_fields(user, person_state: dict | None, phone: str | None) -> dict:
     has a number but a blank country (e.g. a +234 contact captured before country
     derivation shipped), with no backfill job."""
     from app.core.countries import resolve_country, iso_from_text, name_for_iso, flag_url_for
+    from app.services import geography as _geo
     ps = person_state or {}
+    # The geography record decides first (confirmed residence → probable
+    # country → telephone country, services/geography); the stores below are
+    # the fallback for a person without one.
+    _d = _geo.decide(ps)
+    if _d.get("country_iso"):
+        return {"country_iso": _d["country_iso"], "country": _d["country"],
+                "flag_url": _d["flag_url"]}
     iso = user.country_iso or ps.get("country_iso")
     country = user.country or ps.get("country")
     flag = user.flag_url or ps.get("flag_url")
@@ -784,6 +806,26 @@ async def update_customer(
     if "country_iso" in body and body["country_iso"] and "flag_url" not in body:
         from app.core.countries import flag_url_for
         user.flag_url = flag_url_for(body["country_iso"])
+    # A country typed by name, without its ISO, used to leave country_iso (and
+    # so the flag and the market) unset: derive them from the name.
+    if body.get("country") and not body.get("country_iso"):
+        from app.core.countries import iso_from_text, flag_url_for
+        _iso = iso_from_text(str(body["country"]))
+        if _iso:
+            user.country_iso = _iso
+            user.flag_url = flag_url_for(_iso)
+    # An operator's edit CONFIRMS the residence (and the city, when the
+    # location names one) on the geography record (services/geography): the
+    # strongest reading, so the market and the profile follow it.
+    _geo_change = None
+    if any(body.get(k) for k in ("country", "country_iso", "location")) and user.person_id is not None:
+        from app.services import geography as _geo
+        _p = await db.get(Person, user.person_id)
+        _geo_change = await _geo.place(
+            db, _p, _geo.operator_readings(country_iso=body.get("country_iso"),
+                                           country=body.get("country"),
+                                           location=body.get("location")),
+            user=user)
 
     # State-stored fields (lead_stage, tags, notes, merged_ids)
     state = dict(user.state or {})
@@ -823,6 +865,9 @@ async def update_customer(
 
     user.state = state
     await db.commit()
+    if _geo_change:
+        from app.services import geography as _geo
+        await _geo.note(db, channel=(channel or "whatsapp"), contact=wa_id, change=_geo_change)
     return {"ok": True}
 
 

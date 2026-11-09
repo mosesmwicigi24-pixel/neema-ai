@@ -1799,7 +1799,16 @@ async def run_turn(db: AsyncSession, redis, wa_id: str, user_text: str, llm: LLM
         # the visitor's IP and stamps User.country_iso, so a Nairobi visitor is
         # quoted KES without ever being asked where they are (owner rule).
         from app.core.phone import is_plausible_phone as _plausible
-        loc = (resolve_country(wa_id) or {}) if _plausible(wa_id) else {}
+        loc = {}
+        if _plausible(wa_id):
+            # The number, unless the person's geography record places them
+            # elsewhere on their own words or an operator's (services/market
+            # .placement_for_handle → services/geography): the +973 customer
+            # who said "Nairobi" is quoted KES from this turn on.
+            from app.services.market import placement_for_handle as _place
+            _iso, _country = await _place(db, wa_id, user)
+            loc = ({"country_iso": _iso, "country": _country or _iso} if _iso
+                   else (resolve_country(wa_id) or {}))
         if not loc.get("country_iso") and user is not None and getattr(user, "country_iso", None):
             loc = {"country_iso": user.country_iso,
                    "country": user.country or user.country_iso}

@@ -178,6 +178,15 @@ async def web_chat(body: WebChatIn, request: Request, db: AsyncSession = Depends
         if geo:
             u.country_iso, u.country = geo[0], geo[1]
             _log.info("web visitor %s geolocated to %s via IP", wa_id, geo[0])
+            # On the person (when the visitor is already a known customer, via
+            # a Neema link) as a PROBABLE reading from the connection, with its
+            # source; a stated town or an operator's edit outranks it.
+            if getattr(u, "person_id", None) is not None:
+                from app.models.person import Person as _Person
+                from app.services import geography as _geo
+                await _geo.place(db, await db.get(_Person, u.person_id),
+                                 [("probable_country", geo[0],
+                                   {"by": "ip", "confidence": "probable"})])
 
     # Ensure a conversation + persist the inbound turn (so history + the inbox see it).
     conv = (await db.execute(

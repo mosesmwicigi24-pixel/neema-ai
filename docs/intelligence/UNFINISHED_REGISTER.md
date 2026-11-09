@@ -160,3 +160,16 @@ the precise dependency · status. Last update: 2026-11-06, end of session 1.
 | "Commercial recovery" (orders after an escalated-then-closed check) | NOT YET MEASURED; the deals table carries the closed record with age and escalation; no Performance-view column yet | a column on the Performance view, after the first weeks of data |
 | The acknowledgement / supervisor targets (5 / 15 min) against real staffing | first proposals | the owner adjusts the three settings after watching `commitments` in health for a week |
 | The 22 hand-over turns the door does not catch (asks Neema cannot fulfil: bank details, artwork, documents) | by design the model's judgement | the model run; a second deterministic door only if a phrase family emerges |
+
+## Opened by slice 13 (2026-11-09, geography with provenance)
+
+| Item | Status | What closes it |
+|---|---|---|
+| Insights from evidence (paid vs unpaid, one scorer, no stage from a prefix, next best action) | NOT STARTED — audit §8 item 2 | the next slice |
+| Activity as a levelled timeline (customer / technical, grouping, new events) | NOT STARTED — audit §8 item 3; this slice adds one customer-level event ("Placed the customer") | the slice after |
+| Profile UX beyond this slice (verify / correct controls, aging of a weak reading, the history visible) | PARTIALLY — source and confidence on hover, the ☎ chip and the "Number from" row only on a discrepancy | audit §8 item 4 |
+| Segmentation by country / language / channel on Reports | NOT STARTED | audit §8 item 5 |
+| A stated location that is a delivery address for someone else placing a foreign customer in the home market | by design (their words are evidence, as on Messenger since 2026-09-05); an operator's edit outranks it | watch the "Placed the customer" events for a week; a wearer/recipient field on the capture schema (R6 in `CUSTOMER_KNOWLEDGE.md`) if it recurs |
+| `shipping_country` from free-text delivery notes only | the hub holds the structured address; Neema has none | a structured destination on the order tool, if the owner wants it |
+| Towns outside Kenya in `iso_from_text` (R2) | not done — "Lusaka", "Kampala" alone still read as nothing | the town table per market (one day) |
+| Measured with the model | NOT MEASURED — evaluation stopped on the owner's word | the geography cases when lifted |

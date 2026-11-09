@@ -126,6 +126,42 @@ export interface CustomerProfile {
     country_iso: string | null;
     country: string | null;
     flag_url: string | null;
+    /** Geography with provenance (services/geography): each attribute with its
+     *  source and confidence, the decision, and whether the telephone country
+     *  and the decision disagree. Absent on older API builds. */
+    geo?: GeoView | null;
+}
+
+interface GeoReading {
+    value: string | null;
+    label?: string | null;
+    by?: string | null;
+    source?: string | null;
+    confidence?: string | null;
+    confidence_label?: string | null;
+    detail?: string | null;
+    at?: string | null;
+}
+
+export interface GeoView {
+    telephone_country?: GeoReading | null;
+    probable_country?: GeoReading | null;
+    confirmed_residence?: GeoReading | null;
+    shipping_country?: GeoReading | null;
+    city?: GeoReading | null;
+    preferred_language?: GeoReading | null;
+    decision?: (GeoReading & { country_iso?: string | null; country?: string | null; attribute?: string | null }) | null;
+    discrepancy?: boolean;
+    history?: unknown[];
+}
+
+/** "Kenya — what the customer said (High confidence)": the hover text for a
+ *  geography reading, so the source and confidence are one hover away. */
+function geoTitle(r: GeoReading | null | undefined, fallback?: string | null): string | undefined {
+    if (!r) return fallback ?? undefined;
+    const name = r.label ?? r.value ?? fallback ?? "";
+    const parts = [r.source, r.confidence_label].filter(Boolean).join(" · ");
+    return parts ? `${name} — ${parts}` : (name || undefined);
 }
 
 interface ProductionEnquiry {
@@ -1346,13 +1382,15 @@ export function CustomerSidebar({
                                 />
                                 {stageMeta.label}
                             </span>
-                            {/* Country flag + ISO */}
+                            {/* Country flag + ISO — the decided country; its source and
+                                confidence on hover (services/geography) */}
                             {profile.country_iso && (
                                 <span
                                     className="inline-flex items-center gap-1 text-[10px] text-stone-500 cursor-default select-none"
-                                    title={
-                                        profile.country ?? profile.country_iso
-                                    }
+                                    title={geoTitle(
+                                        profile.geo?.decision,
+                                        profile.country ?? profile.country_iso,
+                                    )}
                                 >
                                     <img
                                         src={
@@ -1366,6 +1404,23 @@ export function CustomerSidebar({
                                         {countryFullName(
                                             profile.country_iso,
                                             profile.country,
+                                        )}
+                                    </span>
+                                </span>
+                            )}
+                            {/* The telephone country, only when it differs from where the
+                                customer is placed (a +973 number in Kenya): both facts stay
+                                visible, and nothing is marked wrong. */}
+                            {profile.geo?.discrepancy && profile.geo.telephone_country?.value && (
+                                <span
+                                    className="inline-flex items-center gap-1 text-[10px] text-stone-400 cursor-default select-none"
+                                    title={geoTitle(profile.geo.telephone_country)}
+                                >
+                                    <span>☎</span>
+                                    <span>
+                                        {countryFullName(
+                                            profile.geo.telephone_country.value,
+                                            profile.geo.telephone_country.label,
                                         )}
                                     </span>
                                 </span>
@@ -1758,8 +1813,23 @@ export function CustomerSidebar({
                                 label="Country"
                                 value={profile.country || ""}
                                 onChange={(v) => patch({ country: v })}
-                                placeholder="Resolved from phone"
+                                placeholder="Where they are (from the number until they say)"
                             />
+                            {profile.geo?.discrepancy && profile.geo.telephone_country?.value && (
+                                <div
+                                    className="flex items-start justify-between py-1.5 border-b border-stone-50"
+                                    title={geoTitle(profile.geo.telephone_country)}
+                                >
+                                    <span className="text-[10px] text-stone-400 w-20 flex-shrink-0 pt-0.5">Number from</span>
+                                    <span className="text-[11px] text-stone-700 text-right flex-1">
+                                        {countryFullName(
+                                            profile.geo.telephone_country.value,
+                                            profile.geo.telephone_country.label,
+                                        )}
+                                        {profile.geo.telephone_country.detail ? ` (${profile.geo.telephone_country.detail})` : ""}
+                                    </span>
+                                </div>
+                            )}
                             <EditableField
                                 label="Location"
                                 value={profile.location || ""}

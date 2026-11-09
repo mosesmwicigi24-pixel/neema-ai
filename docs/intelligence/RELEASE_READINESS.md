@@ -62,7 +62,11 @@ silence, plus fail-closed safeguards that had been fail-open.
 - Retiring the legacy bridge order path and the expiring shortener (W9-4).
 - A DB idempotency key for orders (migration).
 
-Slices 1–12 are live on the box at c04dda8 (16:26 UTC, 7 Nov).
+Slices 1–12 are live on the box at c04dda8 (16:26 UTC, 7 Nov). Slice 13 is in PR (not yet merged).
+
+## Slice 13 (2026-11-09) — in PR
+
+Geography with provenance (`services/geography.py`, `CUSTOMER_GEOGRAPHY.md`): one record on the person for the telephone country, the probable country, a confirmed residence, the shipping destination and the city, each with source, confidence and time; one decision shared by the WhatsApp turn, the shared catalogue link, the Meta evidence chain and the profile. No migration (JSONB). Customer-visible: a WhatsApp customer who says they are in Kenya or Zambia is quoted in that market from that turn, whatever their number's country; the profile shows the decided country with its source on hover and the telephone country beside it when they differ. Operator-visible: a country typed by name now sets the ISO and flag; an edit is recorded as confirmed. Tests: 31 new (4 on Postgres in the CI database job); adjacent suites green; web typecheck clean. Rollback: revert the squash commit; the `geo` key is ignored by the previous code.
 
 ## Slice 12 (2026-11-07) — merged as c04dda8, live
 
