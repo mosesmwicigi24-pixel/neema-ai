@@ -99,6 +99,9 @@ def describe(tool: str, args: dict, out) -> tuple[str, str | None]:
             return "Sent a product video", (a.get("product") or None)
         if tool == "church_calendar":
             return "Checked the church calendar", None
+        if tool == "geography":
+            # A customer-level event: the decision on where they are moved.
+            return "Placed the customer", (o.get("summary") or None)
     except Exception:
         pass
     # The fallback that keeps the promise: EVERY activity gets a row.

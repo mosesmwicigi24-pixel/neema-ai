@@ -1448,6 +1448,15 @@ async def _create_order(args: dict, ctx: ToolContext) -> dict:
         figures = ""
     order_note = "; ".join(x for x in (notes, (f"Measurements on file: {figures}" if figures else ""))
                            if x)
+    # Where the parcel goes, when the notes name a country or a Kenyan town:
+    # the SHIPPING destination (services/geography), kept apart from where the
+    # customer is and never deciding the market. Probable, from free text.
+    _ship_iso = None
+    try:
+        from app.core.countries import iso_from_text as _ship_from_text
+        _ship_iso = _ship_from_text(notes) if notes else None
+    except Exception:
+        _ship_iso = None
 
     try:
         from app.services import promotions as _promo
@@ -1557,6 +1566,16 @@ async def _create_order(args: dict, ctx: ToolContext) -> dict:
         hub_pushed_at=datetime.now(timezone.utc),
     )
     ctx.db.add(order_row)
+    if _ship_iso and order_person_id is not None:
+        try:
+            from app.models.person import Person as _Person
+            from app.services import geography as _geo
+            await _geo.place(ctx.db, await ctx.db.get(_Person, order_person_id),
+                             [("shipping_country", _ship_iso,
+                               {"by": "order", "confidence": "probable",
+                                "detail": (pushed.get("order_number") or None)})])
+        except Exception:
+            _log.warning("shipping country not recorded for order %s", hub_order_id, exc_info=False)
 
     # A short, readable ref for the link we give the customer. Postgres-backed,
     # so it survives redis loss and never expires into a bare wa.me chat.
@@ -1860,14 +1879,39 @@ async def _capture_customer(args: dict, ctx: ToolContext) -> dict:
     if args.get("name"):
         user.name = args["name"].strip()
         user.name_confirmed = True
+    change = None
     if args.get("location"):
         user.location = args["location"].strip()
+        # Where they said they are goes on the person WITH its provenance
+        # (services/geography: probable country, high confidence; the city
+        # when they named one). Their own words outrank the number: a +973
+        # customer who says "Nairobi" is placed in Kenya — and this very turn
+        # switches to the Kenyan market, as capture_contact already did for
+        # Messenger, so the quote and the next turn agree.
+        from app.services import geography as _geo
+        if user.person_id is not None:
+            from app.models.person import Person as _Person
+            _p = await ctx.db.get(_Person, user.person_id)
+            change = await _geo.place(ctx.db, _p, _geo.stated_readings(user.location), user=user)
     prof = await _save_profile_fields(ctx.db, user.person_id,
                                       args.get("role"), args.get("organization"))
     await ctx.db.commit()
     out = {"ok": True, "name": user.name, "location": user.location}
     if prof:
         out["profile"] = prof
+    if change:
+        from app.core.countries import market_currency as _mc
+        out["placed"] = change["after"].get("country")
+        await _geo.note(ctx.db, channel=ctx.channel, contact=ctx.wa_id, change=change)
+        # The DECISION's money, not the words' alone: an operator-confirmed
+        # residence outranks what they just said, and the turn follows it.
+        _decided = _mc(change["after"].get("country_iso"))
+        if change["after"].get("country_iso") and _decided != ctx.currency:
+            ctx.currency = _decided
+            out["currency_now"] = _decided
+            out["note"] = (f"Customer is in {change['after'].get('country')} — re-run "
+                           f"search_catalog and quote the real {_decided} catalogue prices; "
+                           f"do NOT convert.")
     return out
 
 
@@ -1935,6 +1979,7 @@ async def _capture_contact(args: dict, ctx: ToolContext) -> dict:
         ident = await resolve_or_create_person(ctx.db, ctx.channel, ctx.wa_id,
                                                source=f"{ctx.channel}_capture")
     out = {"ok": True}
+    _change = None
     person = await ctx.db.get(Person, ident.person_id)
 
     prof = await _save_profile_fields(ctx.db, ident.person_id,
@@ -1983,9 +2028,19 @@ async def _capture_contact(args: dict, ctx: ToolContext) -> dict:
                 _shim.country = state["country"]
                 _shim.flag_url = state["flag_url"]
             out["country"] = state["country"]
+        else:
+            _shim = None
         person.state = state
         flag_modified(person, "state")
         out["location"] = location
+        # The same words, recorded WITH their provenance (services/geography):
+        # the probable country at high confidence, the city when named. The
+        # market decision and the profile read this record first; the user
+        # row (when one exists) follows the decision.
+        from app.services import geography as _geo
+        _change = await _geo.place(ctx.db, person, _geo.stated_readings(location), user=_shim)
+        if _change:
+            out["placed"] = _change["after"].get("country")
         # "Kenya money" case: the moment their location resolves to Kenya, this
         # very turn switches to the Kenyan market — the next search_catalog call
         # returns real KES catalogue prices (never a USD conversion).
@@ -2088,9 +2143,23 @@ async def _capture_contact(args: dict, ctx: ToolContext) -> dict:
                     user.country = loc["country"]
                     user.flag_url = loc["flag_url"]
                 out["country"] = loc["country"]
+                # …and on the geography record as the TELEPHONE country, with
+                # its provenance. The decision (services/geography) still
+                # prefers what they said; the user row follows the decision.
+                from app.services import geography as _geo
+                _tel = _geo.telephone_country(e164)
+                if _tel and person is not None:
+                    _c2 = await _geo.place(ctx.db, person, [("telephone_country", _tel["iso"],
+                                                             {"by": "phone", "confidence": "confirmed",
+                                                              "detail": (f"+{_tel['code']}" if _tel.get("code") else None)})],
+                                           user=user)
+                    _change = _change or _c2
             out["phone"] = e164
 
     await ctx.db.commit()
+    if _change:
+        from app.services import geography as _geo
+        await _geo.note(ctx.db, channel=ctx.channel, contact=ctx.wa_id, change=_change)
     return out
 
 
@@ -2499,14 +2568,13 @@ async def _customer_currency(ctx: ToolContext) -> str:
     from app.core.countries import currency_for_country
     from app.services.market import customer_market
     iso = None
-    if ctx.channel == "whatsapp":
+    try:
+        _, _loc = await customer_market(ctx.db, ctx.channel, ctx.wa_id)
+        iso = _loc.get("country_iso")
+    except Exception:
+        pass
+    if not iso and ctx.channel == "whatsapp":
         iso = (resolve_country(ctx.wa_id) or {}).get("country_iso")
-    else:
-        try:
-            _, _loc = await customer_market(ctx.db, ctx.channel, ctx.wa_id)
-            iso = _loc.get("country_iso")
-        except Exception:
-            pass
     if iso:
         return currency_for_country(iso)
     return "KES" if ctx.currency == "KES" else "USD"

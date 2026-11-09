@@ -370,6 +370,14 @@ async def _capture_events(db: AsyncSession, channel: str, payload: dict, redis=N
                                    "flag_url": flag_url_for(loc_iso)})
                         _p.state = st
                         _fm(_p, "state")
+                    # On the geography record it is a POSSIBLE reading — kept
+                    # with its source, never deciding the market, and never
+                    # overwriting what the customer said (services/geography).
+                    if _p is not None:
+                        from app.services import geography as _geo
+                        await _geo.place(db, _p, [("probable_country", loc_iso,
+                                                   {"by": "locale", "confidence": "possible",
+                                                    "detail": str(prof["locale"])[:20]})])
             # Ad attribution: a DM opened from a Click-to-Messenger/IG ad carries
             # a referral block on the message itself (message-less referral events
             # are handled — and skipped — at the top of the loop). Record

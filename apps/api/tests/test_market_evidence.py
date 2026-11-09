@@ -78,7 +78,10 @@ def _market(results, p, channel="messenger", key=PSID):
 
 # ── 1. WhatsApp: the number is the evidence ──────────────────────────────────
 
-def test_whatsapp_prefix_decides_without_a_lookup():
+def test_whatsapp_prefix_decides_when_no_record_says_otherwise():
+    # The person's geography record is read first (services/geography, slice
+    # 13: their words or an operator's edit can place a number elsewhere);
+    # with no user row and no person, the number decides as before.
     assert _market([], None, "whatsapp", "254712345678") == ("KES", {"country_iso": "KE", "country": "Kenya"})
     cur, loc = _market([], None, "whatsapp", "256700111222")
     assert cur == "USD" and loc["country_iso"] == "UG"

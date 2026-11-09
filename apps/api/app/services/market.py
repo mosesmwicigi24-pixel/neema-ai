@@ -67,10 +67,20 @@ async def evidence_for_person(db, ident, person) -> dict:
     sibs = list((await db.execute(select(Identity).where(
         Identity.person_id == ident.person_id))).scalars().all() or [])
     iso, country, how = None, "", ""
+    # 0. the geography record — their words, an operator's confirmation or a
+    #    merged number, each with its provenance (services/geography). The
+    #    same words the steps below read, decided once; a "possible" reading
+    #    (a profile locale) never places anyone here.
+    from app.services import geography as _geo
+    _d = _geo.decide(person.state if person is not None else None)
+    if _d.get("country_iso"):
+        iso, country = _d["country_iso"], _d["country"]
+        how = {"stated": "their words", "operator": "panel edit", "phone": "merged WhatsApp number",
+               "ip": "profile country"}.get(_d.get("by"), _d.get("by") or "geography")
     # 1. their own words
     words = [((person.state or {}).get("location") if person is not None else None)]
     words += [getattr(u, "location", None) for u in users]
-    for w in words:
+    for w in (words if not iso else []):
         w_iso = iso_from_text(w) if w else None
         if w_iso:
             iso, country, how = w_iso, w, "their words"
@@ -113,6 +123,34 @@ async def evidence_for_person(db, ident, person) -> dict:
             "users": users, "siblings": sibs}
 
 
+async def placement_for_handle(db, key: str, user=None) -> tuple[str | None, str]:
+    """(iso, country) for a WhatsApp number: the geography decision on its
+    person (confirmed residence → probable country → telephone country), with
+    the number's own country as the fallback when no person or record exists.
+    `user` may be passed by a caller that already loaded the row. Any failure
+    reading the record falls back to the number — a quote is never lost to a
+    geography read."""
+    from app.services import geography as _geo
+    tel = _geo.telephone_country(key)
+    fallback_iso = tel["iso"] if tel else _from_phone(key)[0]
+    try:
+        from app.models.person import Person
+        if user is None:
+            user = (await db.execute(select(User).where(User.wa_id == key))).scalars().first()
+        state = None
+        if user is not None and getattr(user, "person_id", None) is not None:
+            p = await db.get(Person, user.person_id)
+            state = (p.state if p is not None else None)
+        d = _geo.decide(state, fallback_iso=fallback_iso)
+        if d.get("country_iso"):
+            return d["country_iso"], d["country"]
+    except Exception:
+        _log.warning("geography read failed for %s — the number decides", key, exc_info=False)
+    if fallback_iso:
+        return fallback_iso, (tel["country"] if tel else _from_phone(key)[1])
+    return None, ""
+
+
 async def customer_market(db, channel: str, key: str) -> tuple[str, dict]:
     """(currency, loc) for ANY customer key — a WhatsApp number (its prefix),
     a web session (the IP-geolocated user row), or a social id (the evidence
@@ -122,7 +160,10 @@ async def customer_market(db, channel: str, key: str) -> tuple[str, dict]:
     key = str(key or "")
     if channel in (WHATSAPP, "sms") or key.startswith("web_"):
         if is_plausible_phone(key):
-            iso, country = _from_phone(key)
+            # The number decides — unless the person's geography record says
+            # they are somewhere else (what they said, an operator's edit):
+            # a +973 customer in Nairobi is quoted KES (services/geography).
+            iso, country = await placement_for_handle(db, key)
         else:
             u = (await db.execute(select(User).where(User.wa_id == key))).scalars().first()
             if u is not None and getattr(u, "country_iso", None):

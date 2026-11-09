@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 import json
+import logging
 import httpx
 from datetime import datetime, timezone, timedelta
 
@@ -92,8 +93,15 @@ async def provision_user(
     if clean_name and not user.name_confirmed and not (user.name or "").strip():
         user.name = clean_name[:100]
 
+    # The telephone country — read with the phone-numbers library so a shared
+    # code names the right country (+1 212 is New York, not Canada); the
+    # prefix table is the fallback. It fills an EMPTY country only: a decided
+    # residence (services/geography) is never overwritten by the number.
+    from app.services import geography as _geo
+    tel = _geo.telephone_country(wa_id) if is_phone else None
     if not user.country:
-        loc = resolve_country(wa_id)
+        loc = ({"country": tel["country"], "country_iso": tel["iso"], "flag_url": tel["flag_url"]}
+               if tel else resolve_country(wa_id))
         if loc["country"]:
             user.country = loc["country"]
             user.country_iso = loc["country_iso"]
@@ -123,6 +131,20 @@ async def provision_user(
         )
         if user.person_id is None:
             user.person_id = ident.person_id
+        # The number's country goes on the person WITH its provenance
+        # (geo.telephone_country), once; the market decision reads it last,
+        # after anything the customer or an operator said.
+        if tel and user.person_id is not None:
+            try:
+                from app.models.person import Person as _Person
+                _p = await db.get(_Person, user.person_id)
+                if _p is not None and not (((_p.state or {}).get("geo") or {}).get("telephone_country")):
+                    await _geo.place(db, _p, [("telephone_country", tel["iso"],
+                                               {"by": "phone", "confidence": "confirmed",
+                                                "detail": (f"+{tel['code']}" if tel.get("code") else None)})])
+            except Exception:
+                logging.getLogger("neema.geography").warning(
+                    "telephone country not recorded for %s", wa_id, exc_info=False)
     elif user.person_id is None:
         from app.services.identity import resolve_person_id_for_wa_id
         user.person_id = await resolve_person_id_for_wa_id(db, wa_id)  # adopt-only for non-phones
