@@ -183,6 +183,6 @@ and `/api/admin/settings/prompt-inputs` (the 22 flag values).
    test proves the write on a database built from the migration chain.
 2. **(The CI pass^3 is in: 54/120 = 0.450, BENCHMARK_RESULTS.)** **Send the box run's files** (`eval-out/agent-eval-blind-7670de1-*.json` and `.log`) — they are the second independent measurement, on the production database.
 
-## Decided 2026-11-09 (12:3x UTC): no validation run for the Customer Intelligence directive
+## Decided 2026-11-09 (12:3x UTC, superseded 13:0x UTC): the Customer Intelligence validation run
 
-The owner's words: "no validation". The model-dependent validation (Phase 9 of the directive) is not wanted; the evaluation stop stands. The model-free tests per slice are the evidence (`REGRESSION_SAFETY_REPORT.md`). Nothing here waits on the owner for this item.
+12:3x UTC, the owner's words: "no validation". 13:0x UTC, the owner's words: "you can do Validation". The later word stands: ONE scoped run of the directive's model-dependent cases (`customer_intelligence.jsonl`, 6 cases, pass^1, the scripted battery off) in the `agent-eval` workflow. The general stop on the blind pass^3 and the tuning files is NOT lifted by this; nothing else is dispatched. The model-free tests per slice remain the main evidence (`REGRESSION_SAFETY_REPORT.md`).

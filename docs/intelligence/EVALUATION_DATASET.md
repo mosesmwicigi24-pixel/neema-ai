@@ -19,6 +19,15 @@ the owned delay with the commitment escalated (`expect.commitment`), no
 hand-over; `safe-094` and `safe-095` (Chinese, Arabic) expect an answer in
 the customer's language from the hub, no hand-over.
 
+Added 2026-11-09 (Customer Intelligence validation, on the owner's word "you can do
+Validation"): `customer_intelligence.jsonl` — 6 developer cases (11 turns, 3 critical)
+for the model-dependent half of the directive's Phase 9 list: the Bahrain number that
+says Nairobi (dollars, then shillings from that turn on, no country question), the
+Kenyan number in Dubai (dollars), a Kenyan town (shillings, city captured), Kampala
+(dollars, no M-Pesa), a hold without a reminder question, a payment claim checked in
+the hub. Two new contact prefixes in the runner (Bahrain, the Emirates). Floors on the
+file: silence 11/11, said 2/2. Reported separately from the independent and blind sets.
+
 Added 2026-11-07 (slice 11): `commercial_ei.jsonl` — 10 developer cases for
 the pause, the bare consultation, "I'll confirm later", "give me a moment"
 (not a hold), the firm decline, comparing without a discount, a named Friday
