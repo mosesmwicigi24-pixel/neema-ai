@@ -1322,9 +1322,11 @@ async def get_thread(
             "created_at":   e.created_at.isoformat() if e.created_at else None,
             # ── Timeline-specific fields ──────────────────────────────────
             "event_kind":   e.action.value,
-            # For escalated rows: use note. For agentless intercepts: use auto_reason.
+            # For escalated and flagged rows: use note (a flag's findings show
+            # under its label in the chat — owner, 2026-11-09). For agentless
+            # intercepts: use auto_reason.
             "event_reason": (
-                e.note if e.action == InterceptAction.escalated
+                e.note if e.action in (InterceptAction.escalated, InterceptAction.flag)
                 else auto_reason
             ),
             "agent_name":   agent_name,
@@ -2039,6 +2041,7 @@ async def upload_media(
     request: Request,
     file: UploadFile = File(...),
     caption: str | None = Form(None),
+    voice: bool = Form(False),
     db: AsyncSession = Depends(get_db),
     agent: Agent = Depends(get_current_agent),
 ):
@@ -2053,9 +2056,13 @@ async def upload_media(
         "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         "video/mp4", "video/3gpp", "video/quicktime", "video/hevc", "video/x-m4v",
         "audio/ogg", "audio/aac", "audio/mpeg",
+        # What the composer's microphone records (Chrome/Android: WebM,
+        # Safari/iPhone: MP4) — re-encoded per channel below (audio_convert).
+        "audio/webm", "audio/mp4", "audio/x-m4a", "audio/m4a",
     }
 
-    ct = file.content_type or mimetypes.guess_type(file.filename or "")[0] or ""
+    # "audio/webm;codecs=opus" — the parameters are not part of the type.
+    ct = (file.content_type or mimetypes.guess_type(file.filename or "")[0] or "").split(";")[0].strip().lower()
     # iPhone .mov/.hevc files often arrive as octet-stream — trust the extension.
     if ct in ("", "application/octet-stream"):
         _ext = os.path.splitext(file.filename or "")[1].lower() if file.filename else ""
@@ -2120,6 +2127,26 @@ async def upload_media(
             file_path = converted
             saved_name = os.path.basename(converted)
 
+    # Voice notes: the channel's own format — Ogg/Opus on WhatsApp (shows as a
+    # voice note), M4A on Messenger/Instagram (services/audio_convert.py).
+    if waba_type == "audio":
+        from app.services.audio_convert import needs_convert, to_channel_voice
+        if needs_convert(ct, voice):
+            _c = (await db.execute(select(Conversation.channel).where(Conversation.id == conv_id))).scalar_one_or_none()
+            out = await to_channel_voice(file_path, _c)
+            try:
+                os.remove(file_path)
+            except OSError:
+                pass
+            if out is None:
+                raise HTTPException(
+                    status_code=422,
+                    detail="Couldn't prepare this voice note for sending — record it again.")
+            file_path, _mime = out
+            saved_name = os.path.basename(file_path)
+        # WhatsApp and Meta play audio without a caption; one would refuse the send.
+        caption = None
+
     public_base = getattr(settings, "media_public_url", "").rstrip("/")
     if not public_base:
         raise HTTPException(
@@ -2135,7 +2162,8 @@ async def upload_media(
         media_url=public_url,
         media_type=waba_type,
         caption=caption,
-        filename=file.filename,
+        # A recording has no meaningful file name; the thread shows it as one.
+        filename="Voice note" if (voice and waba_type == "audio") else file.filename,
         redis=request.app.state.redis,
     )
 
