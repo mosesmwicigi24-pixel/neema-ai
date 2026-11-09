@@ -62,9 +62,9 @@ silence, plus fail-closed safeguards that had been fail-open.
 - Retiring the legacy bridge order path and the expiring shortener (W9-4).
 - A DB idempotency key for orders (migration).
 
-Slices 1–14 are live on the box at 345a20b (12:13 UTC, 9 Nov). Slice 15 merged as c936832 (12:10 UTC; the box's pick-up is recorded in REGRESSION_SAFETY_REPORT when read). Slice 16 is in PR.
+Slices 1–14 are live on the box at 345a20b (12:13 UTC, 9 Nov). Slice 15 merged as c936832 (12:10 UTC) and slice 16 as 35c6740 (12:25 UTC); the box's pick-up is recorded in REGRESSION_SAFETY_REPORT when read.
 
-## Slice 16 (2026-11-09) — in PR
+## Slice 16 (2026-11-09) — merged as 35c6740
 
 Customers in aggregate (`services/segments.py`, `CUSTOMER_SEGMENTS.md`): `GET /admin/reports/segments` and a Customers tab on Reports — by market (the geography decision; confirmed placements apart from inferred and unknown), by language, by channel; counts only, three bulk reads, nothing stored. No model call, no migration. Tests: 5 new. Rollback: revert the squash commit.
 
