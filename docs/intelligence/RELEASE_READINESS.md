@@ -62,7 +62,11 @@ silence, plus fail-closed safeguards that had been fail-open.
 - Retiring the legacy bridge order path and the expiring shortener (W9-4).
 - A DB idempotency key for orders (migration).
 
-Slices 1–14 are live on the box at 345a20b (12:13 UTC, 9 Nov). Slice 15 merged as c936832 (12:10 UTC) and slice 16 as 35c6740 (12:25 UTC); the box's pick-up is recorded in REGRESSION_SAFETY_REPORT when read.
+Slices 1–14 are live on the box at 345a20b (12:13 UTC, 9 Nov). Slice 15 merged as c936832 (12:10 UTC) and slice 16 as 35c6740 (12:25 UTC); the box's pick-up is recorded in REGRESSION_SAFETY_REPORT when read. Slice 17 is in PR.
+
+## Slice 17 (2026-11-09) — in PR
+
+Verify / correct on the Profile tab (web only; `CUSTOMER_GEOGRAPHY.md` §5b): a "Placement" row appears only while the current placement is unconfirmed, with its confidence, the earlier readings on hover, and a one-click Confirm that records the operator's confirmation through the existing PATCH (no API change). One Postgres test added for the ISO-only confirmation. Rollback: revert the squash commit.
 
 ## Slice 16 (2026-11-09) — merged as 35c6740
 

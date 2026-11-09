@@ -128,6 +128,19 @@ Not measured with the model (the owner's stop): whether the writer re-runs the
 catalogue in KES after the switch note (the note is the same one
 `capture_contact` has used since September).
 
+## 5b. Verify / correct controls (slice 17, 2026-11-09)
+
+The Profile tab's second half of the UX (audit §8 item 4): when the current
+placement is not confirmed (the number, what they said, the connection), a
+"Placement" row shows its confidence, how many earlier readings exist (all of
+them on hover, with source and date), and a one-click **Confirm** that sends
+the decision's ISO to the operator PATCH — recorded as the operator's
+confirmation (`confirmed_residence`), the user row's country name following
+the decision, one "Placed the customer" line on the timeline. Correcting a
+placement is typing the country in the field above, as before. Nothing new
+is permanent on the panel: the row appears only while a placement is
+unconfirmed. Postgres test: `test_confirming_the_placement_by_iso_alone_records_the_residence`.
+
 ## 6. What this slice does not do (the next slices, in order)
 
 Insights from evidence (paid vs unpaid, one scorer, no stage from a prefix,
