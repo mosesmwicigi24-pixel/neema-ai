@@ -192,3 +192,37 @@ def test_a_merge_carries_geography_and_the_opt_out(env, world):
             assert pst["contact_preferences"]["language"] == "sw"
             assert pst["customer_state"] == {"state": "needs_time"}
     _run(go())
+
+
+def test_confirming_the_placement_by_iso_alone_records_the_residence(env, world):
+    """The panel's Confirm button sends only the ISO of the current decision
+    (slice 17): the residence is recorded as the operator's confirmation, the
+    user row's country NAME follows the decision (not left at the old one),
+    and the timeline gets its line."""
+    from app.models.agent_activity import AgentActivity
+    from app.models.user import User
+    from app.routers import crm
+    from app.services.channel import get_or_create_conversation
+    from app.services.messaging import provision_user
+
+    async def go():
+        wa = "97333123457"
+        async with env.maker() as db:
+            user = await provision_user(db, wa, name="Yusuf")
+            await get_or_create_conversation(db, "whatsapp", wa, wa_id=wa)
+            await db.commit()
+            assert user.country == "Bahrain"
+            await crm.update_customer(wa, {"country_iso": "KE"}, db=db, agent=None)
+        async with env.maker() as db:
+            user = (await db.execute(select(User).where(User.wa_id == wa))).scalar_one()
+            st, _ = await _person_state(db, user)
+            res = st["geo"]["confirmed_residence"]
+            assert res["value"] == "KE" and res["by"] == "operator" and res["confidence"] == "confirmed"
+            assert (user.country_iso, user.country) == ("KE", "Kenya")
+            assert st["geo"]["telephone_country"]["value"] == "BH"
+            view = crm._geo_view(st, wa)
+            assert view["decision"]["confidence"] == "confirmed" and view["discrepancy"] is True
+            rows = (await db.execute(select(AgentActivity).where(
+                AgentActivity.contact == wa, AgentActivity.tool == "geography"))).scalars().all()
+            assert [r.detail for r in rows] == ["Placed in Kenya (an operator); was Bahrain"]
+    _run(go())

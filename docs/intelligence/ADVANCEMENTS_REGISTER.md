@@ -517,3 +517,9 @@ Full report: `CUSTOMER_SEGMENTS.md`. Audit: `CUSTOMER_INTELLIGENCE_AUDIT.md` §7
 - **Baseline (audit §7):** no endpoint or page aggregated customers by country or language; inferred and confirmed geography were indistinguishable.
 - **Change:** `services/segments.py` — `place` (the geography decision per customer with its basis: confirmed / inferred / unknown), `summarise` (pure aggregates with a `basis` block), `report` (three bulk reads, merged rows excluded); `GET /admin/reports/segments`; the Customers tab on Reports with four stat boxes and three tables. Counts only.
 - **Tests:** `tests/test_segments.py` (5). **Measured:** deterministic. Status: IMPLEMENTED BUT NOT VERIFIED in production (live after merge).
+
+## Slice 17 (2026-11-09) · Customer Intelligence, Phase 3 — verify / correct on the Profile tab
+
+- **Baseline (audit §4, §8 item 4):** nothing on the profile let an operator confirm or correct a placement except retyping the country; the history of readings was invisible.
+- **Change:** `CustomerSidebar.tsx` — a "Placement" row while the decision is unconfirmed: confidence label, the count of earlier readings (all on hover with source and date), a Confirm button that PATCHes the decision's ISO (recorded as `confirmed_residence` by the operator, the user row's name following, one timeline line) and reloads the profile. Correction stays the Country field. No API change.
+- **Tests:** `tests/test_geography_db.py::test_confirming_the_placement_by_iso_alone_records_the_residence` (Postgres). Web typecheck clean. Status: IMPLEMENTED BUT NOT VERIFIED in production (live after merge).

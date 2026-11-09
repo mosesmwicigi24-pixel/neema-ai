@@ -1962,6 +1962,41 @@ export function CustomerSidebar({
                                     </span>
                                 </div>
                             )}
+                            {/* Verify / correct (slice 17): a placement nobody has confirmed can be
+                                confirmed in one click (recorded as the operator's confirmation);
+                                correcting it is typing the country above. Earlier readings on hover. */}
+                            {profile.geo?.decision?.country_iso && profile.geo.decision.confidence !== "confirmed" && (
+                                <div className="flex items-start justify-between py-1.5 border-b border-stone-50">
+                                    <span className="text-[10px] text-stone-400 w-20 flex-shrink-0 pt-0.5">Placement</span>
+                                    <span className="text-[11px] text-right flex-1 flex items-center justify-end gap-2">
+                                        <span
+                                            className="text-stone-500"
+                                            title={[
+                                                geoTitle(profile.geo.decision),
+                                                ...((profile.geo.history ?? []) as { attr?: string; value?: string; by?: string; at?: string }[])
+                                                    .slice(-5)
+                                                    .map((h) => `earlier: ${h.attr ?? ""} ${h.value ?? ""} (${h.by ?? "?"}${h.at ? `, ${fmtDate(h.at)}` : ""})`),
+                                            ].filter(Boolean).join("\n")}
+                                        >
+                                            {profile.geo.decision.confidence_label ?? "Unconfirmed"}
+                                            {(profile.geo.history?.length ?? 0) > 0 ? ` · ${profile.geo.history!.length} earlier` : ""}
+                                        </span>
+                                        <button
+                                            type="button"
+                                            disabled={saving}
+                                            onClick={() => {
+                                                const iso = profile.geo?.decision?.country_iso;
+                                                if (!iso) return;
+                                                patch({ country_iso: iso }).then(() => loadProfile());
+                                            }}
+                                            className="text-[10px] font-semibold px-1.5 py-0.5 rounded border border-emerald-300 text-emerald-700 bg-emerald-50 hover:bg-emerald-100 disabled:opacity-50"
+                                            title={`Confirm ${countryFullName(profile.geo.decision.country_iso, profile.geo.decision.country)} as where this customer is (recorded as your confirmation)`}
+                                        >
+                                            Confirm
+                                        </button>
+                                    </span>
+                                </div>
+                            )}
                             <EditableField
                                 label="Location"
                                 value={profile.location || ""}
