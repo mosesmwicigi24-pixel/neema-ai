@@ -1090,6 +1090,9 @@ export function ConversationsView({
     // The person-scoped journey ledger (pickups, check-ins, deals, orders,
     // calls) — fetched per thread, refreshed while the panel is open.
     const [activityEvents, setActivityEvents] = useState<ApiActivityEvent[]>([]);
+    // The activity log shows every step (owner, 2026-08-19); the technical
+    // level can be hidden to read the customer's timeline alone (slice 15).
+    const [activityTechnical, setActivityTechnical] = useState(true);
     const [clearConfirm, setClearConfirm] = useState(false);
     const [clearing, setClearing] = useState(false);
     const [mobileCrmOpen, setMobileCrmOpen] = useState(false);
@@ -4823,6 +4826,10 @@ export function ConversationsView({
                     order:            "bg-green-100 border-green-400",
                     call:             "bg-teal-100 border-teal-300",
                     tool:             "bg-lime-50 border-lime-300",
+                    geography:        "bg-cyan-100 border-cyan-300",
+                    stage:            "bg-violet-100 border-violet-300",
+                    commitment:       "bg-orange-100 border-orange-300",
+                    customer_state:   "bg-yellow-100 border-yellow-300",
                 };
 
                 if (!activityLogOpen) {
@@ -4902,6 +4909,21 @@ export function ConversationsView({
                             </button>
                         </div>
 
+                        {activityEvents.some((e) => e.level === "technical") && (
+                            <label
+                                className="px-3 py-1.5 flex items-center gap-1.5 text-[10px] text-stone-500 cursor-pointer select-none"
+                                style={{ borderBottom: "1px solid #edf0ea" }}
+                                title="Neema's own steps — searches, cards, cart edits, planned check-ins"
+                            >
+                                <input
+                                    type="checkbox"
+                                    checked={activityTechnical}
+                                    onChange={(e) => setActivityTechnical(e.target.checked)}
+                                    className="accent-[#589b31]"
+                                />
+                                Show Neema's steps ({activityEvents.filter((e) => e.level === "technical").length})
+                            </label>
+                        )}
                         {activityEvents.length === 0 ? (
                             <div className="flex-1 flex items-center justify-center px-3">
                                 <p className="text-[11px] text-stone-300 text-center leading-relaxed">
@@ -4912,10 +4934,10 @@ export function ConversationsView({
                             </div>
                         ) : (
                             <div className="flex-1 overflow-y-auto px-3 py-3 space-y-0">
-                                {activityEvents.map((evt, i) => (
+                                {activityEvents.filter((e) => activityTechnical || e.level !== "technical").map((evt, i, shown) => (
                                     <div key={evt.id} className="flex gap-2 pb-3 relative">
                                         {/* Connector line */}
-                                        {i < activityEvents.length - 1 && (
+                                        {i < shown.length - 1 && (
                                             <div className="absolute left-[6px] top-4 bottom-0 w-px bg-stone-100" />
                                         )}
                                         {/* Dot */}
@@ -4925,6 +4947,11 @@ export function ConversationsView({
                                         <div className="min-w-0">
                                             <p className="text-[11px] font-medium text-[#1c2917] leading-snug">
                                                 {evt.label}
+                                                {(evt.count ?? 1) > 1 && (
+                                                    <span className="ml-1 text-[10px] text-stone-400" title="Repeated steps folded into one line">
+                                                        ×{evt.count}
+                                                    </span>
+                                                )}
                                             </p>
                                             {evt.detail && (
                                                 <p className="text-[10px] text-[#8fa383] mt-0.5 leading-snug break-words">

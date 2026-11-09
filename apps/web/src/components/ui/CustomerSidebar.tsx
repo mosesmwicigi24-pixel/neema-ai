@@ -16,7 +16,7 @@ import {
     displayName,
 } from "@/lib/utils";
 import type { Conversation, Order } from "@/types";
-import { apiErrorDetail, whatsappApi, callsApi, askNeema, answerViaNeema, settingsApi, type ApiCall, type CallPermission } from "@/lib/api";
+import { apiErrorDetail, whatsappApi, callsApi, askNeema, answerViaNeema, settingsApi, conversationsApi, type ApiCall, type CallPermission, type ApiActivityEvent } from "@/lib/api";
 import { useWs } from "@/lib/websocket";
 import { callStatus, fmtCallDuration, upsertCall, CALL_ICON_PATH, permissionLines, type PermTone } from "@/lib/callStatus";
 import { lastCallBrief } from "@/lib/callCard";
@@ -545,6 +545,96 @@ function ScoreBar({ score }: { score: number }) {
 
 /** Ask-Neema (plan C5): the junior fetches — sizes, past orders, call context —
  *  so the human never digs. Read-only; nothing reaches the customer. */
+/** The customer's timeline (slice 15): what happened to them — pickups,
+ *  check-ins sent, orders, calls, deals, discoveries, stage moves, promised
+ *  checks, holds — newest first, from the same ledger the conversation view's
+ *  Activity log reads. Neema's own steps (searches, cards, cart edits) are
+ *  the technical level, behind a toggle, folded when repeated. */
+const TIMELINE_DOT: Record<string, string> = {
+    escalated: "bg-amber-100 border-amber-300", flag: "bg-red-100 border-red-300",
+    intercept: "bg-purple-100 border-purple-300", release: "bg-blue-100 border-blue-300",
+    transfer: "bg-indigo-100 border-indigo-300", pause: "bg-stone-200 border-stone-400",
+    checkin_sent: "bg-sky-200 border-sky-400", deal: "bg-emerald-100 border-emerald-300",
+    promise: "bg-amber-100 border-amber-300", order: "bg-green-100 border-green-400",
+    call: "bg-teal-100 border-teal-300", tool: "bg-lime-50 border-lime-300",
+    geography: "bg-cyan-100 border-cyan-300", stage: "bg-violet-100 border-violet-300",
+    commitment: "bg-orange-100 border-orange-300", customer_state: "bg-yellow-100 border-yellow-300",
+};
+
+function CustomerTimeline({ conversationId }: { conversationId: string }) {
+    const [events, setEvents] = useState<ApiActivityEvent[]>([]);
+    const [technical, setTechnical] = useState(false);
+    const [loaded, setLoaded] = useState(false);
+    useEffect(() => {
+        let stale = false;
+        setLoaded(false);
+        conversationsApi
+            .activity(conversationId)
+            .then((r) => { if (!stale) { setEvents(r.events ?? []); setLoaded(true); } })
+            .catch(() => { if (!stale) { setEvents([]); setLoaded(true); } });
+        return () => { stale = true; };
+    }, [conversationId]);
+    const technicalCount = events.filter((e) => e.level === "technical").length;
+    const shown = events.filter((e) => technical || e.level !== "technical").slice(0, 40);
+    return (
+        <Section
+            title="Timeline"
+            action={
+                technicalCount > 0 ? (
+                    <label
+                        className="flex items-center gap-1 text-[10px] text-stone-500 cursor-pointer select-none"
+                        title="Neema's own steps — searches, cards shown, cart edits, planned check-ins"
+                    >
+                        <input
+                            type="checkbox"
+                            checked={technical}
+                            onChange={(e) => setTechnical(e.target.checked)}
+                            className="accent-[#589b31]"
+                        />
+                        Neema's steps ({technicalCount})
+                    </label>
+                ) : undefined
+            }
+        >
+            {!loaded ? (
+                <p className="text-xs text-stone-400 text-center py-2">Loading…</p>
+            ) : shown.length === 0 ? (
+                <p className="text-xs text-stone-400 text-center py-2">Nothing on the timeline yet</p>
+            ) : (
+                <div className="space-y-0">
+                    {shown.map((evt, i) => (
+                        <div key={evt.id} className="flex gap-2 pb-2.5 relative">
+                            {i < shown.length - 1 && (
+                                <div className="absolute left-[6px] top-4 bottom-0 w-px bg-stone-100" />
+                            )}
+                            <div
+                                className={`w-3.5 h-3.5 rounded-full border flex-shrink-0 mt-0.5 ${TIMELINE_DOT[evt.kind] ?? "bg-stone-100 border-stone-300"}`}
+                                title={evt.level === "technical" ? "Neema's step" : undefined}
+                            />
+                            <div className="min-w-0">
+                                <p className="text-[11px] font-medium leading-snug" style={{ color: "#1c2917" }}>
+                                    {evt.label}
+                                    {(evt.count ?? 1) > 1 && (
+                                        <span className="ml-1 text-[10px] text-stone-400" title="Repeated steps folded into one line">
+                                            ×{evt.count}
+                                        </span>
+                                    )}
+                                </p>
+                                {evt.detail && (
+                                    <p className="text-[10px] mt-0.5 leading-snug break-words" style={{ color: "#8fa383" }}>
+                                        {evt.detail}
+                                    </p>
+                                )}
+                                <p className="text-[10px] text-stone-400 mt-0.5">{evt.at ? timeAgo(evt.at) : ""}</p>
+                            </div>
+                        </div>
+                    ))}
+                </div>
+            )}
+        </Section>
+    );
+}
+
 function AskNeemaBox({ conversationId }: { conversationId: string }) {
     const [q, setQ] = useState("");
     const [answer, setAnswer] = useState<string | null>(null);
@@ -2798,6 +2888,7 @@ export function CustomerSidebar({
 
                 {activeTab === "activity" && (
                     <>
+                        <CustomerTimeline conversationId={conversation.id} />
                         <Section title="Recent Orders">
                             {profile.hub_linked && (
                                 <div

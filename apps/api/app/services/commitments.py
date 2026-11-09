@@ -235,6 +235,18 @@ async def escalate(db, redis, conv, deal, *, stage: str, reason: str,
         except Exception:
             _log.info("commitment flag not recorded", exc_info=True)
     await db.commit()
+    if new_stage:
+        # A customer-level event on the timeline (services/timeline).
+        try:
+            from app.services import timeline as _tl
+            await _tl.note(db, channel=getattr(conv, "channel", None) or "whatsapp",
+                           contact=(getattr(conv, "wa_id", None) or getattr(conv, "external_id", None) or ""),
+                           kind="commitment",
+                           summary=f"Promised check escalated to the {stage}",
+                           detail=f"'{r['item']}' promised {_age_words(r['age_min'])} ago, still open; owner: {owner}",
+                           args={"stage": stage, "item": r["item"], "age_min": r["age_min"]})
+        except Exception:
+            pass
     await _ring(redis, conv, stage=stage, item=r["item"], age_min=r["age_min"], owner=owner,
                 follow_ups=follow_ups)
     _log.info("commitment escalated: conv=%s stage=%s age=%smin owner=%s follow_ups=%s",

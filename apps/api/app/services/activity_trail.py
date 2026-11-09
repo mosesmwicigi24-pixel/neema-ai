@@ -102,6 +102,10 @@ def describe(tool: str, args: dict, out) -> tuple[str, str | None]:
         if tool == "geography":
             # A customer-level event: the decision on where they are moved.
             return "Placed the customer", (o.get("summary") or None)
+        if tool in ("stage", "commitment", "customer_state"):
+            # State-change events written by services/timeline.note: the
+            # summary IS the line; the detail beneath it.
+            return (o.get("summary") or f"{tool} changed"), (o.get("detail") or None)
     except Exception:
         pass
     # The fallback that keeps the promise: EVERY activity gets a row.
