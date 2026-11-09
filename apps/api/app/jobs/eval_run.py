@@ -46,6 +46,9 @@ COUNTRY_PREFIX = {
     "SS": "2119000", "CD": "2438000", "MZ": "2588000", "AO": "2449000", "ZA": "276500",
     "NG": "2347000", "GH": "2335000", "US": "1555000", "GB": "447700", "IN": "919000",
     "FR": "336000", "PT": "35191000",
+    # the Customer Intelligence validation (2026-11-09): a Gulf number whose
+    # owner says they are in Kenya, and a Kenyan who moved to the Emirates
+    "BH": "973330", "AE": "9715000",
 }
 EVAL_TAG = "9"      # every eval contact has this digit after the prefix: 2547000 9 xxx
 
