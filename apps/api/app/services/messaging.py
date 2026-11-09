@@ -56,6 +56,7 @@ async def provision_user(
     name: str | None = None,
     last_text: str | None = None,
     last_direction: str | None = None,
+    name_source: str = "whatsapp",
 ) -> User:
     """Find-or-create the User row behind a wa_id and enrich it server-side.
 
@@ -89,8 +90,12 @@ async def provision_user(
         db.add(user)
         created = True
 
+    # The name on the row is decided by services/names (below, once the
+    # person is known): a WhatsApp profile name is recorded as such and never
+    # replaces a name the customer said or staff confirmed. A row with no
+    # person (a non-phone handle) keeps the old rule: fill an empty name.
     clean_name = (name or "").strip()
-    if clean_name and not user.name_confirmed and not (user.name or "").strip():
+    if clean_name and not is_phone and not user.name_confirmed and not (user.name or "").strip():
         user.name = clean_name[:100]
 
     # The telephone country — read with the phone-numbers library so a shared
@@ -126,11 +131,20 @@ async def provision_user(
         from app.services.identity import resolve_or_create_person, WHATSAPP
         ident = await resolve_or_create_person(
             db, WHATSAPP, wa_id,
-            display_name=(user.name or clean_name or None),
+            display_name=None,
             source="whatsapp_inbound", confidence="deterministic",
         )
         if user.person_id is None:
             user.person_id = ident.person_id
+        if clean_name:
+            from app.models.person import Person as _P
+            from app.services import names as _names
+            await db.flush()
+            _person = await db.get(_P, user.person_id)
+            if _person is not None and ident.person_id == user.person_id:
+                if not ident.display_name:
+                    ident.display_name = clean_name[:200]
+                await _names.record(db, _person, clean_name, by=name_source)
         # The number's country goes on the person WITH its provenance
         # (geo.telephone_country), once; the market decision reads it last,
         # after anything the customer or an operator said.
@@ -151,6 +165,20 @@ async def provision_user(
 
     await db.flush()
     return user
+
+
+async def _record_self_introduction(db, person_id, text: str | None) -> None:
+    """Record a name the customer gives for themselves in `text`. Never raises."""
+    try:
+        from app.services import names as _names
+        stated = _names.self_introduction(text)
+        if not stated:
+            return
+        from app.models.person import Person as _P
+        person = await db.get(_P, person_id)
+        await _names.record(db, person, stated, by="stated")
+    except Exception:
+        logging.getLogger("neema.names").warning("self-introduction not recorded", exc_info=False)
 
 
 def _wamid_of(resp) -> str | None:
@@ -612,6 +640,10 @@ async def upsert_message(db: AsyncSession, redis, body, *, message_id=None,
         conv.person_id = user.person_id
     if conv.channel is None:
         conv.channel = "whatsapp"
+    # "My name is Peter" / "I'm Bishop Daniel" — the customer's own word on
+    # who they are, recorded the moment they say it (services/names).
+    if body.direction == "inbound" and body.text and user.person_id is not None:
+        await _record_self_introduction(db, user.person_id, body.text)
 
     sender    = MsgSender.user       if body.direction == "inbound" else MsgSender.ai
     direction = MsgDirection.inbound if body.direction == "inbound" else MsgDirection.outbound

@@ -2983,7 +2983,8 @@ async def whatsapp_invite(
     try:
         ident = await resolve_or_create_person(db, "whatsapp", wa_id,
                                                display_name=name or None,
-                                               source="whatsapp_invite")
+                                               source="whatsapp_invite",
+                                               name_source="platform")
         conv = await get_or_create_conversation(db, "whatsapp", wa_id,
                                                 person_id=ident.person_id, wa_id=wa_id)
         db.add(Message(

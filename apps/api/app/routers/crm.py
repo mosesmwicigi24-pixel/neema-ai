@@ -359,11 +359,20 @@ def _build_profile(
 
     phone_display = user.phone or (user.wa_id if is_plausible_phone(user.wa_id) else None)
 
+    # The name and its evidence (services/names): where it came from, whether
+    # it is a person's name at all, and every channel's own name beside it.
+    from app.services import names as _names
+    name_info = _names.summary(person_state, user_name=user.name,
+                               user_confirmed=bool(user.name_confirmed),
+                               person_name=person_name, identities=identities,
+                               user_wa_id=user.wa_id)
+
     return {
         "id":             str(user.id),
         "wa_id":          user.wa_id,
-        "name":           user.name or person_name,
+        "name":           name_info.get("name") or user.name or person_name,
         "name_confirmed": user.name_confirmed,
+        "name_info":      name_info,
         "email":          user.email,
         "phone":          phone_display,
         "location":       user.location or (person_state or {}).get("location"),
@@ -858,6 +867,13 @@ async def update_customer(
     # operator changes the country ISO.
     if "name" in body and (body["name"] or "").strip():
         user.name_confirmed = True
+        # On the name record, as staff's word: it outranks everything and is
+        # replaced only by another staff edit (services/names). The channel
+        # profile names stay on their identities.
+        if user.person_id is not None:
+            from app.services import names as _names
+            _np = await db.get(Person, user.person_id)
+            await _names.record(db, _np, str(body["name"]).strip(), by="operator")
     if "country_iso" in body and body["country_iso"] and "flag_url" not in body:
         from app.core.countries import flag_url_for
         user.flag_url = flag_url_for(body["country_iso"])
@@ -1539,7 +1555,11 @@ async def merge_suggestions(
 
     # c) Same full name on another profile (first names alone are noise); when
     #    both countries are known they must agree.
-    if len(my_name) >= 5 and " " in my_name:
+    # A name only suggests a match when it is a person's name: two customers
+    # whose profiles both read "John 14:14" or "Grace Ministries" are not the
+    # same human. (Only ever a suggestion; nothing merges on a name.)
+    from app.services import names as _names
+    if len(my_name) >= 5 and " " in my_name and _names.is_personal(my_name):
         rows = (await db.execute(select(User).where(
             func.lower(User.name) == my_name.lower()).limit(8))).scalars().all()
         for u in rows:

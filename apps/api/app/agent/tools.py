@@ -1872,13 +1872,46 @@ async def _save_profile_fields(db, person_id, role: str | None = None,
     return prof
 
 
+async def _record_stated_name(db, person_id, name: str, *, users=None, fallback_user=None) -> str | None:
+    """A name the customer gave for themselves, through services/names: it
+    outranks every profile name but never a name staff confirmed, and a
+    verse, a church or a handle is not taken as their name. Returns a note
+    for the writer when the name was not taken, else None."""
+    from app.services import names as _names
+    clean = (name or "").strip()
+    if not clean:
+        return None
+    if not _names.is_personal(clean):
+        return (f"\"{clean}\" is {_names.KIND_WORDS.get(_names.classify(clean), 'not a personal name')}, "
+                f"not recorded as their name.")
+    if person_id is None:
+        # No person behind the row (should not happen on WhatsApp): the old
+        # rule, minus overwriting a confirmed name.
+        if fallback_user is not None and not fallback_user.name_confirmed:
+            fallback_user.name = clean[:100]
+            fallback_user.name_confirmed = True
+        return None
+    from app.models.person import Person as _Person
+    person = await db.get(_Person, person_id)
+    if users is None:
+        users = list(await users_for_person(db, person_id) or [])
+    if fallback_user is not None and all(u is not fallback_user for u in users):
+        users = [fallback_user] + users           # the row this turn holds is mirrored too
+    await _names.record(db, person, clean, by="stated", users=users)
+    d = _names.decide(person.state if person is not None else None)
+    if d and d.get("by") == "operator" and d.get("value") != clean:
+        return f"Staff confirmed their name as \"{d['value']}\"; kept."
+    return None
+
+
 async def _capture_customer(args: dict, ctx: ToolContext) -> dict:
     user = (await ctx.db.execute(select(User).where(User.wa_id == ctx.wa_id))).scalar_one_or_none()
     if user is None:
         return {"ok": False}
+    name_note = None
     if args.get("name"):
-        user.name = args["name"].strip()
-        user.name_confirmed = True
+        name_note = await _record_stated_name(ctx.db, user.person_id, args["name"], users=None,
+                                              fallback_user=user)
     change = None
     if args.get("location"):
         user.location = args["location"].strip()
@@ -1897,6 +1930,8 @@ async def _capture_customer(args: dict, ctx: ToolContext) -> dict:
                                       args.get("role"), args.get("organization"))
     await ctx.db.commit()
     out = {"ok": True, "name": user.name, "location": user.location}
+    if name_note:
+        out["name_note"] = name_note
     if prof:
         out["profile"] = prof
     if change:
@@ -1988,25 +2023,15 @@ async def _capture_contact(args: dict, ctx: ToolContext) -> dict:
         out["profile"] = prof
 
     if name:
-        # Fuller name wins everywhere: a self-stated "Meshack" must never shadow
-        # the profile's "Meshack Munyao" — and a fuller self-stated name upgrades
-        # a partial one. All three stores end up showing the SAME name.
-        full = name[:200]
-        for existing in ((ident.display_name or ""),
-                         ((person.display_name or "") if person is not None else "")):
-            e = existing.strip()
-            if e and full.lower() in e.lower() and len(e) > len(full):
-                full = e
-        ident.display_name = full
-        if person is not None:
-            person.display_name = full
-        _users = await users_for_person(ctx.db, ident.person_id)
-        _u = _users[0] if _users else None
-        if _u is not None:
-            cur = (_u.name or "").strip()
-            if not cur or (cur.lower() in full.lower() and len(full) > len(cur)):
-                _u.name = full[:100]              # the CRM panel reads user.name
-        out["name"] = full
+        # services/names decides: what they said outranks every profile name
+        # (a fuller profile name for the same person still wins — "Meshack"
+        # said, "Meshack Munyao" on the profile), never a staff-confirmed one;
+        # the channel's own profile name stays on its identity. Person, user
+        # rows and the inbox all end up showing the SAME name.
+        _note = await _record_stated_name(ctx.db, ident.person_id, name)
+        out["name"] = (person.display_name if person is not None else None) or name[:200]
+        if _note:
+            out["name_note"] = _note
 
     if location and person is not None:
         from sqlalchemy.orm.attributes import flag_modified
