@@ -173,6 +173,9 @@ export default function NeemaDashboard(): React.ReactElement {
     const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(false);
     const [sessionExpired, setSessionExpired] = useState(false);
     const isMobile = useIsMobile();
+    // A chat open on a phone takes the row the "Neema · Inbox" bar used.
+    const [mobileThreadOpen, setMobileThreadOpen] = useState(false);
+    const hideMobileHeader = isMobile && view === "conversations" && mobileThreadOpen;
 
     // ── Deep links (?open=<wa_id> opens the chat; ?view=calls&caller=<wa_id>
     // focuses the call console) — how the hub's order page jumps straight to a
@@ -618,6 +621,7 @@ export default function NeemaDashboard(): React.ReactElement {
                 onConsumeOpenConvKey={() => setOpenConvKey(null)}
                 freshLoaded={inbox.freshLoaded}
                 inbox={inbox}
+                onMobileThreadOpen={setMobileThreadOpen}
                 {...viewProps}
             />
         ),
@@ -736,7 +740,7 @@ export default function NeemaDashboard(): React.ReactElement {
             )}
 
             <div className="flex flex-col flex-1 overflow-hidden">
-                {isMobile && (
+                {isMobile && !hideMobileHeader && (
                     <MobileHeader
                         navItems={baseNavItems}
                         view={view}
@@ -748,7 +752,7 @@ export default function NeemaDashboard(): React.ReactElement {
                 )}
                 <main
                     className="relative flex flex-col flex-1 overflow-hidden"
-                    style={{ marginTop: isMobile ? 56 : 0 }}
+                    style={{ marginTop: isMobile && !hideMobileHeader ? 56 : 0 }}
                 >
                     {/* A minimised call (and "{First} allowed calls") sits in the
                         flow above the view, so it never covers the view's header. */}
