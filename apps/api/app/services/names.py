@@ -420,10 +420,10 @@ async def record(db, person, value: str | None, *, by: str, users: list | None =
         locked = await lock_for_write(db, person)
         if locked is None:
             return None
-        st, seeded = seed_from_legacy(locked.state, user_name=(u0.name if u0 else None),
-                                      user_confirmed=bool(u0 and u0.name_confirmed),
+        st, seeded = seed_from_legacy(locked.state, user_name=getattr(u0, "name", None),
+                                      user_confirmed=bool(getattr(u0, "name_confirmed", False)),
                                       person_name=locked.display_name, identities=identities,
-                                      user_wa_id=(u0.wa_id if u0 else None))
+                                      user_wa_id=getattr(u0, "wa_id", None))
         before = decide(st)
         st, changed = observe(st, value, by=by)
         if not (changed or seeded):
