@@ -1,0 +1,155 @@
+<!doctype html><html><head><meta charset="utf-8"><style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:Manrope,Inter,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;background:#eef0ea;color:#1c2917;padding:28px;width:1240px}
+.sheet{background:#fff;border-radius:22px;padding:26px 28px 30px;margin-bottom:28px}
+h1{font-size:23px;font-weight:800;letter-spacing:-.3px}
+.sub{font-size:14px;color:#5d6a55;margin-top:5px;line-height:1.45;max-width:1000px}
+.row{display:flex;gap:26px;margin-top:20px;align-items:flex-start}
+.col{flex:0 0 auto}
+.cap{font-size:11.5px;font-weight:800;letter-spacing:.7px;text-transform:uppercase;color:#7b8773;margin-bottom:8px}
+.phone{width:372px;background:#fff;border:1px solid #dfe4d8;border-radius:22px;overflow:hidden;box-shadow:0 6px 22px rgba(40,60,20,.08);position:relative}
+.notes{flex:1;font-size:13.5px;line-height:1.5;color:#3a4733;padding-top:24px}
+.notes b{color:#1c2917}.notes li{margin:0 0 7px 16px}
+.bar{display:flex;align-items:center;gap:9px;padding:10px 12px;border-bottom:1px solid #edf0ea}
+.ico{width:34px;height:34px;border-radius:10px;display:flex;align-items:center;justify-content:center;color:#4a5a40;flex:0 0 auto}
+.ico.b{border:1px solid #e3e8dc;background:#fff}
+svg{width:18px;height:18px;stroke:currentColor;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.av{width:38px;height:38px;border-radius:50%;background:linear-gradient(135deg,#c9a27c,#8a5a3c);position:relative;flex:0 0 auto;overflow:visible}
+.av:before{content:"";position:absolute;left:11px;top:7px;width:16px;height:16px;border-radius:50%;background:#3b2a20}
+.av:after{content:"";position:absolute;left:5px;bottom:0;width:28px;height:14px;border-radius:14px 14px 0 0;background:#2f4d7a}
+.av i{position:absolute;right:-3px;bottom:-3px;width:16px;height:16px;border-radius:50%;border:2px solid #fff;z-index:2}
+.wa{background:#25d366}.ms{background:#0084ff}.ig{background:#e1306c}.fb{background:#1877f2}.tt{background:#111}.em{background:#b7791f}.wb{background:#589b31}
+.nm{font-size:15.5px;font-weight:800;letter-spacing:-.2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.meta{font-size:11.5px;color:#6c7964;margin-top:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.grow{flex:1;min-width:0}
+.pill{display:inline-flex;align-items:center;gap:6px;height:30px;padding:0 12px;border-radius:999px;font-size:12.5px;font-weight:700;white-space:nowrap;border:1px solid #e3e8dc;background:#f5f6f3;color:#4a5a40}
+.pill.on{background:#1f2b17;border-color:#1f2b17;color:#fff}
+.pill em{font-style:normal;font-size:10.5px;font-weight:800;padding:1px 6px;border-radius:999px;background:#589b31;color:#fff}
+.pill.on em{background:#fff;color:#1f2b17}
+.pill .d{width:8px;height:8px;border-radius:50%}
+.strip{display:flex;gap:7px;padding:9px 12px;overflow:hidden;border-bottom:1px solid #edf0ea}
+.btn{height:32px;padding:0 12px;border-radius:10px;font-size:12.5px;font-weight:800;display:inline-flex;align-items:center;gap:6px;border:1px solid #e3e8dc;background:#fff;color:#2c3a24;white-space:nowrap}
+.btn.p{background:#589b31;border-color:#589b31;color:#fff}
+.hum{background:#fff7e0;border:1px solid #f0d98a;color:#9a5b12}
+.search{flex:1;height:36px;border-radius:11px;background:#f5f6f3;border:1px solid #edf0ea;display:flex;align-items:center;gap:8px;padding:0 11px;font-size:13px;color:#93a08a}
+.item{display:flex;gap:10px;padding:11px 12px;border-bottom:1px solid #f1f3ee;align-items:center}
+.item .t{font-size:13.5px;font-weight:700}.item .s{font-size:12px;color:#7b8773;margin-top:2px}
+.fade{opacity:.5}
+.thread{background:#f4f6f1;padding:14px 12px;min-height:150px}
+.bub{max-width:76%;padding:9px 12px;border-radius:15px;font-size:12.5px;line-height:1.4;margin-bottom:8px}
+.in{background:#fff;border:1px solid #e6eadf}.out{background:#2bcf17;color:#06320a;margin-left:auto}
+.seg{display:flex;background:#eef1ea;border-radius:11px;padding:3px;gap:2px;flex:1}
+.seg span{flex:1;text-align:center;font-size:12.5px;font-weight:800;padding:7px 0;border-radius:9px;color:#5d6a55}
+.seg .on{background:#fff;color:#9a5b12;box-shadow:0 1px 3px rgba(0,0,0,.12)}
+.bs{position:absolute;left:0;right:0;bottom:0;background:#fff;border-radius:20px 20px 0 0;box-shadow:0 -10px 30px rgba(0,0,0,.18);padding:10px 14px 16px}
+.bs h4{font-size:11px;letter-spacing:.7px;text-transform:uppercase;color:#7b8773;margin:12px 2px 7px}
+.opt{display:flex;align-items:center;gap:10px;padding:8px 4px;font-size:13.5px;font-weight:700}
+.opt .d{width:22px;height:22px;border-radius:7px;flex:0 0 auto}.opt .n{margin-left:auto;font-size:12px;color:#7b8773;font-weight:700}
+.opt .ck{width:18px;height:18px;border-radius:50%;border:2px solid #cfd6c7;margin-left:10px}.opt .ck.on{border-color:#589b31;background:#589b31}
+.dim{position:absolute;inset:0;background:rgba(20,30,15,.35)}
+.tag{font-size:10px;font-weight:800;padding:2px 7px;border-radius:999px}
+.rows{font-size:12px;font-weight:800;color:#589b31;margin-top:8px}
+.rows.bad{color:#b4541a}
+</style></head><body>
+<svg style="display:none"><defs>
+<symbol id="back" viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7"/></symbol>
+<symbol id="more" viewBox="0 0 24 24"><circle cx="5" cy="12" r="1.3"/><circle cx="12" cy="12" r="1.3"/><circle cx="19" cy="12" r="1.3"/></symbol>
+<symbol id="srch" viewBox="0 0 24 24"><circle cx="11" cy="11" r="6.5"/><path d="M20 20l-4-4"/></symbol>
+<symbol id="filt" viewBox="0 0 24 24"><path d="M4 6h16M7 12h10M10 18h4"/></symbol>
+<symbol id="rel" viewBox="0 0 24 24"><path d="M9 14l-4-4 4-4"/><path d="M5 10h9a5 5 0 010 10h-2"/></symbol>
+<symbol id="pause" viewBox="0 0 24 24"><path d="M9 6v12M15 6v12"/></symbol>
+<symbol id="swap" viewBox="0 0 24 24"><path d="M4 8h14l-3-3M20 16H6l3 3"/></symbol>
+<symbol id="note" viewBox="0 0 24 24"><path d="M5 4h10l4 4v12H5z"/><path d="M9 12h6M9 16h4"/></symbol>
+<symbol id="user" viewBox="0 0 24 24"><circle cx="12" cy="8" r="3.5"/><path d="M5 20c1-4 4-5.5 7-5.5s6 1.500 7 5.500"/></symbol>
+<symbol id="down" viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></symbol>
+<symbol id="bell" viewBox="0 0 24 24"><path d="M6 16V11a6 6 0 0112 0v5l1.500 2H4.500z"/><path d="M10 20h4"/></symbol>
+</defs></svg>
+
+<!-- ============ TODAY ============ -->
+<div class="sheet"><h1>Today — for comparison</h1>
+<div class="sub">Before a single chat is visible, the list spends five rows and the open chat spends three. Platform buttons are icons with two-letter labels.</div>
+<div class="row">
+<div class="col"><div class="cap">Chat list</div><div class="phone">
+ <div class="bar"><div class="ico" style="background:#f0a030;color:#fff;border-radius:9px"><svg><use href="#note"/></svg></div><b style="font-size:15px">Neema</b><span style="color:#93a08a;font-size:14px">· Inbox</span><div class="grow"></div><div class="ico"><svg><use href="#bell"/></svg></div></div>
+ <div class="bar" style="border:0"><b style="font-size:17px">Chats</b><div class="grow"></div><span class="pill" style="background:#fdf0c4;border-color:#fdf0c4;color:#6b5a10">206 live</span><div class="ico"><svg><use href="#note"/></svg></div><div class="ico"><svg><use href="#filt"/></svg></div></div>
+ <div class="strip" style="border:0;padding-top:2px"><span class="pill on">All</span><span class="pill">Unread <em>157</em></span><span class="pill">Read</span><span class="pill">Human <em style="background:#b4541a">206</em></span><span class="pill">Yours <em>7</em></span></div>
+ <div class="bar" style="border:0;padding-top:2px"><div class="search"><svg><use href="#srch"/></svg>Start typing to search</div></div>
+ <div class="strip" style="padding-top:2px"><span class="pill" style="flex:1;justify-content:center">All</span><span class="pill" style="flex:1;justify-content:center;color:#25d366">WA</span><span class="pill" style="flex:1;justify-content:center;color:#0084ff">MS</span><span class="pill" style="flex:1;justify-content:center;color:#1877f2">FB</span><span class="pill" style="flex:1;justify-content:center;color:#e1306c">IG</span><span class="pill" style="flex:1;justify-content:center">TT</span></div>
+ <div class="item fade"><div class="av"><i class="ms"></i></div><div><div class="t">Zakayo Makau Ndeto</div><div class="s">If you would like to chat on WhatsApp…</div></div></div>
+</div><div class="rows bad">5 rows before the first chat</div></div>
+<div class="col"><div class="cap">Open chat</div><div class="phone">
+ <div class="bar"><div class="ico" style="background:#f0a030;color:#fff;border-radius:9px"><svg><use href="#note"/></svg></div><b style="font-size:15px">Neema</b><span style="color:#93a08a;font-size:14px">· Inbox</span><div class="grow"></div><div class="ico"><svg><use href="#bell"/></svg></div></div>
+ <div class="bar" style="border:0"><div class="ico"><svg><use href="#back"/></svg></div><div class="ico b" style="border-radius:50%;font-size:12px;font-weight:800">ZM</div><div class="grow"><div class="nm">Zakayo Makau Ndeto</div></div><div class="ico b" style="border-radius:50%"><svg><use href="#user"/></svg></div></div>
+ <div class="strip" style="padding-top:2px"><span class="btn hum">Human</span><span class="btn"><svg><use href="#rel"/></svg>Release</span><span class="btn"><svg><use href="#pause"/></svg>Pause</span><span class="btn"><svg><use href="#swap"/></svg></span><span class="btn"><svg><use href="#note"/></svg></span></div>
+ <div class="thread"><div class="bub out">That is about 13000 KEas</div></div>
+</div><div class="rows bad">3 rows before the conversation</div></div>
+<div class="notes"><ul><li>"Neema · Inbox" repeats what the bottom tab already says.</li><li>Initials where the platform has a real photo.</li><li>Nothing says which platform this chat is on.</li><li>Five controls of equal weight; the one you use most (Release) is not prominent.</li></ul></div>
+</div></div>
+
+<!-- ============ A ============ -->
+<div class="sheet"><h1>Option A — One bar each</h1>
+<div class="sub">The tightest. Everything collapses into a single header row; the less-used controls go behind one menu. Platforms are a named drop-down, not a row.</div>
+<div class="row">
+<div class="col"><div class="cap">Chat list</div><div class="phone">
+ <div class="bar" style="border:0"><b style="font-size:18px">Chats</b><span class="tag" style="background:#fdf0c4;color:#6b5a10">206 with a person</span><div class="grow"></div><div class="ico b"><svg><use href="#srch"/></svg></div><div class="ico b"><svg><use href="#more"/></svg></div></div>
+ <div class="strip" style="padding-top:2px"><span class="pill on"><span class="d wa"></span>WhatsApp Business <svg style="width:13px;height:13px"><use href="#down"/></svg></span><span class="pill">Unread <em>157</em></span><span class="pill">Yours <em>7</em></span><span class="pill">Human</span></div>
+ <div class="item"><div class="av"><i class="wa"></i></div><div class="grow"><div class="t">Amina Yusuf</div><div class="s">Niko Nakuru, bei ya communion set?</div></div><span class="tag" style="background:#589b31;color:#fff">2</span></div>
+ <div class="item"><div class="av" style="background:linear-gradient(135deg,#a8c0d8,#5b7fa6)"><i class="wa"></i></div><div class="grow"><div class="t">Fr. Peter Kamau</div><div class="s">You: The cassock is ready Friday</div></div></div>
+ <div class="item fade"><div class="av"><i class="wa"></i></div><div class="grow"><div class="t">Grace Wanjiru</div><div class="s">Thank you, I will confirm</div></div></div>
+</div><div class="rows">2 rows · three more chats on screen</div></div>
+<div class="col"><div class="cap">Open chat</div><div class="phone">
+ <div class="bar"><div class="ico"><svg><use href="#back"/></svg></div><div class="av"><i class="ms"></i></div><div class="grow"><div class="nm" style="font-size:14.5px">Zakayo Makau Ndeto</div><div class="meta"><b style="color:#0084ff">Messenger</b> · <b style="color:#9a5b12">you reply</b></div></div><span class="btn p" style="padding:0 10px">Release</span><div class="ico b"><svg><use href="#more"/></svg></div></div>
+ <div class="thread"><div class="bub in">How much is the ordination gown?</div><div class="bub out">That is about 13000 KEas</div><div class="bub out">If you would like to chat on WhatsApp, kindly share your number.</div></div>
+</div><div class="rows">1 row · tap the name for the profile</div></div>
+<div class="notes"><ul><li><b>Platform</b> is one chip with its full name; tapping it lists all platforms with counts.</li><li><b>Search</b> is an icon that opens a search field over the bar.</li><li><b>Release</b> is the one visible action. Pause, Hand to a colleague, Add a note and View profile sit under ⋯.</li><li>Photo comes from the platform, with a small coloured dot for which one.</li><li><b>Cost:</b> Pause and the internal note are two taps away, not one.</li></ul></div>
+</div></div>
+
+<!-- ============ B ============ -->
+<div class="sheet"><h1>Option B — Named platforms, always visible</h1>
+<div class="sub">Balanced. Search stays open, platforms are spelled out in a strip you swipe sideways, and the open chat keeps its actions one tap away on a slim second line.</div>
+<div class="row">
+<div class="col"><div class="cap">Chat list</div><div class="phone">
+ <div class="bar" style="border:0;padding-bottom:4px"><div class="search"><svg><use href="#srch"/></svg>Search chats</div><div class="ico b"><svg><use href="#filt"/></svg></div></div>
+ <div class="strip" style="border:0;padding:6px 12px 4px"><span class="pill on">All <em>206</em></span><span class="pill"><span class="d wa"></span>WhatsApp Business <em style="background:#25d366">121</em></span><span class="pill"><span class="d ms"></span>Messenger <em style="background:#0084ff">44</em></span><span class="pill"><span class="d ig"></span>Instagram</span></div>
+ <div class="strip" style="padding:4px 12px 9px;gap:16px;font-size:12.5px;font-weight:800;color:#7b8773"><span style="color:#1f2b17;border-bottom:2px solid #589b31;padding-bottom:5px">All</span><span>Unread 157</span><span>Yours 7</span><span>With a person 206</span><span>Read</span></div>
+ <div class="item"><div class="av"><i class="ms"></i></div><div class="grow"><div class="t">Zakayo Makau Ndeto</div><div class="s">You: What town would you like us to send to?</div></div></div>
+ <div class="item fade"><div class="av" style="background:linear-gradient(135deg,#a8c0d8,#5b7fa6)"><i class="wa"></i></div><div class="grow"><div class="t">Fr. Peter Kamau</div><div class="s">The cassock is ready Friday</div></div></div>
+</div><div class="rows">3 slim rows · platform names in full, swipe for Facebook, TikTok, Email, Website</div></div>
+<div class="col"><div class="cap">Open chat</div><div class="phone">
+ <div class="bar" style="border:0;padding-bottom:6px"><div class="ico"><svg><use href="#back"/></svg></div><div class="av"><i class="ms"></i></div><div class="grow"><div class="nm">Zakayo Makau Ndeto</div><div class="meta"><b style="color:#0084ff">Messenger</b> · Kenya · active 1m ago</div></div><div class="ico b"><svg><use href="#more"/></svg></div></div>
+ <div class="strip" style="padding:0 12px 9px;align-items:center"><span class="tag hum" style="padding:5px 9px;font-size:10.5px;white-space:nowrap">YOU REPLY</span><div class="grow"></div><span class="btn" style="padding:0 9px"><svg><use href="#note"/></svg>Note</span><span class="btn" style="padding:0 9px"><svg><use href="#pause"/></svg>Pause</span><span class="btn p"><svg><use href="#rel"/></svg>Release</span></div>
+ <div class="thread"><div class="bub in">How much is the ordination gown?</div><div class="bub out">That is about 13000 KEas</div></div>
+</div><div class="rows">2 rows · Note, Pause, Release all one tap</div></div>
+<div class="notes"><ul><li><b>Platforms</b> read "WhatsApp Business", "Messenger", "Instagram", "Facebook", "TikTok", "Email", "Website" with a count each.</li><li><b>Status</b> becomes a quiet text tab line under them, so the two filters do not compete.</li><li>The header says the platform, the country and when they were last active.</li><li>Hand to a colleague and View profile move under ⋯; tapping the name also opens the profile.</li><li><b>Cost:</b> one row more than Option A on each screen.</li></ul></div>
+</div></div>
+
+<!-- ============ C ============ -->
+<div class="sheet"><h1>Option C — A filter sheet, and a three-way switch</h1>
+<div class="sub">The biggest rethink. All filters live in one sheet with full names, and the header shows only what is switched on. In a chat, Take over / Release / Pause become one switch that shows who is answering.</div>
+<div class="row" style="gap:18px">
+<div class="col"><div class="cap">Chat list</div><div class="phone" style="width:356px">
+ <div class="bar" style="border:0;padding-bottom:4px"><div class="grow"><b style="font-size:18px">Chats</b><div class="meta">157 unread · 206 with a person</div></div><div class="ico b"><svg><use href="#srch"/></svg></div><span class="btn"><svg><use href="#filt"/></svg>Filter <em style="font-style:normal;background:#589b31;color:#fff;border-radius:999px;padding:0 6px;font-size:10.5px">2</em></span></div>
+ <div class="strip" style="padding-top:5px"><span class="pill on"><span class="d wa"></span>WhatsApp Business ✕</span><span class="pill on">Unread ✕</span></div>
+ <div class="item"><div class="av"><i class="wa"></i></div><div class="grow"><div class="t">Amina Yusuf</div><div class="s">Niko Nakuru, bei ya communion set?</div></div><span class="tag" style="background:#589b31;color:#fff">2</span></div>
+ <div class="item fade"><div class="av" style="background:linear-gradient(135deg,#a8c0d8,#5b7fa6)"><i class="wa"></i></div><div class="grow"><div class="t">Fr. Peter Kamau</div><div class="s">Is it ready?</div></div></div>
+</div><div class="rows">1 row with no filter · 2 when something is on</div></div>
+<div class="col"><div class="cap">The filter sheet</div><div class="phone" style="width:356px;height:372px">
+ <div class="bar"><b style="font-size:18px">Chats</b></div><div class="item fade"><div class="av"></div><div><div class="t">Amina Yusuf</div></div></div>
+ <div class="dim"></div><div class="bs"><div style="width:38px;height:4px;border-radius:4px;background:#d5dbcd;margin:0 auto"></div>
+ <h4>Show</h4><div style="display:flex;gap:7px;flex-wrap:wrap"><span class="pill">All</span><span class="pill on">Unread <em>157</em></span><span class="pill">Yours <em>7</em></span><span class="pill">With a person</span><span class="pill">Read</span></div>
+ <h4>Platform</h4>
+ <div class="opt"><span class="d wa"></span>WhatsApp Business<span class="n">121</span><span class="ck on"></span></div>
+ <div class="opt"><span class="d ms"></span>Messenger<span class="n">44</span><span class="ck"></span></div>
+ <div class="opt"><span class="d ig"></span>Instagram<span class="n">22</span><span class="ck"></span></div>
+ <div class="opt"><span class="d fb"></span>Facebook comments<span class="n">13</span><span class="ck"></span></div>
+ <div class="opt"><span class="d tt"></span>TikTok<span class="n">4</span><span class="ck"></span></div>
+ </div></div><div class="rows">Full names, counts, pick several at once</div></div>
+<div class="col"><div class="cap">Open chat</div><div class="phone" style="width:356px">
+ <div class="bar" style="border:0;padding-bottom:6px"><div class="ico"><svg><use href="#back"/></svg></div><div class="av"><i class="ms"></i></div><div class="grow"><div class="nm">Zakayo Makau Ndeto</div><div class="meta"><b style="color:#0084ff">Messenger</b> · Kenya</div></div><div class="ico b"><svg><use href="#note"/></svg></div><div class="ico b"><svg><use href="#more"/></svg></div></div>
+ <div class="strip" style="padding:0 12px 9px"><div class="seg"><span>Neema</span><span class="on">You</span><span>Paused</span></div></div>
+ <div class="thread"><div class="bub in">How much is the ordination gown?</div><div class="bub out">That is about 13000 KEas</div></div>
+</div><div class="rows">2 rows · who answers is one switch</div></div>
+</div>
+<div class="notes" style="padding-top:14px"><ul><li><b>Neema · You · Paused</b> replaces four buttons (Take over, Release, Pause, Resume). The lit one is who answers now; tap another to change it.</li><li>The filter sheet has room for every platform by full name, and for future filters, without growing the header.</li><li><b>Cost:</b> changing platform is two taps (Filter, then the platform). A new habit for the team to learn.</li></ul></div>
+</div>
+</body></html>
