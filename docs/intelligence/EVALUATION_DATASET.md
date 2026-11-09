@@ -27,6 +27,7 @@ Kenyan number in Dubai (dollars), a Kenyan town (shillings, city captured), Kamp
 (dollars, no M-Pesa), a hold without a reminder question, a payment claim checked in
 the hub. Two new contact prefixes in the runner (Bahrain, the Emirates). Floors on the
 file: silence 11/11, said 2/2. Reported separately from the independent and blind sets.
+Run once on 2026-11-09 (run 42624670362, main 45e5afb): 10/11 turns — `BENCHMARK_RESULTS.md`.
 
 Added 2026-11-07 (slice 11): `commercial_ei.jsonl` — 10 developer cases for
 the pause, the bare consultation, "I'll confirm later", "give me a moment"

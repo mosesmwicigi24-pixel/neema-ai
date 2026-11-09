@@ -533,6 +533,41 @@ The model's own defects in this file: the 16 payment turns (5 now caught
 deterministically), 2 quote deferrals, the 5 decline questions, 4 closers,
 2 DHL, 3 other — about 30 of 355.
 
+### Validation run — `customer_intelligence.jsonl` × 1 (run 42624670362, main 45e5afb, 2026-11-09 13:21–13:23 UTC) — the Customer Intelligence directive's Phase 9, on the owner's word
+
+6 developer cases / 11 turns (7 critical), case set `e22be5524c3a`, prompt
+`253f1c05b63d`, producer claude-sonnet-5-5, light claude-haiku-5-5, reviewer
+claude-sonnet-5 / claude-haiku-4-5; the scripted battery off. **A developer
+file, read per case.** Dispatched on the owner's 13:0x UTC word ("you can do
+Validation"), the one run allowed; nothing else was dispatched. Record:
+`results/agent-eval-cint-45e5afb-run42624670362.json` (the `.log` is git-ignored; its lines are the table below). Model time
+1 min 34 s. Cost: the run record keeps no token counts; at the rate of the
+recorded tuning runs (≈ 23 turns ≈ $1) these 11 turns are **well under $1**
+(the owner's ceiling for it was $10).
+
+**Turns 10/11 = 0.909 [0.623, 0.984] · critical 6/7 · language 11/11 ·
+figures verified 8/8 · within length 9/11 · internal-talk free 11/11 ·
+first draft passed 6/11** (five replies needed the reviewer's soft pass).
+
+| Case | What it checks | Result |
+|---|---|---|
+| cint-001 (Bahrain number says Nairobi) | dollars first; from "I'm in Nairobi, Westlands" the location is captured, the quote restated in shillings, no "which country"; the next quote stays in shillings | **3/3** — `capture_customer` called on turn 2; KES on turns 2 and 3; the catalogue re-run in KES after the switch note (the thing slice 13 could not measure) |
+| cint-002 (Kenyan number in Dubai) | the words outrank the number: captured, the next quote in dollars | **1/2** — turn 1 captured "Dubai, UAE" but the tool answered `placed: Kenya`; turn 2 quoted KES 2,500 / 4,000. **Defect, model-free:** `iso_from_text` knew the table name "United Arab Emirates" only — neither "Dubai" nor "UAE" named a country, so the decision stayed on the telephone country. Fixed in slice 18 (country aliases and well-known cities; `test_geography.py`). The writer did exactly what the record told it |
+| cint-003 (Kenyan number, Nakuru) | shillings, the town captured, nobody asked where | **1/1** (58 words against a 25-word target: over length, not a failure) |
+| cint-004 (Ugandan number, Kampala) | dollars, no shillings, no M-Pesa; captured | **1/1** — captured; dollars. Before slice 18 "Kampala" alone placed no one (the number carried the market); it now places Uganda |
+| cint-005 (hold: "next week") | a hold acknowledged without a reminder question or any question | **2/2** — `schedule_check_in` was called silently for the week they named (the slice 12 design: a time they gave is a commitment, not a question) |
+| cint-006 (payment claim, nothing in the hub) | never thanked as paid; the hub checked | **2/2** — `check_order_status` then `get_cart`; no "payment received" |
+
+By category: closing 2/2, cultural 4/4, needs-silence 2/2, payment 2/2,
+memory 6/7, simple-enquiry 6/7 — the one failure is cint-002's second turn.
+
+**Reading.** The Bahrain/Kenya case the owner saw is measured passing end to
+end with the model. The one failure is not a writer fault: the geography
+record was never given a country for "Dubai, UAE", and every reader downstream
+was faithful to the record. The fix is in the text resolver and is covered by
+model-free tests; the after-measurement (the same file, pass^1, again well
+under $1) is NOT dispatched — the owner allowed one run.
+
 ## The second blind pass^3 — VOID (run 42339309914, main f4a5b37, 2026-11-07 04:38–06:55 UTC); its first pass is a valid single pass
 
 The run completed "success" on CI, but **the Anthropic API balance ran out at

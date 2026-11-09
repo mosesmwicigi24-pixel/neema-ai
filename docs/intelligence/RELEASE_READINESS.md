@@ -62,7 +62,11 @@ silence, plus fail-closed safeguards that had been fail-open.
 - Retiring the legacy bridge order path and the expiring shortener (W9-4).
 - A DB idempotency key for orders (migration).
 
-Slices 1–17 are live on the box at 4bd5ac9 (12:54 UTC, 9 Nov) — every implementation slice of the Customer Intelligence directive. The owner's word (12:3x UTC): no validation run.
+Slices 1–17 are live on the box at 4bd5ac9 (12:54 UTC, 9 Nov) — every implementation slice of the Customer Intelligence directive. The owner's later word (13:0x UTC) allowed one validation run: 10/11 turns, the Bahrain/Kenya case 3/3, one model-free defect found and fixed in slice 18 (`BENCHMARK_RESULTS.md`).
+
+## Slice 18 (2026-11-09) — the validation run and its one fix
+
+The directive's Phase 9 run (`customer_intelligence.jsonl` × 1, run 42624670362): 10/11 turns. The failure — a Kenyan number saying "Dubai, UAE" placed in Kenya and quoted in shillings — was in `iso_from_text`, which knew only the formal country names and the Kenyan towns. Country aliases and well-known cities now name their country (`CUSTOMER_GEOGRAPHY.md` §5c). No migration; no API change; the resolver's other callers (operator country, shipping destination, Meta evidence, Swahili guard) widen in the same direction.
 
 ## Slice 17 (2026-11-09) — merged as 4bd5ac9, live
 

@@ -41,8 +41,27 @@ def test_country_from_words_separates_the_country_from_the_city():
     assert geo.country_from_words("Kenya") == ("KE", None)
     assert geo.country_from_words("Nairobi") == ("KE", "Nairobi")
     assert geo.country_from_words("Kampala, Uganda") == ("UG", "Kampala, Uganda")
-    assert geo.country_from_words("Manama") == (None, "Manama")      # a town we do not know
+    assert geo.country_from_words("Pofadder") == (None, "Pofadder")  # a town we do not know
     assert geo.country_from_words("  ") == (None, None)
+
+
+def test_a_short_country_name_or_a_well_known_city_places_the_customer():
+    """The validation run of 2026-11-09 (cint-002): a Kenyan number saying
+    "Dubai, UAE" was placed in Kenya and quoted in shillings, because the
+    table knew only "United Arab Emirates". Aliases and well-known cities
+    now name their country; Kenyan towns still win; plain words place no one."""
+    assert geo.country_from_words("Dubai, UAE") == ("AE", "Dubai, UAE")
+    assert geo.country_from_words("I'm in Dubai now") == ("AE", "I'm in Dubai now")
+    assert geo.country_from_words("UAE") == ("AE", "UAE")
+    assert geo.country_from_words("Kampala") == ("UG", "Kampala")
+    assert geo.country_from_words("Dar es Salaam") == ("TZ", "Dar es Salaam")
+    assert geo.country_from_words("London, UK") == ("GB", "London, UK")
+    assert geo.country_from_words("Manama") == ("BH", "Manama")
+    assert geo.country_from_words("Dubai or Nairobi") == ("KE", "Dubai or Nairobi")   # the home town wins
+    assert geo.country_from_words("Tell us") == (None, "Tell us")                      # "us" is not the USA
+    assert geo.country_from_words("Thank you") == (None, "Thank you")
+    rs = geo.stated_readings("Dubai, UAE")
+    assert [(a, v) for a, v, _ in rs] == [("probable_country", "AE"), ("city", "Dubai, UAE")]
 
 
 def test_stated_readings_carry_the_words_as_detail():

@@ -518,6 +518,12 @@ Full report: `CUSTOMER_SEGMENTS.md`. Audit: `CUSTOMER_INTELLIGENCE_AUDIT.md` §7
 - **Change:** `services/segments.py` — `place` (the geography decision per customer with its basis: confirmed / inferred / unknown), `summarise` (pure aggregates with a `basis` block), `report` (three bulk reads, merged rows excluded); `GET /admin/reports/segments`; the Customers tab on Reports with four stat boxes and three tables. Counts only.
 - **Tests:** `tests/test_segments.py` (5). **Measured:** deterministic. Status: IMPLEMENTED BUT NOT VERIFIED in production (live after merge).
 
+## Slice 18 (2026-11-09) · Customer Intelligence, Phase 9 — the validation run and its one fix
+
+- **Baseline (run 42624670362, `BENCHMARK_RESULTS.md`):** 10/11 turns; cint-002's second turn quoted a Kenyan number in "Dubai, UAE" in shillings because `iso_from_text` (`app/core/countries.py`) knew only the formal country names and the Kenyan towns — "Dubai" and "UAE" placed no one.
+- **Change:** whole-word country aliases and a table of well-known cities, longest match first, after the country names and the Kenyan towns; the same resolver serves capture, the operator's typed country, the shipping destination, the Meta evidence chain and the Swahili-market guard.
+- **Tests:** `tests/test_geography.py::test_a_short_country_name_or_a_well_known_city_places_the_customer` (+ the "unknown town" example moved off Manama, which is now Bahrain). Status: IMPLEMENTED, model-free verified; the after-measurement waits on the owner's word.
+
 ## Slice 17 (2026-11-09) · Customer Intelligence, Phase 3 — verify / correct on the Profile tab
 
 - **Baseline (audit §4, §8 item 4):** nothing on the profile let an operator confirm or correct a placement except retyping the country; the history of readings was invisible.

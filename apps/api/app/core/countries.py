@@ -300,12 +300,92 @@ _KENYAN_TOWNS = (
 )
 _KENYAN_TOWNS_RE = None
 
+# Short names people actually type for a country, which the table's formal
+# names ("United Arab Emirates") never match. Whole words, lower case.
+_COUNTRY_ALIASES = (
+    ("uae", "AE"), ("u.a.e", "AE"), ("u.a.e.", "AE"), ("emirates", "AE"),
+    ("usa", "US"), ("u.s.a", "US"), ("u.s.", "US"), ("america", "US"),
+    ("united states of america", "US"),
+    ("uk", "GB"), ("u.k", "GB"), ("u.k.", "GB"), ("britain", "GB"), ("great britain", "GB"),
+    ("england", "GB"), ("scotland", "GB"), ("wales", "GB"), ("northern ireland", "GB"),
+    ("drc", "CD"), ("dr congo", "CD"), ("congo kinshasa", "CD"),
+    ("cote d'ivoire", "CI"), ("côte d'ivoire", "CI"),
+    ("holland", "NL"), ("saudi", "SA"), ("ksa", "SA"),
+    ("south korea", "KR"), ("korea", "KR"),
+)
+
+# Well-known cities a customer names as where they are ("I'm in Dubai now").
+# The validation run of 2026-11-09 (cint-002) showed a Kenyan number in
+# "Dubai, UAE" placed in Kenya and quoted in shillings, because neither word
+# named a country the table knew. Capitals and the cities Neema's customers
+# have actually named; whole words; Kenyan towns are listed above and win.
+_WORLD_CITIES = (
+    ("dubai", "AE"), ("abu dhabi", "AE"), ("sharjah", "AE"), ("ajman", "AE"),
+    ("kampala", "UG"), ("entebbe", "UG"), ("jinja", "UG"), ("mbarara", "UG"), ("gulu", "UG"),
+    ("dar es salaam", "TZ"), ("dar-es-salaam", "TZ"), ("arusha", "TZ"), ("dodoma", "TZ"),
+    ("mwanza", "TZ"), ("zanzibar", "TZ"), ("moshi", "TZ"), ("tanga", "TZ"),
+    ("kigali", "RW"), ("bujumbura", "BI"), ("gitega", "BI"),
+    ("juba", "SS"), ("addis ababa", "ET"), ("addis", "ET"), ("mogadishu", "SO"),
+    ("hargeisa", "SO"), ("djibouti city", "DJ"), ("asmara", "ER"), ("khartoum", "SD"),
+    ("lusaka", "ZM"), ("ndola", "ZM"), ("kitwe", "ZM"), ("livingstone", "ZM"),
+    ("lilongwe", "MW"), ("blantyre", "MW"), ("harare", "ZW"), ("bulawayo", "ZW"),
+    ("maputo", "MZ"), ("gaborone", "BW"), ("windhoek", "NA"), ("luanda", "AO"),
+    ("kinshasa", "CD"), ("lubumbashi", "CD"), ("goma", "CD"), ("brazzaville", "CG"),
+    ("johannesburg", "ZA"), ("cape town", "ZA"), ("durban", "ZA"), ("pretoria", "ZA"),
+    ("lagos", "NG"), ("abuja", "NG"), ("port harcourt", "NG"), ("accra", "GH"), ("kumasi", "GH"),
+    ("dakar", "SN"), ("abidjan", "CI"), ("yaounde", "CM"), ("yaoundé", "CM"), ("douala", "CM"),
+    ("cairo", "EG"), ("alexandria", "EG"), ("casablanca", "MA"), ("tunis", "TN"), ("algiers", "DZ"),
+    ("doha", "QA"), ("riyadh", "SA"), ("jeddah", "SA"), ("mecca", "SA"), ("makkah", "SA"),
+    ("medina", "SA"), ("dammam", "SA"), ("manama", "BH"), ("muscat", "OM"), ("kuwait city", "KW"),
+    ("amman", "JO"), ("beirut", "LB"), ("tel aviv", "IL"), ("jerusalem", "IL"),
+    ("london", "GB"), ("manchester", "GB"), ("birmingham", "GB"), ("leeds", "GB"),
+    ("glasgow", "GB"), ("edinburgh", "GB"), ("dublin", "IE"),
+    ("paris", "FR"), ("berlin", "DE"), ("frankfurt", "DE"), ("munich", "DE"), ("hamburg", "DE"),
+    ("rome", "IT"), ("milan", "IT"), ("madrid", "ES"), ("barcelona", "ES"), ("lisbon", "PT"),
+    ("amsterdam", "NL"), ("brussels", "BE"), ("geneva", "CH"), ("zurich", "CH"),
+    ("stockholm", "SE"), ("oslo", "NO"), ("copenhagen", "DK"), ("helsinki", "FI"),
+    ("vienna", "AT"), ("warsaw", "PL"), ("prague", "CZ"), ("athens", "GR"), ("istanbul", "TR"),
+    ("moscow", "RU"), ("new york", "US"), ("nyc", "US"), ("los angeles", "US"), ("chicago", "US"),
+    ("houston", "US"), ("dallas", "US"), ("atlanta", "US"), ("boston", "US"), ("miami", "US"),
+    ("seattle", "US"), ("san francisco", "US"), ("washington dc", "US"), ("washington, dc", "US"),
+    ("philadelphia", "US"), ("minneapolis", "US"), ("denver", "US"), ("phoenix", "US"),
+    ("toronto", "CA"), ("vancouver", "CA"), ("montreal", "CA"), ("ottawa", "CA"), ("calgary", "CA"),
+    ("sydney", "AU"), ("melbourne", "AU"), ("brisbane", "AU"), ("perth", "AU"),
+    ("auckland", "NZ"), ("wellington", "NZ"),
+    ("mumbai", "IN"), ("bombay", "IN"), ("delhi", "IN"), ("new delhi", "IN"), ("bangalore", "IN"),
+    ("bengaluru", "IN"), ("chennai", "IN"), ("kolkata", "IN"), ("hyderabad", "IN"),
+    ("karachi", "PK"), ("lahore", "PK"), ("islamabad", "PK"), ("dhaka", "BD"), ("colombo", "LK"),
+    ("beijing", "CN"), ("shanghai", "CN"), ("guangzhou", "CN"), ("hong kong", "HK"),
+    ("singapore", "SG"), ("kuala lumpur", "MY"), ("jakarta", "ID"), ("manila", "PH"),
+    ("bangkok", "TH"), ("tokyo", "JP"), ("seoul", "KR"),
+    ("sao paulo", "BR"), ("são paulo", "BR"), ("rio de janeiro", "BR"), ("mexico city", "MX"),
+    ("buenos aires", "AR"), ("port louis", "MU"), ("moroni", "KM"),
+)
+_WORLD_RE = None
+
+
+def _world_iso(t: str) -> str | None:
+    """A country from an alias or a well-known city in lower-cased text,
+    longest match first; None when nothing matches."""
+    global _WORLD_RE
+    if _WORLD_RE is None:
+        import re as _re
+        words = sorted((w for w, _ in _COUNTRY_ALIASES + _WORLD_CITIES), key=len, reverse=True)
+        _WORLD_RE = _re.compile(
+            r"(?<![a-z])(?:" + "|".join(_re.escape(w) for w in words) + r")(?![a-z])")
+    m = _WORLD_RE.search(t)
+    if not m:
+        return None
+    return dict(_COUNTRY_ALIASES + _WORLD_CITIES).get(m.group(0))
+
 
 def iso_from_text(text: str | None) -> str | None:
     """Best-effort ISO country from free text (e.g. a captured location like
     'Somerset East, Eastern Cape, South Africa'). Longest country name wins so
     'South Sudan' never matches plain 'Sudan'. A Kenyan town named on its own
-    ("Nakuru") is Kenya. None when nothing matches."""
+    ("Nakuru") is Kenya; a short name ("UAE", "UK") or a well-known city
+    ("Dubai", "Kampala", "London") names its country. None when nothing
+    matches."""
     t = (text or "").lower()
     if not t:
         return None
@@ -321,7 +401,9 @@ def iso_from_text(text: str | None) -> str | None:
         import re as _re
         _KENYAN_TOWNS_RE = _re.compile(
             r"(?<![a-z])(?:" + "|".join(_re.escape(w) for w in _KENYAN_TOWNS) + r")(?![a-z])")
-    return "KE" if _KENYAN_TOWNS_RE.search(t) else None
+    if _KENYAN_TOWNS_RE.search(t):
+        return "KE"
+    return _world_iso(t)
 
 
 def name_for_iso(iso: str | None) -> str | None:
