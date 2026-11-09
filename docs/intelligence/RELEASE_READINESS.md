@@ -62,7 +62,7 @@ silence, plus fail-closed safeguards that had been fail-open.
 - Retiring the legacy bridge order path and the expiring shortener (W9-4).
 - A DB idempotency key for orders (migration).
 
-Slices 1–14 are live on the box at 345a20b (12:13 UTC, 9 Nov). Slice 15 merged as c936832 (12:10 UTC) and slice 16 as 35c6740 (12:25 UTC); the box's pick-up is recorded in REGRESSION_SAFETY_REPORT when read. Slice 17 is in PR.
+Slices 1–15 are live on the box at c936832 (12:27 UTC, 9 Nov). Slice 16 merged as 35c6740 (12:25 UTC; the box's pick-up is recorded in REGRESSION_SAFETY_REPORT when read). Slice 17 is in PR (#354).
 
 ## Slice 17 (2026-11-09) — in PR
 
@@ -72,7 +72,7 @@ Verify / correct on the Profile tab (web only; `CUSTOMER_GEOGRAPHY.md` §5b): a 
 
 Customers in aggregate (`services/segments.py`, `CUSTOMER_SEGMENTS.md`): `GET /admin/reports/segments` and a Customers tab on Reports — by market (the geography decision; confirmed placements apart from inferred and unknown), by language, by channel; counts only, three bulk reads, nothing stored. No model call, no migration. Tests: 5 new. Rollback: revert the squash commit.
 
-## Slice 15 (2026-11-09) — merged as c936832
+## Slice 15 (2026-11-09) — merged as c936832, live
 
 The customer timeline (`services/timeline.py`, `CUSTOMER_TIMELINE.md`): a level (customer / technical) on every event of the activity ledger, repeated technical steps folded into one row with a count, `?level=` and `fold=` on the endpoint, and new customer-level rows written through the existing trail when a stage moves, a promised check is escalated or answered, or the customer asks for time / claims payment / complains / asks to stop (once per change). The panel's Activity tab gains a Timeline section (customer level, Neema's steps behind a toggle); the conversation view's Activity log keeps every step with a toggle to hide them. No model call, no migration. Tests: 10 new (1 on Postgres in the CI database job), one source pin updated. Rollback: revert the squash commit; the new rows render as plain lines under the previous code.
 
