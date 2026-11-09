@@ -11,7 +11,7 @@ import { TextareaField, InputField } from "@/components/ui/FormFields";
 import { Toggle } from "@/components/ui/Layout";
 import { timeAgo, formatPhone, displayName, countryName, dayLabel, dayKey, clockTime } from "@/lib/utils";
 import { formatWa } from "@/lib/waText";
-import { CHANNEL_CONFIG, ALL_CHANNELS } from "@/lib/channels";
+import { CHANNEL_CONFIG, ALL_CHANNELS, channelFullName } from "@/lib/channels";
 import { conversationsApi, mapConversation, profileApi, whatsappApi, type ApiActivityEvent, type PostIdentity } from "@/lib/api";
 import { useCallPresence } from "@/lib/callContext";
 import type { Inbox } from "@/hooks/useInbox";
@@ -959,19 +959,20 @@ interface ConversationsViewProps extends SharedViewProps {
     // ever loaded); inbox.visibleIds says which of them the current filters'
     // server pages returned — that, not the cache, is what the list shows.
     inbox?: Inbox;
+    /** Tells the page a chat is open on a phone, so it can drop its own
+     *  "Neema · Inbox" bar and give the conversation that row. */
+    onMobileThreadOpen?: (open: boolean) => void;
 }
 
 const CHANNEL_TABS: { id: "all" | Channel; label: string; short: string }[] = [
     { id: "all", label: "All", short: "All" },
-    { id: "whatsapp", label: "WhatsApp", short: "WA" },
+    { id: "whatsapp", label: "WhatsApp Business", short: "WA" },
     { id: "facebook", label: "Facebook", short: "FB" },
     { id: "messenger", label: "Messenger", short: "MSG" },
     { id: "instagram", label: "Instagram", short: "IG" },
     // Email + SMS hidden for now — no traffic on those channels yet.
 ];
 
-// Accent for the "All" tab (gold) — channels use their own brand colour.
-const ALL_TAB_ACCENT = "#f59e0b";
 // Active-row accent (Figma gold).
 const ROW_ACCENT = "#f59e0b";
 
@@ -1000,12 +1001,6 @@ const CH_SHORT: Record<Channel, string> = {
 // Chip order for a unified (multi-channel) customer row — WhatsApp first (it can
 // transact), then the social channels.
 const CHAN_ORDER: Channel[] = ["whatsapp", "messenger", "facebook", "instagram", "tiktok", "email", "sms"];
-const SparkleIcon = () => (
-    <svg viewBox="0 0 24 24" fill="currentColor" className="w-3.5 h-3.5">
-        <path d="M12 2l1.9 5.6L19.5 9l-5.6 1.9L12 16.5 10.1 10.9 4.5 9l5.6-1.4L12 2zm6.5 11l.9 2.6 2.6.9-2.6.9-.9 2.6-.9-2.6-2.6-.9 2.6-.9.9-2.6z" />
-    </svg>
-);
-
 export function ConversationsView({
     conversations,
     setConversations,
@@ -1020,9 +1015,14 @@ export function ConversationsView({
     onConsumeOpenConvKey,
     freshLoaded,
     inbox,
+    onMobileThreadOpen,
 }: ConversationsViewProps): React.ReactElement {
     const [activeConvId, setActiveConvId] = useState<string>("");
     const [mobilePanel, setMobilePanel] = useState<MobilePanel>("list");
+    useEffect(() => {
+        onMobileThreadOpen?.(isMobile && mobilePanel !== "list");
+        return () => onMobileThreadOpen?.(false);
+    }, [isMobile, mobilePanel, onMobileThreadOpen]);
     const [channelTab, setChannelTab] = useState<"all" | Channel>("all");
     const [tagFilter, setTagFilter] = useState<string>("all");
     const [interceptFilter, setInterceptFilter] = useState<
@@ -1065,6 +1065,8 @@ export function ConversationsView({
     const [noteModal, setNoteModal] = useState<boolean>(false);
     const [noteText, setNoteText] = useState<string>("");
     const [showFilters, setShowFilters] = useState<boolean>(false);
+    // The open chat's "more" menu (hand to a colleague, profile, clear history).
+    const [headMenu, setHeadMenu] = useState<boolean>(false);
     const [threadLoading, setThreadLoading] = useState(false);
     // A failed thread load must say so — "No messages yet" over a fetch that
     // errored reads as an empty conversation, and a spinner with no timeout
@@ -2644,17 +2646,17 @@ export function ConversationsView({
                 borderRight: "1px solid #edf0ea",
             }}
         >
-            {/* Header */}
-            <div className="px-4 pt-4 pb-3" style={{ borderBottom: "1px solid #edf0ea" }}>
-                <div className="flex items-center justify-between mb-3">
-                    <h1 className="text-sm font-semibold" style={{ color: "#1c2917", letterSpacing: "-0.01em" }}>
-                        {selectMode
-                            ? `${selected.size} selected`
-                            : "Chats"}
-                    </h1>
-                    <div className="flex items-center gap-2">
-                        {selectMode ? (
-                            <>
+            {/* Header — owner's choice of 2026-11-09 (option B): search and the
+                two tools on one line, the platforms by their full names in a
+                strip that swipes sideways, the status as a quiet tab line.
+                Three slim rows where there were five. */}
+            <div className="px-3 pt-3" style={{ borderBottom: "1px solid #edf0ea" }}>
+                {selectMode ? (
+                    <div className="flex items-center justify-between h-9 mb-2">
+                        <h1 className="text-sm font-semibold" style={{ color: "#1c2917", letterSpacing: "-0.01em" }}>
+                            {selected.size} selected
+                        </h1>
+                        <div className="flex items-center gap-2">
                                 <button
                                     onClick={() => setSelected(
                                         selected.size === groupedConvs.length
@@ -2673,176 +2675,82 @@ export function ConversationsView({
                                 >
                                     Cancel
                                 </button>
-                            </>
-                        ) : (
-                            <>
-                                {humanCount > 0 && (
-                                    <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full" style={{ backgroundColor: "#fff3cd", color: "#856404" }}>
-                                        {humanCount} live
-                                    </span>
-                                )}
-                                <button
-                                    onClick={() => setSelectMode(true)}
-                                    title="Select several (or press and hold a chat)"
-                                    className="w-7 h-7 rounded-lg flex items-center justify-center transition-colors hover:bg-[#f0f4ec]"
-                                    style={{ color: "#8a9e80" }}
-                                >
-                                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
-                                              d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4" />
-                                    </svg>
-                                </button>
-                            </>
-                        )}
+                        </div>
+                    </div>
+                ) : (
+                    <div className="flex items-center gap-2 mb-2">
+                        <div className="relative flex-1 min-w-0">
+                            <svg className="absolute left-2.5 top-1/2 -translate-y-1/2 w-4 h-4" style={{ color: "#93a08a" }}
+                                 fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                                      d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                            </svg>
+                            <input
+                                value={searchQ}
+                                onChange={(e) => setSearchQ(e.target.value)}
+                                placeholder="Search chats"
+                                aria-label="Search chats"
+                                className="w-full h-9 pl-8 pr-3 rounded-xl focus:outline-none focus:ring-1 focus:ring-[#589b31]"
+                                style={{ fontSize: 13, backgroundColor: "#f5f6f3", border: "1px solid #edf0ea", color: "#1c2917" }}
+                            />
+                        </div>
+                        <button
+                            onClick={() => setSelectMode(true)}
+                            title="Select several (or press and hold a chat)"
+                            aria-label="Select several chats"
+                            className="w-9 h-9 flex-shrink-0 rounded-xl flex items-center justify-center transition-colors hover:bg-[#f0f4ec]"
+                            style={{ color: "#6b7e64", border: "1px solid #e3e8dc" }}
+                        >
+                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                                      d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4" />
+                            </svg>
+                        </button>
                         <button
                             onClick={() => setShowFilters((f) => !f)}
-                            className={`w-7 h-7 rounded-lg flex items-center justify-center transition-colors ${showFilters ? "bg-[#589b31] text-white" : "hover:bg-[#f0f4ec]"}`}
-                            style={{ color: showFilters ? "white" : "#8a9e80" }}
+                            title="More filters"
+                            aria-label="More filters"
+                            className={`w-9 h-9 flex-shrink-0 rounded-xl flex items-center justify-center transition-colors ${showFilters ? "bg-[#589b31]" : "hover:bg-[#f0f4ec]"}`}
+                            style={{ color: showFilters ? "white" : "#6b7e64", border: `1px solid ${showFilters ? "#589b31" : "#e3e8dc"}` }}
                         >
-                            <svg
-                                className="w-3.5 h-3.5"
-                                fill="none"
-                                stroke="currentColor"
-                                viewBox="0 0 24 24"
-                            >
-                                <path
-                                    strokeLinecap="round"
-                                    strokeLinejoin="round"
-                                    strokeWidth={2}
-                                    d="M3 4h18M7 8h10M11 12h2M13 16h-2"
-                                />
+                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M7 12h10M10 18h4" />
                             </svg>
                         </button>
                     </div>
-                </div>
+                )}
 
-                {/* Read / Unread / Human-pickup / Yours toggle */}
-                <div className="flex items-center flex-wrap gap-1 mb-2">
-                    {(["all", "unread", "read", "human", "yours"] as const).map((f) => (
-                        <button
-                            key={f}
-                            onClick={() => setReadFilter(f)}
-                            className={`flex-1 min-w-[58px] h-7 px-1.5 rounded-lg text-xs font-medium transition-colors flex items-center justify-center gap-1.5`}
-                            style={{
-                                backgroundColor: readFilter === f
-                                    ? f === "unread" ? "#427425"
-                                    : f === "human" ? "#b45309"
-                                    : f === "yours" ? "#589b31"
-                                    : "#1c2917"
-                                    : "#f5f6f3",
-                                color: readFilter === f ? "#fff" : "#6b7e64",
-                            }}
-                        >
-                            {f === "all" && "All"}
-                            {f === "unread" && (
-                                <>
-                                    Unread
-                                    {unreadCount > 0 && (
-                                        <span
-                                            className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full leading-none ${readFilter === "unread" ? "bg-white/25 text-white" : "bg-[#427425] text-white"}`}
-                                        >
-                                            {unreadCount}
-                                        </span>
-                                    )}
-                                </>
-                            )}
-                            {f === "read" && "Read"}
-                            {f === "human" && (
-                                <>
-                                    Human
-                                    {humanCount > 0 && (
-                                        <span
-                                            className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full leading-none ${readFilter === "human" ? "bg-white/25 text-white" : "bg-[#b45309] text-white"}`}
-                                        >
-                                            {humanCount}
-                                        </span>
-                                    )}
-                                </>
-                            )}
-                            {f === "yours" && (
-                                <>
-                                    Yours
-                                    {yoursCount > 0 && (
-                                        <span
-                                            className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full leading-none ${readFilter === "yours" ? "bg-white/25 text-white" : "bg-[#589b31] text-white"}`}
-                                        >
-                                            {yoursCount}
-                                        </span>
-                                    )}
-                                </>
-                            )}
-                        </button>
-                    ))}
-                </div>
-
-                {/* Search */}
-                <div className="relative mb-2">
-                    <svg
-                        className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5"
-                        style={{ color: "#b5c9a8" }}
-                        fill="none"
-                        stroke="currentColor"
-                        viewBox="0 0 24 24"
-                    >
-                        <path
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
-                            strokeWidth={2}
-                            d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"
-                        />
-                    </svg>
-                    <input
-                        value={searchQ}
-                        onChange={(e) => setSearchQ(e.target.value)}
-                        placeholder="Start typing to search"
-                        className="w-full h-8 pl-8 pr-3 text-xs rounded-lg focus:outline-none focus:ring-1 focus:ring-[#589b31]"
-                        style={{
-                            fontSize: 13,
-                            backgroundColor: "#f5f6f3",
-                            border: "1px solid #edf0ea",
-                            color: "#1c2917",
-                        }}
-                    />
-                </div>
-
-                {/* Channel tabs — icon pills per channel, spread evenly across the row */}
-                <div className="flex gap-1.5 pt-2 pb-1">
+                {/* Platforms — full names, a count each, swipe sideways for the rest */}
+                <div className="flex gap-1.5 overflow-x-auto pb-1.5 -mx-3 px-3" style={{ scrollbarWidth: "none" }}>
                     {CHANNEL_TABS.map((tab) => {
                         const active = channelTab === tab.id;
                         const cfg = tab.id === "all" ? null : CHANNEL_CONFIG[tab.id as Channel];
-                        const accent = cfg?.color ?? ALL_TAB_ACCENT;
+                        const accent = cfg?.color ?? "#1c2917";
                         const count = channelCounts[tab.id] ?? 0;
                         return (
                             <button
                                 key={tab.id}
                                 onClick={() => setChannelTab(tab.id)}
-                                title={tab.label}
-                                className="relative flex-1 min-w-0 flex flex-col items-center justify-center gap-0.5 h-10 rounded-lg border transition-all hover:brightness-[0.97]"
+                                aria-pressed={active}
+                                className="flex-shrink-0 inline-flex items-center gap-1.5 h-8 px-3 rounded-full text-xs font-semibold whitespace-nowrap transition-colors"
                                 style={{
-                                    // Each channel wears its own brand hue: full fill when
-                                    // active, a soft tint of the same colour when not — so
-                                    // the tabs read as distinct, coloured, and attractive.
-                                    backgroundColor: active ? accent : accent + "14",
-                                    borderColor: active ? accent : accent + "33",
+                                    backgroundColor: active ? "#1f2b17" : "#f5f6f3",
+                                    border: `1px solid ${active ? "#1f2b17" : "#e3e8dc"}`,
+                                    color: active ? "#ffffff" : "#4a5a40",
                                 }}
                             >
-                                <span
-                                    className="flex items-center justify-center [&>svg]:w-3.5 [&>svg]:h-3.5"
-                                    style={{ color: active ? "#ffffff" : accent }}
-                                >
-                                    {tab.id === "all" ? <SparkleIcon /> : cfg!.icon}
-                                </span>
-                                <span
-                                    className="text-[8px] font-bold leading-none tracking-tight"
-                                    style={{ color: active ? "#ffffff" : accent }}
-                                >
-                                    {tab.short}
-                                </span>
+                                {cfg && (
+                                    <span className="flex items-center justify-center [&>svg]:w-3.5 [&>svg]:h-3.5"
+                                          style={{ color: active ? "#ffffff" : accent }}>
+                                        {cfg.icon}
+                                    </span>
+                                )}
+                                {tab.label}
                                 {count > 0 && (
-                                    <span
-                                        className="absolute -top-1 -right-1 min-w-[14px] h-[14px] px-[3px] rounded-full text-[8px] font-bold flex items-center justify-center text-white leading-none"
-                                        style={{ backgroundColor: active ? "#ef4444" : accent }}
-                                    >
+                                    <span className="min-w-[18px] h-[16px] px-1.5 rounded-full text-[10px] font-bold flex items-center justify-center leading-none"
+                                          style={active
+                                              ? { backgroundColor: "#ffffff", color: "#1f2b17" }
+                                              : { backgroundColor: cfg ? accent : "#589b31", color: "#ffffff" }}>
                                         {count}
                                     </span>
                                 )}
@@ -2851,9 +2759,33 @@ export function ConversationsView({
                     })}
                 </div>
 
+                {/* Status — a quiet tab line, so it does not compete with the platforms */}
+                <div className="flex gap-4 overflow-x-auto -mx-3 px-3" style={{ scrollbarWidth: "none" }}>
+                    {(["all", "unread", "yours", "human", "read"] as const).map((f) => {
+                        const on = readFilter === f;
+                        const n = f === "unread" ? unreadCount : f === "human" ? humanCount : f === "yours" ? yoursCount : 0;
+                        const word = { all: "All", unread: "Unread", yours: "Yours", human: "With a person", read: "Read" }[f];
+                        return (
+                            <button
+                                key={f}
+                                onClick={() => setReadFilter(f)}
+                                aria-pressed={on}
+                                className="flex-shrink-0 pt-1 pb-2 text-xs font-semibold whitespace-nowrap transition-colors"
+                                style={{
+                                    color: on ? "#1c2917" : "#7b8773",
+                                    borderBottom: `2px solid ${on ? (f === "human" ? "#b45309" : "#589b31") : "transparent"}`,
+                                }}
+                            >
+                                {word}
+                                {n > 0 && <span className="ml-1" style={{ color: on ? "#1c2917" : f === "human" ? "#b45309" : "#427425" }}>{n}</span>}
+                            </button>
+                        );
+                    })}
+                </div>
+
                 {/* Extra filters */}
                 {showFilters && (
-                    <div className="mt-2 flex gap-1.5 flex-wrap">
+                    <div className="mt-2 mb-2 flex gap-1.5 flex-wrap">
                         {/* Tag filter */}
                         {allTags.length > 0 && (
                             <>
@@ -3301,30 +3233,8 @@ export function ConversationsView({
                     </div>
                 ) : (
                     <>
-                        {/* Floating profile FAB — mobile only */}
-                        {isMobile && (
-                            <button
-                                onClick={() => setMobileCrmOpen(true)}
-                                title="View customer profile"
-                                className="absolute top-3 right-3 z-20 w-8 h-8 rounded-full bg-white border border-[#edf0ea] shadow-sm flex items-center justify-center text-[#427425] hover:bg-[#fafbf8] transition-colors"
-                            >
-                                <svg
-                                    className="w-4 h-4"
-                                    fill="none"
-                                    stroke="currentColor"
-                                    viewBox="0 0 24 24"
-                                >
-                                    <path
-                                        strokeLinecap="round"
-                                        strokeLinejoin="round"
-                                        strokeWidth={2}
-                                        d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"
-                                    />
-                                </svg>
-                            </button>
-                        )}
                         {/* Thread header */}
-                        <div className="px-4 py-3 bg-white flex items-center gap-2 flex-wrap" style={{ borderBottom: "1px solid #edf0ea" }}>
+                        <div className="px-3 sm:px-4 py-2.5 bg-white flex items-center gap-2 flex-wrap" style={{ borderBottom: "1px solid #edf0ea" }}>
                             {isMobile && (
                                 <button
                                     onClick={() => setMobilePanel("list")}
@@ -3345,36 +3255,164 @@ export function ConversationsView({
                                     </svg>
                                 </button>
                             )}
-                            <Avatar
-                                name={displayName(
-                                    activeConv.name,
-                                    activeConv.wa_id,
-                                )}
-                                src={activeConv.avatar_url}
-                                size={32}
-                            />
-                            <div className="flex-1 min-w-0">
-                                <div className="text-sm font-semibold truncate" style={{ color: "#1c2917" }}>
-                                    {displayName(
-                                        activeConv.name,
-                                        activeConv.wa_id,
-                                    )}
+                            {/* The customer's photo from the platform (initials when it
+                                gives none), with the platform's colour as a dot. */}
+                            <div className="relative flex-shrink-0">
+                                <Avatar
+                                    name={displayName(activeConv.name, activeConv.wa_id)}
+                                    src={activeConv.avatar_url}
+                                    size={36}
+                                />
+                                <span
+                                    title={channelFullName(activeConv.channel)}
+                                    className="absolute -right-0.5 -bottom-0.5 w-4 h-4 rounded-full flex items-center justify-center text-white [&>svg]:w-2.5 [&>svg]:h-2.5"
+                                    style={{ backgroundColor: CHANNEL_CONFIG[activeConv.channel]?.color ?? "#589b31", border: "2px solid #fff" }}
+                                >
+                                    {CHANNEL_CONFIG[activeConv.channel]?.icon}
+                                </span>
+                            </div>
+                            {/* Name, then where they are writing from. On a phone the
+                                name opens the profile (the round button is gone). */}
+                            <div
+                                className={`flex-1 min-w-0 ${isMobile ? "cursor-pointer" : ""}`}
+                                onClick={isMobile ? () => setMobileCrmOpen(true) : undefined}
+                                role={isMobile ? "button" : undefined}
+                                title={isMobile ? "View customer profile" : undefined}
+                            >
+                                <div className="text-[15px] font-bold truncate leading-tight" style={{ color: "#1c2917", letterSpacing: "-0.01em" }}>
+                                    {displayName(activeConv.name, activeConv.wa_id)}
                                 </div>
-                                <div className="text-xs truncate" style={{ color: "#b5c9a8", fontFamily: "'DM Mono', monospace" }}>
-                                    {formatPhone(activeConv.wa_id)}
+                                <div className="text-xs truncate" style={{ color: "#6c7964" }}>
+                                    <span className="font-semibold" style={{ color: CHANNEL_CONFIG[activeConv.channel]?.color ?? "#427425" }}>
+                                        {channelFullName(activeConv.channel)}
+                                    </span>
+                                    {activeConv.country ? ` · ${activeConv.country}` : ""}
+                                    {activeConv.channel === "whatsapp" && activeConv.wa_id ? ` · ${formatPhone(activeConv.wa_id)}` : ""}
                                 </div>
                             </div>
-                            <div className="flex items-center gap-1.5 flex-shrink-0 flex-wrap">
-                                <InterceptBadge
-                                    mode={activeConv.intercept_mode}
-                                />
+                            {/* More: the actions used least */}
+                            {(isMobile || canActOnThisConv || isAdminOrSuper) && (
+                                <div className={`relative flex-shrink-0 ${isMobile ? "" : "order-last"}`}>
+                                    <button
+                                        onClick={() => setHeadMenu((v) => !v)}
+                                        aria-label="More actions"
+                                        aria-expanded={headMenu}
+                                        className="w-9 h-9 rounded-xl flex items-center justify-center hover:bg-[#f0f4ec]"
+                                        style={{ color: "#4a5a40", border: "1px solid #e3e8dc" }}
+                                    >
+                                        <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
+                                            <circle cx="5" cy="12" r="1.8" /><circle cx="12" cy="12" r="1.8" /><circle cx="19" cy="12" r="1.8" />
+                                        </svg>
+                                    </button>
+                                    {headMenu && (
+                                        <>
+                                            <div className="fixed inset-0 z-30" onClick={() => setHeadMenu(false)} />
+                                            <div className="absolute right-0 top-10 z-40 w-56 rounded-xl bg-white py-1 shadow-lg"
+                                                 style={{ border: "1px solid #e3e8dc" }}>
+                                                {isMobile && (
+                                                    <button className="w-full text-left px-3.5 py-2.5 text-sm font-medium hover:bg-[#f5f6f3]" style={{ color: "#1c2917" }}
+                                                            onClick={() => { setHeadMenu(false); setMobileCrmOpen(true); }}>
+                                                        View profile
+                                                    </button>
+                                                )}
+                                                {canActOnThisConv && (
+                                                    <button className="w-full text-left px-3.5 py-2.5 text-sm font-medium hover:bg-[#f5f6f3]" style={{ color: "#1c2917" }}
+                                                            onClick={() => { setHeadMenu(false); setTransferModal(true); }}>
+                                                        Hand to a colleague
+                                                    </button>
+                                                )}
+                                                {isAdminOrSuper && (
+                                                    <button className="w-full text-left px-3.5 py-2.5 text-sm font-medium hover:bg-red-50" style={{ color: "#b91c1c" }}
+                                                            onClick={() => { setHeadMenu(false); setClearConfirm(true); }}>
+                                                        Clear history
+                                                    </button>
+                                                )}
+                                            </div>
+                                        </>
+                                    )}
+                                </div>
+                            )}
+                            {/* Second line on a phone, same line on a desktop: who is
+                                answering on the left; Note, Pause and the one main
+                                action on the right, each one tap. */}
+                            <div className={`flex items-center gap-1.5 ${isMobile ? "w-full" : "flex-shrink-0"}`}>
+                                {/* When a colleague holds it the lock badge beside this
+                                    already names them — one label, not two. */}
+                                {!(convOwnedByOther && !canOverride) && <span
+                                    className="inline-flex items-center h-6 px-2 rounded-md text-[10.5px] font-bold uppercase tracking-wide whitespace-nowrap"
+                                    style={activeConv.intercept_mode === "human"
+                                        ? { backgroundColor: "#fff7e0", border: "1px solid #f0d98a", color: "#9a5b12" }
+                                        : activeConv.intercept_mode === "paused"
+                                            ? { backgroundColor: "#f1f2ef", border: "1px solid #e0e3db", color: "#6b7280" }
+                                            : { backgroundColor: "#eef4ff", border: "1px solid #cfdcf7", color: "#2a48a2" }}
+                                >
+                                    {activeConv.intercept_mode === "paused" ? "Paused"
+                                        : activeConv.intercept_mode === "ai" ? "Neema replies"
+                                        : isOwner ? "You reply"
+                                        : activeConv.assigned_agent_name ? `${activeConv.assigned_agent_name.split(" ")[0]} replies`
+                                        : "Needs a person"}
+                                </span>}
+                                {/* ── Locked badge ──
+                                    Regular agents see this when another agent owns the conv.
+                                    Only the super admin never sees it. */}
+                                {convOwnedByOther && !canOverride && (
+                                    <span
+                                        className="text-xs px-2 py-1 rounded-md bg-stone-100 text-stone-400 cursor-not-allowed"
+                                        title={`Handled by ${activeConv.assigned_agent_name ?? "another agent"} — they must release or transfer it first`}
+                                    >
+                                        🔒{" "}
+                                        {activeConv.assigned_agent_name?.split(
+                                            " ",
+                                        )[0] ?? "Locked"}
+                                    </span>
+                                )}
 
-                                {/* Assigned agent name */}
-                                {activeConv.assigned_agent_id &&
-                                    activeConv.assigned_agent_name && (
-                                        <span className="text-xs text-[#b5c9a8] hidden lg:block">
-                                            → {activeConv.assigned_agent_name}
-                                        </span>
+                                <span className="flex-1" />
+
+                                {/* ── Note — any agent/admin, no ownership restriction */}
+                                {canHandleConversations && (
+                                    <Btn
+                                        key="note"
+                                        small
+                                        onClick={() => setNoteModal(true)}
+                                        variant="secondary"
+                                    >
+                                        Note
+                                    </Btn>
+                                )}
+
+                                {/* ── Pause ──
+                                    Any agent/admin can pause unless another agent owns
+                                    it (regular agents blocked; admin/super can override). */}
+                                {activeConv.intercept_mode !== "paused" &&
+                                    canActOnThisConv && (
+                                        <Btn
+                                            key="pause"
+                                            small
+                                            disabled={!!convBusy}
+                                            onClick={() =>
+                                                pauseConv(activeConv.id)
+                                            }
+                                            variant="secondary"
+                                        >
+                                            {convBusy === "pause" ? <span className="inline-block w-3 h-3 border-2 border-current border-t-transparent rounded-full animate-spin" /> : "⏸"} Pause
+                                        </Btn>
+                                    )}
+
+                                {/* ── Resume — same rules as Pause */}
+                                {activeConv.intercept_mode === "paused" &&
+                                    canActOnThisConv && (
+                                        <Btn
+                                            key="resume"
+                                            small
+                                            disabled={!!convBusy}
+                                            onClick={() =>
+                                                release(activeConv.id)
+                                            }
+                                            variant="primary"
+                                        >
+                                            {convBusy === "release" ? <span className="inline-block w-3 h-3 border-2 border-current border-t-transparent rounded-full animate-spin" /> : "▶"} Resume
+                                        </Btn>
                                     )}
 
                                 {/* ── Intercept ──
@@ -3438,96 +3476,11 @@ export function ConversationsView({
                                             onClick={() =>
                                                 release(activeConv.id)
                                             }
-                                            variant="secondary"
+                                            variant="primary"
                                         >
                                             {convBusy === "release" ? <span className="inline-block w-3 h-3 border-2 border-current border-t-transparent rounded-full animate-spin" /> : "↩"} Release
                                         </Btn>
                                     )}
-
-                                {/* ── Locked badge ──
-                                    Regular agents see this when another agent owns the conv.
-                                    Only the super admin never sees it. */}
-                                {convOwnedByOther && !canOverride && (
-                                    <span
-                                        className="text-xs px-2 py-1 rounded-md bg-stone-100 text-stone-400 cursor-not-allowed"
-                                        title={`Handled by ${activeConv.assigned_agent_name ?? "another agent"} — they must release or transfer it first`}
-                                    >
-                                        🔒{" "}
-                                        {activeConv.assigned_agent_name?.split(
-                                            " ",
-                                        )[0] ?? "Locked"}
-                                    </span>
-                                )}
-
-                                {/* ── Pause ──
-                                    Any agent/admin can pause unless another agent owns
-                                    it (regular agents blocked; admin/super can override). */}
-                                {activeConv.intercept_mode !== "paused" &&
-                                    canActOnThisConv && (
-                                        <Btn
-                                            key="pause"
-                                            small
-                                            disabled={!!convBusy}
-                                            onClick={() =>
-                                                pauseConv(activeConv.id)
-                                            }
-                                            variant="secondary"
-                                        >
-                                            {convBusy === "pause" ? <span className="inline-block w-3 h-3 border-2 border-current border-t-transparent rounded-full animate-spin" /> : "⏸"} Pause
-                                        </Btn>
-                                    )}
-
-                                {/* ── Resume — same rules as Pause */}
-                                {activeConv.intercept_mode === "paused" &&
-                                    canActOnThisConv && (
-                                        <Btn
-                                            key="resume"
-                                            small
-                                            disabled={!!convBusy}
-                                            onClick={() =>
-                                                release(activeConv.id)
-                                            }
-                                            variant="primary"
-                                        >
-                                            {convBusy === "release" ? <span className="inline-block w-3 h-3 border-2 border-current border-t-transparent rounded-full animate-spin" /> : "▶"} Resume
-                                        </Btn>
-                                    )}
-
-                                {/* ── Transfer — same rules as Pause/Resume */}
-                                {canActOnThisConv && (
-                                    <Btn
-                                        key="transfer"
-                                        small
-                                        onClick={() => setTransferModal(true)}
-                                        variant="secondary"
-                                    >
-                                        ⇄
-                                    </Btn>
-                                )}
-
-                                {/* ── Note — any agent/admin, no ownership restriction */}
-                                {canHandleConversations && (
-                                    <Btn
-                                        key="note"
-                                        small
-                                        onClick={() => setNoteModal(true)}
-                                        variant="secondary"
-                                    >
-                                        📝
-                                    </Btn>
-                                )}
-
-                                {/* ── Clear history — admin/superuser only ── */}
-                                {isAdminOrSuper && (
-                                    <Btn
-                                        key="clear-history"
-                                        small
-                                        onClick={() => setClearConfirm(true)}
-                                        variant="danger"
-                                    >
-                                        🗑️
-                                    </Btn>
-                                )}
 
                                 {/* ── Close — any agent/admin, no ownership restriction */}
                                 {/* {activeConv.status === "open" &&

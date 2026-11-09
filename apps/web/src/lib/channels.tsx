@@ -117,6 +117,22 @@ export const CHANNEL_CONFIG: Record<Channel, ChannelConfig> = {
     },
 };
 
+// The platform's name written out for a person (owner, 2026-11-09: "write them
+// in full names"). Short `label`s stay for tight chips elsewhere.
+const CHANNEL_FULL: Partial<Record<Channel, string>> = {
+    whatsapp: "WhatsApp Business",
+    facebook: "Facebook",
+    messenger: "Messenger",
+    instagram: "Instagram",
+    tiktok: "TikTok",
+    email: "Email",
+    sms: "SMS",
+};
+export function channelFullName(ch: string | null | undefined): string {
+    const c = (ch || "whatsapp") as Channel;
+    return CHANNEL_FULL[c] ?? CHANNEL_CONFIG[c]?.label ?? String(ch || "");
+}
+
 export const ALL_CHANNELS: Channel[] = [
     "whatsapp",
     "messenger",
