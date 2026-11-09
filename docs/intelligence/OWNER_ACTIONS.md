@@ -182,3 +182,7 @@ and `/api/admin/settings/prompt-inputs` (the 22 flag values).
    line stays the only direct proof on the box; CI's new real-database
    test proves the write on a database built from the migration chain.
 2. **(The CI pass^3 is in: 54/120 = 0.450, BENCHMARK_RESULTS.)** **Send the box run's files** (`eval-out/agent-eval-blind-7670de1-*.json` and `.log`) — they are the second independent measurement, on the production database.
+
+## Decided 2026-11-09 (12:3x UTC): no validation run for the Customer Intelligence directive
+
+The owner's words: "no validation". The model-dependent validation (Phase 9 of the directive) is not wanted; the evaluation stop stands. The model-free tests per slice are the evidence (`REGRESSION_SAFETY_REPORT.md`). Nothing here waits on the owner for this item.
