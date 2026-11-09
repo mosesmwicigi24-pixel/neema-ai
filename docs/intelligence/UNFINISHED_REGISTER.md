@@ -194,3 +194,11 @@ the precise dependency · status. Last update: 2026-11-06, end of session 1.
 | No per-day headers on the timeline; "x minutes ago" only | by design for now | a day divider if the operators ask |
 | The in-thread system-event dividers (conversation view) are untouched by the levels | recorded | nothing unless the owner wants them filtered too |
 | The directive's validation list (Phase 9) run as one pass | the per-slice tests cover the model-free items; the model-dependent ones wait for the owner's lift | the evaluation stop lifted |
+
+## Opened by slice 16 (2026-11-09, customers in aggregate)
+
+| Item | Status | What closes it |
+|---|---|---|
+| Aggregation by shipping destination or city; a period filter; an export | not built (counts "as of now") | when the operators ask |
+| Profile UX beyond slices 13–14 (verify / correct controls on a reading, aging of a weak placement, the history visible) | PARTIALLY — source and confidence on hover, the ☎ chip, the "Number from" row | audit §8 item 4, second half |
+| The directive's Phase 9 validation list run as one pass with the model | the model-free items are covered per slice (geography 31, insights 16, timeline 10, segments 5 tests); the model-dependent ones wait for the owner's lift | the evaluation stop lifted |
