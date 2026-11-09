@@ -1,0 +1,927 @@
+{
+ "started": "2026-11-09T13:21:29.566678+00:00",
+ "selection": "file:customer_intelligence.jsonl",
+ "file": "customer_intelligence.jsonl",
+ "repeat": 1,
+ "git_sha": "45e5afbcf4cc75c97ee0d5560d1c7b4f1be46376",
+ "case_set": "e22be5524c3a",
+ "cases": 6,
+ "models": {
+  "producer": "claude-sonnet-5-5",
+  "light": "claude-haiku-5-5",
+  "reviewer": "claude-sonnet-5",
+  "reviewer_light": "claude-haiku-4-5"
+ },
+ "prompt_revision": {
+  "prompt_py": "253f1c05b63d",
+  "directives": "e3b0c44298fc",
+  "directives_chars": 0,
+  "learned_rules": "e3b0c44298fc",
+  "learned_rules_chars": 0,
+  "house_voice": "e3b0c44298fc",
+  "house_voice_chars": 0
+ },
+ "results": [
+  {
+   "id": "cint-001",
+   "repeat": 1,
+   "contact": "…9001",
+   "source": "developer",
+   "turns": [
+    {
+     "i": 0,
+     "user": "Hi, how much is a clergy shirt?",
+     "reply": "Good afternoon, and welcome to Bethany House. The Round Collar Clergy Shirt is $30 and the Straight Collar Shirt is $25. Both are made to order. Which would you like?",
+     "next": "quote",
+     "critical": true,
+     "categories": [
+      "simple-enquiry",
+      "memory",
+      "cultural"
+     ],
+     "lang": "en",
+     "latency_s": 10.71,
+     "error": null,
+     "door": null,
+     "tool_outs": [
+      {
+       "tool": "search_catalog",
+       "input": {
+        "query": "clergy shirt",
+        "currency": "USD"
+       },
+       "out": "{\"count\": 5, \"currency\": \"USD\", \"results\": [{\"name\": \"Round Collar Clergy Shirt\", \"sku\": \"SF-SHT-01\", \"category\": \"Vestments\", \"made_to_order\": true, \"availability\": \"available\", \"price\": 30, \"currency\": \"USD\", \"details\": \"Clergy shirt with the full round collar — the white band showing all round for a clean, classic ministerial look.\", \"part_of_set\": {\"name\": \"Cassock Set\", \"price\": 200, \"comes_with\": [\"cassock\", \"stole\", \"belt\", \"straight collar shirt\", \"12 inch clergy collar\"], \"note\": \"also sold inside this set — under a set post, or when they ask about the piece and the set, give the piece's own price AND the set's total in one reply\"}, \"goes_with\": [{\"name\": \"Straight Collar\", \"price\": 8}], \"goes_with_note\": \"the natural companions, cheapest of each kind — ONE of them may be your one suggestion once the order for THIS item is settled, at the price shown; never before the price of what they asked for\", \"measurements_needed\": \"Neck, Shoulders, Sleeves, Wrist, Arm Hole, Upper Arm, Bodice, Waist, Hips, Blouse Length, Full Length, Shoulder Width, Sleeve Length — in inches\", \"ask_next\": \"made to order — the open details are the customer's: ask the colour first, then the size or mea",
+       "truncated": true
+      }
+     ],
+     "verdict": {
+      "passed": true,
+      "failures": [],
+      "observations": {
+       "words": 30,
+       "sentences": 4,
+       "questions": 1,
+       "target_words": 25,
+       "target_kind": "short",
+       "over_target": false,
+       "internal_talk": [],
+       "figures": [
+        30.0,
+        25.0
+       ],
+       "unverified": [],
+       "tools": [
+        "search_catalog"
+       ],
+       "review": "pass",
+       "language_ok": true,
+       "silent": false,
+       "opted_out": false,
+       "intercept_mode": "ai",
+       "judge": []
+      }
+     }
+    },
+    {
+     "i": 1,
+     "user": "I'm in Nairobi, Westlands. Can you deliver here?",
+     "reply": "Yes, we deliver in Westlands, and you're also welcome to visit our shop here in Nairobi. Since you're in Kenya, here are the prices in shillings: the Round Collar Clergy Shirt is KES 3,000 and the Straight Collar Shirt is KES 2,500. Which would you like?",
+     "next": "answer",
+     "critical": true,
+     "categories": [
+      "simple-enquiry",
+      "memory",
+      "cultural"
+     ],
+     "lang": "en",
+     "latency_s": 10.01,
+     "error": null,
+     "door": null,
+     "tool_outs": [
+      {
+       "tool": "search_catalog",
+       "input": {
+        "query": "clergy shirt",
+        "currency": "KES"
+       },
+       "out": "{\"count\": 5, \"currency\": \"USD\", \"results\": [{\"name\": \"Round Collar Clergy Shirt\", \"sku\": \"SF-SHT-01\", \"category\": \"Vestments\", \"made_to_order\": true, \"availability\": \"available\", \"price\": 30, \"currency\": \"USD\", \"details\": \"Clergy shirt with the full round collar — the white band showing all round for a clean, classic ministerial look.\", \"part_of_set\": {\"name\": \"Cassock Set\", \"price\": 200, \"comes_with\": [\"cassock\", \"stole\", \"belt\", \"straight collar shirt\", \"12 inch clergy collar\"], \"note\": \"also sold inside this set — under a set post, or when they ask about the piece and the set, give the piece's own price AND the set's total in one reply\"}, \"goes_with\": [{\"name\": \"Straight Collar\", \"price\": 8}], \"goes_with_note\": \"the natural companions, cheapest of each kind — ONE of them may be your one suggestion once the order for THIS item is settled, at the price shown; never before the price of what they asked for\", \"measurements_needed\": \"Neck, Shoulders, Sleeves, Wrist, Arm Hole, Upper Arm, Bodice, Waist, Hips, Blouse Length, Full Length, Shoulder Width, Sleeve Length — in inches\", \"ask_next\": \"made to order — the open details are the customer's: ask the colour first, then the size or mea",
+       "truncated": true
+      },
+      {
+       "tool": "capture_customer",
+       "input": {
+        "location": "Westlands, Nairobi, Kenya"
+       },
+       "out": "{\"ok\": true, \"name\": null, \"location\": \"Westlands, Nairobi, Kenya\", \"placed\": \"Kenya\", \"currency_now\": \"KES\", \"note\": \"Customer is in Kenya — re-run search_catalog and quote the real KES catalogue prices; do NOT convert.\"}",
+       "truncated": false
+      },
+      {
+       "tool": "search_catalog",
+       "input": {
+        "query": "clergy shirt",
+        "currency": "KES"
+       },
+       "out": "{\"count\": 5, \"currency\": \"KES\", \"results\": [{\"name\": \"Round Collar Clergy Shirt\", \"sku\": \"SF-SHT-01\", \"category\": \"Vestments\", \"made_to_order\": true, \"availability\": \"available\", \"price\": 3000.0, \"currency\": \"KES\", \"details\": \"Clergy shirt with the full round collar — the white band showing all round for a clean, classic ministerial look.\", \"part_of_set\": {\"name\": \"Cassock Set\", \"price\": 19500.0, \"comes_with\": [\"cassock\", \"stole\", \"belt\", \"straight collar shirt\", \"12 inch clergy collar\"], \"note\": \"also sold inside this set — under a set post, or when they ask about the piece and the set, give the piece's own price AND the set's total in one reply\"}, \"goes_with\": [{\"name\": \"Straight Collar\", \"price\": 800.0}], \"goes_with_note\": \"the natural companions, cheapest of each kind — ONE of them may be your one suggestion once the order for THIS item is settled, at the price shown; never before the price of what they asked for\", \"measurements_needed\": \"Neck, Shoulders, Sleeves, Wrist, Arm Hole, Upper Arm, Bodice, Waist, Hips, Blouse Length, Full Length, Shoulder Width, Sleeve Length — in inches\", \"ask_next\": \"made to order — the open details are the customer's: ask the colour first, then the",
+       "truncated": true
+      }
+     ],
+     "verdict": {
+      "passed": true,
+      "failures": [],
+      "observations": {
+       "words": 46,
+       "sentences": 3,
+       "questions": 1,
+       "target_words": 35,
+       "target_kind": "question",
+       "over_target": false,
+       "internal_talk": [],
+       "figures": [
+        3000.0,
+        2500.0
+       ],
+       "unverified": [],
+       "tools": [
+        "search_catalog",
+        "capture_customer",
+        "search_catalog"
+       ],
+       "review": "pass",
+       "language_ok": true,
+       "silent": false,
+       "opted_out": false,
+       "intercept_mode": "ai",
+       "judge": []
+      }
+     }
+    },
+    {
+     "i": 2,
+     "user": "And the cassock?",
+     "reply": "Our Cassock is KES 13,000, made to your measurements in our Nairobi workshop, in every liturgical colour.",
+     "next": "quote",
+     "critical": true,
+     "categories": [
+      "simple-enquiry",
+      "memory",
+      "cultural"
+     ],
+     "lang": "en",
+     "latency_s": 7.02,
+     "error": null,
+     "door": null,
+     "tool_outs": [
+      {
+       "tool": "search_catalog",
+       "input": {
+        "query": "cassock",
+        "currency": "KES"
+       },
+       "out": "{\"count\": 8, \"currency\": \"KES\", \"results\": [{\"name\": \"White Princes Cassock\", \"sku\": \"CLE-PCB-001\", \"category\": \"Clergy Vestments\", \"made_to_order\": true, \"availability\": \"available\", \"price\": 13000.0, \"currency\": \"KES\", \"details\": \"White ladies' princess cassock for festal seasons — Christmas, Easter, weddings and celebration Sundays, made to order in Nairobi.\", \"part_of_set\": {\"name\": \"Classic Princes Cassock Set\", \"price\": 19000.0, \"comes_with\": [\"cassock\", \"shirt\", \"collar\", \"stole\", \"cincture belt\"], \"note\": \"also sold inside this set — under a set post, or when they ask about the piece and the set, give the piece's own price AND the set's total in one reply\"}, \"goes_with\": [{\"name\": \"Single Sided Stole\", \"price\": 2500.0}, {\"name\": \"CINCTURE BELT\", \"price\": 2200.0}, {\"name\": \"BIB Clerical Shirt\", \"price\": 1500.0}], \"goes_with_note\": \"the natural companions, cheapest of each kind — ONE of them may be your one suggestion once the order for THIS item is settled, at the price shown; never before the price of what they asked for\", \"measurements_needed\": \"Neck, Shoulders, Sleeves, Wrist, Arm Hole, Upper Arm, Bodice, Waist, Hips, Blouse Length, Full Length — in inches\", \"variants\": [",
+       "truncated": true
+      },
+      {
+       "tool": "send_product_cards",
+       "input": {
+        "products": [
+         "Cassock"
+        ]
+       },
+       "out": "{\"ok\": true, \"sandbox\": true, \"sent\": 0, \"note\": \"eval sandbox — cards recorded, not sent\"}",
+       "truncated": false
+      }
+     ],
+     "verdict": {
+      "passed": true,
+      "failures": [],
+      "observations": {
+       "words": 17,
+       "sentences": 1,
+       "questions": 0,
+       "target_words": 25,
+       "target_kind": "short",
+       "over_target": false,
+       "internal_talk": [],
+       "figures": [
+        13000.0
+       ],
+       "unverified": [],
+       "tools": [
+        "search_catalog",
+        "send_product_cards"
+       ],
+       "review": "soft",
+       "language_ok": true,
+       "silent": false,
+       "opted_out": false,
+       "intercept_mode": "ai",
+       "judge": []
+      }
+     }
+    }
+   ],
+   "staged": null
+  },
+  {
+   "id": "cint-002",
+   "repeat": 1,
+   "contact": "…9002",
+   "source": "developer",
+   "turns": [
+    {
+     "i": 0,
+     "user": "Hello, I'm in Dubai now. Do you ship to the UAE?",
+     "reply": "Good afternoon, and welcome to Bethany House. Yes, we ship worldwide from our Nairobi workshop, and that includes Dubai. What are you looking for?",
+     "next": "answer",
+     "critical": true,
+     "categories": [
+      "simple-enquiry",
+      "memory"
+     ],
+     "lang": "en",
+     "latency_s": 12.89,
+     "error": null,
+     "door": null,
+     "tool_outs": [
+      {
+       "tool": "capture_customer",
+       "input": {
+        "location": "Dubai, UAE"
+       },
+       "out": "{\"ok\": true, \"name\": null, \"location\": \"Dubai, UAE\", \"placed\": \"Kenya\"}",
+       "truncated": false
+      },
+      {
+       "tool": "search_catalog",
+       "input": {
+        "query": "dubai uae",
+        "by": "reviewer"
+       },
+       "out": "{\"count\": 0, \"currency\": \"KES\", \"results\": []}",
+       "truncated": false
+      }
+     ],
+     "verdict": {
+      "passed": true,
+      "failures": [],
+      "observations": {
+       "words": 24,
+       "sentences": 3,
+       "questions": 1,
+       "target_words": 35,
+       "target_kind": "question",
+       "over_target": false,
+       "internal_talk": [],
+       "figures": [],
+       "unverified": [],
+       "tools": [
+        "capture_customer",
+        "search_catalog"
+       ],
+       "review": "soft",
+       "language_ok": true,
+       "silent": false,
+       "opted_out": false,
+       "intercept_mode": "ai",
+       "judge": []
+      }
+     }
+    },
+    {
+     "i": 1,
+     "user": "How much is a stole then?",
+     "reply": "Our Single Sided Stole is KES 2,500, and the Double sided stole is KES 4,000. Which one would you like?",
+     "next": "quote",
+     "critical": true,
+     "categories": [
+      "simple-enquiry",
+      "memory"
+     ],
+     "lang": "en",
+     "latency_s": 5.41,
+     "error": null,
+     "door": null,
+     "tool_outs": [
+      {
+       "tool": "search_catalog",
+       "input": {
+        "query": "stole"
+       },
+       "out": "{\"count\": 5, \"currency\": \"KES\", \"results\": [{\"name\": \"Single Sided Stole\", \"sku\": \"CLE-S-009\", \"category\": \"Clergy Vestments\", \"made_to_order\": false, \"availability\": \"available\", \"price\": 2500.0, \"currency\": \"KES\", \"details\": \"The badge of ordained ministry — a classic single-sided stole in your liturgical colour, tailored with reverence in Nairobi.\", \"part_of_set\": {\"name\": \"Cassock Set\", \"price\": 19500.0, \"comes_with\": [\"cassock\", \"stole\", \"belt\", \"straight collar shirt\", \"12 inch clergy collar\"], \"note\": \"also sold inside this set — under a set post, or when they ask about the piece and the set, give the piece's own price AND the set's total in one reply\"}, \"ask_next\": \"stock item — every detail is fixed and in `details` (colour in the name, capacity, pack size): state them, never ask colour or size; ask only how many, how soon and the delivery city — one per reply\"}, {\"name\": \"Self Print Stoles\", \"sku\": \"CLF-001\", \"category\": \"Clergy Vestments\", \"made_to_order\": true, \"availability\": \"available\", \"price\": 3000.0, \"currency\": \"KES\", \"details\": \"Tone-on-tone stoles with the motif carried in the same shade as the fabric — quiet elegance, made to order in Nairobi.\", \"part_of_set\":",
+       "truncated": true
+      }
+     ],
+     "verdict": {
+      "passed": false,
+      "failures": [
+       "forbidden text matched /\\bKES\\b|\\bKsh/",
+       "required text missing /\\$|USD/"
+      ],
+      "observations": {
+       "words": 20,
+       "sentences": 2,
+       "questions": 1,
+       "target_words": 25,
+       "target_kind": "short",
+       "over_target": false,
+       "internal_talk": [],
+       "figures": [
+        2500.0,
+        4000.0
+       ],
+       "unverified": [],
+       "tools": [
+        "search_catalog"
+       ],
+       "review": "pass",
+       "language_ok": true,
+       "silent": false,
+       "opted_out": false,
+       "intercept_mode": "ai",
+       "judge": []
+      }
+     }
+    }
+   ],
+   "staged": null
+  },
+  {
+   "id": "cint-003",
+   "repeat": 1,
+   "contact": "…9003",
+   "source": "developer",
+   "turns": [
+    {
+     "i": 0,
+     "user": "Niko Nakuru. How much is a communion set?",
+     "reply": "Our communion trays and sets start at KES 5,000:\n- Wooden tray – KES 5,000\n- Aluminium Tray – KES 7,000\n- Silver Communion Tray – KES 18,000\n- Golden Communion Tray – KES 22,000\n- Aluminium 4-Stack Communion Set, 160 cups – KES 28,000\n- Double Stacked Silver Tray Set – KES 36,000\n\nWhich would you like?",
+     "next": "quote",
+     "critical": false,
+     "categories": [
+      "simple-enquiry",
+      "memory"
+     ],
+     "lang": "en",
+     "latency_s": 4.56,
+     "error": null,
+     "door": null,
+     "tool_outs": [
+      {
+       "tool": "search_catalog",
+       "input": {
+        "query": "communion set",
+        "currency": "KES"
+       },
+       "out": "{\"count\": 6, \"currency\": \"KES\", \"results\": [{\"name\": \"Wooden tray\", \"sku\": \"COM-WT-001\", \"category\": \"Communion Items\", \"made_to_order\": false, \"availability\": \"available\", \"price\": 5000.0, \"currency\": \"KES\", \"details\": \"A wooden communion tray that holds 100 cups — warm natural grain and quiet craftsmanship for congregations that love a traditional table.\", \"part_of_set\": {\"name\": \"Double Stacked Silver Tray Set\", \"price\": 36000.0, \"comes_with\": [], \"note\": \"also sold inside this set — under a set post, or when they ask about the piece and the set, give the piece's own price AND the set's total in one reply\"}, \"goes_with\": [{\"name\": \"Plastic Communion Cups\", \"price\": 10.0}, {\"name\": \"Communion Wafer Bread 200PCs\", \"price\": 400.0}, {\"name\": \"Host\", \"price\": 20.0}], \"goes_with_note\": \"the natural companions, cheapest of each kind — ONE of them may be your one suggestion once the order for THIS item is settled, at the price shown; never before the price of what they asked for\", \"ask_next\": \"stock item — every detail is fixed and in `details` (colour in the name, capacity, pack size): state them, never ask colour or size; ask only how many, how soon and the delivery city — one per rep",
+       "truncated": true
+      },
+      {
+       "tool": "capture_customer",
+       "input": {
+        "location": "Nakuru"
+       },
+       "out": "{\"ok\": true, \"name\": null, \"location\": \"Nakuru\", \"placed\": \"Kenya\"}",
+       "truncated": false
+      }
+     ],
+     "verdict": {
+      "passed": true,
+      "failures": [],
+      "observations": {
+       "words": 58,
+       "sentences": 1,
+       "questions": 1,
+       "target_words": 25,
+       "target_kind": "short",
+       "over_target": true,
+       "internal_talk": [],
+       "figures": [
+        5000.0,
+        7000.0,
+        18000.0,
+        22000.0,
+        28000.0,
+        36000.0
+       ],
+       "unverified": [],
+       "tools": [
+        "search_catalog",
+        "capture_customer"
+       ],
+       "review": "pass",
+       "language_ok": true,
+       "silent": false,
+       "opted_out": false,
+       "intercept_mode": "ai",
+       "judge": []
+      }
+     }
+    }
+   ],
+   "staged": null
+  },
+  {
+   "id": "cint-004",
+   "repeat": 1,
+   "contact": "…9004",
+   "source": "developer",
+   "turns": [
+    {
+     "i": 0,
+     "user": "Good morning. I'm in Kampala, I need prices for chasubles.",
+     "reply": "Good afternoon, and welcome to Bethany House. We make chasubles to order in Nairobi and ship to Kampala.\n\n- Chasuble: $120\n- Ornate Chasuble — Embroidered: $140\n\nKindly place your order. Which colour would you like?",
+     "next": "quote",
+     "critical": false,
+     "categories": [
+      "simple-enquiry",
+      "memory",
+      "cultural"
+     ],
+     "lang": "en",
+     "latency_s": 13.8,
+     "error": null,
+     "door": null,
+     "tool_outs": [
+      {
+       "tool": "search_catalog",
+       "input": {
+        "query": "chasuble"
+       },
+       "out": "{\"count\": 2, \"currency\": \"USD\", \"results\": [{\"name\": \"Chasuble\", \"sku\": \"GOW-C-001\", \"category\": \"Gowns\", \"made_to_order\": true, \"availability\": \"available\", \"price\": 120, \"currency\": \"USD\", \"details\": \"Italian hand-made liturgical chasuble in 100% polyester with golden cross embellishment — artisan quality for the celebrant.\", \"goes_with\": [{\"name\": \"Single Sided Stole\", \"price\": 25}, {\"name\": \"Alb\", \"price\": 85}], \"goes_with_note\": \"the natural companions, cheapest of each kind — ONE of them may be your one suggestion once the order for THIS item is settled, at the price shown; never before the price of what they asked for\", \"measurements_needed\": \"Neck, Shoulder Width, Chest, Height — in inches\", \"variants\": [{\"label\": \"Chasuble — Purple\", \"options\": {\"Colour\": \"Purple\"}, \"sku\": \"GOW-C-001-PUR\", \"price\": 120}, {\"label\": \"Chasuble — Green\", \"options\": {\"Colour\": \"Green\"}, \"sku\": \"GOW-C-001-GRE\", \"price\": 120}, {\"label\": \"Chasuble — White\", \"options\": {\"Colour\": \"White\"}, \"sku\": \"GOW-C-001-WHI\", \"price\": 130}, {\"label\": \"Chasuble — Black\", \"options\": {\"Colour\": \"Black\"}, \"sku\": \"GOW-C-001-BLA\", \"price\": 130}, {\"label\": \"Chasuble — Off-white\", \"options\": {\"Colour\": \"Off-white\"}, \"s",
+       "truncated": true
+      },
+      {
+       "tool": "capture_customer",
+       "input": {
+        "location": "Kampala, Uganda"
+       },
+       "out": "{\"ok\": true, \"name\": null, \"location\": \"Kampala, Uganda\", \"placed\": \"Uganda\"}",
+       "truncated": false
+      }
+     ],
+     "verdict": {
+      "passed": true,
+      "failures": [],
+      "observations": {
+       "words": 36,
+       "sentences": 4,
+       "questions": 1,
+       "target_words": 45,
+       "target_kind": "default",
+       "over_target": false,
+       "internal_talk": [],
+       "figures": [
+        120.0,
+        140.0
+       ],
+       "unverified": [],
+       "tools": [
+        "search_catalog",
+        "capture_customer"
+       ],
+       "review": "soft",
+       "language_ok": true,
+       "silent": false,
+       "opted_out": false,
+       "intercept_mode": "ai",
+       "judge": []
+      }
+     }
+    }
+   ],
+   "staged": null
+  },
+  {
+   "id": "cint-005",
+   "repeat": 1,
+   "contact": "…9005",
+   "source": "developer",
+   "turns": [
+    {
+     "i": 0,
+     "user": "How much is a cassock?",
+     "reply": "Welcome to Bethany House. Our Cassock is KES 13,000, tailored to your measurements in our Nairobi workshop, in the colour of your choice.",
+     "next": "quote",
+     "critical": false,
+     "categories": [
+      "closing",
+      "needs-silence"
+     ],
+     "lang": "en",
+     "latency_s": 7.92,
+     "error": null,
+     "door": null,
+     "tool_outs": [
+      {
+       "tool": "search_catalog",
+       "input": {
+        "query": "cassock",
+        "currency": "KES"
+       },
+       "out": "{\"count\": 8, \"currency\": \"KES\", \"results\": [{\"name\": \"White Princes Cassock\", \"sku\": \"CLE-PCB-001\", \"category\": \"Clergy Vestments\", \"made_to_order\": true, \"availability\": \"available\", \"price\": 13000.0, \"currency\": \"KES\", \"details\": \"White ladies' princess cassock for festal seasons — Christmas, Easter, weddings and celebration Sundays, made to order in Nairobi.\", \"part_of_set\": {\"name\": \"Classic Princes Cassock Set\", \"price\": 19000.0, \"comes_with\": [\"cassock\", \"shirt\", \"collar\", \"stole\", \"cincture belt\"], \"note\": \"also sold inside this set — under a set post, or when they ask about the piece and the set, give the piece's own price AND the set's total in one reply\"}, \"goes_with\": [{\"name\": \"Single Sided Stole\", \"price\": 2500.0}, {\"name\": \"CINCTURE BELT\", \"price\": 2200.0}, {\"name\": \"BIB Clerical Shirt\", \"price\": 1500.0}], \"goes_with_note\": \"the natural companions, cheapest of each kind — ONE of them may be your one suggestion once the order for THIS item is settled, at the price shown; never before the price of what they asked for\", \"measurements_needed\": \"Neck, Shoulders, Sleeves, Wrist, Arm Hole, Upper Arm, Bodice, Waist, Hips, Blouse Length, Full Length — in inches\", \"variants\": [",
+       "truncated": true
+      },
+      {
+       "tool": "send_product_cards",
+       "input": {
+        "products": [
+         "Cassock"
+        ]
+       },
+       "out": "{\"ok\": true, \"sandbox\": true, \"sent\": 0, \"note\": \"eval sandbox — cards recorded, not sent\"}",
+       "truncated": false
+      }
+     ],
+     "verdict": {
+      "passed": true,
+      "failures": [],
+      "observations": {
+       "words": 23,
+       "sentences": 2,
+       "questions": 0,
+       "target_words": 25,
+       "target_kind": "short",
+       "over_target": false,
+       "internal_talk": [],
+       "figures": [
+        13000.0
+       ],
+       "unverified": [],
+       "tools": [
+        "search_catalog",
+        "send_product_cards"
+       ],
+       "review": "soft",
+       "language_ok": true,
+       "silent": false,
+       "opted_out": false,
+       "intercept_mode": "ai",
+       "judge": []
+      }
+     }
+    },
+    {
+     "i": 1,
+     "user": "Let me think about it and get back to you next week.",
+     "reply": "Of course. Take your time with the Cassock. When you're ready, just tell me the colour you'd like and we'll get your order started. I'll check in with you next week, on Monday 16 November.",
+     "next": "hold_ack",
+     "critical": false,
+     "categories": [
+      "closing",
+      "needs-silence"
+     ],
+     "lang": "en",
+     "latency_s": 6.46,
+     "error": null,
+     "door": null,
+     "tool_outs": [
+      {
+       "tool": "schedule_check_in",
+       "input": {
+        "days_from_now": 7,
+        "on_day": "next week",
+        "about": "purchase_decision",
+        "reason": "Customer asked the price of the Cassock (KES 13,000) and will decide and get back next week; the one step left is the colour they want."
+       },
+       "out": "{\"ok\": true, \"check_in_on\": \"16 Nov 2026\", \"about\": \"purchase_decision\", \"already_booked\": false, \"note\": \"booked — now tell them plainly you'll check in then\"}",
+       "truncated": false
+      }
+     ],
+     "verdict": {
+      "passed": true,
+      "failures": [],
+      "observations": {
+       "words": 35,
+       "sentences": 4,
+       "questions": 0,
+       "target_words": 45,
+       "target_kind": "default",
+       "over_target": false,
+       "internal_talk": [],
+       "figures": [],
+       "unverified": [],
+       "tools": [
+        "schedule_check_in"
+       ],
+       "review": "pass",
+       "language_ok": true,
+       "silent": false,
+       "opted_out": false,
+       "intercept_mode": "ai",
+       "judge": []
+      }
+     }
+    }
+   ],
+   "staged": null
+  },
+  {
+   "id": "cint-006",
+   "repeat": 1,
+   "contact": "…9006",
+   "source": "developer",
+   "turns": [
+    {
+     "i": 0,
+     "user": "How much is a clergy collar?",
+     "reply": "Our Straight Collar is KES 800, a detachable white clergy collar. How many would you like?",
+     "next": "quote",
+     "critical": true,
+     "categories": [
+      "payment"
+     ],
+     "lang": "en",
+     "latency_s": 5.53,
+     "error": null,
+     "door": null,
+     "tool_outs": [
+      {
+       "tool": "search_catalog",
+       "input": {
+        "query": "clergy collar",
+        "currency": "KES"
+       },
+       "out": "{\"count\": 7, \"currency\": \"KES\", \"results\": [{\"name\": \"Round Collar Clergy Shirt\", \"sku\": \"SF-SHT-01\", \"category\": \"Vestments\", \"made_to_order\": true, \"availability\": \"available\", \"price\": 3000.0, \"currency\": \"KES\", \"details\": \"Clergy shirt with the full round collar — the white band showing all round for a clean, classic ministerial look.\", \"part_of_set\": {\"name\": \"Cassock Set\", \"price\": 19500.0, \"comes_with\": [\"cassock\", \"stole\", \"belt\", \"straight collar shirt\", \"12 inch clergy collar\"], \"note\": \"also sold inside this set — under a set post, or when they ask about the piece and the set, give the piece's own price AND the set's total in one reply\"}, \"goes_with\": [{\"name\": \"Straight Collar\", \"price\": 800.0}], \"goes_with_note\": \"the natural companions, cheapest of each kind — ONE of them may be your one suggestion once the order for THIS item is settled, at the price shown; never before the price of what they asked for\", \"measurements_needed\": \"Neck, Shoulders, Sleeves, Wrist, Arm Hole, Upper Arm, Bodice, Waist, Hips, Blouse Length, Full Length, Shoulder Width, Sleeve Length — in inches\", \"ask_next\": \"made to order — the open details are the customer's: ask the colour first, then the",
+       "truncated": true
+      }
+     ],
+     "verdict": {
+      "passed": true,
+      "failures": [],
+      "observations": {
+       "words": 16,
+       "sentences": 2,
+       "questions": 1,
+       "target_words": 25,
+       "target_kind": "short",
+       "over_target": false,
+       "internal_talk": [],
+       "figures": [
+        800.0
+       ],
+       "unverified": [],
+       "tools": [
+        "search_catalog"
+       ],
+       "review": "soft",
+       "language_ok": true,
+       "silent": false,
+       "opted_out": false,
+       "intercept_mode": "ai",
+       "judge": []
+      }
+     }
+    },
+    {
+     "i": 1,
+     "user": "I have paid, please send it",
+     "reply": "Thank you. I can't see an order or a payment under this chat yet, and nothing has been placed for the Straight Collar. If you paid to our M-Pesa line, please send me the transaction code and I'll have the team match it. Which size of Straight Collar should the order be for?",
+     "next": "confirm_paid_check",
+     "critical": true,
+     "categories": [
+      "payment"
+     ],
+     "lang": "en",
+     "latency_s": 7.01,
+     "error": null,
+     "door": null,
+     "tool_outs": [
+      {
+       "tool": "check_order_status",
+       "input": {},
+       "out": "{\"found\": false}",
+       "truncated": false
+      },
+      {
+       "tool": "get_cart",
+       "input": {},
+       "out": "{\"items\": [], \"total\": 0, \"currency\": \"KES\"}",
+       "truncated": false
+      }
+     ],
+     "verdict": {
+      "passed": true,
+      "failures": [],
+      "observations": {
+       "words": 53,
+       "sentences": 4,
+       "questions": 1,
+       "target_words": 25,
+       "target_kind": "short",
+       "over_target": true,
+       "internal_talk": [],
+       "figures": [],
+       "unverified": [],
+       "tools": [
+        "check_order_status",
+        "get_cart"
+       ],
+       "review": "pass",
+       "language_ok": true,
+       "silent": false,
+       "opted_out": false,
+       "intercept_mode": "ai",
+       "judge": []
+      }
+     }
+    }
+   ],
+   "staged": null
+  }
+ ],
+ "sandboxed_calls": [
+  {
+   "tool": "send_product_cards",
+   "args": {
+    "products": [
+     "Cassock"
+    ]
+   },
+   "contact": "9733309001"
+  },
+  {
+   "tool": "send_product_cards",
+   "args": {
+    "products": [
+     "Cassock"
+    ]
+   },
+   "contact": "25470009005"
+  }
+ ],
+ "finished": "2026-11-09T13:23:03.328985+00:00",
+ "summary": {
+  "turns": {
+   "k": 10,
+   "n": 11,
+   "p": 0.909,
+   "ci95": [
+    0.623,
+    0.984
+   ]
+  },
+  "critical_turns": {
+   "k": 6,
+   "n": 7,
+   "p": 0.857,
+   "ci95": [
+    0.487,
+    0.974
+   ]
+  },
+  "next_action": {
+   "answer": {
+    "k": 2,
+    "n": 2,
+    "p": 1.0,
+    "ci95": [
+     0.342,
+     1.0
+    ]
+   },
+   "quote": {
+    "k": 6,
+    "n": 7,
+    "p": 0.857,
+    "ci95": [
+     0.487,
+     0.974
+    ]
+   },
+   "hold_ack": {
+    "k": 1,
+    "n": 1,
+    "p": 1.0,
+    "ci95": [
+     0.207,
+     1.0
+    ]
+   },
+   "confirm_paid_check": {
+    "k": 1,
+    "n": 1,
+    "p": 1.0,
+    "ci95": [
+     0.207,
+     1.0
+    ]
+   }
+  },
+  "language_continuity": {
+   "k": 11,
+   "n": 11,
+   "p": 1.0,
+   "ci95": [
+    0.741,
+    1.0
+   ]
+  },
+  "figures_verified": {
+   "k": 8,
+   "n": 8,
+   "p": 1.0,
+   "ci95": [
+    0.676,
+    1.0
+   ]
+  },
+  "within_length_target": {
+   "k": 9,
+   "n": 11,
+   "p": 0.818,
+   "ci95": [
+    0.523,
+    0.949
+   ]
+  },
+  "internal_talk_free": {
+   "k": 11,
+   "n": 11,
+   "p": 1.0,
+   "ci95": [
+    0.741,
+    1.0
+   ]
+  },
+  "first_draft_passed": {
+   "k": 6,
+   "n": 11,
+   "p": 0.545,
+   "ci95": [
+    0.28,
+    0.787
+   ]
+  },
+  "by_category": {
+   "closing": {
+    "k": 2,
+    "n": 2,
+    "p": 1.0,
+    "ci95": [
+     0.342,
+     1.0
+    ]
+   },
+   "cultural": {
+    "k": 4,
+    "n": 4,
+    "p": 1.0,
+    "ci95": [
+     0.51,
+     1.0
+    ]
+   },
+   "memory": {
+    "k": 6,
+    "n": 7,
+    "p": 0.857,
+    "ci95": [
+     0.487,
+     0.974
+    ]
+   },
+   "needs-silence": {
+    "k": 2,
+    "n": 2,
+    "p": 1.0,
+    "ci95": [
+     0.342,
+     1.0
+    ]
+   },
+   "payment": {
+    "k": 2,
+    "n": 2,
+    "p": 1.0,
+    "ci95": [
+     0.342,
+     1.0
+    ]
+   },
+   "simple-enquiry": {
+    "k": 6,
+    "n": 7,
+    "p": 0.857,
+    "ci95": [
+     0.487,
+     0.974
+    ]
+   }
+  },
+  "by_lang": {
+   "en": {
+    "k": 10,
+    "n": 11,
+    "p": 0.909,
+    "ci95": [
+     0.623,
+     0.984
+    ]
+   }
+  },
+  "failure_kinds": {
+   "forbidden text matched": 1,
+   "required text missing": 1
+  }
+ }
+}

@@ -104,7 +104,7 @@ quote is never lost to a geography read.
 
 ## 5. Tests
 
-- `tests/test_geography.py` (27): shared dialling codes through the library;
+- `tests/test_geography.py` (28): shared dialling codes through the library;
   words → country and city; the observe rules (replace, keep, history, cap,
   purity); the decision order and the "possible" exclusion; the view and the
   discrepancy; operator readings; the merge carry; the event line; the market
@@ -124,9 +124,33 @@ quote is never lost to a geography read.
   Kenyan market, web geo, phone shapes — 126 passed before the new files.
 - Web: `tsc --noEmit` clean.
 
-Not measured with the model (the owner's stop): whether the writer re-runs the
-catalogue in KES after the switch note (the note is the same one
-`capture_contact` has used since September).
+Measured with the model (the owner's word of 13:0x UTC, 9 Nov; run
+42624670362 on main 45e5afb, `BENCHMARK_RESULTS.md`): the Bahrain number that
+says "Nairobi, Westlands" is quoted in dollars, then captured and quoted in
+shillings from that turn, and the next quote stays in shillings — 3/3, so the
+writer does re-run the catalogue in KES after the switch note. The reverse
+case (a Kenyan number saying "Dubai, UAE") failed its second turn: see §5c.
+
+## 5c. The validation run's one defect (slice 18, 2026-11-09)
+
+`capture_customer({"location": "Dubai, UAE"})` answered `placed: Kenya` and the
+next quote was KES. The cause was model-free: `iso_from_text` matched the
+country table's formal names ("United Arab Emirates") and the Kenyan towns,
+and nothing else — "Dubai" and "UAE" named no country, so no
+`probable_country` was written and the decision stayed on the +254 number.
+Every reader downstream was faithful to the record.
+
+Fix (`app/core/countries.py`): after the country names and the Kenyan towns,
+whole-word aliases ("UAE", "UK", "USA", "England", "Saudi", "DRC" …) and a table
+of well-known cities (Dubai, Kampala, Dar es Salaam, Kigali, Lusaka, London,
+New York …) name their country; longest match first; Kenyan towns still win
+("Dubai or Nairobi" → Kenya); plain words place no one ("Tell us" is not the
+USA). The same resolver serves the operator's typed country, the shipping
+destination, the Meta evidence chain and the Swahili-market guard, so a
+Messenger customer who says "Kampala" now also keeps the dollar market by
+their words rather than by default. Tests: `test_geography.py` (one new test,
+28). The after-measurement with the model is not dispatched (one run was
+allowed).
 
 ## 5b. Verify / correct controls (slice 17, 2026-11-09)
 
