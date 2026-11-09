@@ -522,7 +522,7 @@ Full report: `CUSTOMER_SEGMENTS.md`. Audit: `CUSTOMER_INTELLIGENCE_AUDIT.md` §7
 
 - **Baseline (run 42624670362, `BENCHMARK_RESULTS.md`):** 10/11 turns; cint-002's second turn quoted a Kenyan number in "Dubai, UAE" in shillings because `iso_from_text` (`app/core/countries.py`) knew only the formal country names and the Kenyan towns — "Dubai" and "UAE" placed no one.
 - **Change:** whole-word country aliases and a table of well-known cities, longest match first, after the country names and the Kenyan towns; the same resolver serves capture, the operator's typed country, the shipping destination, the Meta evidence chain and the Swahili-market guard.
-- **Tests:** `tests/test_geography.py::test_a_short_country_name_or_a_well_known_city_places_the_customer` (+ the "unknown town" example moved off Manama, which is now Bahrain). Status: IMPLEMENTED, model-free verified; the after-measurement waits on the owner's word.
+- **Tests:** `tests/test_geography.py::test_a_short_country_name_or_a_well_known_city_places_the_customer` (+ the "unknown town" example moved off Manama, which is now Bahrain). Status: LIVE (b5dda19, on the box 14:27 UTC), model-free verified; the after-measurement waits on the owner's word.
 
 ## Slice 17 (2026-11-09) · Customer Intelligence, Phase 3 — verify / correct on the Profile tab
 

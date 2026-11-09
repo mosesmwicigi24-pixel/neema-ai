@@ -131,7 +131,7 @@ shillings from that turn, and the next quote stays in shillings — 3/3, so the
 writer does re-run the catalogue in KES after the switch note. The reverse
 case (a Kenyan number saying "Dubai, UAE") failed its second turn: see §5c.
 
-## 5c. The validation run's one defect (slice 18, 2026-11-09)
+## 5c. The validation run's one defect (slice 18, 2026-11-09; merged as b5dda19, live on the box 14:27 UTC)
 
 `capture_customer({"location": "Dubai, UAE"})` answered `placed: Kenya` and the
 next quote was KES. The cause was model-free: `iso_from_text` matched the
