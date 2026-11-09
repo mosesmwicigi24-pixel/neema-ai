@@ -34,6 +34,10 @@ import { CallCard } from "@/components/views/CallCard";
 import { VoiceNoteText } from "@/components/ui/VoiceNoteText";
 import { nearestCallId, mediaKey } from "@/lib/callCard";
 import { MessageKindCard, MessageKindPill } from "@/components/ui/MessageKindCard";
+import { EmojiPicker } from "@/components/views/composer/EmojiPicker";
+import { FlagCard } from "@/components/ui/FlagCard";
+import { useVoiceRecorder, voiceSupported, VoiceBar } from "@/components/views/composer/VoiceRecorder";
+import { AttachMenu, ToolsMenu, useEnterSends, insertAtCursor, type AttachKind } from "@/components/views/composer/ComposerMenus";
 
 // ── NoChatPane ────────────────────────────────────────────────────────────────
 // "Open chat" / "Message" for a caller who has only ever CALLED: there is no
@@ -991,7 +995,8 @@ const LIST_WIDTH = "clamp(340px, 38vw, 436px)";
 // "Moses Mwicigi intercepted the conversation" stops wrapping into a column of
 // single words. Clamped for the same reason as LIST_WIDTH — it sits alongside
 // the list, the thread AND the CRM sidebar, so a narrow screen keeps the 196.
-const ACTIVITY_WIDTH = "clamp(196px, 16vw, 292px)";
+// Widened again (owner, 2026-11-09: "add the width of the activity log").
+const ACTIVITY_WIDTH = "clamp(232px, 19vw, 340px)";
 // Short channel labels for the conversation-row pill (Figma: WA / FB / IG).
 const CH_SHORT: Record<Channel, string> = {
     whatsapp: "WA",
@@ -1191,6 +1196,20 @@ export function ConversationsView({
     const [mediaItems, setMediaItems] = useState<MediaItem[]>([]);
     const [uploadingMedia, setUploadingMedia] = useState(false);
     const fileInputRef = useRef<HTMLInputElement>(null);
+
+    // ── Composer (owner, 2026-11-09) ──────────────────────────────────────────
+    // Secondary tools open on demand: emoji, the attachment kinds, Neema's
+    // tools. One send path each — sendReply (text), sendMedia (files),
+    // sendVoice (a recording) — and every one refuses a second press while
+    // the first is still going (sendingRef), so nothing goes out twice.
+    const [emojiOpen, setEmojiOpen] = useState(false);
+    const [attachOpen, setAttachOpen] = useState(false);
+    const [toolsOpen, setToolsOpen] = useState(false);
+    const [attachAccept, setAttachAccept] = useState<string | null>(null);
+    const [enterSends, setEnterSends] = useEnterSends();
+    const [sendingVoice, setSendingVoice] = useState(false);
+    const sendingRef = useRef(false);
+    const voice = useVoiceRecorder(useCallback((m: string) => onToast(m, "error"), [onToast]));
     const messagesEndRef = useRef<HTMLDivElement>(null);
     // How far the on-screen keyboard covers the pane right now (mobile only).
     const kbLift = useKeyboardLift(isMobile);
@@ -1549,7 +1568,11 @@ export function ConversationsView({
         let stale = false;
         const load = () =>
             conversationsApi.activity(activeConvId)
-                .then((r) => { if (!stale) setActivityEvents(r.events); })
+                .then((r) => {
+                    // A flag shows in the chat under its own label (FlagCard),
+                    // not again in the log (owner, 2026-11-09).
+                    if (!stale) setActivityEvents(r.events.filter((e) => e.kind !== "flag"));
+                })
                 .catch(() => { if (!stale) setActivityEvents([]); });
         load();
         // Slow refresh while the panel is open — new check-ins/orders surface
@@ -1963,6 +1986,14 @@ export function ConversationsView({
 
     const sendReply = async () => {
         if (!replyText.trim() || !activeConvId) return;
+        // One press, one message: Enter held down, a double tap, or Enter
+        // while a translation is still being fetched must not send twice.
+        if (sendingRef.current) return;
+        if (window24?.mode === "closed") {
+            onToast(window24.reason || "Outside the messaging window — send an approved template instead", "warning");
+            return;
+        }
+        sendingRef.current = true;
         setSending(true);
         // Prepend the cross-channel quote so the customer sees what we're answering.
         // Same-channel reply → a native threaded reply (reply_to id). A quote from
@@ -2034,8 +2065,50 @@ export function ConversationsView({
             setReplyText(text);
             onToast(err?.message?.slice(0, 160) || "Failed to send message", "error");
         } finally {
+            sendingRef.current = false;
             setSending(false);
         }
+    };
+
+    // An emoji goes in where the caret is (replacing a selection), like any
+    // keyboard — and the caret lands after it.
+    const insertEmoji = (emoji: string) => {
+        const el = composerRef.current;
+        const { text, caret } = insertAtCursor(replyText, emoji, el?.selectionStart ?? replyText.length, el?.selectionEnd ?? replyText.length);
+        setReplyText(text);
+        requestAnimationFrame(() => {
+            if (!el) return;
+            el.focus();
+            el.setSelectionRange(caret, caret);
+            el.style.height = "auto";
+            el.style.height = Math.min(el.scrollHeight, 132) + "px";
+        });
+    };
+
+    // A recorded voice note: the API turns it into the channel's own format.
+    const sendVoice = async () => {
+        if (!voice.file || !activeConvId || sendingRef.current) return;
+        sendingRef.current = true;
+        setSendingVoice(true);
+        try {
+            const msg = await conversationsApi.uploadMedia(activeConvId, voice.file, undefined, { voice: true });
+            setMessages((m) => ({ ...m, [activeConvId]: [...(m[activeConvId] ?? []), msg] }));
+            voice.reset();
+            refetchConversations?.();
+        } catch (err: any) {
+            onToast(`Voice note not sent: ${err?.message?.slice(0, 140) ?? "failed"}`, "error");
+        } finally {
+            sendingRef.current = false;
+            setSendingVoice(false);
+        }
+    };
+
+    const openPicker = (kind: AttachKind) => {
+        setAttachOpen(false);
+        setAttachAccept(kind.accept);
+        // The accept list changes before the click, so the OS dialog shows
+        // only that kind (photos & videos / documents / audio).
+        requestAnimationFrame(() => fileInputRef.current?.click());
     };
 
     // Start replying to a specific message (from the Reply button or a swipe).
@@ -2253,7 +2326,8 @@ export function ConversationsView({
     };
 
     const sendMedia = async () => {
-        if (!mediaItems.length || !activeConvId) return;
+        if (!mediaItems.length || !activeConvId || sendingRef.current) return;
+        sendingRef.current = true;
         setUploadingMedia(true);
         const sent: Message[] = [];
         let failed = 0;
@@ -2292,6 +2366,7 @@ export function ConversationsView({
                 );
             }
         } finally {
+            sendingRef.current = false;
             setUploadingMedia(false);
         }
     };
@@ -3674,14 +3749,7 @@ export function ConversationsView({
                                                             <div className="flex-1 h-px bg-[#427425]/30" />
                                                         </div>
                                                     )}
-                                                    <div className="flex items-center gap-2 my-2">
-                                                        <div className="flex-1 h-px bg-red-100" />
-                                                        <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-red-100 text-red-700">
-                                                            <span className="text-[10px] font-semibold whitespace-nowrap">🚩 Flagged: Needs Attention</span>
-                                                            {msg.created_at && <span className="text-[9px] opacity-60 whitespace-nowrap">· {timeAgo(msg.created_at)}</span>}
-                                                        </div>
-                                                        <div className="flex-1 h-px bg-red-100" />
-                                                    </div>
+                                                    <FlagCard note={msg.event_reason} when={msg.created_at ? timeAgo(msg.created_at) : ""} />
                                                 </React.Fragment>
                                             );
                                         }
@@ -4257,7 +4325,14 @@ export function ConversationsView({
                                                         className={`text-[10px] mt-1 flex items-center gap-2 ${isInbound ? "" : "opacity-60 justify-end"}`}
                                                         style={{ color: isInbound ? "#b5c9a8" : undefined }}
                                                     >
-                                                        {msg.created_at
+                                                        {/* Still on its way: say so instead of a time, so a
+                                                            slow send is never mistaken for a sent one. */}
+                                                        {String(msg.id).startsWith("optimistic-") ? (
+                                                            <span className="inline-flex items-center gap-1" role="status">
+                                                                <span className="w-2.5 h-2.5 border-[1.5px] border-current border-t-transparent rounded-full animate-spin" />
+                                                                Sending…
+                                                            </span>
+                                                        ) : msg.created_at
                                                             ? timeAgo(
                                                                   msg.created_at,
                                                               )
@@ -4488,30 +4563,6 @@ export function ConversationsView({
                                         </div>
                                     )}
 
-                                    {/* ── Generate draft button — shown when no draft exists */}
-                                    {!draftVisible &&
-                                        activeConv.intercept_mode ===
-                                            "human" && (
-                                            <div className="mb-2 flex justify-end">
-                                                <button
-                                                    onClick={generateDraft}
-                                                    disabled={generatingDraft}
-                                                    className="flex items-center gap-1.5 h-7 px-3 text-xs font-medium rounded-lg border border-blue-200 text-blue-600 hover:bg-blue-50 disabled:opacity-50 transition-colors"
-                                                >
-                                                    {generatingDraft ? (
-                                                        <>
-                                                            <div className="w-3 h-3 border-2 border-blue-400 border-t-transparent rounded-full animate-spin" />
-                                                            Generating…
-                                                        </>
-                                                    ) : (
-                                                        <>
-                                                            🤖 Ask Neema for a draft
-                                                        </>
-                                                    )}
-                                                </button>
-                                            </div>
-                                        )}
-
                                     {/* Reply preview — the message we're answering. */}
                                     {quoted && (
                                         <div className="flex items-start gap-2 mb-2 px-3 py-2 rounded-lg bg-[#f1f5f9] border-l-2 border-[#f59e0b]">
@@ -4582,38 +4633,42 @@ export function ConversationsView({
                                             </div>
                                         </div>
                                     )}
-                                    <div className="flex gap-2 items-end">
-                                        {/* Hidden file input */}
+                                    {/* The composer row: attach · Neema · [text + emoji] · mic/send.
+                                        Secondary tools open on demand (owner, 2026-11-09). */}
+                                    <div className="relative flex gap-1.5 sm:gap-2 items-end">
                                         <input
                                             ref={fileInputRef}
                                             type="file"
-                                            accept={ACCEPT_TYPES}
+                                            accept={attachAccept ?? ACCEPT_TYPES}
                                             multiple
                                             className="hidden"
                                             onChange={handleFileSelect}
                                         />
-                                        {/* Paperclip attach button */}
-                                        <button
-                                            onClick={() =>
-                                                fileInputRef.current?.click()
-                                            }
-                                            title="Attach images or files (up to 5 MB each for images)"
-                                            className="h-11 w-11 sm:h-10 sm:w-10 rounded-2xl bg-[#f1f3f5] hover:bg-[#e5e8eb] active:scale-95 flex items-center justify-center text-[#64748b] transition-all flex-shrink-0"
-                                        >
-                                            <svg
-                                                className="w-4 h-4"
-                                                fill="none"
-                                                stroke="currentColor"
-                                                viewBox="0 0 24 24"
-                                            >
-                                                <path
-                                                    strokeLinecap="round"
-                                                    strokeLinejoin="round"
-                                                    strokeWidth={2}
-                                                    d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13"
+                                        {voice.state === "idle" && (
+                                            <>
+                                                <AttachMenu
+                                                    open={attachOpen}
+                                                    onToggle={() => { setAttachOpen((o) => !o); setToolsOpen(false); setEmojiOpen(false); }}
+                                                    onClose={() => setAttachOpen(false)}
+                                                    onPick={openPicker}
+                                                    channel={activeConv.channel || "whatsapp"}
                                                 />
-                                            </svg>
-                                        </button>
+                                                <ToolsMenu
+                                                    open={toolsOpen}
+                                                    onToggle={() => { setToolsOpen((o) => !o); setAttachOpen(false); setEmojiOpen(false); }}
+                                                    onClose={() => setToolsOpen(false)}
+                                                    canDraft={!draftVisible && activeConv.intercept_mode === "human"}
+                                                    drafting={generatingDraft}
+                                                    onDraft={() => { setToolsOpen(false); generateDraft(); }}
+                                                    enterSends={enterSends}
+                                                    onEnterSends={setEnterSends}
+                                                />
+                                            </>
+                                        )}
+                                        {voice.state !== "idle" ? (
+                                            <VoiceBar v={voice} sending={sendingVoice} onSend={sendVoice} />
+                                        ) : (
+                                        <div className="relative flex-1 min-w-0">
                                         <textarea
                                             ref={composerRef}
                                             value={replyText}
@@ -4626,30 +4681,49 @@ export function ConversationsView({
                                                 t.style.height = Math.min(t.scrollHeight, 132) + "px";
                                             }}
                                             onKeyDown={(e) => {
-                                                if (
-                                                    e.key === "Enter" &&
-                                                    !e.shiftKey
-                                                ) {
-                                                    e.preventDefault();
-                                                    (e.currentTarget as HTMLTextAreaElement).style.height = "auto";
-                                                    sendReply();
-                                                }
+                                                // Never mid-composition (an IME / phone keyboard
+                                                // finishing a word) — that Enter is the word's.
+                                                if (e.nativeEvent.isComposing || e.key !== "Enter") return;
+                                                // Enter sends (Shift+Enter = new line), or — when the
+                                                // agent switched it off — Ctrl/⌘+Enter sends.
+                                                const send = enterSends ? !e.shiftKey : (e.metaKey || e.ctrlKey);
+                                                if (!send) return;
+                                                e.preventDefault();
+                                                (e.currentTarget as HTMLTextAreaElement).style.height = "auto";
+                                                sendReply();
                                             }}
                                             placeholder={window24?.mode === "human_agent"
                                                 ? "Type a reply — goes out under your name (human agent)…"
                                                 : "Type a reply…"}
                                             rows={1}
+                                            aria-label="Reply"
                                             // text-[16px] on mobile is load-bearing: any
                                             // input under 16px makes iOS Safari zoom the
                                             // whole page on focus, which is the single
                                             // ugliest thing that happened when typing here.
-                                            className="flex-1 resize-none px-4 py-2.5 text-[16px] sm:text-sm leading-snug rounded-2xl min-h-[44px] max-h-[132px] focus:outline-none focus:ring-2 focus:ring-[#f59e0b]/70 focus:border-transparent placeholder:text-stone-400"
-                                            style={{
-                                                backgroundColor: "#f6f7f5",
-                                                border: "1px solid #e5e8e2",
-                                                color: "#1c2917",
-                                            }}
+                                            className="block w-full resize-none pl-4 pr-11 py-2.5 text-[16px] sm:text-sm leading-snug rounded-2xl min-h-[44px] max-h-[132px] bg-white border border-[#e5e8e2] text-[#1c2917] shadow-[0_1px_2px_rgba(28,41,23,0.04)] transition-shadow focus:outline-none focus:border-[#f5c46b] focus:ring-4 focus:ring-[#f59e0b]/10 placeholder:text-stone-400"
                                         />
+                                        <button
+                                            type="button"
+                                            onClick={() => { setEmojiOpen((o) => !o); setAttachOpen(false); setToolsOpen(false); }}
+                                            title="Emoji"
+                                            aria-label="Emoji"
+                                            aria-expanded={emojiOpen}
+                                            className={`absolute right-1.5 bottom-1.5 h-8 w-8 rounded-xl flex items-center justify-center transition-colors ${emojiOpen ? "bg-[#fef3c7] text-[#b45309]" : "text-[#94a3b8] hover:text-[#64748b] hover:bg-[#f3f5f0]"}`}
+                                        >
+                                            <svg className="w-[18px] h-[18px]" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={1.8}>
+                                                <circle cx="12" cy="12" r="9" />
+                                                <path strokeLinecap="round" d="M8.5 14.5s1.3 1.8 3.5 1.8 3.5-1.8 3.5-1.8" />
+                                                <path strokeLinecap="round" d="M9 9.5h.01M15 9.5h.01" strokeWidth={2.6} />
+                                            </svg>
+                                        </button>
+                                        </div>
+                                        )}
+                                        {/* Anchored to the whole row, so it never runs off a phone's edge. */}
+                                        {emojiOpen && voice.state === "idle" && (
+                                            <EmojiPicker onPick={insertEmoji} onClose={() => setEmojiOpen(false)} />
+                                        )}
+                                        {voice.state === "idle" && (replyText.trim() || !voiceSupported() || (activeConv.channel || "whatsapp") === "sms") ? (
                                         <button
                                             onClick={sendReply}
                                             disabled={
@@ -4658,31 +4732,39 @@ export function ConversationsView({
                                             }
                                             title={window24?.mode === "closed"
                                                 ? (window24.reason || "Outside the messaging window")
-                                                : "Send"}
-                                            className="h-11 w-11 sm:h-10 sm:w-10 rounded-2xl disabled:opacity-50 active:scale-95 flex items-center justify-center text-white transition-all shadow-sm"
-                                            style={{ backgroundColor: "#f59e0b" }}
-                                            onMouseEnter={(e) => { if (!(!replyText.trim() || sending)) (e.currentTarget as HTMLElement).style.backgroundColor = "#d97706"; }}
-                                            onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.backgroundColor = "#f59e0b"; }}
+                                                : enterSends ? "Send (Enter)" : "Send (Ctrl/⌘ + Enter)"}
+                                            aria-label="Send"
+                                            className="h-11 w-11 sm:h-10 sm:w-10 rounded-2xl disabled:opacity-40 active:scale-95 flex items-center justify-center text-white transition-all shadow-sm bg-[#f59e0b] hover:bg-[#d97706] disabled:hover:bg-[#f59e0b] flex-shrink-0"
                                         >
                                             {sending ? (
                                                 <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
                                             ) : (
-                                                <svg
-                                                    className="w-4 h-4"
-                                                    fill="none"
-                                                    stroke="currentColor"
-                                                    viewBox="0 0 24 24"
-                                                >
-                                                    <path
-                                                        strokeLinecap="round"
-                                                        strokeLinejoin="round"
-                                                        strokeWidth={2}
-                                                        d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"
-                                                    />
+                                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
                                                 </svg>
                                             )}
                                         </button>
+                                        ) : voice.state === "idle" ? (
+                                        <button
+                                            type="button"
+                                            onClick={voice.start}
+                                            disabled={window24?.mode === "closed"}
+                                            title={window24?.mode === "closed" ? (window24.reason || "Outside the messaging window") : "Record a voice note"}
+                                            aria-label="Record a voice note"
+                                            className="h-11 w-11 sm:h-10 sm:w-10 rounded-2xl flex items-center justify-center text-[#64748b] bg-[#f1f3f5] hover:bg-[#e5e8eb] active:scale-95 transition-all disabled:opacity-40 flex-shrink-0"
+                                        >
+                                            <svg className="w-[18px] h-[18px]" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={1.9}>
+                                                <rect x="9" y="3" width="6" height="11" rx="3" />
+                                                <path strokeLinecap="round" d="M5.5 11a6.5 6.5 0 0013 0M12 17.5V21" />
+                                            </svg>
+                                        </button>
+                                        ) : null}
                                     </div>
+                                    {voice.state === "idle" && replyText.includes("\n") === false && replyText.trim().length > 0 && (
+                                        <p className="hidden sm:block mt-1 px-1 text-[10px] text-stone-400 select-none">
+                                            {enterSends ? "Enter to send · Shift + Enter for a new line" : "Ctrl/⌘ + Enter to send · Enter for a new line"}
+                                        </p>
+                                    )}
 
                                     {/* Media attachment preview panel (multi-select) */}
                                     {mediaItems.length > 0 && (
@@ -4716,6 +4798,10 @@ export function ConversationsView({
                                                                 ✕
                                                             </button>
                                                         </div>
+                                                        {/* Audio carries no caption on WhatsApp or Meta. */}
+                                                        {it.file.type.startsWith("audio/") ? (
+                                                            <span className="flex-1 min-w-0 px-2 text-xs text-[#5f6f57] truncate">{it.file.name} · audio, sent without a caption</span>
+                                                        ) : (
                                                         <input
                                                             value={it.caption}
                                                             onChange={(e) => updateMediaCaption(it.id, e.target.value)}
@@ -4724,6 +4810,7 @@ export function ConversationsView({
                                                             className="flex-1 min-w-0 px-2 py-1.5 text-xs rounded-lg focus:outline-none focus:ring-1 focus:ring-[#589b31]"
                                                             style={{ backgroundColor: "#ffffff", border: "1px solid #e8ebe3", color: "#1c2917" }}
                                                         />
+                                                        )}
                                                     </div>
                                                 ))}
                                                 {/* Add-more tile */}
@@ -4979,6 +5066,12 @@ export function ConversationsView({
                         conversation={activeConv}
                         orders={orders}
                         onToast={onToast}
+                        // Wider than the old 320px so the profile and insights
+                        // breathe; clamped so a narrow laptop keeps the thread.
+                        className="w-[clamp(320px,23vw,380px)] flex-shrink-0 flex flex-col overflow-hidden"
+                        // The activity log sits beside the thread on desktop —
+                        // its events are not repeated here (owner, 2026-11-09).
+                        hideActivityTab
                         onClose={() => setCrmOpen(false)}
                         onOpenIdentity={openIdentityConversation}
                         onPrefillReply={putInComposer}

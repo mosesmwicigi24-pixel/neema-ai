@@ -233,6 +233,9 @@ interface Props {
     /** Put text in the reply composer (never sends) — e.g. asking a Messenger
      *  customer for their WhatsApp number so we can call them there. */
     onPrefillReply?: (text: string) => void;
+    /** Leave out the Activity tab — on desktop the activity log beside the
+     *  thread shows the same events (owner, 2026-11-09: no repeat). */
+    hideActivityTab?: boolean;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1127,6 +1130,7 @@ export function CustomerSidebar({
     className,
     hideHeader,
     onPrefillReply,
+    hideActivityTab,
 }: Props) {
     // Presence only (who we're on a call with) — not the whole call state, so a
     // mute toggle or a device notice doesn't re-render this whole panel.
@@ -1839,7 +1843,7 @@ export function CustomerSidebar({
 
             {/* Tabs */}
             <div className="flex" style={{ borderBottom: "1px solid #e2e8f0" }}>
-                {(["profile", "insights", "activity"] as const).map((tab) => (
+                {(hideActivityTab ? (["profile", "insights"] as const) : (["profile", "insights", "activity"] as const)).map((tab) => (
                     <button
                         key={tab}
                         onClick={() => setActiveTab(tab)}
@@ -2921,7 +2925,7 @@ export function CustomerSidebar({
                     </>
                 )}
 
-                {activeTab === "activity" && (
+                {activeTab === "activity" && !hideActivityTab && (
                     <>
                         <CustomerTimeline conversationId={conversation.id} />
                         <Section title="Recent Orders">
