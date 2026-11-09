@@ -144,7 +144,11 @@ def test_out_of_hours_is_queued_for_the_next_staffed_start_without_a_bell(env, w
     from app.services import commitments as cm
     _settings(monkeypatch, hours="07-21")
     cid = _open_check(env, "254700000705", age_min=60)
-    night = datetime.now(timezone.utc).replace(hour=20, minute=30)          # 23:30 Nairobi
+    # TOMORROW's 23:30 Nairobi, never today's: the check opens "60 minutes ago"
+    # by the real clock, so after 21:30 UTC today's 20:30 is BEFORE it opened,
+    # nothing is overdue and the test failed every late evening (CI, 9 Nov).
+    night = (datetime.now(timezone.utc) + timedelta(days=1)).replace(
+        hour=20, minute=30, second=0, microsecond=0)
     out = asyncio.run(cm.sweep(env.redis, now=night))
     assert out["queued"] == 1 and out["team"] == 0 and out["supervisor"] == 0
     esc = _deal(env, cid)["escalation"]

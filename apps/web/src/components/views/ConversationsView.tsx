@@ -30,6 +30,7 @@ import type {
 import { useSession } from "next-auth/react";
 import { CALL_ICON_PATH } from "@/lib/callStatus";
 import { viewForRow, outreachBadge, CUSTOMER_STATE_WORD } from "@/lib/messageKinds";
+import { mergeThread, retireOptimistic } from "@/lib/thread";
 import { CallCard } from "@/components/views/CallCard";
 import { VoiceNoteText } from "@/components/ui/VoiceNoteText";
 import { nearestCallId, mediaKey } from "@/lib/callCard";
@@ -909,18 +910,6 @@ const THREAD_PAGE = 50;
 // effect keyed on the thread.
 const NO_MESSAGES: Message[] = [];
 
-// Union two thread slices by id, newest state winning, ordered by time — so a
-// poll refresh (newest page) never throws away older pages already loaded,
-// and an older page slots in without duplicating anything.
-function mergeThread(existing: Message[], incoming: Message[]): Message[] {
-    const byId = new Map<string, Message>();
-    for (const m of existing) byId.set(String(m.id), m);
-    for (const m of incoming)
-        byId.set(String(m.id), { ...(byId.get(String(m.id)) ?? {}), ...m });
-    return [...byId.values()].sort((a, b) =>
-        (a.created_at || "").localeCompare(b.created_at || ""));
-}
-
 // ── Keyboard lift (mobile) ────────────────────────────────────────────────────
 // iOS Safari never resizes the layout for the on-screen keyboard — it just
 // overlays it — so a composer at the bottom of our fixed-height (100dvh) pane
@@ -1696,7 +1685,9 @@ export function ConversationsView({
                     )
                         return m;
                 }
-                return { ...m, [activeConvId]: [...existing, msg] };
+                // The saved form of a reply this screen just sent replaces the
+                // optimistic bubble drawn for it — never a second bubble beside it.
+                return { ...m, [activeConvId]: [...retireOptimistic(existing, [msg]), msg] };
             });
         }
         if (
