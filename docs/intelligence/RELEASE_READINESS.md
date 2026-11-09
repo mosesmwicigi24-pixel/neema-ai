@@ -62,13 +62,13 @@ silence, plus fail-closed safeguards that had been fail-open.
 - Retiring the legacy bridge order path and the expiring shortener (W9-4).
 - A DB idempotency key for orders (migration).
 
-Slices 1–15 are live on the box at c936832 (12:27 UTC, 9 Nov). Slice 16 merged as 35c6740 (12:25 UTC; the box's pick-up is recorded in REGRESSION_SAFETY_REPORT when read). Slice 17 is in PR (#354).
+Slices 1–16 are live on the box at 35c6740 (12:44 UTC, 9 Nov). Slice 17 merged as 4bd5ac9 (12:44 UTC; the box's pick-up is recorded in REGRESSION_SAFETY_REPORT when read). The owner's word (12:3x UTC): no validation run.
 
-## Slice 17 (2026-11-09) — in PR
+## Slice 17 (2026-11-09) — merged as 4bd5ac9
 
 Verify / correct on the Profile tab (web only; `CUSTOMER_GEOGRAPHY.md` §5b): a "Placement" row appears only while the current placement is unconfirmed, with its confidence, the earlier readings on hover, and a one-click Confirm that records the operator's confirmation through the existing PATCH (no API change). One Postgres test added for the ISO-only confirmation. Rollback: revert the squash commit.
 
-## Slice 16 (2026-11-09) — merged as 35c6740
+## Slice 16 (2026-11-09) — merged as 35c6740, live
 
 Customers in aggregate (`services/segments.py`, `CUSTOMER_SEGMENTS.md`): `GET /admin/reports/segments` and a Customers tab on Reports — by market (the geography decision; confirmed placements apart from inferred and unknown), by language, by channel; counts only, three bulk reads, nothing stored. No model call, no migration. Tests: 5 new. Rollback: revert the squash commit.
 
