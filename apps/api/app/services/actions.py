@@ -886,6 +886,25 @@ async def process_due(db, redis, *, now: datetime | None = None, limit: int = 10
                                 kind=getattr(action, "kind", None), action=getattr(action, "id", None))
                     await _shadow_count(redis, "hold_customer")
                     continue
+            # Someone who asked for goods without payment and was given the
+            # boundary (services/buyer_intent; owner, 2026-11-10): no
+            # unprompted SALES follow-up while that record stands. A promise
+            # we made, an order, a payment or a delivery still goes; and the
+            # moment they ask to buy, the record reopens and this lifts.
+            if message_class(action) == "routine":
+                try:
+                    from app.services import buyer_intent as _bi
+                    _p = await _bi._person_of(db, conv)
+                    if _p is not None and _bi.suppresses_promotion(_p.state, now=now):
+                        action.due_at = now + timedelta(days=7)
+                        await db.commit()
+                        ol.decision("actions", conv.channel, who, "hold",
+                                    "asked for goods without payment — no sales follow-up for now",
+                                    kind=getattr(action, "kind", None), action=getattr(action, "id", None))
+                        await _shadow_count(redis, "hold_intent")
+                        continue
+                except Exception:
+                    pass
             _lang = await _cs.language_for(db, conv)
             if not _cs.automated_ok(_lang) and (message_class(action) == "routine"
                                                  or not in_window):
