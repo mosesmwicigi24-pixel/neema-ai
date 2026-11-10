@@ -345,7 +345,9 @@ _NOTE_SYSTEM = (
     "assistance (mainly asks for free items, money, a loan or sponsorship, and keeps to that after a "
     "clear answer, with no step toward buying), social (greetings and blessings only), unclear. Asking "
     "for a discount, for time, to pay bit by bit or on credit is constrained or negotiator, never "
-    "assistance. Being poor, a pastor, or from any country is not evidence of anything. When in doubt: unclear;\n"
+    "assistance. Nominating someone for a giveaway we advertised, or asking about its gift, is taking part "
+    "in our campaign — never assistance. Being poor, a pastor, or from any country is not evidence of "
+    "anything. When in doubt: unclear;\n"
     '"intent_reason": at most twelve plain words of evidence for that reading, else null.\n'
     "Interest is not agreement. When unsure, choose none / null. Reply with the JSON object only."
 )
