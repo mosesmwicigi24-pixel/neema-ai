@@ -1,6 +1,6 @@
 # Conversational Naturalness & Social Intelligence (slice 20)
 
-Owner's directive, 2026-11-10. Status: **implemented on the branch, tested without the model, NOT deployed** — the directive asks for the report before deployment.
+Owner's directive, 2026-11-10. Status: **slice 20 merged on the owner's word ("merge 369", 4b56485)**; slice 20b (§5b, from the owner's screenshots) is on the branch, tested without the model.
 
 ## 1. What was investigated
 
@@ -58,12 +58,25 @@ No migration, no new setting, no change to prices, sales journeys, the gate, the
 | Genuine assistance requests (slice 19) | `test_an_ordinary_request_or_enquiry_is_not_read_as_participation` + slice 19 suites | Pass unchanged |
 | Giveaway participation not assistance | `test_participation_is_protected_from_the_request_ladder` | Pass |
 
-New file `tests/test_conversational_naturalness.py` (34 tests). Two pinned tests updated to the new wording (`test_register.py`, `test_comment_likes.py`).
+New file `tests/test_conversational_naturalness.py` (39 tests with 20b). Two pinned tests updated to the new wording (`test_register.py`, `test_comment_likes.py`).
+
+## 5b. Checked against the owner's Facebook screenshots (slice 20b)
+
+The screenshots arrived after slice 20 was merged: the cassock giveaway post and its thread, as Neema answered it **before** slice 20.
+
+| What the thread shows | Cause | Covered by |
+|---|---|---|
+| Second and third replies open "Thank you, Siyethemba", recite the church and the name back, and repeat "our team will select one recipient… follow us" | The scripted brief on every turn | Slice 20 (continuing brief) |
+| The church was recorded and said back as "**Bethany House** Pentecostal Holiness Church" | Facebook puts the Page's name, as a tag, in front of a thread reply; it was read as part of the church's name | **20b**: `_strip_page_tag` removes the tag from a thread reply before it is read |
+| She asked for the church and town, then the pastor's full name | The brief listed "name, church, town, size" as things to ask for. This caption asks only for a nomination and the reason | **20b**: ask only for what THIS caption asks; when they have answered, the exchange is complete |
+| A pastor asking to receive the gift herself (in Swahili) was told "if you'd like one for yourself, our Cassock is KES 13,000" | "Another item they bring up may be served" was applied to the gift itself | **20b**: asking to receive the gift, for one's pastor or oneself, is taking part; never an offer to buy, never a price unless they ask to buy |
+
+Tests added to `tests/test_conversational_naturalness.py` (39 in all).
 
 ## 6. Not verified, and remaining risks
 
 - **No model run.** Whether Neema's actual wording is now natural and non-repetitive is unverified; only what she is told and when she is called are tested. Evaluation runs remain stopped on the owner's word.
-- **The Facebook giveaway screenshots were not received** in this session (only the post image arrived). Nothing here was checked against them.
+- **The Page tag is recognised by name** ("Bethany House", or an "@handle"). If the Page is renamed the pattern must follow.
 - **Canned lines still open with "Thank you" / "Welcome to Bethany House".** The model-free price lines and first-contact lines keep the owner's 2026-09-16 cadence. Changing them is a wording decision for the owner.
 - **A Like instead of words** depends on `meta_comment_like` being on; on Instagram there is no Like, so the acknowledgement is simply left.
 - **"Explained" is read by keyword** from our earlier replies; a reply that explained the gift in unusual words would let the gift's line be said once more.

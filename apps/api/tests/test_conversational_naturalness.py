@@ -189,3 +189,75 @@ def test_what_was_established_still_stands():
     assert "THE REGISTER IS CALM AND HONORABLE" in flat and "quiet courtesy" in flat
     assert "A bare \"thanks\"/\"ok\"/\"amen\"/a thumbs-up gets NOTHING back" in flat
     assert "GIFT REQUESTS AND HARDSHIP APPEALS" in flat and "A NATURAL END IS RESPECTED" in flat
+
+
+# ── the owner's Facebook screenshots (2026-11-10): the cassock giveaway ──────
+CASSOCK = ("Would You Love Us to Gift Your Pastor a Beautiful Cassock? Bethany House is giving away a "
+           "beautifully custom-made cassock to one deserving pastor! We want to hear from you. Tell us why "
+           "your pastor deserves this special gift. Your story could be the reason we choose them! Who can "
+           "participate? - Open to everyone, both in Kenya and abroad. - Tell us why your pastor should be "
+           "selected. - Bethany House will choose the recipient. - The cassock is completely FREE! The "
+           "selected recipient will only cover delivery costs within Kenya or international shipping costs "
+           "outside Kenya. Nominate your pastor in the comments! We can't wait to read your stories.")
+SAID_1 = ("Hello Siyethemba, welcome to Bethany House, and thank you for nominating Rev TP. Our team will "
+          "select one recipient for this gift. The cassock is free, and the recipient covers only the "
+          "shipping to South Africa. Follow us for the details. May we have his church and town?")
+
+
+def test_the_cassock_post_is_read_as_a_gifting_campaign():
+    assert rt.is_campaign_post(CASSOCK) and not rt.campaign_is_draw(CASSOCK)
+
+
+def test_the_page_tag_in_front_of_a_thread_reply_is_not_part_of_what_they_said():
+    said = "Bethany House Pentecostal Holiness Church ( Potters House) around Nongoma KZN"
+    assert rt._strip_page_tag(said, "c0") == "Pentecostal Holiness Church ( Potters House) around Nongoma KZN"
+    assert rt._strip_page_tag("@bethanyhouse.ke Thokozani Ndwandwe", "c0") == "Thokozani Ndwandwe"
+    assert rt._strip_page_tag("Bethany House, thank you", "c0") == "thank you"
+    # a sentence about us, a top-level comment, a bare tag: left as written
+    assert rt._strip_page_tag("Bethany House is the best", "c0") == "Bethany House is the best"
+    assert rt._strip_page_tag(said, "") == said
+    assert rt._strip_page_tag("Bethany House", "c0") == "Bethany House"
+
+
+def test_the_church_reply_reaches_the_model_without_our_name_and_as_a_continuation(monkeypatch):
+    _prior(monkeypatch, [SAID_1])
+    from tests import test_campaign_posts as tc
+
+    def engage_reply(text):
+        real = rt._run_comment_engage
+
+        async def run(redis, channel, comment, own):
+            await real(redis, channel, dict(comment, parent_id="c0"), own)
+        monkeypatch.setattr(rt, "_run_comment_engage", run)
+        try:
+            return tc._engage(monkeypatch, text, reading=HIGH, caption=CASSOCK,
+                              answer="Pentecostal Holiness Church, Nongoma — with us.", name="Siyethemba Khumasta")
+        finally:
+            monkeypatch.setattr(rt, "_run_comment_engage", real)
+    out = engage_reply("Bethany House Pentecostal Holiness Church ( Potters House) around Nongoma KZN")
+    assert out["turn"]["user_text"].startswith("Pentecostal Holiness Church")
+    r = out["turn"]["comment_reading"]
+    assert r["returning"] == 1 and r["explained"] is True
+    brief = rt._reading_context(r)
+    assert "CONTINUING AN EXCHANGE" in brief and "welcome to Bethany House!" not in brief
+    assert "the exchange is complete" in brief and "no further question" in brief
+    assert "a church, a town or a full name the caption never asked for is not requested" in brief
+
+
+def test_the_first_brief_asks_only_what_this_caption_asks():
+    first = rt._reading_context({"kind": "other", "campaign": CASSOCK})
+    assert "ASK ONLY FOR WHAT THIS CAPTION ASKS FOR" in first
+    assert "do not invent a request for a church, a town or a full name the caption never made" in first
+
+
+def test_asking_to_receive_the_gift_oneself_is_participation_never_a_sale():
+    for ctx in (rt._reading_context({"kind": "other", "campaign": CASSOCK}),
+                rt._reading_context({"kind": "other", "campaign": CASSOCK, "returning": 1}),
+                rt._campaign_turn_context(CASSOCK, "pls gift me the one")):
+        assert "IS TAKING PART" in ctx and "'I nominate myself'" in ctx
+        assert "Never answer it with an offer to buy one" in ctx
+        assert "a price is given only when THEY ask to buy" in ctx
+    # the Swahili self-nomination in the screenshot is no buying ask
+    irene = ("Hii labda nijiongee Mimi mwenyewe pls gift me the one I had the bishop who gave it alikujia "
+             "the whole. Cussock sinanga na sijafanikiwa kupata pesa ya kushona")
+    assert not rt._CAMPAIGN_BUY_RE.search(irene)
