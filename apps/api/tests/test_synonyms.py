@@ -58,6 +58,10 @@ PECTORAL = {"pectoral-cross", "pectoral-cross-gold", "premium-pectoral-cross"}
     ("cross pendant", "pectoral cross"),
     ("cross for bishops", "pectoral cross"),
     ("clergy cross", "pectoral cross"),
+    # Owner, 2026-11-10: "What I called Apostolic is Episcopal."
+    ("How much is the apostolic cross?", "How much is the episcopal cross?"),
+    ("Apostolic crosses", "episcopal cross"),
+    ("premium pectoral cross", "episcopal cross"),
     ("pedant", "pectoral cross"),                    # the phone-keyboard spelling
 ])
 def test_the_owners_words_become_the_hubs_term(said, hub):
