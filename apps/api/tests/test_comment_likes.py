@@ -70,7 +70,9 @@ def test_the_engine_likes_after_every_landed_reply():
     # the reply reports whether it landed, and the Like follows only then
     assert "async def _post_public(text: str) -> bool:" in src
     assert src.count("posted = await _post_public(") == 2     # the light path and the answer path
-    assert src.count("if posted:\n") == 2 and src.count("await _like_answered()") == 2
+    # ... and a third Like stands IN PLACE of a reply: a returning entrant
+    # with no model answer is liked, not thanked for joining twice (2026-11-10)
+    assert src.count("if posted:\n") == 2 and src.count("await _like_answered()") == 3
     # never a complaint, never spam, never Instagram, and a switch for the day Meta objects
     assert 'if not settings.meta_comment_like or intent in ("negative", "spam"):' in src
     assert 'if channel == "instagram":' in src

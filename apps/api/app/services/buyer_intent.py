@@ -270,6 +270,30 @@ def suppresses_promotion(state: dict | None, *, now: datetime | None = None) -> 
 
 # ── what is never closed on ──────────────────────────────────────────────────
 
+# Taking part in OUR OWN giveaway is not a request for charity (owner,
+# 2026-11-10: "nominations and requests for the advertised free product are
+# legitimate campaign participation — not automatically assistance-seeking").
+# A message that nominates someone, or names the giveaway / the post's gift,
+# is answered by the campaign's own rules even when the conversation carries
+# no post context (a WhatsApp message about the Facebook giveaway).
+_CAMPAIGN_PART_RE = re.compile(
+    r"\b(nominat(?:e|es|ed|ing|ion|ions)|"
+    r"give[\s-]?aways?|"
+    r"(?:your|the)\s+(?:facebook\s+|instagram\s+|tiktok\s+)?(?:post|advert|ad|campaign|promotion)\b"
+    r"[^.?!\n]{0,60}\b(?:gift(?:ing)?|free|donat\w+|bless\w*)|"
+    r"(?:gift(?:ing)?|free|donat\w+)\b[^.?!\n]{0,60}\b(?:your|the)\s+"
+    r"(?:facebook\s+|instagram\s+|tiktok\s+)?(?:post|advert|ad|campaign|promotion)|"
+    r"(?:love|like)\s+(?:you|us)\s+to\s+gift|"
+    r"napendekeza|nampendekeza|namchagua)\b",
+    re.IGNORECASE)
+
+
+def campaign_participation(text: str | None) -> bool:
+    """True when the words take part in a giveaway of ours: a nomination, or
+    a reference to the giveaway or to the post's gift."""
+    return bool(_CAMPAIGN_PART_RE.search(" ".join((text or "").split())))
+
+
 def protected(text: str | None) -> str | None:
     """Why this message is never part of the request ladder, whatever else it
     says — or None. A complaint, a payment claim, a request for a person or an
@@ -278,6 +302,8 @@ def protected(text: str | None) -> str | None:
     t = " ".join((text or "").split())
     if not t:
         return None
+    if campaign_participation(t):
+        return "campaign participation"
     try:
         from app.services.intent import is_opt_out, wants_a_person
         if is_opt_out(t):

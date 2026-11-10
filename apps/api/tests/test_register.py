@@ -36,7 +36,10 @@ def test_acknowledgement_examples_are_dignified():
     flat = _flat()
     # the old list opened with the exact word the owner flagged
     assert '("Perfect", "Lovely choice"' not in flat
-    assert '"Noted", "A fine choice", "Thank you — noted"' in flat
+    # owner, 2026-11-10: no rotation of stock openers either — most replies
+    # need no acknowledgement at all
+    assert '"Noted", "A fine choice", "Thank you — noted"' not in flat
+    assert 'a rotation of stock openers ("Noted", "Thank you — noted", "Got it")' in flat
     # owner, 2026-09-15: "Very well" is bot language — banned, never recommended
     assert '"Very well", "A fine choice"' not in flat
     assert 'never with a butler\'s "Very well", "Certainly" or "Absolutely"' in flat

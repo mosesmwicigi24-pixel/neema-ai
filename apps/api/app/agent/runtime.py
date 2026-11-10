@@ -2371,6 +2371,8 @@ async def run_turn(db: AsyncSession, redis, wa_id: str, user_text: str, llm: LLM
         _rline = _reading_context(comment_reading)
         if _rline:
             turn_notes.append("\n\n" + _rline)
+        if comment_reading.get("returning") and not comment_reading.get("campaign"):
+            turn_notes.append("\n\n" + _returning_note(int(comment_reading["returning"])))
     if lead_ctx:
         content = "\n\n".join(lead_ctx)
         if post_img:
@@ -4106,7 +4108,12 @@ def _campaign_turn_context(caption: str, comment: str) -> str:
              "the caption says. Asked the price, or to buy it: it is a gift — say so warmly, "
              "and nothing more about it. Another item THEY bring up (a cassock, a collar) may "
              "be served from the hub in one warm line; never a pivot from the gift. Never an "
-             "apology, never \"something went wrong\", never a generic hold.)")
+             "apology, never \"something went wrong\", never a generic hold. SAID ONCE IS "
+             "ENOUGH (owner, 2026-11-10): if your earlier messages in this conversation "
+             "already welcomed them or explained the gift, do not do either again — a "
+             "nomination and the details that follow are one exchange: take what they give "
+             "in a few plain words, ask only for what is still missing, and never suggest "
+             "they have been chosen.)")
     return line
 
 
@@ -4187,9 +4194,53 @@ def _host_reading(reading: dict, text: str) -> dict:
     return r
 
 
-def _campaign_context(caption: str) -> str:
+# What our earlier replies under a post already told this person: the gift's
+# line (who is selected, free, the shipping). Said once, it is not said again.
+_EXPLAINED_RE = re.compile(
+    r"\b(select(?:ing|ed)?|recipient|chosen|shipping|mpokeaji|atachaguliwa|kuchagua|usafirishaji)\b",
+    re.IGNORECASE)
+
+
+def _campaign_continues(caption: str, returning: int, explained: bool) -> str:
+    """The host's brief for a person we have ALREADY answered under this
+    campaign post (owner, 2026-11-10: a nomination and the details that
+    follow it are one continuous interaction — never the welcome and the
+    selection procedure again)."""
+    cap = " ".join(str(caption or "").split())[:700]
+    said = ("You have already told them how the recipient is selected, that it is free and "
+            "about the shipping — do NOT say any of it again unless they ask. "
+            if explained else
+            "If the gift's one line (one selected recipient, free, they cover the shipping) "
+            "has not been said to them yet, say it once, briefly. ")
+    return ("(THIS POST IS A CAMPAIGN — its caption: \"" + cap + "\". You are its HOST, "
+            "speaking for Bethany House — not a shopkeeper at a stall. " + _campaign_facts(caption) + " "
+            f"THIS PERSON IS CONTINUING AN EXCHANGE — you have already replied to them {returning} "
+            "time(s) under this post (your replies are in the thread above). It is ONE conversation, "
+            "not a new one: no fresh welcome, no 'welcome to Bethany House', no thanks for joining "
+            "in, no 'follow us' again. " + said +
+            "First read what this comment DOES: gives a detail you asked for, nominates someone, "
+            "corrects something, confirms, asks, or simply shares. Then say only what that needs — "
+            "usually ONE short plain sentence, in words different from your earlier replies. A "
+            "detail they give is SAVED this turn (capture_contact for the name, role and town; the "
+            "church with save_parish; a size with save_measurements) and acknowledged by what "
+            "matters, never recited back in full and never with the rules repeated. Ask only for "
+            "something the caption requires that is STILL missing — one thing, and nothing at all "
+            "when they have given it. A question gets its answer, exactly. Asked the price, or to "
+            "buy it: it is a gift — say so in a line. Another item THEY bring up (a cassock, a "
+            "collar) may be picked up in one warm line with an invitation to message us — never a "
+            "pivot from the gift. Never suggest they have been or will be the one chosen. Never ask "
+            "for a phone number, an address or an email in public — the caption's own details "
+            "(name, church, town, size) only. Not every line opens with thanks, a blessing or "
+            "'noted': open with the thing itself. Never an apology, never \"something went "
+            "wrong\", never \"hold on\".)")
+
+
+def _campaign_context(caption: str, returning: int = 0, explained: bool = False) -> str:
     """The host's brief under a campaign post (owner, 2026-09-26): the gift's
-    facts, the owner's own reply as the shape, and what never to say."""
+    facts, the owner's own reply as the shape, and what never to say. A
+    person already answered under this post gets the continuing brief."""
+    if returning:
+        return _campaign_continues(caption, returning, explained)
     cap = " ".join(str(caption or "").split())[:700]
     return ("(THIS POST IS A CAMPAIGN — its caption: \"" + cap + "\". You are its HOST, "
             "speaking for Bethany House — not a shopkeeper at a stall. " + _campaign_facts(caption) + " "
@@ -4200,7 +4251,11 @@ def _campaign_context(caption: str) -> str:
             "town so we can reach you if you're the one chosen?' — welcome them by name and "
             "title; the gift in one line; the invitation to follow us; then ask, warmly, for "
             "whatever the caption asks that they have not yet given (name, church, town, size), "
-            "so we can reach them if they are the one chosen. What they have given, confirm and "
+            "so we can reach them if they are the one chosen. That reply is the SUBSTANCE of a "
+            "FIRST answer, not a script to recite (owner, 2026-11-10): say it in your own words, "
+            "and shorter when their comment already nominates someone or gives the details — "
+            "then take what they gave and ask only for what is missing. Never ask for a phone "
+            "number, an address or an email in public. What they have given, confirm and "
             "SAVE this turn (capture_contact for the name, role and town; the church with "
             "save_parish; a shoe or garment size with save_measurements). Be specific to their "
             "words, confident, one question at most, in their language. Asked the price, or to "
@@ -4218,9 +4273,11 @@ def _reading_context(reading: dict | None) -> str:
     r = reading or {}
     kind = str(r.get("kind") or "other")
     ask = str(r.get("ask") or "").strip()
+    returning = int(r.get("returning") or 0)
     if r.get("campaign"):
-        rest = _reading_context({k: v for k, v in r.items() if k not in ("campaign", "hint")})
-        out = _campaign_context(str(r["campaign"]))
+        rest = _reading_context({k: v for k, v in r.items()
+                                 if k not in ("campaign", "hint", "returning", "explained")})
+        out = _campaign_context(str(r["campaign"]), returning, bool(r.get("explained")))
         if r.get("hint") == "displeasure":
             out += ("\n\n(The reader sensed some displeasure in the words — if it is there, "
                     "meet it kindly and directly first, then continue as the host.)")
@@ -6033,6 +6090,56 @@ class _OptedOut(Exception):
     """The contact asked not to be messaged — the DM leg stands down."""
 
 
+def _returning_note(n: int) -> str:
+    """One conversation, not a new one (owner, 2026-11-10): the line a public
+    comment turn carries when we have already answered this person here."""
+    return (f"(You have already replied to this person {n} time(s) under this post — your "
+            "replies are in the thread above. This comment CONTINUES that exchange: no fresh "
+            "welcome, no thanks or 'noted' out of habit, nothing you have already told them "
+            "said again. Read what this comment does — asks, gives a detail, confirms, "
+            "corrects, appreciates — and say only what that needs, in different words from "
+            "before; often one short sentence.)")
+
+
+async def _thread_prior(channel: str, ext: str, post_id: str) -> list[str]:
+    """Our earlier public replies to THIS person under THIS post, oldest
+    first — what the thread has already heard from us. [] on any doubt (no
+    post id, a failed read): the comment is then treated as a first one."""
+    if not (post_id and ext):
+        return []
+    try:
+        from sqlalchemy import select
+        from app.database import AsyncSessionLocal
+        from app.models.message import Message
+        async with AsyncSessionLocal() as db:
+            rows = list((await db.execute(
+                select(Message).where(Message.channel == channel, Message.external_id == ext)
+                .where(Message.media_type.is_(None) | (Message.media_type != "note"))
+                .order_by(Message.created_at.desc()).limit(80))).scalars().all())
+        out = []
+        for m in _thread_rows(list(reversed(rows)), post_id):
+            if str(getattr(m.direction, "value", m.direction)) != "inbound" and (m.text or "").strip():
+                out.append(m.text.strip())
+        return out
+    except Exception as exc:
+        _log.info("thread-prior read skipped for %s: %s", ext, exc)
+        return []
+
+
+def _nothing_to_add(comment: dict) -> bool:
+    """A comment that, AFTER we have already answered this person under this
+    post, needs no more words (owner, 2026-11-10: "react or remain silent when
+    another written response would add nothing"): a bare thanks, "ok",
+    "amen", a thumbs-up — cooling's closer gate, the DM rule's own. Never
+    one with a question, a buying word, a figure or a picture in it: those
+    still get their turn."""
+    t = (comment.get("text") or "").strip()
+    if not t or comment.get("photo") or re.search(r"\d", t):
+        return False
+    from app.agent import cooling as _cool
+    return _cool.silence_decision(t)
+
+
 async def _run_comment_engage(redis, channel: str, comment: dict, own_pages: set) -> None:
     from app.database import AsyncSessionLocal
     from app.services import messaging as svc
@@ -6048,7 +6155,27 @@ async def _run_comment_engage(redis, channel: str, comment: dict, own_pages: set
     # the plan's intent, what the comment IS (a request, a question, a
     # complaint, praise, mixed, a greeting), a complaint's weight, a request's
     # ask — and everything below acts on it.
+    # ONE CONVERSATION PER PERSON PER POST (owner, 2026-11-10). What have we
+    # already said to this person under this post? A bare acknowledgement
+    # after our reply ends the exchange: the Page's Like, no more words, and
+    # no model call. Everything else carries the count into the reading, so
+    # the reply continues the exchange instead of starting it again.
+    _post_id0 = str(comment.get("post_id") or (comment.get("post_context") or {}).get("post_id") or "")
+    _prior = await _thread_prior(channel, ext, _post_id0)
+    if _prior and _nothing_to_add(comment):
+        _log.info("comment %s: an acknowledgement after our reply — reacting, not replying", cid)
+        if settings.meta_comment_like and channel != "instagram":
+            try:
+                await like_comment(cid, page_id=comment.get("page_id"), channel=channel)
+            except Exception as exc:
+                _log.info("comment %s like skipped: %s", cid, exc)
+        await _note_silent_decision(channel, ext, cid,
+                                    "an acknowledgement after our earlier reply — nothing to add")
+        return
     reading = await read_comment(comment_text, redis=redis)
+    if _prior:
+        reading = dict(reading, returning=len(_prior),
+                       explained=any(_EXPLAINED_RE.search(x) for x in _prior))
     # A CAMPAIGN POST (owner, 2026-09-26): its comments are entries and cheers.
     # The host answers every one with words in it — the canned thanks and the
     # complaint lines are for shop posts.
@@ -6441,6 +6568,17 @@ async def _run_comment_engage(redis, channel: str, comment: dict, own_pages: set
     if campaign and not answer:
         # The host's lines, by what they wrote (owner, 2026-09-26).
         public_text = _campaign_canned(comment_text, kind, ask, name_tag, ext, swahili)
+        if (_prior and not held_issues and kind not in ("request", "question")
+                and not _CAMPAIGN_BUY_RE.search(comment_text)
+                and not re.search(r"\d", comment_text) and len(comment_text.split()) <= 8):
+            # Already welcomed under this post, and no model answer to give:
+            # the stock "thank you for joining in" a second time is the
+            # machine talking (owner, 2026-11-10). The Like says it is seen.
+            _log.info("comment %s: returning entrant, no model answer — reacting, not repeating", cid)
+            await _like_answered()
+            await _note_silent_decision(channel, ext, cid,
+                                        "a returning entrant, already welcomed — liked, no stock line repeated")
+            return
     if held_issues and not answer:
         # THE GATE BEFORE POSTING (owner, 2026-09-25): no verified answer —
         # the thread hears an honest holding line, never a guess.
