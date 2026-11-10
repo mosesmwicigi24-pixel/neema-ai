@@ -19,11 +19,15 @@ def _flat() -> str:
     return " ".join(build_system_prompt(country_iso="KE", currency="KES").split())
 
 
-def test_decline_once_and_open_the_budget_door():
+def test_one_boundary_and_no_cheaper_items_for_a_donation_request():
+    """The owner's directive of 2026-11-10 replaced "decline and open the
+    budget door": someone asking for a donation is not offered cheaper items."""
     flat = _flat()
     assert "GIFT REQUESTS AND HARDSHIP APPEALS" in flat
-    assert "DECLINE once, gently" in flat
-    assert "a smaller size, fewer pieces, an item within their budget" in flat
+    assert "ONE kind boundary, then a close" in flat
+    assert "no question, no list of cheaper items" in flat
+    # the budget door is still there for a buyer who is short of money
+    assert "a smaller size, fewer pieces or a simpler item when THEY ask what fits their budget" in flat
 
 
 def test_no_false_hope_of_team_consideration():
@@ -32,19 +36,18 @@ def test_no_false_hope_of_team_consideration():
     assert "extends false hope" in flat
 
 
-def test_insistence_gets_one_blessing_then_the_chain_ends():
+def test_insistence_gets_one_brief_line_then_the_chain_ends():
     flat = _flat()
-    assert "sending photos of their situation to persuade" in flat
+    assert "photos of their situation to persuade" in flat
     assert "never reciprocate message-for-message" in flat
-    assert "ONE closing word of blessing" in flat
-    assert "Philippians 4:19" in flat
+    assert "ONE brief line that acknowledges it kindly and wishes them well" in flat
     assert "call `pause_conversation`" in flat
-    assert "silence after a blessing is kindness" in flat
+    assert "silence after a kind word is kindness" in flat
 
 
 def test_the_shop_door_stays_open():
     flat = _flat()
-    assert "if they later return able to buy within their means" in flat
+    assert "if they later ask about an item, a price or an order, serve them warmly like any customer" in flat
     assert "with no reference to the appeal" in flat
 
 
@@ -52,5 +55,5 @@ def test_pause_tool_knows_the_appeal_case():
     from app.agent.tools import TOOLS
     desc = next(t["description"] for t in TOOLS if t["name"] == "pause_conversation")
     assert "gift/hardship appeal" in desc
-    assert "AFTER your one scripture blessing" in desc
+    assert "AFTER your one brief closing line" in desc
     assert "Never use it on a buying customer" in desc

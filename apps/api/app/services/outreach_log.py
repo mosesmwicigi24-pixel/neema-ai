@@ -55,7 +55,7 @@ def decision(source: str, channel: str, key: str, verdict: str, reason: str,
 
 TALLY_FIELDS = ("suppress", "defer", "enforced_suppress", "enforced_defer",
                 "rule_customer_replied", "rule_colleague_replied", "rule_daily_cap", "rule_other",
-                "hold_customer", "hold_team_check", "park_language", "park_template",
+                "hold_customer", "hold_team_check", "hold_intent", "park_language", "park_template",
                 "unknown_outcome")
 
 

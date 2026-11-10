@@ -338,7 +338,15 @@ _NOTE_SYSTEM = (
     "paid_claim = says they paid; stop = asked for no more messages);\n"
     '"hold_until": "YYYY-MM-DD" when they named a day to come back, else null;\n'
     '"language": the ISO 639-1 code of the customer\'s last message (en, sw, fr, hi, …);\n'
-    '"open_item_check": the item we told them we are confirming with the team, else null.\n'
+    '"open_item_check": the item we told them we are confirming with the team, else null;\n'
+    '"intent": what they want from this conversation AS A WHOLE, read from what they do, not from '
+    "single words — buyer (asks about items, prices, sizes, delivery, payment, ordering), constrained "
+    "(wants to buy but is short of money or needs time), negotiator (wants a better price or terms), "
+    "assistance (mainly asks for free items, money, a loan or sponsorship, and keeps to that after a "
+    "clear answer, with no step toward buying), social (greetings and blessings only), unclear. Asking "
+    "for a discount, for time, to pay bit by bit or on credit is constrained or negotiator, never "
+    "assistance. Being poor, a pastor, or from any country is not evidence of anything. When in doubt: unclear;\n"
+    '"intent_reason": at most twelve plain words of evidence for that reading, else null.\n'
     "Interest is not agreement. When unsure, choose none / null. Reply with the JSON object only."
 )
 
@@ -359,6 +367,11 @@ def parse_note(raw: str | None) -> dict | None:
            "hold_until": None, "language": None,
            "open_item_check": (str(data.get("open_item_check")).strip()[:120]
                                if data.get("open_item_check") else None)}
+    intent = str(data.get("intent") or "").strip().lower()
+    if intent in ("buyer", "constrained", "negotiator", "assistance", "social", "unclear"):
+        out["intent"] = intent
+        out["intent_reason"] = (" ".join(str(data.get("intent_reason")).split())[:160]
+                                if data.get("intent_reason") else None)
     hu = str(data.get("hold_until") or "").strip()
     if re.match(r"^\d{4}-\d{2}-\d{2}$", hu):
         out["hold_until"] = hu
@@ -592,7 +605,17 @@ async def after_turn(db, conv, deal, *, inbound_text: str, reply: str, transcrip
         source = "none"
     if not reading.get("language"):
         reading["language"] = guess_language(inbound_text)
-    return await apply(db, conv, deal, reading, source=source, inbound_text=inbound_text, now=now)
+    changed = await apply(db, conv, deal, reading, source=source, inbound_text=inbound_text, now=now)
+    # What they want from the conversation as a whole (services/buyer_intent):
+    # the model's reading is stored as evidence; it never closes anything.
+    if reading.get("intent"):
+        try:
+            from app.services import buyer_intent as _bi
+            if await _bi.apply_note(db, conv, reading["intent"], reading.get("intent_reason"), now=now):
+                changed["intent"] = reading["intent"]
+        except Exception:
+            pass
+    return changed
 
 
 async def _transcript(db, conv, limit: int = 12) -> list[tuple[str, str]]:
