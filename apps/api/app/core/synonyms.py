@@ -28,6 +28,16 @@ import re
 # a bare "chain" is NOT a cross (the thurible swings on one).
 FAMILIES: tuple[dict, ...] = (
     {
+        # Owner, 2026-11-10: "What I called Apostolic is Episcopal" — the
+        # large cross worn on the heavy chain is the hub's EPISCOPAL CROSS,
+        # the dearer cross; the Pectoral Cross is the other, simpler one.
+        "hub": "episcopal cross",
+        "said": (
+            r"apostolic\s+cross(?:es)?",
+            r"premium\s+pectoral\s+cross(?:es)?",
+        ),
+    },
+    {
         "hub": "pectoral cross",
         "said": (
             r"cross(?:es)?\s*(?:and|&|\+|with|na|on)\s*(?:a\s+|the\s+)?chains?",
