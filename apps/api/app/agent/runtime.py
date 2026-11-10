@@ -4133,7 +4133,12 @@ def _campaign_facts(caption: str | None) -> str:
             "'hatuuzi viatu', never that it is not ours; the church-goods rule does not apply "
             "to it. Speak of the gift only, and do not digress. Never say win, winner, prize, "
             "lucky, vote, contest, entry, 'good luck' or 'all the best' — say 'selected', "
-            "'the recipient', 'gift'. Never a date, a count or a criterion the caption does "
+            "'the recipient', 'gift'. SOMEONE ASKING TO RECEIVE THE GIFT — for their pastor or "
+            "for themselves ('gift me', 'I nominate myself', 'I cannot afford one') — IS TAKING "
+            "PART: receive it as a nomination, with the same warmth as any other. Never answer "
+            "it with an offer to buy one, and never with a price for this item or one of its "
+            "kind ('if you'd like one for yourself, our cassock is …') — a price is given only "
+            "when THEY ask to buy. Never a date, a count or a criterion the caption does "
             "not state; asked when or how, say our team will be selecting one recipient — "
             "follow us and watch for the details on who's been selected.")
 
@@ -4224,8 +4229,11 @@ def _campaign_continues(caption: str, returning: int, explained: bool) -> str:
             "detail they give is SAVED this turn (capture_contact for the name, role and town; the "
             "church with save_parish; a size with save_measurements) and acknowledged by what "
             "matters, never recited back in full and never with the rules repeated. Ask only for "
-            "something the caption requires that is STILL missing — one thing, and nothing at all "
-            "when they have given it. A question gets its answer, exactly. Asked the price, or to "
+            "something the caption ITSELF asks for that is STILL missing — one thing, and nothing "
+            "at all when they have given it; a church, a town or a full name the caption never "
+            "asked for is not requested. When they have answered what you asked, the exchange is "
+            "complete: a few plain words that it is with us, and no further question. A question "
+            "gets its answer, exactly. Asked the price, or to "
             "buy it: it is a gift — say so in a line. Another item THEY bring up (a cassock, a "
             "collar) may be picked up in one warm line with an invitation to message us — never a "
             "pivot from the gift. Never suggest they have been or will be the one chosen. Never ask "
@@ -4250,12 +4258,16 @@ def _campaign_context(caption: str, returning: int = 0, explained: bool = False)
             "and watch for the details on who's been selected. May we have your name, church and "
             "town so we can reach you if you're the one chosen?' — welcome them by name and "
             "title; the gift in one line; the invitation to follow us; then ask, warmly, for "
-            "whatever the caption asks that they have not yet given (name, church, town, size), "
+            "whatever THIS caption asks that they have not yet given (a name, church, town or size only when its words ask for one), "
             "so we can reach them if they are the one chosen. That reply is the SUBSTANCE of a "
             "FIRST answer, not a script to recite (owner, 2026-11-10): say it in your own words, "
             "and shorter when their comment already nominates someone or gives the details — "
-            "then take what they gave and ask only for what is missing. Never ask for a phone "
-            "number, an address or an email in public. What they have given, confirm and "
+            "then take what they gave and ask only for what is missing. ASK ONLY FOR WHAT THIS "
+            "CAPTION ASKS FOR: the name, church and town in that reply were what ITS post asked. "
+            "If this caption asks for a nomination and their reason, and they have given both, "
+            "there is NOTHING more to ask — do not invent a request for a church, a town or a "
+            "full name the caption never made; our team reaches the person selected. Never ask "
+            "for a phone number, an address or an email in public. What they have given, confirm and "
             "SAVE this turn (capture_contact for the name, role and town; the church with "
             "save_parish; a shoe or garment size with save_measurements). Be specific to their "
             "words, confident, one question at most, in their language. Asked the price, or to "
@@ -6126,6 +6138,28 @@ async def _thread_prior(channel: str, ext: str, post_id: str) -> list[str]:
         return []
 
 
+# Facebook opens a reply inside a thread with the name of whoever is being
+# answered — the Page's own name, as a tag — and Instagram with "@handle".
+# It is an address, not part of what they said: "Bethany House Pentecostal
+# Holiness Church (Potters House)" was read, and recorded, as a church called
+# "Bethany House Pentecostal Holiness Church" (owner's screenshots, 2026-11-10).
+_PAGE_TAG_RE = re.compile(
+    r"^\s*(?:@[\w.]+\s+|@?bethany\s+house\b(?!\s+(?:is|are|was|were|has|have|had|will|"
+    r"team|family|staff|people|ni|mko|mna)\b)[\s,:;\-–—]*)",
+    re.IGNORECASE)
+
+
+def _strip_page_tag(text: str, parent_id: str = "") -> str:
+    """A thread reply's words without the Page tag in front of them. Only a
+    reply inside a thread carries one; a top-level comment is left alone, and
+    so is a sentence ABOUT us ("Bethany House is the best")."""
+    t = (text or "").strip()
+    if not (parent_id and t):
+        return t
+    rest = _PAGE_TAG_RE.sub("", t, count=1).strip()
+    return rest or t
+
+
 def _nothing_to_add(comment: dict) -> bool:
     """A comment that, AFTER we have already answered this person under this
     post, needs no more words (owner, 2026-11-10: "react or remain silent when
@@ -6147,7 +6181,9 @@ async def _run_comment_engage(redis, channel: str, comment: dict, own_pages: set
 
     cid = comment.get("comment_id")
     ext = comment.get("from_id")
-    comment_text = (comment.get("text") or "").strip()
+    comment_text = _strip_page_tag(comment.get("text") or "", str(comment.get("parent_id") or ""))
+    if comment_text != (comment.get("text") or "").strip():
+        comment = dict(comment, text=comment_text)
     first = (comment.get("from_name") or "").strip().split(" ")[0]
     name_tag = f" {first}" if first else ""
 
