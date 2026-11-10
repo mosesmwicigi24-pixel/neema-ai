@@ -1868,7 +1868,14 @@ async def run_turn(db: AsyncSession, redis, wa_id: str, user_text: str, llm: LLM
             await _promo2.granted_promise(redis, channel, key))
     except Exception:
         _promise = ""
+    # Greet only by a person's name: a profile that reads "John 14:14" or
+    # "Grace Ministries" is shown to the writer as what it is, never used as
+    # their name (services/names; the owner's "John 14:14", 2026-11-09).
+    from app.services.names import for_agent as _name_for_agent
+    customer_name, _name_note = _name_for_agent(customer_name)
     tail = customer_context(customer_name, loc.get("country") or "", _promise, clock=True)
+    if _name_note:
+        tail = (tail + "\n" + _name_note) if tail else ("THIS CUSTOMER\n" + _name_note)
     # What THIS message alone brings (a guard's note, a pacing note, a rate the
     # customer just asked for, a link they just shared, the products of late):
     # it rides AFTER the conversation, on the current message — never in the
