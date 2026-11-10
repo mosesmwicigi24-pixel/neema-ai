@@ -192,3 +192,5 @@ and `/api/admin/settings/prompt-inputs` (the 22 flag values).
 ## Decided 2026-11-10 (~06:4x UTC): slice 19 — check the wording with the model, then deploy
 
 The owner's words on the three open decisions of slice 19 (send the Pakistan conversation; check the replies with the model; deploy): "Do all three". Acted on: ONE run of `intent_discernment.jsonl` (8 cases, 14 turns, pass^1, scripted off) on the slice 19 branch, then the merge of PR #366 once its result is read. The Pakistan conversation is the owner's to send; it had not arrived. The general stop on the blind and tuning runs is not lifted by this.
+
+**Superseded ~06:5x UTC, the owner's "Final intelligence refinement":** review four risks; "Do not run additional evaluations or deploy without explicit authorisation." The scheduled merge was cancelled before it ran. The one model run had already finished (12/14; `INTENT_DISCERNMENT.md` §5) and was read; no other was dispatched. PR #366 stays a draft. **Your call:** "merge 366" to deploy; a second pass of the eight cases (well under 2 USD) to see the corrected case 008 with the model, only if you say so.

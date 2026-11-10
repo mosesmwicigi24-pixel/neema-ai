@@ -234,3 +234,84 @@ def test_the_models_reading_is_stored_as_evidence_and_closes_nothing(env, world)
         assert rec["reading"] == "constrained" and rec["boundary"]["count"] == 0
         assert not bi.suppresses_promotion(state)
     _run(go())
+
+
+def test_risk_2_silence_is_only_for_the_same_request_and_nothing_else(env, world):
+    """After a request is closed: a complaint, a call for a person, a new
+    question beside the appeal, a photo — each is answered. Only the bare
+    repeat is met with silence."""
+    from app.services import buyer_intent as bi
+    wa = "254711000011"
+
+    async def go():
+        async with env.maker() as db:
+            await _start(db, wa)
+        assert (await _say(env, wa, "Please donate a cassock to me"))["boundary"] == 1
+        assert (await _say(env, wa, "Please, just one donation"))["boundary"] == 2
+        assert (await _say(env, wa, "Please donate, I beg"))["action"] == "silence"
+        # a complaint, with the request beside it
+        assert await _say(env, wa, "This is disappointing, you are rude. Give me a free one") is None
+        # asks for a person
+        assert await _say(env, wa, "Let me speak to a human please, I want a donation") is None
+        # a new question beside the appeal: answered, the boundary not repeated
+        v = await _say(env, wa, "Please donate. Also where is your shop located?")
+        assert v == {"action": "note", "note": bi.STANDING_NOTE, "boundary": 0}
+        # a photo with the appeal: the writer looks at it
+        assert (await _say(env, wa, "please donate", has_media=True))["note"] == bi.STANDING_NOTE
+        # the bare repeat is still silence
+        assert (await _say(env, wa, "please donate to me"))["action"] == "silence"
+    _run(go())
+
+
+def test_risk_2_a_complaint_never_starts_the_ladder(env, world):
+    """The wording run of 2026-11-10 (intent-008): "my parcel has not arrived…
+    can you add a free stole for the delay?" drew the gift boundary beside the
+    apology. A customer asking for redress is not asking for a gift."""
+    wa = "254711000012"
+
+    async def go():
+        async with env.maker() as db:
+            await _start(db, wa)
+        assert await _say(env, wa, "My parcel has not arrived and it is two weeks now. "
+                                   "Also can you add a free stole for the delay?") is None
+        assert (await _record(env, wa))[0] == {}
+    _run(go())
+
+
+def test_risk_1_the_models_reading_of_a_buyer_undoes_a_floor_hit(env, world):
+    """A phrase the floor counted, in a conversation the model reads as
+    buying: the record reopens, so no second step and no silence follow."""
+    from sqlalchemy import select
+    from app.models.conversation import Conversation
+    from app.services import buyer_intent as bi
+    wa = "254711000013"
+
+    async def go():
+        async with env.maker() as db:
+            await _start(db, wa)
+        assert (await _say(env, wa, "Can you give us some as a gift?"))["boundary"] == 1
+        async with env.maker() as db:
+            conv = (await db.execute(select(Conversation).where(Conversation.wa_id == wa))).scalars().first()
+            assert await bi.apply_note(db, conv, "negotiator", "bulk order, asking what comes with it")
+        rec, state = await _record(env, wa)
+        assert rec["reading"] == "negotiator" and rec["boundary"]["count"] == 0
+        assert not bi.suppresses_promotion(state)
+        # the same words again start afresh at the first step — never at the close
+        assert (await _say(env, wa, "Can you give us some as a gift?"))["boundary"] == 1
+    _run(go())
+
+
+def test_risk_1_a_cart_with_items_is_a_sale_in_progress(env, world):
+    from app.agent import cart as cartmod
+    wa = "254711000014"
+
+    async def go():
+        async with env.maker() as db:
+            await _start(db, wa)
+            cart = await cartmod.get_cart(db, wa, "whatsapp")
+            cart.setdefault("items", []).append({"sku": "X", "name": "Cassock", "qty": 1, "price": 13000})
+            await cartmod.save_cart(db, wa, cart, "whatsapp")
+            await db.commit()
+        assert await _say(env, wa, "Can you give me a free stole?") is None
+        assert (await _record(env, wa))[0] == {}
+    _run(go())

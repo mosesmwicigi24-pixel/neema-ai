@@ -18,7 +18,6 @@ ASKS = [
     "We need sponsorship for our choir robes",
     "naomba zawadi ya kasoki",
     "Nipe bure tafadhali",
-    "Please send me a free sample",
     "Bless me with one alb, I can't pay",
     "lend me the money",
     "Can you help our ministry financially",
@@ -61,6 +60,23 @@ NOT_ASKS = [
     "I am saving for an alb, will order next month",
     "I can't afford it now",
     "It is too expensive for our small church",
+    # owner's review of 2026-11-10, risk 1: samples, complimentary shipping,
+    # promotions, donors and other commercial uses of the same words
+    "Can I get a free sample to check the fabric?",
+    "Please send me a free sample",
+    "Do you have fabric swatches?",
+    "Is shipping complimentary?",
+    "Do you give a free stole with the cassock set?",
+    "Is the collar free with the shirt?",
+    "Any promotion or free gift this month?",
+    "Buy 10 get one free?",
+    "Does it come with a free belt",
+    "Is the stole included free?",
+    "Is it free?",
+    "We are buying 20 cassocks for a donation to an orphanage",
+    "We are donating robes to a village church, do you deliver there?",
+    "Do you accept donations for needy pastors?",
+    "Do you have church pricing or a tax exempt invoice?",
     "",
 ]
 
@@ -122,12 +138,18 @@ def test_the_record_is_neutral_reversible_and_capped():
     assert len(bi.record(st)["history"]) <= bi.HISTORY_MAX
 
 
-def test_a_boundary_ages_out_of_its_window():
+def test_a_boundary_ages_out_of_its_window_but_promotion_stays_held():
+    """Risk 3: thirty days age the REPLY ladder (a new request is answered
+    afresh). They never switch unsolicited sales messages back on — only the
+    person's own purchase step does."""
     st, _ = bi.step({}, reason="asked", now=NOW)
     st, _ = bi.step(st, reason="asked again", now=NOW)
     later = NOW + timedelta(days=bi.WINDOW_DAYS + 1)
     assert bi.boundary(bi.record(st), now=later) == {"count": 0, "closed": False, "last_at": None}
-    assert not bi.suppresses_promotion(st, now=later)
+    assert bi.suppresses_promotion(st, now=later)
+    assert bi.suppresses_promotion(st, now=NOW + timedelta(days=400))
+    bought, _ = bi.reopen(st, reason="asked a price", now=later)
+    assert not bi.suppresses_promotion(bought, now=later)
     st, n = bi.step(st, reason="a new request months later", now=later)
     assert n == 1 and bi.record(st)["boundary"]["closed"] is False      # answered afresh, never held against them
 
@@ -197,3 +219,41 @@ def test_the_live_turn_and_the_dispatcher_are_wired():
     i = a.index("_bi.suppresses_promotion(_p.state, now=now)")
     assert 'if message_class(action) == "routine":' in a[i - 400:i]                 # never a promise or an order
     assert "hold_intent" in outreach_log.TALLY_FIELDS
+
+
+def test_what_is_never_part_of_the_ladder():
+    """Risk 2: a complaint, a payment claim, a request for a person or an
+    opt-out is answered by its own path, with or without a request beside it."""
+    assert bi.protected("My parcel has not arrived and it is two weeks now. Also can you add a "
+                        "free stole for the delay?") == "complaint"
+    assert bi.protected("I have paid, now give me a free gift") == "payment claim"
+    assert bi.protected("I want to talk to a human, give me a gift") == "asks for a person"
+    assert bi.protected("stop messaging me") == "opt-out"
+    assert bi.protected("please give me a gift") is None and bi.protected("") is None
+
+
+def test_a_new_question_beside_the_request_is_never_met_with_silence():
+    assert bi.new_subject("Please give me a gift. And where is your shop located?")
+    assert bi.new_subject("I am poor. Do you make choir robes for children?")
+    assert not bi.new_subject("Please help me, will you give me a gift?")       # the same request, as a question
+    assert not bi.new_subject("please please remember me, I am poor")
+    assert not bi.new_subject("ok?")
+
+
+def test_the_notes_defer_to_the_whole_conversation():
+    """Risk 1: the floor is a prompt to look, never the verdict."""
+    assert "Read it in the WHOLE conversation first" in bi.FIRST_NOTE
+    assert "a sample to check the cloth" in bi.FIRST_NOTE and "answer that question normally" in bi.FIRST_NOTE
+    assert "asks something new" in bi.SECOND_NOTE and "answer that and ignore this note" in bi.SECOND_NOTE
+
+
+def test_every_automated_sales_path_reads_the_same_hold():
+    """Risk 3: the dispatcher (every planned follow-up) and the seasonal
+    campaign job, the one sender outside it."""
+    import inspect
+    from app.jobs import seasonal_outreach
+    from app.services import actions
+    assert "_bi.suppresses_promotion(_p.state, now=now)" in inspect.getsource(actions)
+    src = inspect.getsource(seasonal_outreach._handle)
+    assert "_bi.suppresses_promotion(_p.state)" in src
+    assert src.index("suppresses_promotion") < src.index("year_key =")        # before anything is spent or sent

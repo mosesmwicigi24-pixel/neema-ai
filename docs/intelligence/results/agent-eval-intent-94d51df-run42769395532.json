@@ -1,0 +1,1116 @@
+{
+ "started": "2026-11-10T06:35:03.312274+00:00",
+ "selection": "file:intent_discernment.jsonl",
+ "file": "intent_discernment.jsonl",
+ "repeat": 1,
+ "git_sha": "94d51df08d21c00e21327a5357ba3f24b924ab3d",
+ "case_set": "e7ebeffc02ab",
+ "cases": 8,
+ "models": {
+  "producer": "claude-sonnet-5-5",
+  "light": "claude-haiku-5-5",
+  "reviewer": "claude-sonnet-5",
+  "reviewer_light": "claude-haiku-4-5"
+ },
+ "prompt_revision": {
+  "prompt_py": "373a63dbd695",
+  "directives": "e3b0c44298fc",
+  "directives_chars": 0,
+  "learned_rules": "e3b0c44298fc",
+  "learned_rules_chars": 0,
+  "house_voice": "e3b0c44298fc",
+  "house_voice_chars": 0
+ },
+ "results": [
+  {
+   "id": "intent-001",
+   "repeat": 1,
+   "contact": "…9001",
+   "source": "developer",
+   "turns": [
+    {
+     "i": 0,
+     "user": "Hello, how much is the ordination gown?",
+     "reply": "Hello, welcome to Bethany House. The Ordination Gown is $130, made to your measurements in our Nairobi workshop. Kindly place your order. Which colour would you like?",
+     "next": "quote",
+     "critical": true,
+     "categories": [
+      "emotional",
+      "cultural",
+      "unsuccessful-sale"
+     ],
+     "lang": "en",
+     "latency_s": 15.76,
+     "error": null,
+     "door": null,
+     "tool_outs": [
+      {
+       "tool": "search_catalog",
+       "input": {
+        "query": "ordination gown",
+        "currency": "USD"
+       },
+       "out": "{\"count\": 1, \"currency\": \"USD\", \"results\": [{\"name\": \"Ordination Gown\", \"sku\": \"UE81UOJY5\", \"category\": \"Gowns\", \"made_to_order\": true, \"availability\": \"available\", \"price\": 130, \"currency\": \"USD\", \"details\": \"Made-to-measure ordination gown tailored in Nairobi — a dignified robe for the day your calling is confirmed.\", \"goes_with\": [{\"name\": \"Single Sided Stole\", \"price\": 25}, {\"name\": \"Skull Cap\", \"price\": 15}], \"goes_with_note\": \"the natural companions, cheapest of each kind — ONE of them may be your one suggestion once the order for THIS item is settled, at the price shown; never before the price of what they asked for\", \"measurements_needed\": \"Neck, Shoulder Width, Sleeve Length, Wrist, Chest, Stomach, Full Length — in cm\", \"variants\": [{\"label\": \"Ordination Gown — Black\", \"options\": {\"Size\": \"XS\", \"Colour\": \"Black\"}, \"sku\": \"UE81UOJY5-XS-BLA\", \"price\": 130}, {\"label\": \"Ordination Gown — White\", \"options\": {\"Size\": \"XS\", \"Colour\": \"White\"}, \"sku\": \"UE81UOJY5-XS-WHI\", \"price\": 130}, {\"label\": \"Ordination Gown — Navy\", \"options\": {\"Size\": \"XS\", \"Colour\": \"Navy\"}, \"sku\": \"UE81UOJY5-XS-NAV\", \"price\": 130}, {\"label\": \"Ordination Gown — Red\", \"options\": {\"Size\": \"XS\", \"Colour\": \"Red",
+       "truncated": true
+      },
+      {
+       "tool": "send_product_cards",
+       "input": {
+        "products": [
+         "Ordination Gown"
+        ]
+       },
+       "out": "{\"ok\": true, \"sandbox\": true, \"sent\": 0, \"note\": \"eval sandbox — cards recorded, not sent\"}",
+       "truncated": false
+      }
+     ],
+     "verdict": {
+      "passed": true,
+      "failures": [],
+      "observations": {
+       "words": 27,
+       "sentences": 4,
+       "questions": 1,
+       "target_words": 25,
+       "target_kind": "short",
+       "over_target": false,
+       "internal_talk": [],
+       "figures": [
+        130.0
+       ],
+       "unverified": [],
+       "tools": [
+        "search_catalog",
+        "send_product_cards"
+       ],
+       "review": "pass",
+       "language_ok": true,
+       "silent": false,
+       "opted_out": false,
+       "intercept_mode": "ai",
+       "judge": []
+      }
+     }
+    },
+    {
+     "i": 1,
+     "user": "I am a poor pastor in Pakistan, our church is small. Please bless me with one as a gift, I have no money.",
+     "reply": "Thank you for sharing this, Pastor. May God strengthen you and your ministry. Bethany House is a business, so we are not able to give items free of charge. Whenever you are ready to order, we will be glad to serve you. God bless you.",
+     "next": "answer",
+     "critical": true,
+     "categories": [
+      "emotional",
+      "cultural",
+      "unsuccessful-sale"
+     ],
+     "lang": "en",
+     "latency_s": 1.83,
+     "error": null,
+     "door": null,
+     "tool_outs": [],
+     "verdict": {
+      "passed": true,
+      "failures": [],
+      "observations": {
+       "words": 45,
+       "sentences": 5,
+       "questions": 0,
+       "target_words": 45,
+       "target_kind": "default",
+       "over_target": false,
+       "internal_talk": [],
+       "figures": [],
+       "unverified": [],
+       "tools": [],
+       "review": "pass",
+       "language_ok": true,
+       "silent": false,
+       "opted_out": false,
+       "intercept_mode": "ai",
+       "judge": []
+      }
+     }
+    },
+    {
+     "i": 2,
+     "user": "Please have mercy, God will reward you. Remember us, we are suffering.",
+     "reply": "I hear you, Pastor, and I am sorry for the hardship you carry. May the Lord sustain you and your church.",
+     "next": "answer",
+     "critical": true,
+     "categories": [
+      "emotional",
+      "cultural",
+      "unsuccessful-sale"
+     ],
+     "lang": "en",
+     "latency_s": 4.53,
+     "error": null,
+     "door": null,
+     "tool_outs": [
+      {
+       "tool": "pause_conversation",
+       "input": {},
+       "out": "{\"ok\": true, \"paused_hours\": 2}",
+       "truncated": false
+      },
+      {
+       "tool": "add_tags",
+       "input": {
+        "tags": [
+         "clergy",
+         "gown"
+        ]
+       },
+       "out": "{\"ok\": true, \"tags\": [\"Pakistan\", \"clergy\", \"gown\"]}",
+       "truncated": false
+      }
+     ],
+     "verdict": {
+      "passed": true,
+      "failures": [],
+      "observations": {
+       "words": 21,
+       "sentences": 2,
+       "questions": 0,
+       "target_words": 45,
+       "target_kind": "default",
+       "over_target": false,
+       "internal_talk": [],
+       "figures": [],
+       "unverified": [],
+       "tools": [
+        "pause_conversation",
+        "add_tags"
+       ],
+       "review": "pass",
+       "language_ok": true,
+       "silent": false,
+       "opted_out": false,
+       "intercept_mode": "ai",
+       "judge": []
+      }
+     }
+    }
+   ],
+   "staged": null
+  },
+  {
+   "id": "intent-002",
+   "repeat": 1,
+   "contact": "…9002",
+   "source": "developer",
+   "turns": [
+    {
+     "i": 0,
+     "user": "How much is the alb?",
+     "reply": "Good morning. Our Alb is KES 8,500, a simple white full-length, long-sleeved alb. How many do you need?",
+     "next": "quote",
+     "critical": true,
+     "categories": [
+      "price-objection",
+      "delay"
+     ],
+     "lang": "en",
+     "latency_s": 3.0,
+     "error": null,
+     "door": null,
+     "tool_outs": [
+      {
+       "tool": "search_catalog",
+       "input": {
+        "query": "alb",
+        "currency": "KES"
+       },
+       "out": "{\"count\": 2, \"currency\": \"KES\", \"results\": [{\"name\": \"Alb\", \"sku\": \"CLE-A-001\", \"category\": \"Clergy Vestments\", \"made_to_order\": false, \"availability\": \"available\", \"price\": 8500.0, \"currency\": \"KES\", \"details\": \"A simple white full-length, long-sleeved alb — the garment of baptismal purity for servers, lectors, deacons and priests.\", \"goes_with\": [{\"name\": \"Cincture Rope\", \"price\": 2000.0}, {\"name\": \"Single Sided Stole\", \"price\": 2500.0}], \"goes_with_note\": \"the natural companions, cheapest of each kind — ONE of them may be your one suggestion once the order for THIS item is settled, at the price shown; never before the price of what they asked for\", \"ask_next\": \"stock item — every detail is fixed and in `details` (colour in the name, capacity, pack size): state them, never ask colour or size; ask only how many, how soon and the delivery city — one per reply\"}, {\"name\": \"Cincture Rope\", \"sku\": \"537OU8Q5Z\", \"category\": \"Clergy Vestments\", \"made_to_order\": false, \"availability\": \"available\", \"price\": 2000.0, \"currency\": \"KES\", \"details\": \"Tasselled cincture rope, 118 inches with 4-inch tassels, proudly made in Kenya — girds the alb or cassock for service.\", \"variants\": [{\"label\": \"C",
+       "truncated": true
+      },
+      {
+       "tool": "send_product_cards",
+       "input": {
+        "products": [
+         "Alb"
+        ]
+       },
+       "out": "{\"ok\": true, \"sandbox\": true, \"sent\": 0, \"note\": \"eval sandbox — cards recorded, not sent\"}",
+       "truncated": false
+      }
+     ],
+     "verdict": {
+      "passed": true,
+      "failures": [],
+      "observations": {
+       "words": 18,
+       "sentences": 3,
+       "questions": 1,
+       "target_words": 25,
+       "target_kind": "short",
+       "over_target": false,
+       "internal_talk": [],
+       "figures": [
+        8500.0
+       ],
+       "unverified": [],
+       "tools": [
+        "search_catalog",
+        "send_product_cards"
+       ],
+       "review": "pass",
+       "language_ok": true,
+       "silent": false,
+       "opted_out": false,
+       "intercept_mode": "ai",
+       "judge": []
+      }
+     }
+    },
+    {
+     "i": 1,
+     "user": "That is a lot for me now. I am saving little by little, I will order next month.",
+     "reply": "Thank you for telling me. Saving little by little is a wise way to prepare. I'll check in with you on 1 December, and when you're ready to order the Alb, just say the word and we will begin.",
+     "next": "hold_ack",
+     "critical": true,
+     "categories": [
+      "price-objection",
+      "delay"
+     ],
+     "lang": "en",
+     "latency_s": 18.7,
+     "error": null,
+     "door": null,
+     "tool_outs": [
+      {
+       "tool": "schedule_check_in",
+       "input": {
+        "days_from_now": 21,
+        "reason": "Customer is saving little by little for the Alb (KES 8,500) and plans to order next month; check in at the start of next month. Colour and measurements still needed.",
+        "about": "purchase_decision"
+       },
+       "out": "{\"ok\": true, \"check_in_on\": \"01 Dec 2026\", \"about\": \"purchase_decision\", \"already_booked\": false, \"note\": \"booked — now tell them plainly you'll check in then\"}",
+       "truncated": false
+      },
+      {
+       "tool": "search_catalog",
+       "input": {
+        "query": "lot saving little little will next",
+        "by": "reviewer"
+       },
+       "out": "{\"count\": 0, \"currency\": \"KES\", \"results\": []}",
+       "truncated": false
+      }
+     ],
+     "verdict": {
+      "passed": false,
+      "failures": [
+       "pitched after a request for time"
+      ],
+      "observations": {
+       "words": 39,
+       "sentences": 3,
+       "questions": 0,
+       "target_words": 45,
+       "target_kind": "default",
+       "over_target": false,
+       "internal_talk": [],
+       "figures": [],
+       "unverified": [],
+       "tools": [
+        "schedule_check_in",
+        "search_catalog"
+       ],
+       "review": "rewritten",
+       "language_ok": true,
+       "silent": false,
+       "opted_out": false,
+       "intercept_mode": "ai",
+       "judge": []
+      }
+     }
+    }
+   ],
+   "staged": null
+  },
+  {
+   "id": "intent-003",
+   "repeat": 1,
+   "contact": "…9003",
+   "source": "developer",
+   "turns": [
+    {
+     "i": 0,
+     "user": "We need 30 cassocks for the diocese. What is your best price?",
+     "reply": "Our Cassock is KES 13,000 per piece, made to measure in Nairobi in any colour you choose. No offer is running today, so that is our price. Which colour does the diocese want?",
+     "next": "quote",
+     "critical": true,
+     "categories": [
+      "org-purchase",
+      "price-objection"
+     ],
+     "lang": "en",
+     "latency_s": 7.92,
+     "error": null,
+     "door": null,
+     "tool_outs": [
+      {
+       "tool": "search_catalog",
+       "input": {
+        "query": "cassock",
+        "currency": "KES"
+       },
+       "out": "{\"count\": 8, \"currency\": \"KES\", \"results\": [{\"name\": \"White Princes Cassock\", \"sku\": \"CLE-PCB-001\", \"category\": \"Clergy Vestments\", \"made_to_order\": true, \"availability\": \"available\", \"price\": 13000.0, \"currency\": \"KES\", \"details\": \"White ladies' princess cassock for festal seasons — Christmas, Easter, weddings and celebration Sundays, made to order in Nairobi.\", \"part_of_set\": {\"name\": \"Classic Princes Cassock Set\", \"price\": 19000.0, \"comes_with\": [\"cassock\", \"shirt\", \"collar\", \"stole\", \"cincture belt\"], \"note\": \"also sold inside this set — under a set post, or when they ask about the piece and the set, give the piece's own price AND the set's total in one reply\"}, \"goes_with\": [{\"name\": \"Single Sided Stole\", \"price\": 2500.0}, {\"name\": \"CINCTURE BELT\", \"price\": 2200.0}, {\"name\": \"BIB Clerical Shirt\", \"price\": 1500.0}], \"goes_with_note\": \"the natural companions, cheapest of each kind — ONE of them may be your one suggestion once the order for THIS item is settled, at the price shown; never before the price of what they asked for\", \"measurements_needed\": \"Neck, Shoulders, Sleeves, Wrist, Arm Hole, Upper Arm, Bodice, Waist, Hips, Blouse Length, Full Length — in inches\", \"variants\": [",
+       "truncated": true
+      },
+      {
+       "tool": "apply_offer",
+       "input": {
+        "product": "Cassock"
+       },
+       "out": "{\"offer\": null, \"say\": \"There is no offer running — do not invent one. Hold the price warmly, sell the value, and hand off if they press.\"}",
+       "truncated": false
+      }
+     ],
+     "verdict": {
+      "passed": true,
+      "failures": [],
+      "observations": {
+       "words": 33,
+       "sentences": 3,
+       "questions": 1,
+       "target_words": 35,
+       "target_kind": "question",
+       "over_target": false,
+       "internal_talk": [],
+       "figures": [
+        13000.0
+       ],
+       "unverified": [],
+       "tools": [
+        "search_catalog",
+        "apply_offer"
+       ],
+       "review": "soft",
+       "language_ok": true,
+       "silent": false,
+       "opted_out": false,
+       "intercept_mode": "ai",
+       "judge": []
+      }
+     }
+    },
+    {
+     "i": 1,
+     "user": "That is too high. Other suppliers are cheaper, give us a discount and we order today.",
+     "reply": "I understand. There is no offer running that I can apply, and our price is for cassocks tailored to each wearer's measurements in our Nairobi workshop. For a 30-piece order I have asked a colleague to talk through the terms with you. Meanwhile, which colour does the diocese want?",
+     "next": "answer",
+     "critical": true,
+     "categories": [
+      "org-purchase",
+      "price-objection"
+     ],
+     "lang": "en",
+     "latency_s": 8.94,
+     "error": null,
+     "door": null,
+     "tool_outs": [
+      {
+       "tool": "apply_offer",
+       "input": {
+        "product": "Cassock"
+       },
+       "out": "{\"offer\": null, \"say\": \"There is no offer running — do not invent one. Hold the price warmly, sell the value, and hand off if they press.\"}",
+       "truncated": false
+      },
+      {
+       "tool": "handoff_to_human",
+       "input": {
+        "reason": "Diocese wants 30 Cassocks (KES 13,000 each), says other suppliers are cheaper and asks for a bulk discount, ready to order today. No offer is running; needs a colleague to discuss bulk terms. Colour not yet given."
+       },
+       "out": "{\"ok\": true, \"reason\": \"Diocese wants 30 Cassocks (KES 13,000 each), says other suppliers are cheaper and asks for a bulk discount, ready to order today. No offer is running; needs a colleague to discuss bulk terms. Colour not yet given.\", \"team_told\": true}",
+       "truncated": false
+      }
+     ],
+     "verdict": {
+      "passed": true,
+      "failures": [],
+      "observations": {
+       "words": 49,
+       "sentences": 4,
+       "questions": 1,
+       "target_words": 45,
+       "target_kind": "default",
+       "over_target": false,
+       "internal_talk": [],
+       "figures": [],
+       "unverified": [],
+       "tools": [
+        "apply_offer",
+        "handoff_to_human"
+       ],
+       "review": "pass",
+       "language_ok": true,
+       "silent": false,
+       "opted_out": false,
+       "intercept_mode": "human",
+       "judge": []
+      }
+     }
+    }
+   ],
+   "staged": null
+  },
+  {
+   "id": "intent-004",
+   "repeat": 1,
+   "contact": "…9004",
+   "source": "developer",
+   "turns": [
+    {
+     "i": 0,
+     "user": "Praise God. I am an evangelist, kindly give me a free cassock for the ministry.",
+     "reply": "Praise God, and thank you for sharing your calling with us, Evangelist. May He strengthen you and your ministry. Bethany House is a business, so we are not able to give items free of charge. Whenever you are ready to order a cassock, we will be glad to serve you.",
+     "next": "answer",
+     "critical": true,
+     "categories": [
+      "emotional",
+      "cultural"
+     ],
+     "lang": "en",
+     "latency_s": 2.71,
+     "error": null,
+     "door": null,
+     "tool_outs": [],
+     "verdict": {
+      "passed": true,
+      "failures": [],
+      "observations": {
+       "words": 50,
+       "sentences": 4,
+       "questions": 0,
+       "target_words": 45,
+       "target_kind": "default",
+       "over_target": false,
+       "internal_talk": [],
+       "figures": [],
+       "unverified": [],
+       "tools": [],
+       "review": "pass",
+       "language_ok": true,
+       "silent": false,
+       "opted_out": false,
+       "intercept_mode": "ai",
+       "judge": []
+      }
+     }
+    }
+   ],
+   "staged": null
+  },
+  {
+   "id": "intent-005",
+   "repeat": 1,
+   "contact": "…9005",
+   "source": "developer",
+   "turns": [
+    {
+     "i": 0,
+     "user": "How much is a clergy shirt?",
+     "reply": "Good morning, and welcome to Bethany House. The Straight Collar Shirt is KES 2,500 and the Round Collar Clergy Shirt is KES 3,000. Which would you like?",
+     "next": "quote",
+     "critical": true,
+     "categories": [
+      "price-objection",
+      "uncertain-info"
+     ],
+     "lang": "en",
+     "latency_s": 9.61,
+     "error": null,
+     "door": null,
+     "tool_outs": [
+      {
+       "tool": "search_catalog",
+       "input": {
+        "query": "clergy shirt",
+        "currency": "KES"
+       },
+       "out": "{\"count\": 5, \"currency\": \"KES\", \"results\": [{\"name\": \"Round Collar Clergy Shirt\", \"sku\": \"SF-SHT-01\", \"category\": \"Vestments\", \"made_to_order\": true, \"availability\": \"available\", \"price\": 3000.0, \"currency\": \"KES\", \"details\": \"Clergy shirt with the full round collar — the white band showing all round for a clean, classic ministerial look.\", \"part_of_set\": {\"name\": \"Cassock Set\", \"price\": 19500.0, \"comes_with\": [\"cassock\", \"stole\", \"belt\", \"straight collar shirt\", \"12 inch clergy collar\"], \"note\": \"also sold inside this set — under a set post, or when they ask about the piece and the set, give the piece's own price AND the set's total in one reply\"}, \"goes_with\": [{\"name\": \"Straight Collar\", \"price\": 800.0}], \"goes_with_note\": \"the natural companions, cheapest of each kind — ONE of them may be your one suggestion once the order for THIS item is settled, at the price shown; never before the price of what they asked for\", \"measurements_needed\": \"Neck, Shoulders, Sleeves, Wrist, Arm Hole, Upper Arm, Bodice, Waist, Hips, Blouse Length, Full Length, Shoulder Width, Sleeve Length — in inches\", \"ask_next\": \"made to order — the open details are the customer's: ask the colour first, then the",
+       "truncated": true
+      },
+      {
+       "tool": "send_product_cards",
+       "input": {
+        "products": [
+         "Round Collar Clergy Shirt",
+         "Straight Collar Shirt"
+        ]
+       },
+       "out": "{\"ok\": true, \"sandbox\": true, \"sent\": 0, \"note\": \"eval sandbox — cards recorded, not sent\"}",
+       "truncated": false
+      }
+     ],
+     "verdict": {
+      "passed": true,
+      "failures": [],
+      "observations": {
+       "words": 27,
+       "sentences": 3,
+       "questions": 1,
+       "target_words": 25,
+       "target_kind": "short",
+       "over_target": false,
+       "internal_talk": [],
+       "figures": [
+        2500.0,
+        3000.0
+       ],
+       "unverified": [],
+       "tools": [
+        "search_catalog",
+        "send_product_cards"
+       ],
+       "review": "rewritten",
+       "language_ok": true,
+       "silent": false,
+       "opted_out": false,
+       "intercept_mode": "ai",
+       "judge": []
+      }
+     }
+    },
+    {
+     "i": 1,
+     "user": "Can you send it today and I pay on Sunday after the offering?",
+     "reply": "Payment comes before dispatch, so we can't send it ahead of Sunday. I've asked the team about a ready shirt for same-day dispatch and will come back shortly. Which shirt would you like, the Straight Collar Shirt or the Round Collar Clergy Shirt?",
+     "next": "answer",
+     "critical": true,
+     "categories": [
+      "price-objection",
+      "uncertain-info"
+     ],
+     "lang": "en",
+     "latency_s": 29.71,
+     "error": null,
+     "door": null,
+     "tool_outs": [
+      {
+       "tool": "check_availability",
+       "input": {
+        "item": "Ready-made clergy shirt for same-day dispatch"
+       },
+       "out": "{\"ok\": true, \"item\": \"Ready-made clergy shirt for same-day dispatch\", \"team_check_open\": true, \"note\": \"The team has been asked to confirm. Tell them you're checking and will come back shortly — never that we don't have it, and not that we do either (no 'yes, we sell / have it' until the team answers). Until the team's answer is in this chat, do NOT ask them to start, confirm or pay for THIS item (no 'shall I start the order?' for it); serve the rest of their list meanwhile — and in the SAME message show the closest items from the same family.\"}",
+       "truncated": false
+      },
+      {
+       "tool": "search_catalog",
+       "input": {
+        "query": "send pay sunday after offering",
+        "by": "reviewer"
+       },
+       "out": "{\"count\": 3, \"currency\": \"KES\", \"results\": [{\"name\": \"Offering basket\", \"sku\": \"CLE-OB-001\", \"category\": \"Clergy Accessories\", \"made_to_order\": false, \"availability\": \"available\", \"price\": 4500.0, \"currency\": \"KES\", \"match\": \"partial\", \"caution\": \"only SOME of their words match this row — confirm it is the item they mean (or what the photo shows) before you quote it; never present a partial match as THE item\", \"details\": \"The classic offering basket — light, dignified and sized for every row as the congregation brings its gifts.\", \"ask_next\": \"stock item — every detail is fixed and in `details` (colour in the name, capacity, pack size): state them, never ask colour or size; ask only how many, how soon and the delivery city — one per reply\"}, {\"name\": \"Large offering basket\", \"sku\": \"CLE-LOB-001\", \"category\": \"Clergy Accessories\", \"made_to_order\": false, \"availability\": \"available\", \"price\": 6000.0, \"currency\": \"KES\", \"match\": \"partial\", \"caution\": \"only SOME of their words match this row — confirm it is the item they mean (or what the photo shows) before you quote it; never present a partial match as THE item\", \"details\": \"The large offering basket — generous, handsome and steady i",
+       "truncated": true
+      }
+     ],
+     "verdict": {
+      "passed": true,
+      "failures": [],
+      "observations": {
+       "words": 43,
+       "sentences": 3,
+       "questions": 1,
+       "target_words": 25,
+       "target_kind": "short",
+       "over_target": true,
+       "internal_talk": [],
+       "figures": [],
+       "unverified": [],
+       "tools": [
+        "check_availability",
+        "search_catalog"
+       ],
+       "review": "rewritten",
+       "language_ok": true,
+       "silent": false,
+       "opted_out": false,
+       "intercept_mode": "ai",
+       "judge": []
+      }
+     }
+    }
+   ],
+   "staged": null
+  },
+  {
+   "id": "intent-006",
+   "repeat": 1,
+   "contact": "…9006",
+   "source": "developer",
+   "turns": [
+    {
+     "i": 0,
+     "user": "Can you donate robes to our choir?",
+     "reply": "Thank you for thinking of us, and God bless your choir's ministry. Bethany House is a business, so we cannot donate or give items free. We would be glad to serve you whenever you are ready to order.",
+     "next": "answer",
+     "critical": true,
+     "categories": [
+      "intent-change",
+      "successful-sale"
+     ],
+     "lang": "en",
+     "latency_s": 1.79,
+     "error": null,
+     "door": null,
+     "tool_outs": [],
+     "verdict": {
+      "passed": true,
+      "failures": [],
+      "observations": {
+       "words": 38,
+       "sentences": 3,
+       "questions": 0,
+       "target_words": 25,
+       "target_kind": "short",
+       "over_target": true,
+       "internal_talk": [],
+       "figures": [],
+       "unverified": [],
+       "tools": [],
+       "review": "pass",
+       "language_ok": true,
+       "silent": false,
+       "opted_out": false,
+       "intercept_mode": "ai",
+       "judge": []
+      }
+     }
+    },
+    {
+     "i": 1,
+     "user": "Good morning. How much is one choir robe? We want to order 12.",
+     "reply": "Good morning. For choirs we make the White Cassock at $130 each, so $1,560 for 12. We also have the Canon Gown at $130 each. Which would you like?",
+     "next": "quote",
+     "critical": true,
+     "categories": [
+      "intent-change",
+      "successful-sale"
+     ],
+     "lang": "en",
+     "latency_s": 7.56,
+     "error": null,
+     "door": null,
+     "tool_outs": [
+      {
+       "tool": "search_catalog",
+       "input": {
+        "query": "choir robe"
+       },
+       "out": "{\"count\": 2, \"currency\": \"USD\", \"results\": [{\"name\": \"Canon Gown\", \"sku\": \"M3BXRUQJC\", \"category\": \"Clergy Vestments\", \"made_to_order\": true, \"availability\": \"available\", \"price\": 130, \"currency\": \"USD\", \"details\": \"Canon gown tailored in Nairobi for Catholic fathers — made-to-measure choir dress for canons and cathedral clergy.\", \"goes_with\": [{\"name\": \"Single Sided Stole\", \"price\": 25}, {\"name\": \"Skull Cap\", \"price\": 15}], \"goes_with_note\": \"the natural companions, cheapest of each kind — ONE of them may be your one suggestion once the order for THIS item is settled, at the price shown; never before the price of what they asked for\", \"measurements_needed\": \"Neck, Shoulder Width, Sleeve Length, Wrists, Chest, Stomach, Length, Full Length — in cm\", \"variants\": [{\"label\": \"Canon Gown — Black with Purple Buttons\", \"options\": {\"Color\": \"Black with Purple Buttons\"}, \"sku\": \"M3BXRUQJC-V30\", \"price\": 130}], \"variant_note\": \"the hub shows one figure for every variant: ask which size/colour they want, then quote that variant. NEVER say 'all sizes / colours are the same price' — quote the price once, for their choice.\", \"ask_next\": \"made to order — the open details are the customer's: ask t",
+       "truncated": true
+      },
+      {
+       "tool": "search_catalog",
+       "input": {
+        "query": "choir gown"
+       },
+       "out": "{\"count\": 1, \"currency\": \"USD\", \"results\": [{\"name\": \"Canon Gown\", \"sku\": \"M3BXRUQJC\", \"category\": \"Clergy Vestments\", \"made_to_order\": true, \"availability\": \"available\", \"price\": 130, \"currency\": \"USD\", \"details\": \"Canon gown tailored in Nairobi for Catholic fathers — made-to-measure choir dress for canons and cathedral clergy.\", \"goes_with\": [{\"name\": \"Single Sided Stole\", \"price\": 25}, {\"name\": \"Skull Cap\", \"price\": 15}], \"goes_with_note\": \"the natural companions, cheapest of each kind — ONE of them may be your one suggestion once the order for THIS item is settled, at the price shown; never before the price of what they asked for\", \"measurements_needed\": \"Neck, Shoulder Width, Sleeve Length, Wrists, Chest, Stomach, Length, Full Length — in cm\", \"variants\": [{\"label\": \"Canon Gown — Black with Purple Buttons\", \"options\": {\"Color\": \"Black with Purple Buttons\"}, \"sku\": \"M3BXRUQJC-V30\", \"price\": 130}], \"variant_note\": \"the hub shows one figure for every variant: ask which size/colour they want, then quote that variant. NEVER say 'all sizes / colours are the same price' — quote the price once, for their choice.\", \"ask_next\": \"made to order — the open details are the customer's: ask t",
+       "truncated": true
+      }
+     ],
+     "verdict": {
+      "passed": true,
+      "failures": [],
+      "observations": {
+       "words": 29,
+       "sentences": 4,
+       "questions": 1,
+       "target_words": 35,
+       "target_kind": "question",
+       "over_target": false,
+       "internal_talk": [],
+       "figures": [
+        130.0,
+        1560.0
+       ],
+       "unverified": [],
+       "tools": [
+        "search_catalog",
+        "search_catalog"
+       ],
+       "review": "pass",
+       "language_ok": true,
+       "silent": false,
+       "opted_out": false,
+       "intercept_mode": "ai",
+       "judge": []
+      }
+     }
+    }
+   ],
+   "staged": null
+  },
+  {
+   "id": "intent-007",
+   "repeat": 1,
+   "contact": "…9007",
+   "source": "developer",
+   "turns": [
+    {
+     "i": 0,
+     "user": "Good morning, God bless you and the team",
+     "reply": "Good morning, and God bless you too. Welcome to Bethany House. What are you looking for today?",
+     "next": "answer",
+     "critical": false,
+     "categories": [
+      "cultural",
+      "needs-silence"
+     ],
+     "lang": "en",
+     "latency_s": 0.89,
+     "error": null,
+     "door": null,
+     "tool_outs": [],
+     "verdict": {
+      "passed": true,
+      "failures": [],
+      "observations": {
+       "words": 17,
+       "sentences": 3,
+       "questions": 1,
+       "target_words": 45,
+       "target_kind": "default",
+       "over_target": false,
+       "internal_talk": [],
+       "figures": [],
+       "unverified": [],
+       "tools": [],
+       "review": "pass",
+       "language_ok": true,
+       "silent": false,
+       "opted_out": false,
+       "intercept_mode": "ai",
+       "judge": []
+      }
+     }
+    }
+   ],
+   "staged": null
+  },
+  {
+   "id": "intent-008",
+   "repeat": 1,
+   "contact": "…9008",
+   "source": "developer",
+   "turns": [
+    {
+     "i": 0,
+     "user": "My parcel has not arrived and it is two weeks now. Also can you add a free stole for the delay?",
+     "reply": "I'm sorry your parcel has taken two weeks. I can't find an order under this chat, so please send me your order number, or the phone number you ordered with. A colleague is now looking into the delay and will follow up with you.\n\nBethany House is a business, so I'm not able to add items free of charge. We will gladly serve you whenever you are ready to order.",
+     "next": "care_first",
+     "critical": true,
+     "categories": [
+      "complaint",
+      "delay"
+     ],
+     "lang": "en",
+     "latency_s": 8.32,
+     "error": null,
+     "door": null,
+     "tool_outs": [
+      {
+       "tool": "check_order_status",
+       "input": {},
+       "out": "{\"found\": false}",
+       "truncated": false
+      },
+      {
+       "tool": "raise_complaint",
+       "input": {
+        "issue": "Customer says their parcel has not arrived after two weeks. Also asked for a free stole as compensation for the delay.",
+        "findings": "check_order_status found no order linked to this chat/number. Need order number or the phone used to order. Free stole request declined kindly by me; no compensation promised.",
+        "wanted": "Delivery of the parcel; also asked for a free stole (not promised).",
+        "severity": "high"
+       },
+       "out": "{\"ok\": true, \"logged\": true, \"severity\": \"high\", \"you_may\": \"explain what happened, give real order status, correct wrong information, re-send a payment link, and say a colleague is picking it up (and by when if you know).\", \"you_may_not\": \"promise or initiate a refund, offer a discount, commit to a remake or reshipment, guarantee a delivery date you cannot verify, or accept blame in a way that binds the business.\", \"next_step\": \"Tell the customer, warmly and without excuses, what you found and that a colleague is now on it. Then STAY with them: keep answering factual questions. Do NOT sell anything in this conversation unless they themselves move on to buying.\"}",
+       "truncated": false
+      }
+     ],
+     "verdict": {
+      "passed": false,
+      "failures": [
+       "forbidden text matched /whenever you are ready to order/"
+      ],
+      "observations": {
+       "words": 70,
+       "sentences": 5,
+       "questions": 0,
+       "target_words": 45,
+       "target_kind": "default",
+       "over_target": true,
+       "internal_talk": [],
+       "figures": [],
+       "unverified": [],
+       "tools": [
+        "check_order_status",
+        "raise_complaint"
+       ],
+       "review": "pass",
+       "language_ok": true,
+       "silent": false,
+       "opted_out": false,
+       "intercept_mode": "ai",
+       "judge": []
+      }
+     }
+    }
+   ],
+   "staged": null
+  }
+ ],
+ "sandboxed_calls": [
+  {
+   "tool": "send_product_cards",
+   "args": {
+    "products": [
+     "Ordination Gown"
+    ]
+   },
+   "contact": "9230009001"
+  },
+  {
+   "tool": "send_product_cards",
+   "args": {
+    "products": [
+     "Alb"
+    ]
+   },
+   "contact": "25470009002"
+  },
+  {
+   "tool": "send_product_cards",
+   "args": {
+    "products": [
+     "Round Collar Clergy Shirt",
+     "Straight Collar Shirt"
+    ]
+   },
+   "contact": "25470009005"
+  }
+ ],
+ "finished": "2026-11-10T06:37:08.925203+00:00",
+ "summary": {
+  "turns": {
+   "k": 12,
+   "n": 14,
+   "p": 0.857,
+   "ci95": [
+    0.601,
+    0.96
+   ]
+  },
+  "critical_turns": {
+   "k": 11,
+   "n": 13,
+   "p": 0.846,
+   "ci95": [
+    0.578,
+    0.957
+   ]
+  },
+  "next_action": {
+   "answer": {
+    "k": 7,
+    "n": 7,
+    "p": 1.0,
+    "ci95": [
+     0.646,
+     1.0
+    ]
+   },
+   "quote": {
+    "k": 5,
+    "n": 5,
+    "p": 1.0,
+    "ci95": [
+     0.566,
+     1.0
+    ]
+   },
+   "hold_ack": {
+    "k": 0,
+    "n": 1,
+    "p": 0.0,
+    "ci95": [
+     0.0,
+     0.793
+    ]
+   },
+   "care_first": {
+    "k": 0,
+    "n": 1,
+    "p": 0.0,
+    "ci95": [
+     0.0,
+     0.793
+    ]
+   }
+  },
+  "language_continuity": {
+   "k": 14,
+   "n": 14,
+   "p": 1.0,
+   "ci95": [
+    0.785,
+    1.0
+   ]
+  },
+  "figures_verified": {
+   "k": 5,
+   "n": 5,
+   "p": 1.0,
+   "ci95": [
+    0.566,
+    1.0
+   ]
+  },
+  "within_length_target": {
+   "k": 11,
+   "n": 14,
+   "p": 0.786,
+   "ci95": [
+    0.524,
+    0.924
+   ]
+  },
+  "internal_talk_free": {
+   "k": 14,
+   "n": 14,
+   "p": 1.0,
+   "ci95": [
+    0.785,
+    1.0
+   ]
+  },
+  "first_draft_passed": {
+   "k": 10,
+   "n": 14,
+   "p": 0.714,
+   "ci95": [
+    0.454,
+    0.883
+   ]
+  },
+  "by_category": {
+   "complaint": {
+    "k": 0,
+    "n": 1,
+    "p": 0.0,
+    "ci95": [
+     0.0,
+     0.793
+    ]
+   },
+   "cultural": {
+    "k": 5,
+    "n": 5,
+    "p": 1.0,
+    "ci95": [
+     0.566,
+     1.0
+    ]
+   },
+   "delay": {
+    "k": 1,
+    "n": 3,
+    "p": 0.333,
+    "ci95": [
+     0.061,
+     0.792
+    ]
+   },
+   "emotional": {
+    "k": 4,
+    "n": 4,
+    "p": 1.0,
+    "ci95": [
+     0.51,
+     1.0
+    ]
+   },
+   "intent-change": {
+    "k": 2,
+    "n": 2,
+    "p": 1.0,
+    "ci95": [
+     0.342,
+     1.0
+    ]
+   },
+   "needs-silence": {
+    "k": 1,
+    "n": 1,
+    "p": 1.0,
+    "ci95": [
+     0.207,
+     1.0
+    ]
+   },
+   "org-purchase": {
+    "k": 2,
+    "n": 2,
+    "p": 1.0,
+    "ci95": [
+     0.342,
+     1.0
+    ]
+   },
+   "price-objection": {
+    "k": 5,
+    "n": 6,
+    "p": 0.833,
+    "ci95": [
+     0.436,
+     0.97
+    ]
+   },
+   "successful-sale": {
+    "k": 2,
+    "n": 2,
+    "p": 1.0,
+    "ci95": [
+     0.342,
+     1.0
+    ]
+   },
+   "uncertain-info": {
+    "k": 2,
+    "n": 2,
+    "p": 1.0,
+    "ci95": [
+     0.342,
+     1.0
+    ]
+   },
+   "unsuccessful-sale": {
+    "k": 3,
+    "n": 3,
+    "p": 1.0,
+    "ci95": [
+     0.438,
+     1.0
+    ]
+   }
+  },
+  "by_lang": {
+   "en": {
+    "k": 12,
+    "n": 14,
+    "p": 0.857,
+    "ci95": [
+     0.601,
+     0.96
+    ]
+   }
+  },
+  "failure_kinds": {
+   "pitched after a request for time": 1,
+   "forbidden text matched": 1
+  }
+ }
+}

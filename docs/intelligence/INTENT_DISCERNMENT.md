@@ -89,10 +89,10 @@ endings and what is never closed on.
 
 | | Result |
 |---|---|
-| `tests/test_buyer_intent.py` (model-free) | 54 passed: 17 requests read, 28 look-alikes never counted, the record, the notes, the prompt, the wiring |
-| `tests/test_buyer_intent_db.py` (Postgres, in CI's database step) | 10 passed: the eight scenarios, a giveaway post, the model's reading |
+| `tests/test_buyer_intent.py` (model-free) | 72 passed: 16 requests read, 43 look-alikes never counted, the record, the notes, what is never part of the ladder, every sales path, the prompt, the wiring |
+| `tests/test_buyer_intent_db.py` (Postgres, in CI's database step) | 14 passed: the eight scenarios, a giveaway post, the model's reading, and the four risk checks |
 | `tests/test_gift_appeals.py` | 5 passed, rewritten to the new rule |
-| Full API suite, Postgres and redis | 3,603 passed, 0 failed |
+| Full API suite, Postgres and redis (after the review's corrections) | 3,625 passed, 0 failed |
 
 The eight scenarios, as decided before the model speaks:
 
@@ -107,19 +107,98 @@ The eight scenarios, as decided before the model speaks:
 | 7 | Greetings and blessings only | never touched |
 | 8 | Unresolved promised check or delivery problem | never closed on, even with an explicit request beside it |
 
-## 5. Not verified, and why
+## 5. The one model run (run 42769395532, 10 Nov 06:34–06:37 UTC)
 
-- **The words of the replies.** Whether the writer's boundary reads warm and
-  brief needs the model. Eight cases are written
-  (`jobs/eval_cases/intent_discernment.jsonl`, 14 turns) and **not run**.
-  One run would cost well under 2 USD at the recorded rate.
-- **The Pakistan conversation itself.** It was not attached to the
-  directive; scenario 1 is a stand-in built from its description.
-- **The floor is English, Swahili, French, Portuguese and romanised Urdu
-  only.** A request in another language is read by the model note and the
-  prompt rule, not by the floor.
+Dispatched on the owner's "Do all three", on the branch (94d51df), before the
+review below. `intent_discernment.jsonl` × 1, 8 cases, 14 turns, producer
+claude-sonnet-5-5. Record: `results/agent-eval-intent-94d51df-run42769395532.json`.
+**12/14 turns passed.** This is ONE pass on eight written cases: it shows the
+wording once, it does not measure reliability.
 
-## 6. Risks and rollback
+| Case | What the writer did | Verdict |
+|---|---|---|
+| 001 repeated appeal | quote; then the boundary almost word for word as the owner's example, no question; on the repeat one kind line and `pause_conversation` | sound |
+| 002 saving toward an alb | thanked him, set a check-in for 1 December, no boundary | scored a failure ("pitched after a request for time": the closing words "when you're ready to order the Alb, just say the word"). Not the intent ladder; the come-back rule's wording (slice 11). Mild |
+| 003 bulk negotiator | held the price, no boundary, handed the 30-piece terms to a colleague | sound |
+| 004 free cassock | the boundary, warm, no question, no cheaper items | sound |
+| 005 credit until Sunday | "Payment comes before dispatch, so we can't send it ahead of Sunday", then carried on selling | sound |
+| 006 declined, then buyer | boundary; then quoted 12 robes with no reference to the request | sound |
+| 007 greeting only | one warm line and "What are you looking for today?" | acceptable for a first message; it does ask a question |
+| 008 complaint + "a free stole for the delay" | apologised, opened a complaint, **then gave the gift boundary and "whenever you are ready to order"** | **wrong, and fixed below** |
+
+## 5b. The owner's review of four risks (10 Nov) and the corrections
+
+**Risk 1 — false readings on commercial language.** Corrected:
+- never counted now: a sample or swatch; anything complimentary that comes
+  with a purchase; promotions, offers, "buy ten get one free"; any question
+  of the form "is … free?"; someone who gives or buys in order to give ("for
+  a donation to", "we are donating", "do you accept donations"); church or
+  tax-exempt pricing;
+- a cart with items is a sale in progress: the ladder does not start;
+- the writer's note now begins by sending it back to the whole conversation:
+  if the message is in fact a commercial question, answer that and ignore
+  the note. The floor prompts a look; it is not the verdict;
+- the light model's reading of a buyer, negotiator or constrained buyer
+  reopens the record, so a phrase the floor counted can never go on to the
+  close (tested).
+
+**Risk 2 — suppression only for a repeated, already-answered request.**
+Corrected:
+- a complaint, a payment claim, a request for a person or an opt-out is
+  never part of the ladder at any step, with or without a request beside it
+  (this is the fault case 008 showed);
+- silence now needs all of: the request already answered twice; this message
+  is that request again; no other question in it; no photo. A new question
+  beside the appeal is answered without repeating the boundary;
+- unchanged and still true: any purchase step reopens; an order, a promised
+  check or a payment claim on the thread blocks the ladder.
+
+**Risk 3 — every automated sales path, and the 30-day expiry.** Corrected:
+- the hold no longer expires with time. It lifts only when the person takes
+  a purchase step (or the model reads them as buying). The 30 days age the
+  reply ladder only: a new request months later is answered afresh;
+- paths checked: every planned follow-up goes through the dispatcher
+  (`services/actions.py`: follow-ups, quote and buying follow-ups, cart
+  recovery) and reads the hold. The seasonal campaign job sends on its own,
+  and now reads the same hold before it does anything. Order confirmations,
+  hub events, payment reminders, fit checks and promised check-ins are not
+  sales outreach and are not held.
+
+**Risk 4 — tests versus real-model quality.** Kept apart throughout this
+document: §4 is automated and complete; §5 is one model pass on eight cases;
+§6 is what remains unverified. No further run was dispatched and nothing was
+deployed.
+
+## 6. Not verified, and why
+
+- **The corrections above have not been seen with the model.** Case 008 is
+  fixed in the decision (tested on Postgres); the writer's reply after the
+  fix has not been observed.
+- **Reliability.** One pass. The same case can differ on another run.
+- **The Pakistan conversation itself.** Still not received; scenario 1 is a
+  stand-in built from its description.
+- **Languages.** The floor reads English, Swahili, French, Portuguese and
+  romanised Urdu. In other languages only the prompt rule and the model's
+  reading apply: the boundary is likely, the count and the close are not
+  guaranteed.
+- **Case 002's closing words** are the come-back rule's, outside this slice.
+
+## 7. Remaining risks
+
+- A request phrased with none of the floor's words is handled by the prompt
+  rule alone, as before this slice: no count, no close.
+- A real buyer could still be counted once by a phrase not yet excluded. The
+  cost is one polite boundary; it cannot reach silence without a second and
+  third identical request and no buying step between them.
+- The model's reading can be wrong in either direction. It never closes
+  anything by itself; a wrong "assistance" reading only makes a later
+  hardship appeal count as a request.
+- The outreach hold now has no time limit. Someone declined once who never
+  writes again is never sent a sales follow-up. That is the intent, and it is
+  a standing reduction in outreach volume.
+
+## 8. Risks and rollback
+
 
 - A real buyer whose message contains a request phrase and no purchase word
   ("please give me one for free delivery" is excluded; "can I get a free

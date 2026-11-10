@@ -239,6 +239,19 @@ async def _handle(redis, row: dict, season: dict, *, send: bool) -> dict:
            "last_bought": row["last_bought"], "route": "", "text": "",
            "sent": False, "skipped": None, "error": None}
 
+    # Someone whose only business with us was a request for free goods is not
+    # sent a campaign (services/buyer_intent; owner, 2026-11-10). Read before
+    # the once-a-season guard is taken, so nothing is spent on them.
+    try:
+        from app.services import buyer_intent as _bi
+        async with AsyncSessionLocal() as _db:
+            _p = await _bi._person_of(_db, conv, to)
+            if _p is not None and _bi.suppresses_promotion(_p.state):
+                res["skipped"] = "asked for goods without payment — no campaign"
+                return res
+    except Exception:
+        pass
+
     year_key = f"seasonal:{season['season']}:{season['date'][:4]}:{to}"
     if send and redis is not None:
         try:

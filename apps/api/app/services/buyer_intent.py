@@ -112,7 +112,22 @@ _ASK_NEG_RE = re.compile(
     r"\b(?:not|n't|never) (?:asking|begging|looking|want(?:ing)?)(?: you)?(?: for)?(?: it| anything| a| any)?(?: for)? ?(?:free|"
     r"charity|donations?|handouts?|a gift)\b|\bi am free\b|\bfeel free\b|\bfree (?:hand|will)\b|gluten[- ]free|"
     r"\b(?:we|i|he|she|they)(?: would like| want| wish| plan| are going| am going|'d like)? to (?:donate|sponsor|give|gift)\b|"
-    r"\bmy sponsors?\b|\bour sponsors?\b|\b(?:the|a) sponsor (?:will|is|has|can)\b",
+    r"\bmy sponsors?\b|\bour sponsors?\b|\b(?:the|a) sponsor (?:will|is|has|can)\b|"
+    # a SAMPLE or swatch is how a buyer checks the cloth before ordering
+    r"\b(?:free |a |any |some |fabric |cloth |colou?r )*(?:samples?|swatch(?:es)?|sample (?:piece|fabric|cloth))\b|"
+    # complimentary things that come WITH a purchase, and promotions
+    r"\bfree (?:gift|stole|collar|belt|cincture|bag|cover|item|one|shirt|cross)s? (?:with|when|if|on|for (?:every|each|orders?))\b|"
+    r"\b(?:comes?|come|included?|includes?|including|bundled?) (?:with |as )?(?:a |an |any )?(?:free|complimentary)\b|"
+    r"\b(?:complimentary|bonus|promo(?:tion|tional)?s?|offers?|deals?|giveaway|free gift with|buy (?:one|two|\d+)|"
+    r"get (?:one|two|\d+) free|\d+ free|free for (?:orders?|bulk|every|each|\d+))\b|"
+    # asking WHETHER something is free is a question about the terms, not a request
+    r"\b(?:is|are|was|were|does|do|will|would) (?:the |this |that |it |they |there )?[\w ]{0,24}?\b(?:free|complimentary|included)\b[^.!\n]{0,12}\?|"
+    # someone who gives, or buys in order to give
+    r"\b(?:for|as|towards?) (?:a |our |the |my )?(?:donation to|donations to|charity (?:drive|event|project)|outreach|mission (?:trip|drive)|"
+    r"fundrais\w+)\b|\b(?:donating|sponsoring|gifting) (?:to|for|a|an|the|some|\d+)\b|"
+    r"\b(?:we|i)(?:'re|'m| are| am| will be| have been)? (?:donating|sponsoring|gifting)\b|"
+    r"\b(?:do you|can (?:we|i)|how (?:do|can) (?:we|i)) (?:accept|take|receive) donations?\b|"
+    r"\b(?:tax|charity|church|ngo|non-?profit) (?:exempt\w*|rate|pricing|invoice|registration)\b",
     re.IGNORECASE)
 
 # A hardship appeal with no explicit ask in it. It counts ONLY while the
@@ -242,18 +257,71 @@ def reopen(state: dict | None, *, reading: str = "buyer", reason: str, now: date
 
 
 def suppresses_promotion(state: dict | None, *, now: datetime | None = None) -> bool:
-    """True while the record reads assistance with a boundary given inside the
-    window: unprompted SALES follow-ups wait. Order, payment and delivery
-    messages are never held by this."""
+    """True while the record reads assistance and a boundary was ever given:
+    unprompted SALES messages wait until the person themselves takes a
+    purchase step (`reopen`). Time alone never lifts it — the 30-day window
+    ages the reply ladder, not this (owner, 2026-11-10: "the expiry must not
+    independently reactivate unsolicited promotional messaging"). Order,
+    payment and delivery messages are never held by this."""
     rec = record(state)
-    return rec.get("reading") == "assistance" and boundary(rec, now=now)["count"] >= 1
+    b = rec.get("boundary") if isinstance(rec.get("boundary"), dict) else {}
+    return rec.get("reading") == "assistance" and bool(b.get("first_at") or b.get("count"))
+
+
+# ── what is never closed on ──────────────────────────────────────────────────
+
+def protected(text: str | None) -> str | None:
+    """Why this message is never part of the request ladder, whatever else it
+    says — or None. A complaint, a payment claim, a request for a person or an
+    opt-out is answered by its own path, even with "and a free stole for the
+    delay" beside it (a customer asking for redress is not asking for a gift)."""
+    t = " ".join((text or "").split())
+    if not t:
+        return None
+    try:
+        from app.services.intent import is_opt_out, wants_a_person
+        if is_opt_out(t):
+            return "opt-out"
+        if wants_a_person(t):
+            return "asks for a person"
+    except Exception:
+        pass
+    try:
+        from app.services import customer_state as _cs
+        if _cs._COMPLAINT_STRONG_RE.search(t) or _cs._COMPLAINT_RE.search(t):
+            return "complaint"
+        if _cs._PAID_RE.search(t) and not _cs._PAID_NEG_RE.search(t):
+            return "payment claim"
+    except Exception:
+        pass
+    return None
+
+
+_SENTENCE_RE = re.compile(r"[^.!?\n]+[.!?]*")
+
+
+def new_subject(text: str | None) -> bool:
+    """True when the message also asks something that is NOT the request — a
+    real question beside the appeal ("…and where is your shop?"). Such a
+    message is never met with silence."""
+    for m in _SENTENCE_RE.finditer(" ".join((text or "").split())):
+        part = m.group(0).strip()
+        if "?" not in part or len(part.split()) < 3:
+            continue
+        if _ASK_RE.search(_ASK_NEG_RE.sub(" ", part)) or _APPEAL_RE.search(part):
+            continue
+        return True
+    return False
 
 
 # ── what the writer is told ──────────────────────────────────────────────────
 
 FIRST_NOTE = (
-    "(INTENT: in this message they ask for goods, money or credit without payment, and nothing in it "
-    "moves toward an order. Answer with ONE kind boundary, two or three short sentences: acknowledge what "
+    "(INTENT: this message reads as a request for goods, money or credit without payment, with nothing in "
+    "it that moves toward an order. Read it in the WHOLE conversation first: if it is in fact a commercial "
+    "question — a sample to check the cloth, something complimentary with an order, a promotion, delivery, "
+    "a donation THEY are making or buying for — answer that question normally and ignore the rest of this "
+    "note. Otherwise answer with ONE kind boundary, two or three short sentences: acknowledge what "
     "they shared with real warmth; say plainly that Bethany House is a business, so we cannot give items "
     "free, donate, lend, or send anything before it is paid for; say we will be glad to serve them whenever "
     "they are ready to order. Stop there. No question. No list of cheaper items. No promise that anyone will "
@@ -261,7 +329,9 @@ FIRST_NOTE = (
     "Never question or judge their circumstances. Do not call pause_conversation.)")
 
 SECOND_NOTE = (
-    "(INTENT: they have repeated the same request after your boundary. ONE brief line only: acknowledge it "
+    "(INTENT: they have repeated the same request after your boundary. If this message instead asks "
+    "something new — an item, a price, an order, a problem — answer that and ignore this note. Otherwise "
+    "ONE brief line only: acknowledge it "
     "kindly and wish them well. Do not explain again, do not decline at length, no question, no offer, no "
     "second blessing. This closes that request; if they later ask about an item or an order, serve them "
     "as any customer, with no mention of this.)")
@@ -285,6 +355,15 @@ async def _active_business(db, conv) -> bool:
             row = (await db.execute(select(OrderEvent.id).where(
                 OrderEvent.wa_id == key, OrderEvent.created_at > since).limit(1))).scalar_one_or_none()
             if row:
+                return True
+    except Exception:
+        pass
+    try:
+        async with db.begin_nested():
+            from app.agent import cart as cartmod
+            key = getattr(conv, "wa_id", None) or getattr(conv, "external_id", None)
+            cart = await cartmod.get_cart(db, key, getattr(conv, "channel", None) or "whatsapp")
+            if cart and (cart.get("items") or []):
                 return True
     except Exception:
         pass
@@ -361,9 +440,17 @@ async def decide(db, redis, *, channel: str, key: str, text: str, has_media: boo
             if standing and b["count"] >= 1:
                 return {"action": "note", "note": STANDING_NOTE, "boundary": 0}
             return None
-        if await _active_business(db, conv):
-            return None       # an order, a payment or a complaint is never closed on
+        # A complaint, a payment claim, a request for a person or an opt-out is
+        # answered by its own path at every step; so is anything on a thread
+        # with an order, a cart or a promised check open.
+        if protected(t) or await _active_business(db, conv):
+            return None
         if b["count"] >= 2 or b["closed"]:
+            # Silence is for the SAME request, already answered twice, and
+            # nothing else in the message. A new question beside it is
+            # answered (without repeating the boundary).
+            if has_media or new_subject(t):
+                return {"action": "note", "note": STANDING_NOTE, "boundary": 0}
             st, n = step(person.state, reason="the same request again after it was closed", now=now)
             await _save(st)
             return {"action": "silence", "why": "request closed", "boundary": n}
