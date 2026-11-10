@@ -2027,6 +2027,35 @@ async def run_turn(db: AsyncSession, redis, wa_id: str, user_text: str, llm: LLM
             if turn_facts is not None:
                 turn_facts["pacing"] = "economy"
 
+    # INTENT (owner, 2026-11-10: "one kind boundary, then close"). Someone
+    # asking for goods, money or credit without payment gets the boundary
+    # once, one brief acknowledgment if they repeat it, and after that no
+    # automatic reply TO THAT REQUEST. A price, an order, a product question,
+    # a complaint or a payment from the same person is answered as always and
+    # reopens the record — services/buyer_intent.py. Never under a giveaway
+    # post, never on a draft. Fails open.
+    if not read_only and not scribe_only and not public_comment and _gate_applies(user_text):
+        try:
+            from app.services import buyer_intent as _bi
+            _iv = await _bi.decide(db, redis, channel=channel, key=key, text=user_text or "",
+                                   has_media=bool(media), campaign=bool(_campaign_allow))
+        except Exception as exc:
+            _log.warning("intent failed open for %s/%s: %s", channel, key, exc)
+            _iv = None
+        if _iv and _iv.get("action") == "silence":
+            try:
+                await _mark_silenced(redis, channel, key)     # a decision, never a miss for the sweep
+            except Exception:
+                pass
+            if turn_facts is not None:
+                turn_facts.update({"tools": [], "held": [], "review": "intent",
+                                   "intent": _iv.get("why") or "request closed"})
+            return ""
+        if _iv and _iv.get("action") == "note":
+            turn_notes.append(_iv["note"])
+            if turn_facts is not None:
+                turn_facts["intent_boundary"] = _iv.get("boundary")
+
     # Their OWN money, at today's rate (services/fx; owner, 2026-09-25): a
     # "how much in rands?" gets a FACT to convert with — and the gate verifies
     # the figure against the same rate. No rate → no conversion, said plainly.

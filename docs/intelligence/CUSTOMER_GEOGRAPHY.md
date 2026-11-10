@@ -149,8 +149,8 @@ USA). The same resolver serves the operator's typed country, the shipping
 destination, the Meta evidence chain and the Swahili-market guard, so a
 Messenger customer who says "Kampala" now also keeps the dollar market by
 their words rather than by default. Tests: `test_geography.py` (one new test,
-28). The after-measurement with the model is not dispatched (one run was
-allowed).
+28). The after-measurement with the model is not run (the owner, 19:5x UTC:
+"dont run validation"); the fix stands on its model-free tests.
 
 ## 5b. Verify / correct controls (slice 17, 2026-11-09)
 

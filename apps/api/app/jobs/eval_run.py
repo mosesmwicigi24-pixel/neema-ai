@@ -44,7 +44,7 @@ from app.jobs import eval_cases
 COUNTRY_PREFIX = {
     "KE": "2547000", "TZ": "2557000", "UG": "2567000", "RW": "2507000", "BI": "2577000",
     "SS": "2119000", "CD": "2438000", "MZ": "2588000", "AO": "2449000", "ZA": "276500",
-    "NG": "2347000", "GH": "2335000", "US": "1555000", "GB": "447700", "IN": "919000",
+    "NG": "2347000", "PK": "923000", "GH": "2335000", "US": "1555000", "GB": "447700", "IN": "919000",
     "FR": "336000", "PT": "35191000",
     # the Customer Intelligence validation (2026-11-09): a Gulf number whose
     # owner says they are in Kenya, and a Kenyan who moved to the Emirates

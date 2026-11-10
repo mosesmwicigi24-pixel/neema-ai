@@ -108,7 +108,13 @@ def test_the_inbox_fetches_and_merges_pages_not_repaints():
                         "components", "views", "ConversationsView.tsx")
     s = open(view, encoding="utf-8").read()
     assert "const THREAD_PAGE = 50" in s
-    assert "function mergeThread(" in s
+    # mergeThread lives in lib/thread.ts since 2026-11-09 (it also retires the
+    # optimistic bubble a send draws, so a reply never shows twice)
+    lib = open(os.path.join(os.path.dirname(view), "..", "..", "lib", "thread.ts"),
+               encoding="utf-8").read()
+    assert "export function mergeThread" in lib and "retireOptimistic(existing, incoming)" in lib
+    assert 'import { mergeThread, retireOptimistic } from "@/lib/thread"' in s
+    assert "...retireOptimistic(existing, [msg]), msg" in s
     assert "before: oldest.created_at" in s
     assert "silent ? mergeThread(" in s
     assert "el2.scrollHeight - prevH + prevTop" in s

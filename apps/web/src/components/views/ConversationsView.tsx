@@ -11,7 +11,7 @@ import { TextareaField, InputField } from "@/components/ui/FormFields";
 import { Toggle } from "@/components/ui/Layout";
 import { timeAgo, formatPhone, displayName, countryName, dayLabel, dayKey, clockTime } from "@/lib/utils";
 import { formatWa } from "@/lib/waText";
-import { CHANNEL_CONFIG, ALL_CHANNELS } from "@/lib/channels";
+import { CHANNEL_CONFIG, ALL_CHANNELS, channelFullName } from "@/lib/channels";
 import { conversationsApi, mapConversation, profileApi, whatsappApi, type ApiActivityEvent, type PostIdentity } from "@/lib/api";
 import { useCallPresence } from "@/lib/callContext";
 import type { Inbox } from "@/hooks/useInbox";
@@ -30,10 +30,15 @@ import type {
 import { useSession } from "next-auth/react";
 import { CALL_ICON_PATH } from "@/lib/callStatus";
 import { viewForRow, outreachBadge, CUSTOMER_STATE_WORD } from "@/lib/messageKinds";
+import { mergeThread, retireOptimistic } from "@/lib/thread";
 import { CallCard } from "@/components/views/CallCard";
 import { VoiceNoteText } from "@/components/ui/VoiceNoteText";
 import { nearestCallId, mediaKey } from "@/lib/callCard";
 import { MessageKindCard, MessageKindPill } from "@/components/ui/MessageKindCard";
+import { EmojiPicker } from "@/components/views/composer/EmojiPicker";
+import { FlagCard } from "@/components/ui/FlagCard";
+import { useVoiceRecorder, voiceSupported, VoiceBar } from "@/components/views/composer/VoiceRecorder";
+import { AttachMenu, ToolsMenu, useEnterSends, insertAtCursor, type AttachKind } from "@/components/views/composer/ComposerMenus";
 
 // ── NoChatPane ────────────────────────────────────────────────────────────────
 // "Open chat" / "Message" for a caller who has only ever CALLED: there is no
@@ -905,18 +910,6 @@ const THREAD_PAGE = 50;
 // effect keyed on the thread.
 const NO_MESSAGES: Message[] = [];
 
-// Union two thread slices by id, newest state winning, ordered by time — so a
-// poll refresh (newest page) never throws away older pages already loaded,
-// and an older page slots in without duplicating anything.
-function mergeThread(existing: Message[], incoming: Message[]): Message[] {
-    const byId = new Map<string, Message>();
-    for (const m of existing) byId.set(String(m.id), m);
-    for (const m of incoming)
-        byId.set(String(m.id), { ...(byId.get(String(m.id)) ?? {}), ...m });
-    return [...byId.values()].sort((a, b) =>
-        (a.created_at || "").localeCompare(b.created_at || ""));
-}
-
 // ── Keyboard lift (mobile) ────────────────────────────────────────────────────
 // iOS Safari never resizes the layout for the on-screen keyboard — it just
 // overlays it — so a composer at the bottom of our fixed-height (100dvh) pane
@@ -966,19 +959,20 @@ interface ConversationsViewProps extends SharedViewProps {
     // ever loaded); inbox.visibleIds says which of them the current filters'
     // server pages returned — that, not the cache, is what the list shows.
     inbox?: Inbox;
+    /** Tells the page a chat is open on a phone, so it can drop its own
+     *  "Neema · Inbox" bar and give the conversation that row. */
+    onMobileThreadOpen?: (open: boolean) => void;
 }
 
 const CHANNEL_TABS: { id: "all" | Channel; label: string; short: string }[] = [
     { id: "all", label: "All", short: "All" },
-    { id: "whatsapp", label: "WhatsApp", short: "WA" },
+    { id: "whatsapp", label: "WhatsApp Business", short: "WA" },
     { id: "facebook", label: "Facebook", short: "FB" },
     { id: "messenger", label: "Messenger", short: "MSG" },
     { id: "instagram", label: "Instagram", short: "IG" },
     // Email + SMS hidden for now — no traffic on those channels yet.
 ];
 
-// Accent for the "All" tab (gold) — channels use their own brand colour.
-const ALL_TAB_ACCENT = "#f59e0b";
 // Active-row accent (Figma gold).
 const ROW_ACCENT = "#f59e0b";
 
@@ -991,7 +985,8 @@ const LIST_WIDTH = "clamp(340px, 38vw, 436px)";
 // "Moses Mwicigi intercepted the conversation" stops wrapping into a column of
 // single words. Clamped for the same reason as LIST_WIDTH — it sits alongside
 // the list, the thread AND the CRM sidebar, so a narrow screen keeps the 196.
-const ACTIVITY_WIDTH = "clamp(196px, 16vw, 292px)";
+// Widened again (owner, 2026-11-09: "add the width of the activity log").
+const ACTIVITY_WIDTH = "clamp(232px, 19vw, 340px)";
 // Short channel labels for the conversation-row pill (Figma: WA / FB / IG).
 const CH_SHORT: Record<Channel, string> = {
     whatsapp: "WA",
@@ -1006,12 +1001,6 @@ const CH_SHORT: Record<Channel, string> = {
 // Chip order for a unified (multi-channel) customer row — WhatsApp first (it can
 // transact), then the social channels.
 const CHAN_ORDER: Channel[] = ["whatsapp", "messenger", "facebook", "instagram", "tiktok", "email", "sms"];
-const SparkleIcon = () => (
-    <svg viewBox="0 0 24 24" fill="currentColor" className="w-3.5 h-3.5">
-        <path d="M12 2l1.9 5.6L19.5 9l-5.6 1.9L12 16.5 10.1 10.9 4.5 9l5.6-1.4L12 2zm6.5 11l.9 2.6 2.6.9-2.6.9-.9 2.6-.9-2.6-2.6-.9 2.6-.9.9-2.6z" />
-    </svg>
-);
-
 export function ConversationsView({
     conversations,
     setConversations,
@@ -1026,9 +1015,14 @@ export function ConversationsView({
     onConsumeOpenConvKey,
     freshLoaded,
     inbox,
+    onMobileThreadOpen,
 }: ConversationsViewProps): React.ReactElement {
     const [activeConvId, setActiveConvId] = useState<string>("");
     const [mobilePanel, setMobilePanel] = useState<MobilePanel>("list");
+    useEffect(() => {
+        onMobileThreadOpen?.(isMobile && mobilePanel !== "list");
+        return () => onMobileThreadOpen?.(false);
+    }, [isMobile, mobilePanel, onMobileThreadOpen]);
     const [channelTab, setChannelTab] = useState<"all" | Channel>("all");
     const [tagFilter, setTagFilter] = useState<string>("all");
     const [interceptFilter, setInterceptFilter] = useState<
@@ -1071,6 +1065,8 @@ export function ConversationsView({
     const [noteModal, setNoteModal] = useState<boolean>(false);
     const [noteText, setNoteText] = useState<string>("");
     const [showFilters, setShowFilters] = useState<boolean>(false);
+    // The open chat's "more" menu (hand to a colleague, profile, clear history).
+    const [headMenu, setHeadMenu] = useState<boolean>(false);
     const [threadLoading, setThreadLoading] = useState(false);
     // A failed thread load must say so — "No messages yet" over a fetch that
     // errored reads as an empty conversation, and a spinner with no timeout
@@ -1191,6 +1187,20 @@ export function ConversationsView({
     const [mediaItems, setMediaItems] = useState<MediaItem[]>([]);
     const [uploadingMedia, setUploadingMedia] = useState(false);
     const fileInputRef = useRef<HTMLInputElement>(null);
+
+    // ── Composer (owner, 2026-11-09) ──────────────────────────────────────────
+    // Secondary tools open on demand: emoji, the attachment kinds, Neema's
+    // tools. One send path each — sendReply (text), sendMedia (files),
+    // sendVoice (a recording) — and every one refuses a second press while
+    // the first is still going (sendingRef), so nothing goes out twice.
+    const [emojiOpen, setEmojiOpen] = useState(false);
+    const [attachOpen, setAttachOpen] = useState(false);
+    const [toolsOpen, setToolsOpen] = useState(false);
+    const [attachAccept, setAttachAccept] = useState<string | null>(null);
+    const [enterSends, setEnterSends] = useEnterSends();
+    const [sendingVoice, setSendingVoice] = useState(false);
+    const sendingRef = useRef(false);
+    const voice = useVoiceRecorder(useCallback((m: string) => onToast(m, "error"), [onToast]));
     const messagesEndRef = useRef<HTMLDivElement>(null);
     // How far the on-screen keyboard covers the pane right now (mobile only).
     const kbLift = useKeyboardLift(isMobile);
@@ -1549,7 +1559,11 @@ export function ConversationsView({
         let stale = false;
         const load = () =>
             conversationsApi.activity(activeConvId)
-                .then((r) => { if (!stale) setActivityEvents(r.events); })
+                .then((r) => {
+                    // A flag shows in the chat under its own label (FlagCard),
+                    // not again in the log (owner, 2026-11-09).
+                    if (!stale) setActivityEvents(r.events.filter((e) => e.kind !== "flag"));
+                })
                 .catch(() => { if (!stale) setActivityEvents([]); });
         load();
         // Slow refresh while the panel is open — new check-ins/orders surface
@@ -1673,7 +1687,9 @@ export function ConversationsView({
                     )
                         return m;
                 }
-                return { ...m, [activeConvId]: [...existing, msg] };
+                // The saved form of a reply this screen just sent replaces the
+                // optimistic bubble drawn for it — never a second bubble beside it.
+                return { ...m, [activeConvId]: [...retireOptimistic(existing, [msg]), msg] };
             });
         }
         if (
@@ -1963,6 +1979,14 @@ export function ConversationsView({
 
     const sendReply = async () => {
         if (!replyText.trim() || !activeConvId) return;
+        // One press, one message: Enter held down, a double tap, or Enter
+        // while a translation is still being fetched must not send twice.
+        if (sendingRef.current) return;
+        if (window24?.mode === "closed") {
+            onToast(window24.reason || "Outside the messaging window — send an approved template instead", "warning");
+            return;
+        }
+        sendingRef.current = true;
         setSending(true);
         // Prepend the cross-channel quote so the customer sees what we're answering.
         // Same-channel reply → a native threaded reply (reply_to id). A quote from
@@ -2034,8 +2058,50 @@ export function ConversationsView({
             setReplyText(text);
             onToast(err?.message?.slice(0, 160) || "Failed to send message", "error");
         } finally {
+            sendingRef.current = false;
             setSending(false);
         }
+    };
+
+    // An emoji goes in where the caret is (replacing a selection), like any
+    // keyboard — and the caret lands after it.
+    const insertEmoji = (emoji: string) => {
+        const el = composerRef.current;
+        const { text, caret } = insertAtCursor(replyText, emoji, el?.selectionStart ?? replyText.length, el?.selectionEnd ?? replyText.length);
+        setReplyText(text);
+        requestAnimationFrame(() => {
+            if (!el) return;
+            el.focus();
+            el.setSelectionRange(caret, caret);
+            el.style.height = "auto";
+            el.style.height = Math.min(el.scrollHeight, 132) + "px";
+        });
+    };
+
+    // A recorded voice note: the API turns it into the channel's own format.
+    const sendVoice = async () => {
+        if (!voice.file || !activeConvId || sendingRef.current) return;
+        sendingRef.current = true;
+        setSendingVoice(true);
+        try {
+            const msg = await conversationsApi.uploadMedia(activeConvId, voice.file, undefined, { voice: true });
+            setMessages((m) => ({ ...m, [activeConvId]: [...(m[activeConvId] ?? []), msg] }));
+            voice.reset();
+            refetchConversations?.();
+        } catch (err: any) {
+            onToast(`Voice note not sent: ${err?.message?.slice(0, 140) ?? "failed"}`, "error");
+        } finally {
+            sendingRef.current = false;
+            setSendingVoice(false);
+        }
+    };
+
+    const openPicker = (kind: AttachKind) => {
+        setAttachOpen(false);
+        setAttachAccept(kind.accept);
+        // The accept list changes before the click, so the OS dialog shows
+        // only that kind (photos & videos / documents / audio).
+        requestAnimationFrame(() => fileInputRef.current?.click());
     };
 
     // Start replying to a specific message (from the Reply button or a swipe).
@@ -2253,7 +2319,8 @@ export function ConversationsView({
     };
 
     const sendMedia = async () => {
-        if (!mediaItems.length || !activeConvId) return;
+        if (!mediaItems.length || !activeConvId || sendingRef.current) return;
+        sendingRef.current = true;
         setUploadingMedia(true);
         const sent: Message[] = [];
         let failed = 0;
@@ -2292,6 +2359,7 @@ export function ConversationsView({
                 );
             }
         } finally {
+            sendingRef.current = false;
             setUploadingMedia(false);
         }
     };
@@ -2578,17 +2646,17 @@ export function ConversationsView({
                 borderRight: "1px solid #edf0ea",
             }}
         >
-            {/* Header */}
-            <div className="px-4 pt-4 pb-3" style={{ borderBottom: "1px solid #edf0ea" }}>
-                <div className="flex items-center justify-between mb-3">
-                    <h1 className="text-sm font-semibold" style={{ color: "#1c2917", letterSpacing: "-0.01em" }}>
-                        {selectMode
-                            ? `${selected.size} selected`
-                            : "Chats"}
-                    </h1>
-                    <div className="flex items-center gap-2">
-                        {selectMode ? (
-                            <>
+            {/* Header — owner's choice of 2026-11-09 (option B): search and the
+                two tools on one line, the platforms by their full names in a
+                strip that swipes sideways, the status as a quiet tab line.
+                Three slim rows where there were five. */}
+            <div className="px-3 pt-3" style={{ borderBottom: "1px solid #edf0ea" }}>
+                {selectMode ? (
+                    <div className="flex items-center justify-between h-9 mb-2">
+                        <h1 className="text-sm font-semibold" style={{ color: "#1c2917", letterSpacing: "-0.01em" }}>
+                            {selected.size} selected
+                        </h1>
+                        <div className="flex items-center gap-2">
                                 <button
                                     onClick={() => setSelected(
                                         selected.size === groupedConvs.length
@@ -2607,176 +2675,82 @@ export function ConversationsView({
                                 >
                                     Cancel
                                 </button>
-                            </>
-                        ) : (
-                            <>
-                                {humanCount > 0 && (
-                                    <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full" style={{ backgroundColor: "#fff3cd", color: "#856404" }}>
-                                        {humanCount} live
-                                    </span>
-                                )}
-                                <button
-                                    onClick={() => setSelectMode(true)}
-                                    title="Select several (or press and hold a chat)"
-                                    className="w-7 h-7 rounded-lg flex items-center justify-center transition-colors hover:bg-[#f0f4ec]"
-                                    style={{ color: "#8a9e80" }}
-                                >
-                                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
-                                              d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4" />
-                                    </svg>
-                                </button>
-                            </>
-                        )}
+                        </div>
+                    </div>
+                ) : (
+                    <div className="flex items-center gap-2 mb-2">
+                        <div className="relative flex-1 min-w-0">
+                            <svg className="absolute left-2.5 top-1/2 -translate-y-1/2 w-4 h-4" style={{ color: "#93a08a" }}
+                                 fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                                      d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                            </svg>
+                            <input
+                                value={searchQ}
+                                onChange={(e) => setSearchQ(e.target.value)}
+                                placeholder="Search chats"
+                                aria-label="Search chats"
+                                className="w-full h-9 pl-8 pr-3 rounded-xl focus:outline-none focus:ring-1 focus:ring-[#589b31]"
+                                style={{ fontSize: 13, backgroundColor: "#f5f6f3", border: "1px solid #edf0ea", color: "#1c2917" }}
+                            />
+                        </div>
+                        <button
+                            onClick={() => setSelectMode(true)}
+                            title="Select several (or press and hold a chat)"
+                            aria-label="Select several chats"
+                            className="w-9 h-9 flex-shrink-0 rounded-xl flex items-center justify-center transition-colors hover:bg-[#f0f4ec]"
+                            style={{ color: "#6b7e64", border: "1px solid #e3e8dc" }}
+                        >
+                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                                      d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4" />
+                            </svg>
+                        </button>
                         <button
                             onClick={() => setShowFilters((f) => !f)}
-                            className={`w-7 h-7 rounded-lg flex items-center justify-center transition-colors ${showFilters ? "bg-[#589b31] text-white" : "hover:bg-[#f0f4ec]"}`}
-                            style={{ color: showFilters ? "white" : "#8a9e80" }}
+                            title="More filters"
+                            aria-label="More filters"
+                            className={`w-9 h-9 flex-shrink-0 rounded-xl flex items-center justify-center transition-colors ${showFilters ? "bg-[#589b31]" : "hover:bg-[#f0f4ec]"}`}
+                            style={{ color: showFilters ? "white" : "#6b7e64", border: `1px solid ${showFilters ? "#589b31" : "#e3e8dc"}` }}
                         >
-                            <svg
-                                className="w-3.5 h-3.5"
-                                fill="none"
-                                stroke="currentColor"
-                                viewBox="0 0 24 24"
-                            >
-                                <path
-                                    strokeLinecap="round"
-                                    strokeLinejoin="round"
-                                    strokeWidth={2}
-                                    d="M3 4h18M7 8h10M11 12h2M13 16h-2"
-                                />
+                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M7 12h10M10 18h4" />
                             </svg>
                         </button>
                     </div>
-                </div>
+                )}
 
-                {/* Read / Unread / Human-pickup / Yours toggle */}
-                <div className="flex items-center flex-wrap gap-1 mb-2">
-                    {(["all", "unread", "read", "human", "yours"] as const).map((f) => (
-                        <button
-                            key={f}
-                            onClick={() => setReadFilter(f)}
-                            className={`flex-1 min-w-[58px] h-7 px-1.5 rounded-lg text-xs font-medium transition-colors flex items-center justify-center gap-1.5`}
-                            style={{
-                                backgroundColor: readFilter === f
-                                    ? f === "unread" ? "#427425"
-                                    : f === "human" ? "#b45309"
-                                    : f === "yours" ? "#589b31"
-                                    : "#1c2917"
-                                    : "#f5f6f3",
-                                color: readFilter === f ? "#fff" : "#6b7e64",
-                            }}
-                        >
-                            {f === "all" && "All"}
-                            {f === "unread" && (
-                                <>
-                                    Unread
-                                    {unreadCount > 0 && (
-                                        <span
-                                            className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full leading-none ${readFilter === "unread" ? "bg-white/25 text-white" : "bg-[#427425] text-white"}`}
-                                        >
-                                            {unreadCount}
-                                        </span>
-                                    )}
-                                </>
-                            )}
-                            {f === "read" && "Read"}
-                            {f === "human" && (
-                                <>
-                                    Human
-                                    {humanCount > 0 && (
-                                        <span
-                                            className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full leading-none ${readFilter === "human" ? "bg-white/25 text-white" : "bg-[#b45309] text-white"}`}
-                                        >
-                                            {humanCount}
-                                        </span>
-                                    )}
-                                </>
-                            )}
-                            {f === "yours" && (
-                                <>
-                                    Yours
-                                    {yoursCount > 0 && (
-                                        <span
-                                            className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full leading-none ${readFilter === "yours" ? "bg-white/25 text-white" : "bg-[#589b31] text-white"}`}
-                                        >
-                                            {yoursCount}
-                                        </span>
-                                    )}
-                                </>
-                            )}
-                        </button>
-                    ))}
-                </div>
-
-                {/* Search */}
-                <div className="relative mb-2">
-                    <svg
-                        className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5"
-                        style={{ color: "#b5c9a8" }}
-                        fill="none"
-                        stroke="currentColor"
-                        viewBox="0 0 24 24"
-                    >
-                        <path
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
-                            strokeWidth={2}
-                            d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"
-                        />
-                    </svg>
-                    <input
-                        value={searchQ}
-                        onChange={(e) => setSearchQ(e.target.value)}
-                        placeholder="Start typing to search"
-                        className="w-full h-8 pl-8 pr-3 text-xs rounded-lg focus:outline-none focus:ring-1 focus:ring-[#589b31]"
-                        style={{
-                            fontSize: 13,
-                            backgroundColor: "#f5f6f3",
-                            border: "1px solid #edf0ea",
-                            color: "#1c2917",
-                        }}
-                    />
-                </div>
-
-                {/* Channel tabs — icon pills per channel, spread evenly across the row */}
-                <div className="flex gap-1.5 pt-2 pb-1">
+                {/* Platforms — full names, a count each, swipe sideways for the rest */}
+                <div className="flex gap-1.5 overflow-x-auto pb-1.5 -mx-3 px-3" style={{ scrollbarWidth: "none" }}>
                     {CHANNEL_TABS.map((tab) => {
                         const active = channelTab === tab.id;
                         const cfg = tab.id === "all" ? null : CHANNEL_CONFIG[tab.id as Channel];
-                        const accent = cfg?.color ?? ALL_TAB_ACCENT;
+                        const accent = cfg?.color ?? "#1c2917";
                         const count = channelCounts[tab.id] ?? 0;
                         return (
                             <button
                                 key={tab.id}
                                 onClick={() => setChannelTab(tab.id)}
-                                title={tab.label}
-                                className="relative flex-1 min-w-0 flex flex-col items-center justify-center gap-0.5 h-10 rounded-lg border transition-all hover:brightness-[0.97]"
+                                aria-pressed={active}
+                                className="flex-shrink-0 inline-flex items-center gap-1.5 h-8 px-3 rounded-full text-xs font-semibold whitespace-nowrap transition-colors"
                                 style={{
-                                    // Each channel wears its own brand hue: full fill when
-                                    // active, a soft tint of the same colour when not — so
-                                    // the tabs read as distinct, coloured, and attractive.
-                                    backgroundColor: active ? accent : accent + "14",
-                                    borderColor: active ? accent : accent + "33",
+                                    backgroundColor: active ? "#1f2b17" : "#f5f6f3",
+                                    border: `1px solid ${active ? "#1f2b17" : "#e3e8dc"}`,
+                                    color: active ? "#ffffff" : "#4a5a40",
                                 }}
                             >
-                                <span
-                                    className="flex items-center justify-center [&>svg]:w-3.5 [&>svg]:h-3.5"
-                                    style={{ color: active ? "#ffffff" : accent }}
-                                >
-                                    {tab.id === "all" ? <SparkleIcon /> : cfg!.icon}
-                                </span>
-                                <span
-                                    className="text-[8px] font-bold leading-none tracking-tight"
-                                    style={{ color: active ? "#ffffff" : accent }}
-                                >
-                                    {tab.short}
-                                </span>
+                                {cfg && (
+                                    <span className="flex items-center justify-center [&>svg]:w-3.5 [&>svg]:h-3.5"
+                                          style={{ color: active ? "#ffffff" : accent }}>
+                                        {cfg.icon}
+                                    </span>
+                                )}
+                                {tab.label}
                                 {count > 0 && (
-                                    <span
-                                        className="absolute -top-1 -right-1 min-w-[14px] h-[14px] px-[3px] rounded-full text-[8px] font-bold flex items-center justify-center text-white leading-none"
-                                        style={{ backgroundColor: active ? "#ef4444" : accent }}
-                                    >
+                                    <span className="min-w-[18px] h-[16px] px-1.5 rounded-full text-[10px] font-bold flex items-center justify-center leading-none"
+                                          style={active
+                                              ? { backgroundColor: "#ffffff", color: "#1f2b17" }
+                                              : { backgroundColor: cfg ? accent : "#589b31", color: "#ffffff" }}>
                                         {count}
                                     </span>
                                 )}
@@ -2785,9 +2759,33 @@ export function ConversationsView({
                     })}
                 </div>
 
+                {/* Status — a quiet tab line, so it does not compete with the platforms */}
+                <div className="flex gap-4 overflow-x-auto -mx-3 px-3" style={{ scrollbarWidth: "none" }}>
+                    {(["all", "unread", "yours", "human", "read"] as const).map((f) => {
+                        const on = readFilter === f;
+                        const n = f === "unread" ? unreadCount : f === "human" ? humanCount : f === "yours" ? yoursCount : 0;
+                        const word = { all: "All", unread: "Unread", yours: "Yours", human: "With a person", read: "Read" }[f];
+                        return (
+                            <button
+                                key={f}
+                                onClick={() => setReadFilter(f)}
+                                aria-pressed={on}
+                                className="flex-shrink-0 pt-1 pb-2 text-xs font-semibold whitespace-nowrap transition-colors"
+                                style={{
+                                    color: on ? "#1c2917" : "#7b8773",
+                                    borderBottom: `2px solid ${on ? (f === "human" ? "#b45309" : "#589b31") : "transparent"}`,
+                                }}
+                            >
+                                {word}
+                                {n > 0 && <span className="ml-1" style={{ color: on ? "#1c2917" : f === "human" ? "#b45309" : "#427425" }}>{n}</span>}
+                            </button>
+                        );
+                    })}
+                </div>
+
                 {/* Extra filters */}
                 {showFilters && (
-                    <div className="mt-2 flex gap-1.5 flex-wrap">
+                    <div className="mt-2 mb-2 flex gap-1.5 flex-wrap">
                         {/* Tag filter */}
                         {allTags.length > 0 && (
                             <>
@@ -3235,30 +3233,8 @@ export function ConversationsView({
                     </div>
                 ) : (
                     <>
-                        {/* Floating profile FAB — mobile only */}
-                        {isMobile && (
-                            <button
-                                onClick={() => setMobileCrmOpen(true)}
-                                title="View customer profile"
-                                className="absolute top-3 right-3 z-20 w-8 h-8 rounded-full bg-white border border-[#edf0ea] shadow-sm flex items-center justify-center text-[#427425] hover:bg-[#fafbf8] transition-colors"
-                            >
-                                <svg
-                                    className="w-4 h-4"
-                                    fill="none"
-                                    stroke="currentColor"
-                                    viewBox="0 0 24 24"
-                                >
-                                    <path
-                                        strokeLinecap="round"
-                                        strokeLinejoin="round"
-                                        strokeWidth={2}
-                                        d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"
-                                    />
-                                </svg>
-                            </button>
-                        )}
                         {/* Thread header */}
-                        <div className="px-4 py-3 bg-white flex items-center gap-2 flex-wrap" style={{ borderBottom: "1px solid #edf0ea" }}>
+                        <div className="px-3 sm:px-4 py-2.5 bg-white flex items-center gap-2 flex-wrap" style={{ borderBottom: "1px solid #edf0ea" }}>
                             {isMobile && (
                                 <button
                                     onClick={() => setMobilePanel("list")}
@@ -3279,36 +3255,164 @@ export function ConversationsView({
                                     </svg>
                                 </button>
                             )}
-                            <Avatar
-                                name={displayName(
-                                    activeConv.name,
-                                    activeConv.wa_id,
-                                )}
-                                src={activeConv.avatar_url}
-                                size={32}
-                            />
-                            <div className="flex-1 min-w-0">
-                                <div className="text-sm font-semibold truncate" style={{ color: "#1c2917" }}>
-                                    {displayName(
-                                        activeConv.name,
-                                        activeConv.wa_id,
-                                    )}
+                            {/* The customer's photo from the platform (initials when it
+                                gives none), with the platform's colour as a dot. */}
+                            <div className="relative flex-shrink-0">
+                                <Avatar
+                                    name={displayName(activeConv.name, activeConv.wa_id)}
+                                    src={activeConv.avatar_url}
+                                    size={36}
+                                />
+                                <span
+                                    title={channelFullName(activeConv.channel)}
+                                    className="absolute -right-0.5 -bottom-0.5 w-4 h-4 rounded-full flex items-center justify-center text-white [&>svg]:w-2.5 [&>svg]:h-2.5"
+                                    style={{ backgroundColor: CHANNEL_CONFIG[activeConv.channel]?.color ?? "#589b31", border: "2px solid #fff" }}
+                                >
+                                    {CHANNEL_CONFIG[activeConv.channel]?.icon}
+                                </span>
+                            </div>
+                            {/* Name, then where they are writing from. On a phone the
+                                name opens the profile (the round button is gone). */}
+                            <div
+                                className={`flex-1 min-w-0 ${isMobile ? "cursor-pointer" : ""}`}
+                                onClick={isMobile ? () => setMobileCrmOpen(true) : undefined}
+                                role={isMobile ? "button" : undefined}
+                                title={isMobile ? "View customer profile" : undefined}
+                            >
+                                <div className="text-[15px] font-bold truncate leading-tight" style={{ color: "#1c2917", letterSpacing: "-0.01em" }}>
+                                    {displayName(activeConv.name, activeConv.wa_id)}
                                 </div>
-                                <div className="text-xs truncate" style={{ color: "#b5c9a8", fontFamily: "'DM Mono', monospace" }}>
-                                    {formatPhone(activeConv.wa_id)}
+                                <div className="text-xs truncate" style={{ color: "#6c7964" }}>
+                                    <span className="font-semibold" style={{ color: CHANNEL_CONFIG[activeConv.channel]?.color ?? "#427425" }}>
+                                        {channelFullName(activeConv.channel)}
+                                    </span>
+                                    {activeConv.country ? ` · ${activeConv.country}` : ""}
+                                    {activeConv.channel === "whatsapp" && activeConv.wa_id ? ` · ${formatPhone(activeConv.wa_id)}` : ""}
                                 </div>
                             </div>
-                            <div className="flex items-center gap-1.5 flex-shrink-0 flex-wrap">
-                                <InterceptBadge
-                                    mode={activeConv.intercept_mode}
-                                />
+                            {/* More: the actions used least */}
+                            {(isMobile || canActOnThisConv || isAdminOrSuper) && (
+                                <div className={`relative flex-shrink-0 ${isMobile ? "" : "order-last"}`}>
+                                    <button
+                                        onClick={() => setHeadMenu((v) => !v)}
+                                        aria-label="More actions"
+                                        aria-expanded={headMenu}
+                                        className="w-9 h-9 rounded-xl flex items-center justify-center hover:bg-[#f0f4ec]"
+                                        style={{ color: "#4a5a40", border: "1px solid #e3e8dc" }}
+                                    >
+                                        <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
+                                            <circle cx="5" cy="12" r="1.8" /><circle cx="12" cy="12" r="1.8" /><circle cx="19" cy="12" r="1.8" />
+                                        </svg>
+                                    </button>
+                                    {headMenu && (
+                                        <>
+                                            <div className="fixed inset-0 z-30" onClick={() => setHeadMenu(false)} />
+                                            <div className="absolute right-0 top-10 z-40 w-56 rounded-xl bg-white py-1 shadow-lg"
+                                                 style={{ border: "1px solid #e3e8dc" }}>
+                                                {isMobile && (
+                                                    <button className="w-full text-left px-3.5 py-2.5 text-sm font-medium hover:bg-[#f5f6f3]" style={{ color: "#1c2917" }}
+                                                            onClick={() => { setHeadMenu(false); setMobileCrmOpen(true); }}>
+                                                        View profile
+                                                    </button>
+                                                )}
+                                                {canActOnThisConv && (
+                                                    <button className="w-full text-left px-3.5 py-2.5 text-sm font-medium hover:bg-[#f5f6f3]" style={{ color: "#1c2917" }}
+                                                            onClick={() => { setHeadMenu(false); setTransferModal(true); }}>
+                                                        Hand to a colleague
+                                                    </button>
+                                                )}
+                                                {isAdminOrSuper && (
+                                                    <button className="w-full text-left px-3.5 py-2.5 text-sm font-medium hover:bg-red-50" style={{ color: "#b91c1c" }}
+                                                            onClick={() => { setHeadMenu(false); setClearConfirm(true); }}>
+                                                        Clear history
+                                                    </button>
+                                                )}
+                                            </div>
+                                        </>
+                                    )}
+                                </div>
+                            )}
+                            {/* Second line on a phone, same line on a desktop: who is
+                                answering on the left; Note, Pause and the one main
+                                action on the right, each one tap. */}
+                            <div className={`flex items-center gap-1.5 ${isMobile ? "w-full" : "flex-shrink-0"}`}>
+                                {/* When a colleague holds it the lock badge beside this
+                                    already names them — one label, not two. */}
+                                {!(convOwnedByOther && !canOverride) && <span
+                                    className="inline-flex items-center h-6 px-2 rounded-md text-[10.5px] font-bold uppercase tracking-wide whitespace-nowrap"
+                                    style={activeConv.intercept_mode === "human"
+                                        ? { backgroundColor: "#fff7e0", border: "1px solid #f0d98a", color: "#9a5b12" }
+                                        : activeConv.intercept_mode === "paused"
+                                            ? { backgroundColor: "#f1f2ef", border: "1px solid #e0e3db", color: "#6b7280" }
+                                            : { backgroundColor: "#eef4ff", border: "1px solid #cfdcf7", color: "#2a48a2" }}
+                                >
+                                    {activeConv.intercept_mode === "paused" ? "Paused"
+                                        : activeConv.intercept_mode === "ai" ? "Neema replies"
+                                        : isOwner ? "You reply"
+                                        : activeConv.assigned_agent_name ? `${activeConv.assigned_agent_name.split(" ")[0]} replies`
+                                        : "Needs a person"}
+                                </span>}
+                                {/* ── Locked badge ──
+                                    Regular agents see this when another agent owns the conv.
+                                    Only the super admin never sees it. */}
+                                {convOwnedByOther && !canOverride && (
+                                    <span
+                                        className="text-xs px-2 py-1 rounded-md bg-stone-100 text-stone-400 cursor-not-allowed"
+                                        title={`Handled by ${activeConv.assigned_agent_name ?? "another agent"} — they must release or transfer it first`}
+                                    >
+                                        🔒{" "}
+                                        {activeConv.assigned_agent_name?.split(
+                                            " ",
+                                        )[0] ?? "Locked"}
+                                    </span>
+                                )}
 
-                                {/* Assigned agent name */}
-                                {activeConv.assigned_agent_id &&
-                                    activeConv.assigned_agent_name && (
-                                        <span className="text-xs text-[#b5c9a8] hidden lg:block">
-                                            → {activeConv.assigned_agent_name}
-                                        </span>
+                                <span className="flex-1" />
+
+                                {/* ── Note — any agent/admin, no ownership restriction */}
+                                {canHandleConversations && (
+                                    <Btn
+                                        key="note"
+                                        small
+                                        onClick={() => setNoteModal(true)}
+                                        variant="secondary"
+                                    >
+                                        Note
+                                    </Btn>
+                                )}
+
+                                {/* ── Pause ──
+                                    Any agent/admin can pause unless another agent owns
+                                    it (regular agents blocked; admin/super can override). */}
+                                {activeConv.intercept_mode !== "paused" &&
+                                    canActOnThisConv && (
+                                        <Btn
+                                            key="pause"
+                                            small
+                                            disabled={!!convBusy}
+                                            onClick={() =>
+                                                pauseConv(activeConv.id)
+                                            }
+                                            variant="secondary"
+                                        >
+                                            {convBusy === "pause" ? <span className="inline-block w-3 h-3 border-2 border-current border-t-transparent rounded-full animate-spin" /> : "⏸"} Pause
+                                        </Btn>
+                                    )}
+
+                                {/* ── Resume — same rules as Pause */}
+                                {activeConv.intercept_mode === "paused" &&
+                                    canActOnThisConv && (
+                                        <Btn
+                                            key="resume"
+                                            small
+                                            disabled={!!convBusy}
+                                            onClick={() =>
+                                                release(activeConv.id)
+                                            }
+                                            variant="primary"
+                                        >
+                                            {convBusy === "release" ? <span className="inline-block w-3 h-3 border-2 border-current border-t-transparent rounded-full animate-spin" /> : "▶"} Resume
+                                        </Btn>
                                     )}
 
                                 {/* ── Intercept ──
@@ -3372,96 +3476,11 @@ export function ConversationsView({
                                             onClick={() =>
                                                 release(activeConv.id)
                                             }
-                                            variant="secondary"
+                                            variant="primary"
                                         >
                                             {convBusy === "release" ? <span className="inline-block w-3 h-3 border-2 border-current border-t-transparent rounded-full animate-spin" /> : "↩"} Release
                                         </Btn>
                                     )}
-
-                                {/* ── Locked badge ──
-                                    Regular agents see this when another agent owns the conv.
-                                    Only the super admin never sees it. */}
-                                {convOwnedByOther && !canOverride && (
-                                    <span
-                                        className="text-xs px-2 py-1 rounded-md bg-stone-100 text-stone-400 cursor-not-allowed"
-                                        title={`Handled by ${activeConv.assigned_agent_name ?? "another agent"} — they must release or transfer it first`}
-                                    >
-                                        🔒{" "}
-                                        {activeConv.assigned_agent_name?.split(
-                                            " ",
-                                        )[0] ?? "Locked"}
-                                    </span>
-                                )}
-
-                                {/* ── Pause ──
-                                    Any agent/admin can pause unless another agent owns
-                                    it (regular agents blocked; admin/super can override). */}
-                                {activeConv.intercept_mode !== "paused" &&
-                                    canActOnThisConv && (
-                                        <Btn
-                                            key="pause"
-                                            small
-                                            disabled={!!convBusy}
-                                            onClick={() =>
-                                                pauseConv(activeConv.id)
-                                            }
-                                            variant="secondary"
-                                        >
-                                            {convBusy === "pause" ? <span className="inline-block w-3 h-3 border-2 border-current border-t-transparent rounded-full animate-spin" /> : "⏸"} Pause
-                                        </Btn>
-                                    )}
-
-                                {/* ── Resume — same rules as Pause */}
-                                {activeConv.intercept_mode === "paused" &&
-                                    canActOnThisConv && (
-                                        <Btn
-                                            key="resume"
-                                            small
-                                            disabled={!!convBusy}
-                                            onClick={() =>
-                                                release(activeConv.id)
-                                            }
-                                            variant="primary"
-                                        >
-                                            {convBusy === "release" ? <span className="inline-block w-3 h-3 border-2 border-current border-t-transparent rounded-full animate-spin" /> : "▶"} Resume
-                                        </Btn>
-                                    )}
-
-                                {/* ── Transfer — same rules as Pause/Resume */}
-                                {canActOnThisConv && (
-                                    <Btn
-                                        key="transfer"
-                                        small
-                                        onClick={() => setTransferModal(true)}
-                                        variant="secondary"
-                                    >
-                                        ⇄
-                                    </Btn>
-                                )}
-
-                                {/* ── Note — any agent/admin, no ownership restriction */}
-                                {canHandleConversations && (
-                                    <Btn
-                                        key="note"
-                                        small
-                                        onClick={() => setNoteModal(true)}
-                                        variant="secondary"
-                                    >
-                                        📝
-                                    </Btn>
-                                )}
-
-                                {/* ── Clear history — admin/superuser only ── */}
-                                {isAdminOrSuper && (
-                                    <Btn
-                                        key="clear-history"
-                                        small
-                                        onClick={() => setClearConfirm(true)}
-                                        variant="danger"
-                                    >
-                                        🗑️
-                                    </Btn>
-                                )}
 
                                 {/* ── Close — any agent/admin, no ownership restriction */}
                                 {/* {activeConv.status === "open" &&
@@ -3674,14 +3693,7 @@ export function ConversationsView({
                                                             <div className="flex-1 h-px bg-[#427425]/30" />
                                                         </div>
                                                     )}
-                                                    <div className="flex items-center gap-2 my-2">
-                                                        <div className="flex-1 h-px bg-red-100" />
-                                                        <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-red-100 text-red-700">
-                                                            <span className="text-[10px] font-semibold whitespace-nowrap">🚩 Flagged: Needs Attention</span>
-                                                            {msg.created_at && <span className="text-[9px] opacity-60 whitespace-nowrap">· {timeAgo(msg.created_at)}</span>}
-                                                        </div>
-                                                        <div className="flex-1 h-px bg-red-100" />
-                                                    </div>
+                                                    <FlagCard note={msg.event_reason} when={msg.created_at ? timeAgo(msg.created_at) : ""} />
                                                 </React.Fragment>
                                             );
                                         }
@@ -4257,7 +4269,14 @@ export function ConversationsView({
                                                         className={`text-[10px] mt-1 flex items-center gap-2 ${isInbound ? "" : "opacity-60 justify-end"}`}
                                                         style={{ color: isInbound ? "#b5c9a8" : undefined }}
                                                     >
-                                                        {msg.created_at
+                                                        {/* Still on its way: say so instead of a time, so a
+                                                            slow send is never mistaken for a sent one. */}
+                                                        {String(msg.id).startsWith("optimistic-") ? (
+                                                            <span className="inline-flex items-center gap-1" role="status">
+                                                                <span className="w-2.5 h-2.5 border-[1.5px] border-current border-t-transparent rounded-full animate-spin" />
+                                                                Sending…
+                                                            </span>
+                                                        ) : msg.created_at
                                                             ? timeAgo(
                                                                   msg.created_at,
                                                               )
@@ -4488,30 +4507,6 @@ export function ConversationsView({
                                         </div>
                                     )}
 
-                                    {/* ── Generate draft button — shown when no draft exists */}
-                                    {!draftVisible &&
-                                        activeConv.intercept_mode ===
-                                            "human" && (
-                                            <div className="mb-2 flex justify-end">
-                                                <button
-                                                    onClick={generateDraft}
-                                                    disabled={generatingDraft}
-                                                    className="flex items-center gap-1.5 h-7 px-3 text-xs font-medium rounded-lg border border-blue-200 text-blue-600 hover:bg-blue-50 disabled:opacity-50 transition-colors"
-                                                >
-                                                    {generatingDraft ? (
-                                                        <>
-                                                            <div className="w-3 h-3 border-2 border-blue-400 border-t-transparent rounded-full animate-spin" />
-                                                            Generating…
-                                                        </>
-                                                    ) : (
-                                                        <>
-                                                            🤖 Ask Neema for a draft
-                                                        </>
-                                                    )}
-                                                </button>
-                                            </div>
-                                        )}
-
                                     {/* Reply preview — the message we're answering. */}
                                     {quoted && (
                                         <div className="flex items-start gap-2 mb-2 px-3 py-2 rounded-lg bg-[#f1f5f9] border-l-2 border-[#f59e0b]">
@@ -4582,38 +4577,42 @@ export function ConversationsView({
                                             </div>
                                         </div>
                                     )}
-                                    <div className="flex gap-2 items-end">
-                                        {/* Hidden file input */}
+                                    {/* The composer row: attach · Neema · [text + emoji] · mic/send.
+                                        Secondary tools open on demand (owner, 2026-11-09). */}
+                                    <div className="relative flex gap-1.5 sm:gap-2 items-end">
                                         <input
                                             ref={fileInputRef}
                                             type="file"
-                                            accept={ACCEPT_TYPES}
+                                            accept={attachAccept ?? ACCEPT_TYPES}
                                             multiple
                                             className="hidden"
                                             onChange={handleFileSelect}
                                         />
-                                        {/* Paperclip attach button */}
-                                        <button
-                                            onClick={() =>
-                                                fileInputRef.current?.click()
-                                            }
-                                            title="Attach images or files (up to 5 MB each for images)"
-                                            className="h-11 w-11 sm:h-10 sm:w-10 rounded-2xl bg-[#f1f3f5] hover:bg-[#e5e8eb] active:scale-95 flex items-center justify-center text-[#64748b] transition-all flex-shrink-0"
-                                        >
-                                            <svg
-                                                className="w-4 h-4"
-                                                fill="none"
-                                                stroke="currentColor"
-                                                viewBox="0 0 24 24"
-                                            >
-                                                <path
-                                                    strokeLinecap="round"
-                                                    strokeLinejoin="round"
-                                                    strokeWidth={2}
-                                                    d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13"
+                                        {voice.state === "idle" && (
+                                            <>
+                                                <AttachMenu
+                                                    open={attachOpen}
+                                                    onToggle={() => { setAttachOpen((o) => !o); setToolsOpen(false); setEmojiOpen(false); }}
+                                                    onClose={() => setAttachOpen(false)}
+                                                    onPick={openPicker}
+                                                    channel={activeConv.channel || "whatsapp"}
                                                 />
-                                            </svg>
-                                        </button>
+                                                <ToolsMenu
+                                                    open={toolsOpen}
+                                                    onToggle={() => { setToolsOpen((o) => !o); setAttachOpen(false); setEmojiOpen(false); }}
+                                                    onClose={() => setToolsOpen(false)}
+                                                    canDraft={!draftVisible && activeConv.intercept_mode === "human"}
+                                                    drafting={generatingDraft}
+                                                    onDraft={() => { setToolsOpen(false); generateDraft(); }}
+                                                    enterSends={enterSends}
+                                                    onEnterSends={setEnterSends}
+                                                />
+                                            </>
+                                        )}
+                                        {voice.state !== "idle" ? (
+                                            <VoiceBar v={voice} sending={sendingVoice} onSend={sendVoice} />
+                                        ) : (
+                                        <div className="relative flex-1 min-w-0">
                                         <textarea
                                             ref={composerRef}
                                             value={replyText}
@@ -4626,30 +4625,49 @@ export function ConversationsView({
                                                 t.style.height = Math.min(t.scrollHeight, 132) + "px";
                                             }}
                                             onKeyDown={(e) => {
-                                                if (
-                                                    e.key === "Enter" &&
-                                                    !e.shiftKey
-                                                ) {
-                                                    e.preventDefault();
-                                                    (e.currentTarget as HTMLTextAreaElement).style.height = "auto";
-                                                    sendReply();
-                                                }
+                                                // Never mid-composition (an IME / phone keyboard
+                                                // finishing a word) — that Enter is the word's.
+                                                if (e.nativeEvent.isComposing || e.key !== "Enter") return;
+                                                // Enter sends (Shift+Enter = new line), or — when the
+                                                // agent switched it off — Ctrl/⌘+Enter sends.
+                                                const send = enterSends ? !e.shiftKey : (e.metaKey || e.ctrlKey);
+                                                if (!send) return;
+                                                e.preventDefault();
+                                                (e.currentTarget as HTMLTextAreaElement).style.height = "auto";
+                                                sendReply();
                                             }}
                                             placeholder={window24?.mode === "human_agent"
                                                 ? "Type a reply — goes out under your name (human agent)…"
                                                 : "Type a reply…"}
                                             rows={1}
+                                            aria-label="Reply"
                                             // text-[16px] on mobile is load-bearing: any
                                             // input under 16px makes iOS Safari zoom the
                                             // whole page on focus, which is the single
                                             // ugliest thing that happened when typing here.
-                                            className="flex-1 resize-none px-4 py-2.5 text-[16px] sm:text-sm leading-snug rounded-2xl min-h-[44px] max-h-[132px] focus:outline-none focus:ring-2 focus:ring-[#f59e0b]/70 focus:border-transparent placeholder:text-stone-400"
-                                            style={{
-                                                backgroundColor: "#f6f7f5",
-                                                border: "1px solid #e5e8e2",
-                                                color: "#1c2917",
-                                            }}
+                                            className="block w-full resize-none pl-4 pr-11 py-2.5 text-[16px] sm:text-sm leading-snug rounded-2xl min-h-[44px] max-h-[132px] bg-white border border-[#e5e8e2] text-[#1c2917] shadow-[0_1px_2px_rgba(28,41,23,0.04)] transition-shadow focus:outline-none focus:border-[#f5c46b] focus:ring-4 focus:ring-[#f59e0b]/10 placeholder:text-stone-400"
                                         />
+                                        <button
+                                            type="button"
+                                            onClick={() => { setEmojiOpen((o) => !o); setAttachOpen(false); setToolsOpen(false); }}
+                                            title="Emoji"
+                                            aria-label="Emoji"
+                                            aria-expanded={emojiOpen}
+                                            className={`absolute right-1.5 bottom-1.5 h-8 w-8 rounded-xl flex items-center justify-center transition-colors ${emojiOpen ? "bg-[#fef3c7] text-[#b45309]" : "text-[#94a3b8] hover:text-[#64748b] hover:bg-[#f3f5f0]"}`}
+                                        >
+                                            <svg className="w-[18px] h-[18px]" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={1.8}>
+                                                <circle cx="12" cy="12" r="9" />
+                                                <path strokeLinecap="round" d="M8.5 14.5s1.3 1.8 3.5 1.8 3.5-1.8 3.5-1.8" />
+                                                <path strokeLinecap="round" d="M9 9.5h.01M15 9.5h.01" strokeWidth={2.6} />
+                                            </svg>
+                                        </button>
+                                        </div>
+                                        )}
+                                        {/* Anchored to the whole row, so it never runs off a phone's edge. */}
+                                        {emojiOpen && voice.state === "idle" && (
+                                            <EmojiPicker onPick={insertEmoji} onClose={() => setEmojiOpen(false)} />
+                                        )}
+                                        {voice.state === "idle" && (replyText.trim() || !voiceSupported() || (activeConv.channel || "whatsapp") === "sms") ? (
                                         <button
                                             onClick={sendReply}
                                             disabled={
@@ -4658,31 +4676,39 @@ export function ConversationsView({
                                             }
                                             title={window24?.mode === "closed"
                                                 ? (window24.reason || "Outside the messaging window")
-                                                : "Send"}
-                                            className="h-11 w-11 sm:h-10 sm:w-10 rounded-2xl disabled:opacity-50 active:scale-95 flex items-center justify-center text-white transition-all shadow-sm"
-                                            style={{ backgroundColor: "#f59e0b" }}
-                                            onMouseEnter={(e) => { if (!(!replyText.trim() || sending)) (e.currentTarget as HTMLElement).style.backgroundColor = "#d97706"; }}
-                                            onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.backgroundColor = "#f59e0b"; }}
+                                                : enterSends ? "Send (Enter)" : "Send (Ctrl/⌘ + Enter)"}
+                                            aria-label="Send"
+                                            className="h-11 w-11 sm:h-10 sm:w-10 rounded-2xl disabled:opacity-40 active:scale-95 flex items-center justify-center text-white transition-all shadow-sm bg-[#f59e0b] hover:bg-[#d97706] disabled:hover:bg-[#f59e0b] flex-shrink-0"
                                         >
                                             {sending ? (
                                                 <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
                                             ) : (
-                                                <svg
-                                                    className="w-4 h-4"
-                                                    fill="none"
-                                                    stroke="currentColor"
-                                                    viewBox="0 0 24 24"
-                                                >
-                                                    <path
-                                                        strokeLinecap="round"
-                                                        strokeLinejoin="round"
-                                                        strokeWidth={2}
-                                                        d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"
-                                                    />
+                                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
                                                 </svg>
                                             )}
                                         </button>
+                                        ) : voice.state === "idle" ? (
+                                        <button
+                                            type="button"
+                                            onClick={voice.start}
+                                            disabled={window24?.mode === "closed"}
+                                            title={window24?.mode === "closed" ? (window24.reason || "Outside the messaging window") : "Record a voice note"}
+                                            aria-label="Record a voice note"
+                                            className="h-11 w-11 sm:h-10 sm:w-10 rounded-2xl flex items-center justify-center text-[#64748b] bg-[#f1f3f5] hover:bg-[#e5e8eb] active:scale-95 transition-all disabled:opacity-40 flex-shrink-0"
+                                        >
+                                            <svg className="w-[18px] h-[18px]" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={1.9}>
+                                                <rect x="9" y="3" width="6" height="11" rx="3" />
+                                                <path strokeLinecap="round" d="M5.5 11a6.5 6.5 0 0013 0M12 17.5V21" />
+                                            </svg>
+                                        </button>
+                                        ) : null}
                                     </div>
+                                    {voice.state === "idle" && replyText.includes("\n") === false && replyText.trim().length > 0 && (
+                                        <p className="hidden sm:block mt-1 px-1 text-[10px] text-stone-400 select-none">
+                                            {enterSends ? "Enter to send · Shift + Enter for a new line" : "Ctrl/⌘ + Enter to send · Enter for a new line"}
+                                        </p>
+                                    )}
 
                                     {/* Media attachment preview panel (multi-select) */}
                                     {mediaItems.length > 0 && (
@@ -4716,6 +4742,10 @@ export function ConversationsView({
                                                                 ✕
                                                             </button>
                                                         </div>
+                                                        {/* Audio carries no caption on WhatsApp or Meta. */}
+                                                        {it.file.type.startsWith("audio/") ? (
+                                                            <span className="flex-1 min-w-0 px-2 text-xs text-[#5f6f57] truncate">{it.file.name} · audio, sent without a caption</span>
+                                                        ) : (
                                                         <input
                                                             value={it.caption}
                                                             onChange={(e) => updateMediaCaption(it.id, e.target.value)}
@@ -4724,6 +4754,7 @@ export function ConversationsView({
                                                             className="flex-1 min-w-0 px-2 py-1.5 text-xs rounded-lg focus:outline-none focus:ring-1 focus:ring-[#589b31]"
                                                             style={{ backgroundColor: "#ffffff", border: "1px solid #e8ebe3", color: "#1c2917" }}
                                                         />
+                                                        )}
                                                     </div>
                                                 ))}
                                                 {/* Add-more tile */}
@@ -4979,6 +5010,12 @@ export function ConversationsView({
                         conversation={activeConv}
                         orders={orders}
                         onToast={onToast}
+                        // Wider than the old 320px so the profile and insights
+                        // breathe; clamped so a narrow laptop keeps the thread.
+                        className="w-[clamp(320px,23vw,380px)] flex-shrink-0 flex flex-col overflow-hidden"
+                        // The activity log sits beside the thread on desktop —
+                        // its events are not repeated here (owner, 2026-11-09).
+                        hideActivityTab
                         onClose={() => setCrmOpen(false)}
                         onOpenIdentity={openIdentityConversation}
                         onPrefillReply={putInComposer}

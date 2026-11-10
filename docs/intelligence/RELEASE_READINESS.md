@@ -64,6 +64,10 @@ silence, plus fail-closed safeguards that had been fail-open.
 
 Slices 1–18 are live on the box at b5dda19 (14:27 UTC, 9 Nov) — every implementation slice of the Customer Intelligence directive and the validation run's one fix. The owner's later word (13:0x UTC) allowed one validation run: 10/11 turns, the Bahrain/Kenya case 3/3, one model-free defect found and fixed in slice 18 (`BENCHMARK_RESULTS.md`).
 
+## Slice 19 (2026-11-10) — merged as 68da764, live (on the box 07:28 UTC)
+
+Intent discernment and graceful close (`INTENT_DISCERNMENT.md`): one kind boundary for a request for goods without payment, one brief line on a repeat, then no automatic reply to that same request; buyers, negotiators, credit, samples, promotions, donors, complaints, payment claims and requests for a person are never part of it. Sales follow-ups and the seasonal campaign wait while a boundary stands, with no time expiry. No migration. One model pass read (12/14); the corrections after the owner's four-risk review are tested but not seen with the model.
+
 ## Slice 18 (2026-11-09) — merged as b5dda19, live (on the box 14:27 UTC)
 
 The directive's Phase 9 run (`customer_intelligence.jsonl` × 1, run 42624670362): 10/11 turns. The failure — a Kenyan number saying "Dubai, UAE" placed in Kenya and quoted in shillings — was in `iso_from_text`, which knew only the formal country names and the Kenyan towns. Country aliases and well-known cities now name their country (`CUSTOMER_GEOGRAPHY.md` §5c). No migration; no API change; the resolver's other callers (operator country, shipping destination, Meta evidence, Swahili guard) widen in the same direction.
