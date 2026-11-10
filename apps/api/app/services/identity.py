@@ -50,6 +50,35 @@ async def resolve_or_create_person(
     raw_profile: dict | None = None,
     source: str | None = None,
     confidence: str | None = None,
+    name_source: str | None = None,
+) -> Identity:
+    """Find-or-create the identity and record the channel's name on the person.
+
+    The name the channel shows (a WhatsApp profile, a Facebook name, a comment
+    author) is recorded through services/names WITH its source, which decides
+    the canonical name and mirrors it where every screen reads (owner,
+    2026-11-09: "John 14:14"). `name_source` overrides the source when the
+    name did not come from this channel's own profile."""
+    ident = await _resolve_or_create_person(
+        db, channel, external_id, display_name=display_name, raw_profile=raw_profile,
+        source=source, confidence=confidence)
+    if display_name and ident is not None and ident.person_id is not None:
+        from app.services import names as _names
+        person = await db.get(Person, ident.person_id)
+        await _names.record(db, person, display_name,
+                            by=(name_source or _names.channel_source(channel)))
+    return ident
+
+
+async def _resolve_or_create_person(
+    db: AsyncSession,
+    channel: str,
+    external_id: str,
+    *,
+    display_name: str | None = None,
+    raw_profile: dict | None = None,
+    source: str | None = None,
+    confidence: str | None = None,
 ) -> Identity:
     """Find-or-create the identity for `(channel, external_id)` and its person.
 

@@ -224,7 +224,7 @@ async def submit_measurement(
     from app.models.intercept import Intercept, InterceptAction
     from app.models.production_enquiry import ProductionEnquiry
 
-    user = await provision_user(db, phone, name=name)
+    user = await provision_user(db, phone, name=name, name_source="web_form")
     conv = await get_or_create_conversation(db, "whatsapp", phone, person_id=user.person_id)
     conv.intercept_mode = InterceptMode.human          # hand to a human, don't auto-sell
     conv.last_message_at = datetime.now(timezone.utc)

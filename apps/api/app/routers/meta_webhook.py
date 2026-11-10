@@ -391,6 +391,10 @@ async def _capture_events(db: AsyncSession, channel: str, payload: dict, redis=N
                     _log.warning("ad referral capture failed (%s): %s", channel, exc)
 
             conv = await get_or_create_conversation(db, channel, sender, person_id=ident.person_id)
+            # "My name is Peter": their own word on their name (services/names).
+            if text:
+                from app.services.messaging import _record_self_introduction
+                await _record_self_introduction(db, ident.person_id, text)
 
             # A voice note is transcribed in the background (services/
             # voice_notes) — the row carries its outcome from `queued` on.

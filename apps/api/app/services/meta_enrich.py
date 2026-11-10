@@ -65,10 +65,13 @@ async def backfill_unknown_profiles(db: AsyncSession, limit: int = 50,
             ident.raw_profile = {k: v for k, v in (ident.raw_profile or {}).items()
                                  if k != "no_profile"}
         if name:
-            if not person.display_name:
-                person.display_name = name[:200]
             if not ident.display_name:
                 ident.display_name = name[:200]
+            # Recorded with its source; services/names decides and mirrors.
+            from app.services import names as _names
+            if await _names.record(db, person, name, by=_names.channel_source(ident.channel)) is None \
+                    and not person.display_name:
+                person.display_name = name[:200]
         if pic and (ident.raw_profile or {}).get("profile_pic") != pic:
             ident.raw_profile = {**(ident.raw_profile or {}), "profile_pic": pic}
         enriched += 1
@@ -106,9 +109,12 @@ async def sweep_conversation_names(db: AsyncSession) -> int:
             nm = names.get(str(ident.external_id))
             if not nm:
                 continue
-            person.display_name = nm[:200]
             if not ident.display_name:
                 ident.display_name = nm[:200]
+            from app.services import names as _names
+            if await _names.record(db, person, nm, by=_names.channel_source(ident.channel)) is None \
+                    and not person.display_name:
+                person.display_name = nm[:200]
             rp = dict(ident.raw_profile or {})
             rp.pop("no_profile", None)
             ident.raw_profile = rp

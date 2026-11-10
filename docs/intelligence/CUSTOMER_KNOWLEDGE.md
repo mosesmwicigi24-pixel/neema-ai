@@ -70,12 +70,26 @@ prompt names ("eish", "po", a currency word) are read by the model only.
 
 ## 4. Names and identity
 
-| Source | Stored where | Rule |
+**Since 2026-11-09 (the "John 14:14" fix, G4/R5):** one decision,
+`app/services/names.py`. Every name is recorded on the person with its source
+(`persons.state.name`: readings per source, the current decision, a capped
+history) and the decision is mirrored onto `persons.display_name` (inbox),
+`users.name` / `name_confirmed` (profile, apps). Each channel's own name stays
+on its identity row.
+
+| Level | Source | Rule |
 |---|---|---|
-| WhatsApp profile name on an inbound message | `users.name` | never overwrites a name the customer or an operator set (`name_confirmed`) |
-| Meta profile (name, picture, locale) | `identities.display_name`, `identities.raw_profile`, `persons.display_name` | enriches an empty name, never replaces one |
-| What the customer says | identity, person and user row at once | the fuller name wins; sets `name_confirmed` |
-| An operator's edit | the same | wins, confirmed |
+| confirmed | staff edit (`operator`); a name confirmed before the rule (`legacy_confirmed`) | staff's word always stands; replaced only by another staff edit |
+| stated | the customer's own "My name is…/I'm Bishop…/Naitwa…" (read on every inbound message), or the capture tools | outranks every profile name |
+| profile | WhatsApp profile name | outranks other platforms |
+| platform | Facebook / Messenger / Instagram / TikTok / comment author / the public web form | weakest named source |
+
+A name that is not a person's (a scripture reference, a church or business, a
+handle, a placeholder) ranks below every personal name, is never greeted ("You
+are speaking with…" is replaced by a note), and never suggests a merge. A
+fuller name for the same person wins over a partial one unless staff
+confirmed it. `python -m app.scripts.audit_names` (dry run; `--apply --actor`)
+brings older records under the rule from real evidence only.
 
 Titles stay with the first name ("Pastor Moses"), used once per reply at
 most; role and church go to `persons.state.profile`. One person has many
@@ -83,8 +97,8 @@ handles (`Identity`), many identifiers with `source` and `confidence`
 (`Identifier`), and an audited, undoable merge (`PersonMerge`). The parish is
 found or created by a normalised name and attached to the person. The writer
 is told "You are speaking with {name}" and "They appear to be in {country}"
-plus facts, sizes, past orders and the parish. Thin spot: a profile name is
-trusted as a person's name even when it is a church, a shop or symbols.
+plus facts, sizes, past orders and the parish — "You are speaking with" only
+when the name is a person's (G4 closed 2026-11-09).
 
 ## 5. How information is gathered today
 

@@ -97,6 +97,16 @@ export interface CustomerProfile {
     wa_id: string;
     name: string | null;
     name_confirmed: boolean;
+    /** Where the name came from (services/names on the API). */
+    name_info?: {
+        name: string | null;
+        source: string | null;
+        label: string | null;
+        level: string | null;
+        kind: string;
+        addressable: boolean;
+        profiles: { source: string; label: string; name: string; kind: string; level: string }[];
+    };
     email: string | null;
     phone: string | null;
     location: string | null;
@@ -1493,6 +1503,21 @@ export function CustomerSidebar({
                                 </span>
                             )}
                         </div>
+                        {profile.name_info?.label && (
+                            <div
+                                className="text-[10px] text-stone-400 truncate"
+                                title={(profile.name_info.profiles || [])
+                                    .map((p) => `${p.label}: ${p.name}`)
+                                    .join("\n")}
+                            >
+                                {profile.name_info.label}
+                                {!profile.name_info.addressable && (
+                                    <span className="text-amber-600">
+                                        {" "}· not a personal name — Neema won't greet them by it
+                                    </span>
+                                )}
+                            </div>
+                        )}
                         <div className="text-xs text-stone-400 font-mono flex items-center gap-1.5">
                             {profile.country_iso && (
                                 <img
