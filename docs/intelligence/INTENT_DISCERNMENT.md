@@ -1,7 +1,9 @@
 # Intent discernment and graceful close — slice 19 (2026-11-10)
 
-The owner's directive "NEEMA — Intent Discernment & Graceful Close". Built on
-a branch and **not deployed**: the directive says to report before deployment.
+The owner's directive "NEEMA — Intent Discernment & Graceful Close". Reported
+before deployment as the directive asked, reviewed against the owner's four
+risks, then **merged as 68da764 on the owner's word ("merge 366") and live on
+the box since 07:28 UTC, 10 Nov**.
 No evaluation run was dispatched (the owner's word of 9 Nov: "Don't run
 validation"). No migration: the record is JSONB on `persons.state`.
 
