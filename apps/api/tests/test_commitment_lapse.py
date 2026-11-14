@@ -52,3 +52,24 @@ def test_the_inbox_offers_the_way_there():
     assert "conversationsApi.directLink(activeConv.id)" in view
     assert "Open the comment on Facebook" in view and "Open in the Page inbox" in view
     assert "/direct-link" in (web / "lib" / "api.ts").read_text()
+
+
+def test_each_platform_has_its_own_longest_reply_window(monkeypatch):
+    monkeypatch.setattr(cm.settings, "commitment_lapse_hours", 24, raising=False)
+    monkeypatch.setattr(cm.settings, "commitment_lapse_hours_by_channel",
+                        "whatsapp:24,messenger:168,instagram:168,facebook:168,tiktok:48", raising=False)
+    assert cm.lapse_hours("whatsapp") == 24 and cm.lapse_hours("tiktok") == 48
+    assert cm.lapse_hours("messenger") == cm.lapse_hours("instagram") == cm.lapse_hours("facebook") == 168
+    assert cm.lapse_hours("web") == 24 and cm.lapse_hours(None) == 24        # not named: the plain figure
+    two_days = NOW - timedelta(days=2)
+    assert cm.lapsed(_r(5000), two_days, now=NOW, channel="whatsapp")
+    assert not cm.lapsed(_r(5000), two_days, now=NOW, channel="messenger")    # a colleague may still reply
+    assert not cm.lapsed(_r(5000), two_days, now=NOW, channel="facebook")
+    assert not cm.lapsed(_r(5000), NOW - timedelta(hours=47), now=NOW, channel="tiktok")
+    assert cm.lapsed(_r(5000), NOW - timedelta(hours=49), now=NOW, channel="tiktok")
+    assert cm.lapsed(_r(11000), NOW - timedelta(days=7, hours=1), now=NOW, channel="messenger")
+    # a malformed entry falls back to the plain figure; 0 switches it all off
+    monkeypatch.setattr(cm.settings, "commitment_lapse_hours_by_channel", "messenger:soon", raising=False)
+    assert cm.lapse_hours("messenger") == 24
+    monkeypatch.setattr(cm.settings, "commitment_lapse_hours", 0, raising=False)
+    assert cm.lapse_hours("whatsapp") == 0

@@ -73,9 +73,33 @@ The screenshots arrived after slice 20 was merged: the cassock giveaway post and
 
 Tests added to `tests/test_conversational_naturalness.py` (39 in all).
 
+## 5c. The giveaway thread with the model (run 43585505682, 14 Nov 10:29–10:32 UTC)
+
+On the owner's word ("can you test it?"). `app.jobs.eval_giveaway` feeds comments through the real comment path with the real model; the three sends to Facebook are recorders. Six commenters, 11 comments, one pass, on branch a87f1d5. Result: `results/giveaway-eval-a87f1d5-run43585505682.json`.
+
+**11 of 11 turns passed the written checks.** 9 replies, 2 deliberate silences ("Thank you" and "Amen" after an earlier reply were liked, not answered).
+
+What the transcript shows, beyond the checks:
+
+| Seen | Verdict |
+|---|---|
+| The church reply no longer reads as "Bethany House Pentecostal…"; no welcome and no selection procedure a second time; no request for church, town or full name | Fixed (20/20b) |
+| Asking to receive the gift herself: answered in Swahili as a nomination, no price | Fixed (20b) |
+| "When will you choose the pastor?": "We have no set date to share…" — no invented date | Good |
+| A price ask: the public reply said "a gift, not for sale" — and the PRIVATE message then carried "Order here 👉 …/cassock" | **Defect, fixed the same day**: `_is_the_gift` — the gift's own item never travels as an order link |
+| Second reply in the thread repeated that the recipient covers the shipping | Still there, milder |
+| Replies still open "Thank you, …" on the second and third turn | Still there |
+| "Thokozani Ndwandwe" (the pastor's name) was read as the commenter's own name | Wrong; in the real thread it followed Neema's question, which she no longer asks |
+
+The job's own dry run (model unreachable) found one more: a returning commenter's QUESTION was liked into silence when the reader could not classify it. Fixed: a question, by its mark or its opening word, always keeps its line.
+
+The same run re-checked intent-002 after the come-back rule was tightened: 2/2 — "God bless your saving. I'll check in with you on 1 December."
+
+Cost: not recorded by the run; estimated under USD 0.50.
+
 ## 6. Not verified, and remaining risks
 
-- **No model run.** Whether Neema's actual wording is now natural and non-repetitive is unverified; only what she is told and when she is called are tested. Evaluation runs remain stopped on the owner's word.
+- **One model pass only** (§5c): 11 comments, once. It is evidence, not a measurement; a second pass could differ.
 - **The Page tag is recognised by name** ("Bethany House", or an "@handle"). If the Page is renamed the pattern must follow.
 - **Canned lines still open with "Thank you" / "Welcome to Bethany House".** The model-free price lines and first-contact lines keep the owner's 2026-09-16 cadence. Changing them is a wording decision for the owner.
 - **A Like instead of words** depends on `meta_comment_like` being on; on Instagram there is no Like, so the acknowledgement is simply left.

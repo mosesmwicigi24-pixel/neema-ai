@@ -485,6 +485,19 @@ class Settings(BaseSettings):
     # passed") — the reply window is gone, and an open check there only holds
     # every follow-up and grows the count. 0 turns it off.
     commitment_lapse_hours: int = 24
+    # ... and each platform has its own longest time in which a PERSON on our
+    # team may still reply (owner, 2026-11-14: "get the maximum in every
+    # platform"). Hours, per channel; a channel not named here uses the figure
+    # above.
+    #   whatsapp  24  — the customer-service window; after it only a paid,
+    #                   approved template may be sent
+    #   messenger 168 — 24 h for Neema, 7 days for a colleague's own reply
+    #                   (Meta's human-agent tag, which our sends already use)
+    #   instagram 168 — the same rule as Messenger
+    #   facebook  168 — a comment can be answered in public for as long as it
+    #                   stands; the private reply to it is allowed for 7 days
+    #   tiktok    48  — TikTok's business-messaging window
+    commitment_lapse_hours_by_channel: str = "whatsapp:24,messenger:168,instagram:168,facebook:168,tiktok:48"
     # A person commenting many times under one post: this many full model
     # replies a day; beyond it, a bare price ask still gets the free priced
     # line on an identified post and anything else the warm canned line.

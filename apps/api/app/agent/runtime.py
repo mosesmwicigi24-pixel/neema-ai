@@ -6110,6 +6110,16 @@ class _OptedOut(Exception):
     """The contact asked not to be messaged — the DM leg stands down."""
 
 
+def _is_the_gift(caption: str | None, name: str | None) -> bool:
+    """Is this hub item the thing the campaign post gives away? True when
+    every word of its name (three letters or more) is in the caption — the
+    "Cassock" under "gift your pastor a beautiful cassock". A "Clergy Collar"
+    asked about under the same post is another item, and may have its link."""
+    cap = " ".join(str(caption or "").lower().split())
+    words = [w for w in re.findall(r"[a-z]{3,}", str(name or "").lower())]
+    return bool(cap and words) and all(re.search(rf"\b{re.escape(w)}s?\b", cap) for w in words)
+
+
 def _returning_note(n: int) -> str:
     """One conversation, not a new one (owner, 2026-11-10): the line a public
     comment turn carries when we have already answered this person here."""
@@ -6485,6 +6495,12 @@ async def _run_comment_engage(redis, channel: str, comment: dict, own_pages: set
     # "Order here" (owner, 2026-09-26: that shoe is a gift).
     if campaign and not (product_link and _names_exactly(answer, matched.get("name") or "")):
         product_link = ""
+    if campaign and product_link and _is_the_gift(_caption, matched.get("name") or ""):
+        # The item the answer named IS the gift (a cassock, under the cassock
+        # giveaway): "it is a gift, not for sale" followed in the inbox by
+        # "Order here 👉 …/cassock" is a sales redirect of someone taking part
+        # (the giveaway run with the model, 2026-11-14).
+        product_link = ""
     # Goodwill opens no DM — unless the post sells a product, where the link is
     # the most useful thing we can hand them.
     if answer and (plan["dm"] or product_link):
@@ -6614,6 +6630,9 @@ async def _run_comment_engage(redis, channel: str, comment: dict, own_pages: set
         public_text = _campaign_canned(comment_text, kind, ask, name_tag, ext, swahili)
         if (_prior and not held_issues and kind not in ("request", "question")
                 and not _CAMPAIGN_BUY_RE.search(comment_text)
+                and "?" not in comment_text and not _looks_like_a_question(comment_text)
+                and not re.match(r"(?i)\s*(when|what|who|whom|why|how|which|where|is|are|will|would|can|"
+                                 r"could|do|does|did|lini|nani|nini|kwa\s+nini|vipi|je)\b", comment_text)
                 and not re.search(r"\d", comment_text) and len(comment_text.split()) <= 8):
             # Already welcomed under this post, and no model answer to give:
             # the stock "thank you for joining in" a second time is the

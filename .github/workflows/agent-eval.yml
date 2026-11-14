@@ -22,6 +22,9 @@ on:
       scripted:
         description: "Also run the scripted battery first (true/false)"
         default: "true"
+      giveaway:
+        description: "Also run the giveaway comment thread (app.jobs.eval_giveaway) (true/false)"
+        default: "false"
 
 jobs:
   eval:
@@ -93,11 +96,19 @@ jobs:
           python -m app.jobs.agent_eval --cases --file "${{ inputs.file || 'blind_heldout.jsonl' }}" \
             --repeat "${{ inputs.repeat || '3' }}" $ONLY \
             --out agent-eval-blind.json --packet rater-packet.md 2>&1 | tee agent-eval-blind.log
+      # What Neema says UNDER A POST: the cassock giveaway thread through the
+      # real comment path, every send to Facebook replaced by a recorder.
+      - name: The giveaway comment thread
+        if: ${{ inputs.giveaway == 'true' }}
+        shell: bash
+        run: set -o pipefail; python -m app.jobs.eval_giveaway --out giveaway-eval.json 2>&1 | tee giveaway-eval.log
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: agent-eval-results
           path: |
+            apps/api/giveaway-eval.json
+            apps/api/giveaway-eval.log
             apps/api/agent-eval-transcript.txt
             apps/api/agent-eval-blind.json
             apps/api/agent-eval-blind.log
