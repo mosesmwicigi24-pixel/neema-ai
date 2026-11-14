@@ -770,6 +770,18 @@ async def _capture_comment_events(db: AsyncSession, channel: str, payload: dict,
             if not c or not c.get("comment_id") or not c.get("from_id"):
                 continue
             c["page_id"] = str(entry.get("id") or "") or None   # owning page → right token
+            # A reply inside a thread arrives with the Page's own name tagged in
+            # front of it. Taken off HERE, before it is stored: the engine
+            # already read the comment without it, but the stored row is what
+            # the next turn reads back as the thread, and "Bethany House
+            # Pentecostal Holiness Church" came back as the church's name
+            # (giveaway run 43586975548, 2026-11-14).
+            if c.get("parent_id") and c.get("text"):
+                try:
+                    from app.agent.runtime import _strip_page_tag
+                    c["text"] = _strip_page_tag(c["text"], str(c["parent_id"]))
+                except Exception:
+                    pass
             if c["from_id"] in own:            # our own comment/reply — never self-answer
                 continue
             if redis is not None:              # dedup on the comment id (fast path)

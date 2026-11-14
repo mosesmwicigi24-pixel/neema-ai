@@ -79,6 +79,9 @@ def test_a_returning_entrant_over_the_cap_is_not_thanked_for_joining_twice(monke
     # details, a question or a first comment keep their line
     out = _engage(monkeypatch, "Rev Alice from Nakuru, size 39", reading=LOW, identity=SHOE, over_cap=True)
     assert len(out["public"]) == 1
+    # ... and that line says it arrived — never "thank you for joining in" again
+    assert out["public"][0] in [x.replace("{name}", ", John") for x in rt._CAMPAIGN_RETURN_POOL]
+    assert "joining" not in out["public"][0] and "Thank" not in out["public"][0]
     # a question the reader could not classify (the model was down) is still a
     # question: never liked into silence (found by the giveaway dry run, 2026-11-14)
     for q in ("When will you choose the pastor?", "when will the pastor be chosen"):
@@ -305,3 +308,64 @@ def test_the_gifts_own_item_gets_no_order_link_in_the_inbox(monkeypatch):
                   answer="The cassock here is a gift. Our Clergy Collar is KES 500 — message us to order.",
                   turn_rows=[collar])
     assert len(out["dm"]) == 1 and "clergy-collar" in out["dm"][0]
+
+
+# ── the three left open by the giveaway run (owner, 2026-11-14: "fix them") ──
+def test_a_continuing_reply_loses_the_reflex_thanks():
+    t = rt._trim_continuing
+    assert t("Thank you, we have noted your church and Nongoma.", "Potters House, Nongoma", explained=False) \
+        == "We have noted your church and Nongoma."
+    assert t("Thank you, Siyethemba. Your nomination of Rev TP is with our team.", "Thokozani Ndwandwe",
+             explained=False) == "Your nomination of Rev TP is with our team."
+    assert t("Asante sana, Irene 🙏 Ombi lako limepokelewa.", "sawa", explained=False) == "Ombi lako limepokelewa."
+    # a thanks FOR something is a sentence and stays; so does a reply that is only the thanks
+    assert t("Thank you for the correction — Nongoma it is.", "It is Nongoma", explained=False) \
+        == "Thank you for the correction — Nongoma it is."
+    assert t("Thank you, Siyethemba.", "ok then", explained=False) == "Thank you, Siyethemba."
+    assert t("Thank you. Noted.", "ok", explained=False) == "Thank you. Noted."      # nothing left worth keeping
+    assert t("", "x", explained=True) == ""
+
+
+def test_terms_they_have_heard_are_not_said_again_unless_they_ask():
+    t = rt._trim_continuing
+    said = ("We have noted your church and Nongoma. The gift is shipped from our Nairobi workshop by DHL, "
+            "and the recipient covers only that shipping, as the post says.")
+    assert t(said, "Pentecostal Holiness Church around Nongoma KZN", explained=True) \
+        == "We have noted your church and Nongoma."
+    # not yet explained, or they asked about it: the terms stay
+    assert t(said, "Pentecostal Holiness Church", explained=False) == said
+    assert t(said, "Who pays for the shipping?", explained=True) == said
+    assert t(said, "when will you choose", explained=True) == said
+    # a reply that is ONLY terms is never emptied
+    only = "Our team will be selecting one recipient. Follow us for the details."
+    assert t(only, "Rev John", explained=True) == only
+
+
+def test_the_engine_trims_only_a_continuing_reply(monkeypatch):
+    _prior(monkeypatch, [SAID_1])
+    out = _engage(monkeypatch, "Pentecostal Holiness Church around Nongoma KZN", reading=HIGH, caption=CASSOCK,
+                  answer="Thank you, we have noted your church. The recipient covers only the shipping.")
+    assert out["public"] == ["We have noted your church."]
+    assert out["turn"]["comment_reading"]["commenter"] == "John"
+    _prior(monkeypatch, [])
+    first = "Thank you, John. Our team will be selecting one recipient — completely free."
+    out = _engage(monkeypatch, "I nominate Rev Peter", reading=HIGH, caption=CASSOCK, answer=first)
+    assert out["public"] == [first]                      # a first reply is left as written
+
+
+def test_a_name_sent_after_a_nomination_is_the_nominees():
+    cont = rt._reading_context({"kind": "other", "campaign": CASSOCK, "returning": 2, "explained": True,
+                                "commenter": "Siyethemba"})
+    assert "The person writing is Siyethemba (the name on the comment)." in cont
+    assert "is the NOMINEE'S name" in cont and "never greet or thank the commenter by it" in cont
+    assert "never save it as the commenter's own name" in cont
+    assert "The person writing is" not in rt._reading_context(
+        {"kind": "other", "campaign": CASSOCK, "returning": 1})
+
+
+def test_the_page_tag_is_taken_off_before_the_comment_is_stored():
+    from app.routers import meta_webhook as mw
+    src = inspect.getsource(mw._capture_comment_events)
+    strip, store = src.index("_strip_page_tag(c[\"text\"]"), src.index("db.add(Message(")
+    assert strip < store                       # what is stored is what the next turn reads back
+    assert 'if c.get("parent_id") and c.get("text"):' in src

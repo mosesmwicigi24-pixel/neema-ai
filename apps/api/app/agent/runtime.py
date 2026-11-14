@@ -4214,7 +4214,7 @@ _EXPLAINED_RE = re.compile(
     re.IGNORECASE)
 
 
-def _campaign_continues(caption: str, returning: int, explained: bool) -> str:
+def _campaign_continues(caption: str, returning: int, explained: bool, commenter: str = "") -> str:
     """The host's brief for a person we have ALREADY answered under this
     campaign post (owner, 2026-11-10: a nomination and the details that
     follow it are one continuous interaction — never the welcome and the
@@ -4247,16 +4247,21 @@ def _campaign_continues(caption: str, returning: int, explained: bool) -> str:
             "pivot from the gift. Never suggest they have been or will be the one chosen. Never ask "
             "for a phone number, an address or an email in public — the caption's own details "
             "(name, church, town, size) only. Not every line opens with thanks, a blessing or "
-            "'noted': open with the thing itself. Never an apology, never \"something went "
-            "wrong\", never \"hold on\".)")
+            "'noted': open with the thing itself. "
+            + (f"The person writing is {commenter} (the name on the comment). " if commenter else "")
+            + "A NAME THEY SEND as a detail after nominating someone is the NOMINEE'S name — the "
+            "pastor they put forward — not their own: never greet or thank the commenter by it, and "
+            "never save it as the commenter's own name. "
+            "Never an apology, never \"something went wrong\", never \"hold on\".)")
 
 
-def _campaign_context(caption: str, returning: int = 0, explained: bool = False) -> str:
+def _campaign_context(caption: str, returning: int = 0, explained: bool = False,
+                      commenter: str = "") -> str:
     """The host's brief under a campaign post (owner, 2026-09-26): the gift's
     facts, the owner's own reply as the shape, and what never to say. A
     person already answered under this post gets the continuing brief."""
     if returning:
-        return _campaign_continues(caption, returning, explained)
+        return _campaign_continues(caption, returning, explained, commenter)
     cap = " ".join(str(caption or "").split())[:700]
     return ("(THIS POST IS A CAMPAIGN — its caption: \"" + cap + "\". You are its HOST, "
             "speaking for Bethany House — not a shopkeeper at a stall. " + _campaign_facts(caption) + " "
@@ -4296,8 +4301,9 @@ def _reading_context(reading: dict | None) -> str:
     returning = int(r.get("returning") or 0)
     if r.get("campaign"):
         rest = _reading_context({k: v for k, v in r.items()
-                                 if k not in ("campaign", "hint", "returning", "explained")})
-        out = _campaign_context(str(r["campaign"]), returning, bool(r.get("explained")))
+                                 if k not in ("campaign", "hint", "returning", "explained", "commenter")})
+        out = _campaign_context(str(r["campaign"]), returning, bool(r.get("explained")),
+                                str(r.get("commenter") or ""))
         if r.get("hint") == "displeasure":
             out += ("\n\n(The reader sensed some displeasure in the words — if it is there, "
                     "meet it kindly and directly first, then continue as the host.)")
@@ -4834,6 +4840,17 @@ _CAMPAIGN_ACK_POOL = [
 _SW_CAMPAIGN_ACK_POOL = [
     "Asante kwa kujiunga nasi{name} 🙏 Tumepokea ujumbe wako, na tunafurahi uko nasi 💛",
     "Mungu akubariki{name}! 🙏 Tumeona ujumbe wako — asante kwa kuwa sehemu ya hili 💛",
+]
+# A RETURNING entrant who has sent a detail, with no model answer to give
+# (over the cap, the model unreachable): a few plain words that it arrived —
+# never the welcome or "thank you for joining in" a second time (owner,
+# 2026-11-10 and 2026-11-14).
+_CAMPAIGN_RETURN_POOL = [
+    "Received{name} — it is with our team 🙏",
+    "We have it{name} — it is with our team 🙏",
+]
+_SW_CAMPAIGN_RETURN_POOL = [
+    "Tumepokea{name} — iko kwa timu yetu 🙏",
 ]
 # A price or buying ask under a campaign with no model answer: the gift's
 # line — never a price, never "we do not sell it" (owner, 2026-09-26: "that
@@ -6178,6 +6195,47 @@ def _strip_page_tag(text: str, parent_id: str = "") -> str:
     return rest or t
 
 
+# A CONTINUING reply, trimmed (owner, 2026-11-14: "fix them"). The model was
+# told not to open every line with thanks nor to say the gift's terms twice;
+# the giveaway run still showed "Thank you, …" on the second and third reply
+# and the shipping line once more. What the brief asks, the seam now holds.
+_THANKS_OPENER_RE = re.compile(
+    r"^\s*(?:thank\s+you|thanks|asante(?:\s+sana)?)"
+    r"(?:\s+(?:so|very)\s+much)?"
+    r"(?:,?\s+(?!We\b|I\b|Our\b|The\b|Your\b|It\b|This\b)[A-Z][\w'’.-]*){0,3}"
+    r"\s*(?:[.,!;:—–-]+\s*(?:🙏\s*)?|🙏\s*)",
+    re.IGNORECASE)
+_TERMS_SENTENCE_RE = re.compile(
+    r"\b(?:select(?:ing|ed|s)?\s+(?:one\s+|the\s+|a\s+)?recipient|will\s+be\s+selecting|"
+    r"cover(?:s|ing)?\s+(?:only\s+)?(?:the\s+|that\s+|their\s+)?(?:shipping|delivery)|"
+    r"(?:shipping|delivery)\s+(?:cost|costs|fee|is\s+covered)|completely\s+free|free\s+of\s+charge|"
+    r"follow\s+us|mpokeaji|usafirishaji|tufuate)\b",
+    re.IGNORECASE)
+_ASKS_TERMS_RE = re.compile(
+    r"\?|\b(?:ship|shipping|deliver|delivery|free|cost|pay|how|when|who|select|chosen|choose|"
+    r"lini|vipi|bure|usafirishaji)\b", re.IGNORECASE)
+
+
+def _trim_continuing(answer: str, comment_text: str, *, explained: bool) -> str:
+    """The reply to someone we have ALREADY answered under this post, without
+    the reflex opener and without terms they have heard and did not ask
+    about. Only ever shortens; never leaves nothing; a thanks FOR something
+    ("Thank you for the correction") is a sentence, not an opener, and stays."""
+    text = (answer or "").strip()
+    if not text:
+        return text
+    m = _THANKS_OPENER_RE.match(text)
+    if m and len(text[m.end():].split()) >= 3:
+        rest = text[m.end():].lstrip()
+        text = rest[:1].upper() + rest[1:]
+    if explained and not _ASKS_TERMS_RE.search(comment_text or ""):
+        parts = [p for p in re.split(r"(?<=[.!?])\s+", text) if p.strip()]
+        kept = [p for p in parts if not _TERMS_SENTENCE_RE.search(p)]
+        if kept and len(kept) < len(parts):
+            text = " ".join(kept)
+    return text.strip()
+
+
 def _nothing_to_add(comment: dict) -> bool:
     """A comment that, AFTER we have already answered this person under this
     post, needs no more words (owner, 2026-11-10: "react or remain silent when
@@ -6228,7 +6286,7 @@ async def _run_comment_engage(redis, channel: str, comment: dict, own_pages: set
         return
     reading = await read_comment(comment_text, redis=redis)
     if _prior:
-        reading = dict(reading, returning=len(_prior),
+        reading = dict(reading, returning=len(_prior), commenter=first,
                        explained=any(_EXPLAINED_RE.search(x) for x in _prior))
     # A CAMPAIGN POST (owner, 2026-09-26): its comments are entries and cheers.
     # The host answers every one with words in it — the canned thanks and the
@@ -6429,6 +6487,8 @@ async def _run_comment_engage(redis, channel: str, comment: dict, own_pages: set
                     thread_parent=_parent, turn_facts=_facts)).strip()
         except Exception as exc:
             _log.warning("public agent reply failed for %s: %s", cid, exc)
+        if answer and _prior:
+            answer = _trim_continuing(answer, comment_text, explained=bool(reading.get("explained")))
 
     # WE SELL CHURCH GOODS ONLY (owner, 2026-09-25): a thread the guard
     # paused hears nothing — no canned line, no DM, no one routed.
@@ -6642,6 +6702,11 @@ async def _run_comment_engage(redis, channel: str, comment: dict, own_pages: set
             await _note_silent_decision(channel, ext, cid,
                                         "a returning entrant, already welcomed — liked, no stock line repeated")
             return
+        if (_prior and kind not in ("request", "question")
+                and not _CAMPAIGN_BUY_RE.search(comment_text) and "?" not in comment_text):
+            # A detail from someone already welcomed: it arrived, in a few words.
+            public_text = _pick(_SW_CAMPAIGN_RETURN_POOL if swahili else _CAMPAIGN_RETURN_POOL,
+                                ext).replace("{name}", (f", {name_tag.strip()}" if name_tag.strip() else ""))
     if held_issues and not answer:
         # THE GATE BEFORE POSTING (owner, 2026-09-25): no verified answer —
         # the thread hears an honest holding line, never a guess.
