@@ -69,7 +69,7 @@ def test_agent_display_passes_the_hub_figure_through():
     usd = _ctx("USD")
     # The hub's own USD row wins and is untouched
     assert _to_display(450, usd, price_usd=4.5) == 4.5
-    assert _to_display(1300, usd, prices={"USD": 12.75}) == 12.75
+    assert _to_display(1300, usd, prices={"USD": 12.75}) == 13     # KES/100, always (owner, 2026-11-14)
     assert _to_display(36000, usd, prices={"USD": 360}) == 360
     # ZMW the same
     assert _to_display(7000, _ctx("ZMW"), prices={"ZMW": 1262.5}) == 1262.5

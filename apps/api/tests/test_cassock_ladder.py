@@ -70,7 +70,8 @@ def test_the_sets_are_priced_from_the_hub_in_their_money():
     assert kes.count("?") == 1 and kes.rstrip().endswith("I'll start your order.")
     assert kes.index("Cassock Set — KES 19,500") < kes.index("Cope & Cassock Set — KES 45,000")
     usd = ladder.message(CATALOG, _ctx("USD"))
-    assert "$200" in usd and "$450" in usd and "KES" not in usd
+    # every dollar price is KES/100 (owner, 2026-11-14): 19,500 → $195
+    assert "$195" in usd and "$450" in usd and "KES" not in usd
     zmw = ladder.message(CATALOG, _ctx("ZMW"))
     assert "3,900" in zmw and "9,000" in zmw
     assert "*Cassock Set — KES 19,500:*" in kes                    # WhatsApp bold
