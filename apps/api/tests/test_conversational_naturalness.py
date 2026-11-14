@@ -79,6 +79,9 @@ def test_a_returning_entrant_over_the_cap_is_not_thanked_for_joining_twice(monke
     # details, a question or a first comment keep their line
     out = _engage(monkeypatch, "Rev Alice from Nakuru, size 39", reading=LOW, identity=SHOE, over_cap=True)
     assert len(out["public"]) == 1
+    # ... and that line says it arrived — never "thank you for joining in" again
+    assert out["public"][0] in [x.replace("{name}", ", John") for x in rt._CAMPAIGN_RETURN_POOL]
+    assert "joining" not in out["public"][0] and "Thank" not in out["public"][0]
     # a question the reader could not classify (the model was down) is still a
     # question: never liked into silence (found by the giveaway dry run, 2026-11-14)
     for q in ("When will you choose the pastor?", "when will the pastor be chosen"):
@@ -358,3 +361,11 @@ def test_a_name_sent_after_a_nomination_is_the_nominees():
     assert "never save it as the commenter's own name" in cont
     assert "The person writing is" not in rt._reading_context(
         {"kind": "other", "campaign": CASSOCK, "returning": 1})
+
+
+def test_the_page_tag_is_taken_off_before_the_comment_is_stored():
+    from app.routers import meta_webhook as mw
+    src = inspect.getsource(mw._capture_comment_events)
+    strip, store = src.index("_strip_page_tag(c[\"text\"]"), src.index("db.add(Message(")
+    assert strip < store                       # what is stored is what the next turn reads back
+    assert 'if c.get("parent_id") and c.get("text"):' in src

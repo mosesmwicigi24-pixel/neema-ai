@@ -97,6 +97,21 @@ The same run re-checked intent-002 after the come-back rule was tightened: 2/2 �
 
 Cost: not recorded by the run; estimated under USD 0.50.
 
+## 5d. The three left open, fixed and run again (run 43586975548, 14 Nov 10:48–10:50 UTC)
+
+Owner: "fix them". Result: `results/giveaway-eval-6a7de4b-run43586975548.json`, on branch 6a7de4b.
+
+| Left open in §5c | Fix | Seen in the re-run |
+|---|---|---|
+| Later replies opened "Thank you, …" | `_trim_continuing` removes the opener from a reply to someone already answered (a thanks FOR something stays) | Gone: "Noted, Siyethemba. …", "I have saved Thokozani Ndwandwe as Rev TP's full name…", "Daniel, the recipient will be chosen by our team…" |
+| The shipping line a second time | The same function drops a sentence of the gift's terms they have heard and did not ask about | Gone |
+| The pastor's name read as the commenter's | The brief names the person writing; a name sent after a nomination is the nominee's | "I have saved Thokozani Ndwandwe as Rev TP's full name for the nomination." |
+| The order link after a price ask (§5c) | `_is_the_gift` | No private message was sent |
+
+**10 of 11** on the tightened checks. The one failure: the church reply read "Rev TP's church, **Bethany House** Pentecostal Holiness Church (Potters House)…" again. Cause: the Page tag was stripped from what the model was handed for this turn, but the STORED comment still carried it, and the thread history read it back. Fixed after the run: the tag is taken off before the comment is stored (`_capture_comment_events`); checked on a local run of the job (the stored row reads "Pentecostal Holiness Church ( Potters House) around Nongoma KZN"). **Not re-run with the model.**
+
+Also changed after the run: when no model answer can be given, a returning commenter's detail gets "Received, <name> — it is with our team 🙏", not "Thank you for joining in" again.
+
 ## 6. Not verified, and remaining risks
 
 - **One model pass only** (§5c): 11 comments, once. It is evidence, not a measurement; a second pass could differ.

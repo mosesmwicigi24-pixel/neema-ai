@@ -4841,6 +4841,17 @@ _SW_CAMPAIGN_ACK_POOL = [
     "Asante kwa kujiunga nasi{name} 🙏 Tumepokea ujumbe wako, na tunafurahi uko nasi 💛",
     "Mungu akubariki{name}! 🙏 Tumeona ujumbe wako — asante kwa kuwa sehemu ya hili 💛",
 ]
+# A RETURNING entrant who has sent a detail, with no model answer to give
+# (over the cap, the model unreachable): a few plain words that it arrived —
+# never the welcome or "thank you for joining in" a second time (owner,
+# 2026-11-10 and 2026-11-14).
+_CAMPAIGN_RETURN_POOL = [
+    "Received{name} — it is with our team 🙏",
+    "We have it{name} — it is with our team 🙏",
+]
+_SW_CAMPAIGN_RETURN_POOL = [
+    "Tumepokea{name} — iko kwa timu yetu 🙏",
+]
 # A price or buying ask under a campaign with no model answer: the gift's
 # line — never a price, never "we do not sell it" (owner, 2026-09-26: "that
 # shoe is a gift. Go to the gift only").
@@ -6691,6 +6702,11 @@ async def _run_comment_engage(redis, channel: str, comment: dict, own_pages: set
             await _note_silent_decision(channel, ext, cid,
                                         "a returning entrant, already welcomed — liked, no stock line repeated")
             return
+        if (_prior and kind not in ("request", "question")
+                and not _CAMPAIGN_BUY_RE.search(comment_text) and "?" not in comment_text):
+            # A detail from someone already welcomed: it arrived, in a few words.
+            public_text = _pick(_SW_CAMPAIGN_RETURN_POOL if swahili else _CAMPAIGN_RETURN_POOL,
+                                ext).replace("{name}", (f", {name_tag.strip()}" if name_tag.strip() else ""))
     if held_issues and not answer:
         # THE GATE BEFORE POSTING (owner, 2026-09-25): no verified answer —
         # the thread hears an honest holding line, never a guess.

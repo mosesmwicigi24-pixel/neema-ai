@@ -1,0 +1,180 @@
+{
+ "started": "2026-11-14T10:48:54.649195+00:00",
+ "post": "the cassock giveaway",
+ "models": {
+  "producer": "claude-sonnet-5-5",
+  "light": "claude-haiku-5-5"
+ },
+ "results": [
+  {
+   "id": "give-001",
+   "about": "the owner's screenshot: a nomination, then the details that followed it",
+   "turns": [
+    {
+     "i": 0,
+     "comment": "I nominate my Pastor Rev TP From South Africa. He is a loving, caring and a patient father that 1. Moreover he totally loves a cassock but doesn't own one, it would be great for him to have it",
+     "expect": "reply",
+     "reply": "Welcome to Bethany House, Siyethemba. Thank you for nominating Rev TP and for telling us why he deserves it. Our team will be selecting one recipient for this free cassock. If it is Rev TP, he covers only the shipping to South Africa. Follow us to see who is selected. 🙏",
+     "private_message": "",
+     "liked": true,
+     "words": 50,
+     "latency_s": 17.26,
+     "failures": []
+    },
+    {
+     "i": 1,
+     "comment": "Bethany House Pentecostal Holiness Church ( Potters House) around Nongoma KZN",
+     "expect": "any",
+     "reply": "Noted, Siyethemba. Rev TP's church, Bethany House Pentecostal Holiness Church (Potters House) near Nongoma, KZN, is saved with his nomination.",
+     "private_message": "",
+     "liked": true,
+     "words": 20,
+     "latency_s": 11.51,
+     "failures": [
+      "said what it should not: “Bethany House Pentecostal”"
+     ]
+    },
+    {
+     "i": 2,
+     "comment": "Thokozani Ndwandwe",
+     "expect": "any",
+     "reply": "I have saved Thokozani Ndwandwe as Rev TP's full name for the nomination.",
+     "private_message": "",
+     "liked": true,
+     "words": 13,
+     "latency_s": 11.01,
+     "failures": []
+    },
+    {
+     "i": 3,
+     "comment": "Thank you",
+     "expect": "silent",
+     "reply": "",
+     "private_message": "",
+     "liked": true,
+     "words": 0,
+     "latency_s": 0.02,
+     "failures": []
+    }
+   ]
+  },
+  {
+   "id": "give-002",
+   "about": "the owner's screenshot: asking to receive the gift herself, in Swahili and English",
+   "turns": [
+    {
+     "i": 0,
+     "comment": "Hii labda nijiongee Mimi mwenyewe pls gift me the one I had the bishop who gave it alikujia the whole. Cussock sinanga na sijafanikiwa kupata pesa ya kushona",
+     "expect": "reply",
+     "reply": "Karibu Bethany House, Pastor Irene. Tumepokea ombi lako la kujipendekeza mwenyewe. Kasoki ni zawadi bila malipo, na mpokeaji hulipia usafirishaji tu. Tuambie kidogo kuhusu huduma yako, na utufuate ili uone atakayechaguliwa. 🙏",
+     "private_message": "",
+     "liked": true,
+     "words": 31,
+     "latency_s": 22.24,
+     "failures": []
+    }
+   ]
+  },
+  {
+   "id": "give-003",
+   "about": "a casual compliment, then a bare acknowledgement",
+   "turns": [
+    {
+     "i": 0,
+     "comment": "Very nice 👍",
+     "expect": "reply",
+     "reply": "Thank you, Oguchi. Our team will select one recipient for this free gift, who covers only the shipping. Follow us for updates, and nominate your pastor here.",
+     "private_message": "",
+     "liked": true,
+     "words": 27,
+     "latency_s": 7.87,
+     "failures": []
+    },
+    {
+     "i": 1,
+     "comment": "Amen",
+     "expect": "silent",
+     "reply": "",
+     "private_message": "",
+     "liked": true,
+     "words": 0,
+     "latency_s": 0.01,
+     "failures": []
+    }
+   ]
+  },
+  {
+   "id": "give-004",
+   "about": "a price ask under a gift",
+   "turns": [
+    {
+     "i": 0,
+     "comment": "How much is this cassock?",
+     "expect": "reply",
+     "reply": "Grace, the cassock is a gift, so there is no price. Bethany House will select one recipient, who receives it free and covers only the shipping. Share in the comments why your pastor deserves it.",
+     "private_message": "",
+     "liked": true,
+     "words": 35,
+     "latency_s": 11.13,
+     "failures": []
+    }
+   ]
+  },
+  {
+   "id": "give-005",
+   "about": "a nomination, then a real question that must be answered",
+   "turns": [
+    {
+     "i": 0,
+     "comment": "I nominate Pastor Mary Achieng of Kisumu, she has served our church for 20 years without a cassock of her own.",
+     "expect": "reply",
+     "reply": "Hello Daniel, welcome to Bethany House 🙏 Thank you for nominating Pastor Mary Achieng. Twenty years of service without a cassock of her own is a moving story. Our team will be selecting one recipient for this gift. Please follow us and watch for the details on who is selected.",
+     "private_message": "",
+     "liked": true,
+     "words": 49,
+     "latency_s": 15.38,
+     "failures": []
+    },
+    {
+     "i": 1,
+     "comment": "When will you choose the pastor?",
+     "expect": "reply",
+     "reply": "Daniel, the recipient will be chosen by our team, and we will share the announcement on our page. Thank you for nominating Pastor Mary Achieng.",
+     "private_message": "",
+     "liked": true,
+     "words": 25,
+     "latency_s": 8.23,
+     "failures": []
+    }
+   ]
+  },
+  {
+   "id": "give-006",
+   "about": "a grievance under the giveaway is still a grievance",
+   "turns": [
+    {
+     "i": 0,
+     "comment": "I ordered a stole from you last month and I have never received it.",
+     "expect": "reply",
+     "reply": "We're sorry Peter 🙏 This is not the experience we want for you. One of our team is looking into it now, and I've sent you a private message so we can put it right quickly.",
+     "private_message": "Hello Peter, this is Bethany House. We're sorry about this, and we want to put it right. Please share the details here — your name, what you ordered and when — and a colleague will take it up with you personally today.",
+     "liked": false,
+     "words": 35,
+     "latency_s": 0.02,
+     "failures": []
+    }
+   ]
+  }
+ ],
+ "finished": "2026-11-14T10:50:39.322918+00:00",
+ "summary": {
+  "turns": 11,
+  "passed": 10,
+  "replies": 9,
+  "silent": 2,
+  "words": 285,
+  "failure_kinds": {
+   "said what it should not": 1
+  }
+ }
+}
