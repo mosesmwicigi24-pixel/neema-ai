@@ -60,3 +60,13 @@ def test_the_summary_counts_turns_and_failure_kinds():
                                  {"reply": "KES 1", "failures": ["said what it should not: “KES 1”"]}]}])
     assert s["turns"] == 3 and s["passed"] == 2 and s["replies"] == 2 and s["silent"] == 1
     assert s["failure_kinds"] == {"said what it should not": 1}
+
+
+def test_the_later_turn_checks_catch_what_the_first_run_showed():
+    import re
+    assert re.search(eg.OPENER, "Thank you, we have noted your church.", re.IGNORECASE)
+    assert not re.search(eg.OPENER, "Thank you for the correction.", re.IGNORECASE)
+    assert not re.search(eg.OPENER, "We have noted your church. Thank you.", re.IGNORECASE)
+    assert re.search(eg.TERMS_AGAIN, "the recipient covers only that shipping", re.IGNORECASE)
+    assert re.search(eg.WRONG_NAME, "Thank you, Thokozani. We have your name.", re.IGNORECASE)
+    assert not re.search(eg.WRONG_NAME, "Rev Thokozani Ndwandwe's nomination is with our team.", re.IGNORECASE)

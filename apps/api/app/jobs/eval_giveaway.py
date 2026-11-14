@@ -51,6 +51,11 @@ PRIVATE = r"\b(?:phone|mobile|whatsapp number|your number|email|e-mail|home addr
 WELCOME = r"welcome to bethany house"
 PROCEDURE = r"select(?:ing)? one recipient|will be selecting|only cover(?:s)? the shipping|follow us"
 EXTRA_ASK = r"(?:which|what|his|her|their|your)\s+(?:church|town|full name)|church and town|full name"
+# On a later turn of a thread: the reflex opener, the terms once more, and
+# the nominee's name used for the person writing (run 43585505682).
+OPENER = r"^\s*(?:thank\s+you|thanks|asante)\b(?!\s+for\b)"
+TERMS_AGAIN = r"cover(?:s|ing)?\s+(?:only\s+)?(?:the\s+|that\s+)?(?:shipping|delivery)|completely free"
+WRONG_NAME = r"(?:thank\s+you|thanks|hello|hi|dear),?\s+thokozani"
 
 CASES = [
     {"id": "give-001", "who": "Siyethemba Khumasta",
@@ -62,10 +67,11 @@ CASES = [
           "expect": "reply", "must_not": [PRICE, SELL, CONTEST, PRIVATE, EXTRA_ASK]},
          {"text": "Bethany House Pentecostal Holiness Church ( Potters House) around Nongoma KZN",
           "thread": True, "expect": "any", "max_words": 30,
-          "must_not": [PRICE, SELL, CONTEST, PRIVATE, WELCOME, PROCEDURE,
+          "must_not": [PRICE, SELL, CONTEST, PRIVATE, WELCOME, PROCEDURE, OPENER, TERMS_AGAIN,
                        r"bethany house pentecostal"]},
          {"text": "Thokozani Ndwandwe", "thread": True, "expect": "any", "max_words": 30,
-          "must_not": [PRICE, SELL, CONTEST, PRIVATE, WELCOME, PROCEDURE]},
+          "must_not": [PRICE, SELL, CONTEST, PRIVATE, WELCOME, PROCEDURE, OPENER, TERMS_AGAIN,
+                       WRONG_NAME]},
          {"text": "Thank you", "thread": True, "expect": "silent"},
      ]},
     {"id": "give-002", "who": "Pstr Irene",
@@ -94,7 +100,7 @@ CASES = [
                   "without a cassock of her own.",
           "expect": "reply", "must_not": [PRICE, SELL, CONTEST, PRIVATE, EXTRA_ASK]},
          {"text": "When will you choose the pastor?", "thread": True, "expect": "reply",
-          "must_not": [PRICE, SELL, CONTEST, PRIVATE, WELCOME,
+          "must_not": [PRICE, SELL, CONTEST, PRIVATE, WELCOME, OPENER,
                        r"\b(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday|january|february|"
                        r"march|april|may \d|june|july|august|september|october|november|december)\b"]},
      ]},
