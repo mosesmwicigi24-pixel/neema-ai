@@ -79,6 +79,11 @@ def test_a_returning_entrant_over_the_cap_is_not_thanked_for_joining_twice(monke
     # details, a question or a first comment keep their line
     out = _engage(monkeypatch, "Rev Alice from Nakuru, size 39", reading=LOW, identity=SHOE, over_cap=True)
     assert len(out["public"]) == 1
+    # a question the reader could not classify (the model was down) is still a
+    # question: never liked into silence (found by the giveaway dry run, 2026-11-14)
+    for q in ("When will you choose the pastor?", "when will the pastor be chosen"):
+        out = _engage(monkeypatch, q, reading=LOW, identity=SHOE, over_cap=True)
+        assert len(out["public"]) == 1, q
     _prior(monkeypatch, [])
     out = _engage(monkeypatch, "We are following you now", reading=LOW, identity=SHOE, over_cap=True)
     assert len(out["public"]) == 1

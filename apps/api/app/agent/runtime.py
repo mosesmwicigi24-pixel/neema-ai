@@ -6614,6 +6614,9 @@ async def _run_comment_engage(redis, channel: str, comment: dict, own_pages: set
         public_text = _campaign_canned(comment_text, kind, ask, name_tag, ext, swahili)
         if (_prior and not held_issues and kind not in ("request", "question")
                 and not _CAMPAIGN_BUY_RE.search(comment_text)
+                and "?" not in comment_text and not _looks_like_a_question(comment_text)
+                and not re.match(r"(?i)\s*(when|what|who|whom|why|how|which|where|is|are|will|would|can|"
+                                 r"could|do|does|did|lini|nani|nini|kwa\s+nini|vipi|je)\b", comment_text)
                 and not re.search(r"\d", comment_text) and len(comment_text.split()) <= 8):
             # Already welcomed under this post, and no model answer to give:
             # the stock "thank you for joining in" a second time is the
