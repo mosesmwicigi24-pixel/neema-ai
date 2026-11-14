@@ -2168,6 +2168,29 @@ async def upload_media(
     )
 
 
+@router.get("/conversations/{conversation_id}/direct-link")
+async def conversation_direct_link(
+    conversation_id: str,
+    db: AsyncSession = Depends(get_db),
+    agent: Agent = Depends(get_current_agent),
+):
+    """Where a colleague can answer this customer directly on the platform —
+    the comment on Facebook, the post on Instagram, the Page inbox thread on
+    Messenger — for when our own reply window has closed (owner, 2026-11-14).
+    `url` is "" when the platform offers nothing (WhatsApp)."""
+    import uuid as _uuid
+    from app.models.conversation import Conversation
+    from app.services.commitments import link_for
+    try:
+        cid = _uuid.UUID(str(conversation_id))
+    except (ValueError, TypeError):
+        raise HTTPException(status_code=404, detail="No such conversation")
+    conv = await db.get(Conversation, cid)
+    if conv is None:
+        raise HTTPException(status_code=404, detail="No such conversation")
+    return {"url": await link_for(db, conv), "channel": conv.channel or "whatsapp"}
+
+
 @router.get("/post-video/{post_id}")
 async def post_video(
     post_id: str,

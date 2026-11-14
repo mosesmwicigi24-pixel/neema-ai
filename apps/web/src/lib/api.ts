@@ -544,6 +544,14 @@ export const conversationsApi = {
     clearHistory: (id: string) =>
         del<{ ok: boolean }>(`/admin/conversations/${id}/messages`),
 
+    /** Where to answer this customer directly on the platform (the Facebook
+     *  comment, the Instagram post, the Messenger thread in the Page inbox)
+     *  once our own reply window has closed. `url` is "" when there is none. */
+    directLink: (conversationId: string) =>
+        get<{ url: string; channel: string }>(
+            `/admin/conversations/${encodeURIComponent(conversationId)}/direct-link`,
+        ),
+
     /** A fresh direct video URL for a page reel/video post, so the inbox can
      * play the commented-on reel inline (source URLs expire → fetched on play). */
     postVideo: (postId: string, channel?: string) =>

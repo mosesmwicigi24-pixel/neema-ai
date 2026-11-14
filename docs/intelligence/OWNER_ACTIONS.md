@@ -196,3 +196,15 @@ The owner's words on the three open decisions of slice 19 (send the Pakistan con
 **Superseded ~06:5x UTC, the owner's "Final intelligence refinement":** review four risks; "Do not run additional evaluations or deploy without explicit authorisation." The scheduled merge was cancelled before it ran. The one model run had already finished (12/14; `INTENT_DISCERNMENT.md` §5) and was read; no other was dispatched. PR #366 stays a draft. **Your call:** "merge 366" to deploy; a second pass of the eight cases (well under 2 USD) to see the corrected case 008 with the model, only if you say so.
 
 **Decided ~06:55 UTC, the owner's words: "merge 366".** Merged as 68da764 at 07:05 UTC once CI was green on the approved commit; on the box at 07:28 UTC (status ok, replies ok). No second model pass was dispatched: the corrected complaint case is tested in the decision logic and has not been seen with the model. Still the owner's: the Pakistan conversation (never received); a second pass of the eight cases if wanted.
+
+## 14 November 2026 — six decisions, in the owner's words
+
+| Item | The owner's word | Acted on |
+|---|---|---|
+| Promised checks nobody owns (83) | "Close those that the respond day have passed and what we can open directly on Messenger or Facebook comment, have a provision to go directly to that comment or message after the response time/window has closed" | A check is closed, recorded as UNANSWERED, once the customer has not written for 24 hours (`commitment_lapse_hours`); the Activity note and the inbox "More" menu carry the direct link (the Facebook comment, the Instagram post, the Messenger thread in the Page inbox). |
+| Real-model check | "run this and monitor cost" | Run 43581689747, 13/14 — `INTENT_DISCERNMENT.md` §5c. |
+| Outreach rules | "how much and if cost is not an issue, go ahead" | Cost is nil. **Correction to the Stage 4 summary:** "no follow-up while a team check is open" and "no message in the wrong language" are safety holds that were ALREADY in force all week; they were never shadow-only. Nothing was switched. The three rules that are shadow-only (customer replied, colleague replied, one sales message a day) were not part of this approval and stay in shadow. |
+| Approval backlog (636) | "clear" | Migration `b1d3f5a7c9e2`: rows waiting more than 30 days are marked vetoed with a named reason (reversible). Newer rows stay for the team. |
+| Dollar prices | "KES/100 should be the price across for all USD prices" | `price_audit.QUOTE_TOLERANCE_PCT = 0`: the hub's own USD row is never quoted. |
+| Dashboard access | "I grant you permision" | Permission noted. Access still needs a sign-in this session can use; none exists yet (no credential is ever to be pasted into chat). |
+

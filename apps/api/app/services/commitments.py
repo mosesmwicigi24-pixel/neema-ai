@@ -276,6 +276,109 @@ async def customer_followed_up(db, redis, key: str, channel: str, *,
     return writer_note(r)
 
 
+# ── closing a check whose reply day has passed (owner, 2026-11-14) ───────────
+
+def lapse_hours() -> int:
+    return int(getattr(settings, "commitment_lapse_hours", 24) or 0)
+
+
+def direct_link(channel: str | None, external_id: str | None, *, permalink: str = "",
+                comment_id: str = "") -> str:
+    """Where a colleague can answer this customer DIRECTLY on the platform
+    once our own reply window has closed: the comment itself on Facebook, the
+    post on Instagram, the Page inbox thread on Messenger. "" for WhatsApp
+    (outside the window only an approved template may be sent) and whenever
+    there is nothing to point at."""
+    ch = (channel or "").lower()
+    page = str(getattr(settings, "meta_page_id", "") or "").strip()
+    if ch == "facebook":
+        link = (permalink or "").strip()
+        cid = str(comment_id or "").rsplit("_", 1)[-1]
+        if link and cid:
+            return link + ("&" if "?" in link else "?") + "comment_id=" + cid
+        return link
+    if ch == "instagram" and (permalink or "").strip():
+        return permalink.strip()
+    if ch in ("messenger", "instagram") and page:
+        base = f"https://business.facebook.com/latest/inbox/all?asset_id={page}"
+        if ch == "messenger" and external_id:
+            return (base + f"&mailbox_id={page}&selected_item_id={external_id}"
+                    "&thread_type=FB_MESSAGE")
+        return base
+    return ""
+
+
+async def link_for(db, conv) -> str:
+    """direct_link for a conversation, read from its newest comment."""
+    permalink = comment_id = ""
+    ch = getattr(conv, "channel", None) or "whatsapp"
+    if ch in ("facebook", "instagram"):
+        try:
+            from sqlalchemy import select
+            from app.models.message import Message, MsgDirection
+            m = (await db.execute(
+                select(Message).where(Message.conversation_id == conv.id,
+                                      Message.direction == MsgDirection.inbound,
+                                      Message.comment_context.isnot(None))
+                .order_by(Message.created_at.desc()).limit(1))).scalars().first()
+            if m is not None:
+                permalink = str((m.comment_context or {}).get("permalink") or "")
+                comment_id = str(getattr(m, "waba_msg_id", "") or "")
+        except Exception:
+            _log.info("direct link: newest comment unreadable", exc_info=True)
+    return direct_link(ch, getattr(conv, "external_id", None), permalink=permalink,
+                       comment_id=comment_id)
+
+
+async def _last_inbound_at(db, conv) -> datetime | None:
+    from sqlalchemy import func as sa_func, select
+    from app.models.message import Message, MsgDirection
+    at = (await db.execute(select(sa_func.max(Message.created_at)).where(
+        Message.conversation_id == conv.id,
+        Message.direction == MsgDirection.inbound))).scalar()
+    return _aware(at)
+
+
+def lapsed(r: dict | None, last_in: datetime | None, *, now: datetime | None = None) -> bool:
+    """Has this open check's reply day passed? True when the customer has not
+    written for `commitment_lapse_hours` AND the check itself is that old —
+    a check opened an hour ago on an old thread is still live. Never when the
+    setting is 0 or the customer's last message cannot be read."""
+    hours = lapse_hours()
+    if not r or hours <= 0 or last_in is None:
+        return False
+    now = _aware(now) or datetime.now(timezone.utc)
+    quiet_min = (now - last_in).total_seconds() / 60
+    return quiet_min >= hours * 60 and int(r.get("age_min") or 0) >= hours * 60
+
+
+async def lapse(db, conv, deal, r: dict, *, last_in: datetime | None,
+                now: datetime | None = None) -> bool:
+    """Close a check whose reply day has passed — recorded as UNANSWERED, never
+    as answered: a flag row in the Activity log (with the place to answer the
+    customer directly, when the platform has one) and the deal's closed record
+    (`owner: lapsed`, the age). True when one was closed."""
+    from app.services.deals import clear_team_check
+    now = _aware(now) or datetime.now(timezone.utc)
+    link = await link_for(db, conv)
+    quiet = _age_words(int((now - last_in).total_seconds() // 60)) if last_in else "a while"
+    try:
+        from app.models.intercept import Intercept, InterceptAction
+        note = (f"⌛ CHECK CLOSED UNANSWERED — '{r['item']}' was promised "
+                f"{_age_words(int(r.get('age_min') or 0))} ago and nobody confirmed it. The customer "
+                f"last wrote {quiet} ago, so the reply day has passed and the check is closed. "
+                + (f"You can still answer them directly here: {link}" if link else
+                   "On WhatsApp only an approved template can reach them now."))
+        db.add(Intercept(conversation_id=conv.id, action=InterceptAction.flag, note=note[:2000]))
+        await db.commit()
+    except Exception:
+        _log.info("lapse flag not recorded", exc_info=True)
+    closed = await clear_team_check(db, conv.id, by="lapsed")
+    if closed:
+        _log.info("commitment lapsed: conv=%s age=%smin", getattr(conv, "id", "?"), r.get("age_min"))
+    return closed
+
+
 async def _open_checks(db, limit: int = 200) -> list:
     from sqlalchemy import select
     from app.models.conversation import Conversation
@@ -293,7 +396,7 @@ async def sweep(redis=None, *, now: datetime | None = None, limit: int = 200) ->
     staffed start and rings then. Returns counts. Best-effort."""
     from app.database import AsyncSessionLocal
     now = _aware(now) or datetime.now(timezone.utc)
-    out = {"open": 0, "overdue": 0, "team": 0, "supervisor": 0, "queued": 0}
+    out = {"open": 0, "overdue": 0, "team": 0, "supervisor": 0, "queued": 0, "lapsed": 0}
     try:
         async with AsyncSessionLocal() as db:
             rows = await _open_checks(db, limit)
@@ -301,6 +404,16 @@ async def sweep(redis=None, *, now: datetime | None = None, limit: int = 200) ->
                 r = reading(deal, now=now)
                 if r is None:
                     continue
+                # The reply day has passed: close it, unanswered and recorded
+                # (owner, 2026-11-14) — whatever the hour.
+                try:
+                    last_in = await _last_inbound_at(db, conv)
+                    if lapsed(r, last_in, now=now) and await lapse(db, conv, deal, r,
+                                                                    last_in=last_in, now=now):
+                        out["lapsed"] += 1
+                        continue
+                except Exception:
+                    _log.info("lapse check skipped", exc_info=True)
                 out["open"] += 1
                 if not r["overdue"]:
                     continue
@@ -336,9 +449,19 @@ async def health_view(now: datetime | None = None) -> dict:
     from app.database import AsyncSessionLocal
     now = _aware(now) or datetime.now(timezone.utc)
     view = {"open": 0, "overdue": 0, "unowned": 0, "oldest_min": 0,
-            "escalated": {"team": 0, "supervisor": 0}, "staffed": staffed_now(now)}
+            "escalated": {"team": 0, "supervisor": 0}, "staffed": staffed_now(now),
+            "closed_unanswered": 0}
     try:
         async with AsyncSessionLocal() as db:
+            try:
+                from sqlalchemy import func as sa_func, select
+                from app.models.deal import Deal
+                view["closed_unanswered"] = int((await db.execute(
+                    select(sa_func.count()).select_from(Deal).where(
+                        Deal.next_action["kind"].astext == "team_check_closed",
+                        Deal.next_action["owner"].astext == "lapsed"))).scalar() or 0)
+            except Exception:
+                _log.info("closed-unanswered count unavailable", exc_info=True)
             for deal, conv in await _open_checks(db):
                 r = reading(deal, now=now)
                 if r is None:

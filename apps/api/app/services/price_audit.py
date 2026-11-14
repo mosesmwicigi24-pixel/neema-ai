@@ -86,7 +86,10 @@ def currency_gap(item: dict, rate: float) -> dict | None:
 # stands); farther off it is a stale or hand-set number, and KES / rate is
 # quoted instead. The audit above still names every row past 1% so the hub
 # gets fixed — a checkout runs on the hub's own figures.
-QUOTE_TOLERANCE_PCT = 0.05
+# Owner, 2026-11-14: "KES/100 should be the price across for all USD prices."
+# No tolerance any more: a hub USD row is never quoted in place of KES / rate
+# (the deliberate $12.75 on KES 1,300 becomes $13).
+QUOTE_TOLERANCE_PCT = 0.0
 
 
 def usd_quote(kes, usd, rate: float):
@@ -123,7 +126,7 @@ def health_summary_from(catalog: list[dict], rate: float, worst: int = 3) -> dic
         "checked": rep.get("checked", 0),
         "hub_usd_gaps": len(gaps),
         "quoted_from_kes": len(over),
-        "policy": f"the hub's USD only within {int(QUOTE_TOLERANCE_PCT * 100)}% of KES/{int(rate)}, else KES/{int(rate)}",
+        "policy": f"every USD price is KES/{int(rate)}; the hub's own USD row is not quoted",
         "worst": [{"name": g.get("name"), "kes": g.get("kes"), "hub_usd": g.get("usd"),
                    "quoted_usd": usd_quote(g.get("kes"), g.get("usd"), rate)}
                   for g in over[:worst]],

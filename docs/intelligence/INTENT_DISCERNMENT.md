@@ -171,6 +171,24 @@ document: §4 is automated and complete; §5 is one model pass on eight cases;
 §6 is what remains unverified. No further run was dispatched and nothing was
 deployed.
 
+## 5c. The second model run (run 43581689747, 14 Nov 09:41–09:43 UTC)
+
+On the owner's word ("run this and monitor cost"): ONE pass of the same 8 cases, 14 turns, on main f973c42 (slices 19, 20 and 20b live). Result file: `results/agent-eval-intent-f973c42-run43581689747.json`.
+
+| Measure | 10 Nov (94d51df) | 14 Nov (f973c42) |
+|---|---|---|
+| Turns passed | 12/14 | **13/14** |
+| Critical turns | — | 12/13 |
+| Language | — | 14/14 |
+| Figures verified | — | 6/6 |
+| First draft passed review | — | 8/14 |
+
+- **intent-008 (the complaint with "a free stole for the delay") now passes**: the reply apologises, traces the parcel and promises nothing — the §5b correction, seen with the model for the first time.
+- **The one failure, intent-002 turn 2** ("I am saving little by little, I will order next month"): the scorer read "the Alb will be ready to order whenever you are" as a pitch after a request for time. The reply also booked a check-in for 1 December. Mild; not changed.
+- **A defect the scorer did NOT catch, intent-001 turn 3** (the second appeal): the reply was the literal text `_(No further reply is needed.)_` with `pause_conversation` — a note to self that would have been SENT to the customer. Fixed the same day: `agent/voice.stage_direction` turns a reply that is only such a note into nothing (tests in `test_conversational_naturalness.py`). The scorer still counts that turn as passed; the case's expectation is unchanged.
+- Cost: the result file carries no cost figure. From the size of the run (14 answering turns, 14 reviews, 6 rewrites) the estimate is **under USD 0.50**; the exact figure is on the Anthropic console for 14 Nov 09:41–09:43 UTC.
+- Not run: the giveaway (slice 20/20b) behaviour. The runner drives WhatsApp conversations only; it cannot post a public comment under a campaign post.
+
 ## 6. Not verified, and why
 
 - **The corrections above have not been seen with the model.** Case 008 is

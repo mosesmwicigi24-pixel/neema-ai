@@ -111,6 +111,34 @@ def drop_butler_opener(text: str | None) -> str:
     return lead[0].upper() + lead[1:]
 
 
+# A reply that is only a note to self — "_(No further reply is needed.)_",
+# "(no response)", "[silence]" — is the model describing its silence instead of
+# keeping it. Sent as written it would reach the customer as a message (the
+# first real-model pass of the intent cases, 2026-11-14, produced exactly
+# that after a second appeal). It is nothing: the turn sends nothing.
+_STAGE_BRACKET_RE = re.compile(r"^[\(\[][^\)\]\n]{0,200}[\)\]][.!]?$")
+_STAGE_WORDS_RE = re.compile(
+    r"^(?:no\s+(?:further\s+|more\s+)?(?:reply|response|message|answer)\s*(?:is\s+|was\s+)?"
+    r"(?:needed|necessary|required|sent)?|silence|nothing\s+(?:more\s+)?to\s+(?:send|add|say)|"
+    r"(?:left\s+)?unanswered|empty\s+(?:reply|message))[.!]?$",
+    re.IGNORECASE)
+
+
+def stage_direction(text: str | None) -> bool:
+    """True when the whole reply is a bracketed aside or a bare statement that
+    no reply is being sent — never a real sentence to the customer. A reply
+    that merely contains brackets ("the set (cassock and stole) is $210") is
+    not one."""
+    t = re.sub(r"[_*`~]", "", str(text or "")).strip()
+    if not t:
+        return False
+    if _STAGE_BRACKET_RE.match(t):
+        inner = t.strip("()[].! ").strip()
+        return bool(_STAGE_WORDS_RE.match(inner)) or bool(
+            re.search(r"(?i)\b(no|without)\b.{0,30}\b(reply|response|message|answer)\b|\bsilen", inner))
+    return bool(_STAGE_WORDS_RE.match(t))
+
+
 def plain_public_voice(text: str | None) -> str:
     """Everything above, in order, for Neema's own public text. Idempotent."""
     return drop_butler_opener(plain_money(strip_markdown(text))).strip()

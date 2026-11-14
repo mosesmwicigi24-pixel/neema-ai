@@ -261,3 +261,17 @@ def test_asking_to_receive_the_gift_oneself_is_participation_never_a_sale():
     irene = ("Hii labda nijiongee Mimi mwenyewe pls gift me the one I had the bishop who gave it alikujia "
              "the whole. Cussock sinanga na sijafanikiwa kupata pesa ya kushona")
     assert not rt._CAMPAIGN_BUY_RE.search(irene)
+
+
+# ── a note to self is not a message (the real-model pass of 2026-11-14) ──────
+def test_a_reply_that_only_says_no_reply_is_needed_is_sent_as_nothing():
+    from app.agent.voice import stage_direction
+    for t in ("_(No further reply is needed.)_", "(No reply needed)", "[silence]", "*(no response)*",
+              "No further reply is needed.", "(Silence.)", "Nothing more to add.", "_(No reply.)_"):
+        assert stage_direction(t), t
+    for t in ("The set (cassock and stole) is $210.", "Thank you — I'll have everything ready.",
+              "(Kindly note) we ship worldwide by DHL.", "No.", "", None,
+              "No reply came from the team yet; I have referred it again."):
+        assert not stage_direction(t), t
+    src = inspect.getsource(rt.run_turn)
+    assert "if _stage(reply):" in src and 'reply = ""' in src

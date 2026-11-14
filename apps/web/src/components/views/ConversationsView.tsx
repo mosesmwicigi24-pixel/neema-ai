@@ -3291,7 +3291,7 @@ export function ConversationsView({
                                 </div>
                             </div>
                             {/* More: the actions used least */}
-                            {(isMobile || canActOnThisConv || isAdminOrSuper) && (
+                            {(isMobile || canActOnThisConv || isAdminOrSuper || activeConv.channel !== "whatsapp") && (
                                 <div className={`relative flex-shrink-0 ${isMobile ? "" : "order-last"}`}>
                                     <button
                                         onClick={() => setHeadMenu((v) => !v)}
@@ -3313,6 +3313,26 @@ export function ConversationsView({
                                                     <button className="w-full text-left px-3.5 py-2.5 text-sm font-medium hover:bg-[#f5f6f3]" style={{ color: "#1c2917" }}
                                                             onClick={() => { setHeadMenu(false); setMobileCrmOpen(true); }}>
                                                         View profile
+                                                    </button>
+                                                )}
+                                                {activeConv.channel !== "whatsapp" && (
+                                                    <button className="w-full text-left px-3.5 py-2.5 text-sm font-medium hover:bg-[#f5f6f3]" style={{ color: "#1c2917" }}
+                                                            onClick={async () => {
+                                                                setHeadMenu(false);
+                                                                // Opened before the request so a popup blocker lets it through.
+                                                                const tab = window.open("", "_blank");
+                                                                try {
+                                                                    const { url } = await conversationsApi.directLink(activeConv.id);
+                                                                    if (url && tab) tab.location.href = url;
+                                                                    else { tab?.close(); window.alert("There is no direct link for this conversation."); }
+                                                                } catch {
+                                                                    tab?.close();
+                                                                    window.alert("Could not open it on the platform. Please try again.");
+                                                                }
+                                                            }}>
+                                                        {activeConv.channel === "facebook" ? "Open the comment on Facebook"
+                                                            : activeConv.channel === "instagram" ? "Open on Instagram"
+                                                            : "Open in the Page inbox"}
                                                     </button>
                                                 )}
                                                 {canActOnThisConv && (
