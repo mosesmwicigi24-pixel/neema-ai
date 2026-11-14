@@ -280,3 +280,28 @@ def test_a_reply_that_only_says_no_reply_is_needed_is_sent_as_nothing():
         assert not stage_direction(t), t
     src = inspect.getsource(rt.run_turn)
     assert "if _stage(reply):" in src and 'reply = ""' in src
+
+
+# ── the gift never travels as "Order here" (the giveaway run of 2026-11-14) ──
+def test_the_gifts_own_item_gets_no_order_link_in_the_inbox(monkeypatch):
+    assert rt._is_the_gift(CASSOCK, "Cassock") and rt._is_the_gift(CASSOCK, "cassock")
+    assert not rt._is_the_gift(CASSOCK, "Clergy Collar") and not rt._is_the_gift(CASSOCK, "Cassock Set")
+    assert not rt._is_the_gift("", "Cassock") and not rt._is_the_gift(CASSOCK, "")
+    cassock = {"name": "Cassock", "slug": "cassock", "price": 13000, "source": "caption"}
+    _prior(monkeypatch, [])
+
+    async def allowed(redis, channel, ext):
+        return True
+    monkeypatch.setattr(rt, "_comment_dm_allowed", allowed)
+    out = _engage(monkeypatch, "How much is this cassock?", caption=CASSOCK, identity=cassock,
+                  reading={"intent": "high", "kind": "question", "severity": 0, "ask": "the price"},
+                  answer="This cassock is a gift, not for sale — one pastor our team selects receives it free.",
+                  turn_rows=[cassock])
+    assert out["public"] and out["dm"] == []
+    # another item they bring up still gets its link
+    collar = {"name": "Clergy Collar", "slug": "clergy-collar", "price": 500, "source": "caption"}
+    out = _engage(monkeypatch, "And how much is a clergy collar?", caption=CASSOCK, identity=collar,
+                  reading={"intent": "high", "kind": "question", "severity": 0, "ask": "the collar's price"},
+                  answer="The cassock here is a gift. Our Clergy Collar is KES 500 — message us to order.",
+                  turn_rows=[collar])
+    assert len(out["dm"]) == 1 and "clergy-collar" in out["dm"][0]

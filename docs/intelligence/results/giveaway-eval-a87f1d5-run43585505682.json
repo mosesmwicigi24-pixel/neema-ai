@@ -1,0 +1,176 @@
+{
+ "started": "2026-11-14T10:30:32.927006+00:00",
+ "post": "the cassock giveaway",
+ "models": {
+  "producer": "claude-sonnet-5-5",
+  "light": "claude-haiku-5-5"
+ },
+ "results": [
+  {
+   "id": "give-001",
+   "about": "the owner's screenshot: a nomination, then the details that followed it",
+   "turns": [
+    {
+     "i": 0,
+     "comment": "I nominate my Pastor Rev TP From South Africa. He is a loving, caring and a patient father that 1. Moreover he totally loves a cassock but doesn't own one, it would be great for him to have it",
+     "expect": "reply",
+     "reply": "Welcome to Bethany House, Siyethemba. Thank you for nominating Rev TP, and for telling us how he loves and cares for his flock. Our team will be selecting one recipient for this gift. It is completely free, and the recipient covers only the shipping. Follow us to see who has been selected.",
+     "private_message": "",
+     "liked": true,
+     "words": 52,
+     "latency_s": 19.92,
+     "failures": []
+    },
+    {
+     "i": 1,
+     "comment": "Bethany House Pentecostal Holiness Church ( Potters House) around Nongoma KZN",
+     "expect": "any",
+     "reply": "Thank you, we have noted your church and Nongoma. The gift is shipped from our Nairobi workshop by DHL, and the recipient covers only that shipping, as the post says.",
+     "private_message": "",
+     "liked": true,
+     "words": 30,
+     "latency_s": 13.07,
+     "failures": []
+    },
+    {
+     "i": 2,
+     "comment": "Thokozani Ndwandwe",
+     "expect": "any",
+     "reply": "Thank you, Thokozani. We have your name and your church on record, and your nomination of Rev TP is with our team.",
+     "private_message": "",
+     "liked": true,
+     "words": 22,
+     "latency_s": 10.76,
+     "failures": []
+    },
+    {
+     "i": 3,
+     "comment": "Thank you",
+     "expect": "silent",
+     "reply": "",
+     "private_message": "",
+     "liked": true,
+     "words": 0,
+     "latency_s": 0.01,
+     "failures": []
+    }
+   ]
+  },
+  {
+   "id": "give-002",
+   "about": "the owner's screenshot: asking to receive the gift herself, in Swahili and English",
+   "turns": [
+    {
+     "i": 0,
+     "comment": "Hii labda nijiongee Mimi mwenyewe pls gift me the one I had the bishop who gave it alikujia the whole. Cussock sinanga na sijafanikiwa kupata pesa ya kushona",
+     "expect": "reply",
+     "reply": "Pastor Irene, asante kwa kutuandikia. Ombi lako la zawadi ya kasoki limepokelewa kama pendekezo. Timu yetu itachagua mpokeaji mmoja. Zawadi ni bure, na atakayechaguliwa atalipia usafirishaji tu. Tufuate ili uone atakayechaguliwa. Mungu akubariki 🙏",
+     "private_message": "",
+     "liked": true,
+     "words": 33,
+     "latency_s": 20.07,
+     "failures": []
+    }
+   ]
+  },
+  {
+   "id": "give-003",
+   "about": "a casual compliment, then a bare acknowledgement",
+   "turns": [
+    {
+     "i": 0,
+     "comment": "Very nice 👍",
+     "expect": "reply",
+     "reply": "Thank you, Oguchi. 🙏 Our team will select one recipient for this gift, completely free. Follow us and watch for the announcement.",
+     "private_message": "",
+     "liked": true,
+     "words": 21,
+     "latency_s": 7.33,
+     "failures": []
+    },
+    {
+     "i": 1,
+     "comment": "Amen",
+     "expect": "silent",
+     "reply": "",
+     "private_message": "",
+     "liked": true,
+     "words": 0,
+     "latency_s": 0.01,
+     "failures": []
+    }
+   ]
+  },
+  {
+   "id": "give-004",
+   "about": "a price ask under a gift",
+   "turns": [
+    {
+     "i": 0,
+     "comment": "How much is this cassock?",
+     "expect": "reply",
+     "reply": "Hello Grace, thank you for asking. This cassock is a gift, not for sale. Bethany House is giving one custom-made cassock, completely free, to one pastor our team selects. The recipient only covers the shipping. Follow us to see who has been selected.",
+     "private_message": "Hello Grace, thank you for asking. This cassock is a gift, not for sale. Bethany House is giving one custom-made cassock, completely free, to one pastor our team selects. The recipient only covers the shipping. Follow us to see who has been selected.\n\nOrder here 👉 https://bethanyhouse.co.ke/product/cassock?ref=460D2E",
+     "liked": true,
+     "words": 44,
+     "latency_s": 11.84,
+     "failures": []
+    }
+   ]
+  },
+  {
+   "id": "give-005",
+   "about": "a nomination, then a real question that must be answered",
+   "turns": [
+    {
+     "i": 0,
+     "comment": "I nominate Pastor Mary Achieng of Kisumu, she has served our church for 20 years without a cassock of her own.",
+     "expect": "reply",
+     "reply": "Welcome to Bethany House, Daniel. Thank you for nominating Pastor Mary Achieng. Twenty years of faithful service is a story we are glad to read. Our team will be selecting one recipient for this gift. It is completely free, and only the delivery is covered by the recipient. Follow us and watch for the details on who has been selected.",
+     "private_message": "",
+     "liked": true,
+     "words": 60,
+     "latency_s": 17.03,
+     "failures": []
+    },
+    {
+     "i": 1,
+     "comment": "When will you choose the pastor?",
+     "expect": "reply",
+     "reply": "We have no set date to share. Our team will select the recipient, and we'll post the news on our page.",
+     "private_message": "",
+     "liked": true,
+     "words": 21,
+     "latency_s": 8.57,
+     "failures": []
+    }
+   ]
+  },
+  {
+   "id": "give-006",
+   "about": "a grievance under the giveaway is still a grievance",
+   "turns": [
+    {
+     "i": 0,
+     "comment": "I ordered a stole from you last month and I have never received it.",
+     "expect": "reply",
+     "reply": "We're sorry Peter 🙏 This is not the experience we want for you. One of our team is looking into it now, and I've sent you a private message so we can put it right quickly.",
+     "private_message": "Hello Peter, this is Bethany House. We're sorry about this, and we want to put it right. Please share the details here — your name, what you ordered and when — and a colleague will take it up with you personally today.",
+     "liked": false,
+     "words": 35,
+     "latency_s": 0.02,
+     "failures": []
+    }
+   ]
+  }
+ ],
+ "finished": "2026-11-14T10:32:21.562999+00:00",
+ "summary": {
+  "turns": 11,
+  "passed": 11,
+  "replies": 9,
+  "silent": 2,
+  "words": 318,
+  "failure_kinds": {}
+ }
+}

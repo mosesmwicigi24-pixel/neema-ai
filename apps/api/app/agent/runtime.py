@@ -6110,6 +6110,16 @@ class _OptedOut(Exception):
     """The contact asked not to be messaged — the DM leg stands down."""
 
 
+def _is_the_gift(caption: str | None, name: str | None) -> bool:
+    """Is this hub item the thing the campaign post gives away? True when
+    every word of its name (three letters or more) is in the caption — the
+    "Cassock" under "gift your pastor a beautiful cassock". A "Clergy Collar"
+    asked about under the same post is another item, and may have its link."""
+    cap = " ".join(str(caption or "").lower().split())
+    words = [w for w in re.findall(r"[a-z]{3,}", str(name or "").lower())]
+    return bool(cap and words) and all(re.search(rf"\b{re.escape(w)}s?\b", cap) for w in words)
+
+
 def _returning_note(n: int) -> str:
     """One conversation, not a new one (owner, 2026-11-10): the line a public
     comment turn carries when we have already answered this person here."""
@@ -6484,6 +6494,12 @@ async def _run_comment_engage(redis, channel: str, comment: dict, own_pages: set
     # by its hub name (the bishop's cassock); the gift never travels as
     # "Order here" (owner, 2026-09-26: that shoe is a gift).
     if campaign and not (product_link and _names_exactly(answer, matched.get("name") or "")):
+        product_link = ""
+    if campaign and product_link and _is_the_gift(_caption, matched.get("name") or ""):
+        # The item the answer named IS the gift (a cassock, under the cassock
+        # giveaway): "it is a gift, not for sale" followed in the inbox by
+        # "Order here 👉 …/cassock" is a sales redirect of someone taking part
+        # (the giveaway run with the model, 2026-11-14).
         product_link = ""
     # Goodwill opens no DM — unless the post sells a product, where the link is
     # the most useful thing we can hand them.
