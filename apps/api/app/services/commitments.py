@@ -278,8 +278,23 @@ async def customer_followed_up(db, redis, key: str, channel: str, *,
 
 # ── closing a check whose reply day has passed (owner, 2026-11-14) ───────────
 
-def lapse_hours() -> int:
-    return int(getattr(settings, "commitment_lapse_hours", 24) or 0)
+def lapse_hours(channel: str | None = None) -> int:
+    """How long after the customer's last message a person on our team may
+    still reply on this platform — the platform's own longest window
+    (`commitment_lapse_hours_by_channel`); the plain setting for a channel it
+    does not name. 0 (the plain setting) turns closing off everywhere."""
+    base = int(getattr(settings, "commitment_lapse_hours", 24) or 0)
+    if base <= 0:
+        return 0
+    ch = (channel or "").strip().lower()
+    for part in str(getattr(settings, "commitment_lapse_hours_by_channel", "") or "").split(","):
+        name, _, hours = part.partition(":")
+        if name.strip().lower() == ch and ch:
+            try:
+                return max(int(hours), 0) or base
+            except (TypeError, ValueError):
+                return base
+    return base
 
 
 def direct_link(channel: str | None, external_id: str | None, *, permalink: str = "",
@@ -339,12 +354,13 @@ async def _last_inbound_at(db, conv) -> datetime | None:
     return _aware(at)
 
 
-def lapsed(r: dict | None, last_in: datetime | None, *, now: datetime | None = None) -> bool:
+def lapsed(r: dict | None, last_in: datetime | None, *, now: datetime | None = None,
+           channel: str | None = None) -> bool:
     """Has this open check's reply day passed? True when the customer has not
-    written for `commitment_lapse_hours` AND the check itself is that old —
+    written for the platform's reply window (`lapse_hours`) AND the check itself is that old —
     a check opened an hour ago on an old thread is still live. Never when the
     setting is 0 or the customer's last message cannot be read."""
-    hours = lapse_hours()
+    hours = lapse_hours(channel)
     if not r or hours <= 0 or last_in is None:
         return False
     now = _aware(now) or datetime.now(timezone.utc)
@@ -366,7 +382,7 @@ async def lapse(db, conv, deal, r: dict, *, last_in: datetime | None,
         from app.models.intercept import Intercept, InterceptAction
         note = (f"⌛ CHECK CLOSED UNANSWERED — '{r['item']}' was promised "
                 f"{_age_words(int(r.get('age_min') or 0))} ago and nobody confirmed it. The customer "
-                f"last wrote {quiet} ago, so the reply day has passed and the check is closed. "
+                f"last wrote {quiet} ago — past the time this platform lets us reply — so the check is closed. "
                 + (f"You can still answer them directly here: {link}" if link else
                    "On WhatsApp only an approved template can reach them now."))
         db.add(Intercept(conversation_id=conv.id, action=InterceptAction.flag, note=note[:2000]))
@@ -408,7 +424,7 @@ async def sweep(redis=None, *, now: datetime | None = None, limit: int = 200) ->
                 # (owner, 2026-11-14) — whatever the hour.
                 try:
                     last_in = await _last_inbound_at(db, conv)
-                    if lapsed(r, last_in, now=now) and await lapse(db, conv, deal, r,
+                    if lapsed(r, last_in, now=now, channel=getattr(conv, "channel", None)) and await lapse(db, conv, deal, r,
                                                                     last_in=last_in, now=now):
                         out["lapsed"] += 1
                         continue
