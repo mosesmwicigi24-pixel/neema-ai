@@ -43,8 +43,8 @@ def _ctx(ccy="USD"):
 @pytest.mark.parametrize("kes,usd,quoted", [
     (1500, 20, 15),        # the ring: the hub's $20 is a stale number — KES / 100
     (4500, 45, 45),        # the bishopric ring: the hub agrees
-    (10000, 95, 95),       # within 5%: the hub's own figure stands
-    (1300, 12.75, 12.75),  # a deliberate exact price stands
+    (10000, 95, 100),      # owner, 2026-11-14: KES/100 for every USD price —
+    (1300, 12.75, 13),     # even a near or deliberate hub figure
     (400, 10, 4),          # the $10 floor on a $4 collar
     (36000, 600, 360),     # the tray set rounded to 600
     (4500, 50, 45),        # the shirt quoted at $50 on Facebook (2026-09-06)
@@ -60,8 +60,8 @@ def test_the_tools_quote_fifteen_and_forty_five():
     assert _to_display(1500, _ctx("USD"), 20, prices=RING["prices"]) == 15
     assert _to_display(4500, _ctx("USD"), 45, prices=BISHOPRIC["prices"]) == 45
     assert _to_display(1500, _ctx("KES"), 20, prices=RING["prices"]) == 1500
-    assert _to_display(10000, _ctx("USD"), price_usd=95) == 95        # within 5%, the hub's own
-    assert _to_display(1300, _ctx("USD"), prices={"USD": 12.75}) == 12.75
+    assert _to_display(10000, _ctx("USD"), price_usd=95) == 100       # KES/100, always (owner, 2026-11-14)
+    assert _to_display(1300, _ctx("USD"), prices={"USD": 12.75}) == 13       # no deliberate exceptions any more
     assert _to_display(400, _ctx("USD"), price_usd=10) == 4
     assert _to_display(None, _ctx("USD"), price_usd=0.5) == 0.5
 
@@ -163,7 +163,7 @@ def test_health_names_the_hub_rows_whose_dollar_disagrees():
     assert out["hub_usd_gaps"] == 2 and out["quoted_from_kes"] == 2
     assert out["worst"][0]["name"] == "Straight Collar" and out["worst"][0]["quoted_usd"] == 4
     assert {"name": "Ring", "kes": 1500, "hub_usd": 20, "quoted_usd": 15} in out["worst"]
-    assert "else KES/100" in out["policy"]
+    assert "every USD price is KES/100" in out["policy"]
     assert 'out["prices"]' in inspect.getsource(health_router.health)
     clean = pa.health_summary_from([BISHOPRIC, CROSS], 100)
     assert clean["hub_usd_gaps"] == 0 and clean["worst"] == []

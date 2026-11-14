@@ -480,6 +480,11 @@ class Settings(BaseSettings):
     commitment_ack_minutes: int = 5
     commitment_supervisor_minutes: int = 15
     commitment_staffed_hours: str = "07-21"
+    # A promised check is CLOSED, unanswered, once the customer has not written
+    # for this long (owner, 2026-11-14: "close those that the respond day have
+    # passed") — the reply window is gone, and an open check there only holds
+    # every follow-up and grows the count. 0 turns it off.
+    commitment_lapse_hours: int = 24
     # A person commenting many times under one post: this many full model
     # replies a day; beyond it, a bare price ask still gets the free priced
     # line on an identified post and anything else the warm canned line.

@@ -66,7 +66,7 @@ def _flags(env, conv_id):
     async def go():
         async with env.maker() as db:
             rows = (await db.execute(select(Intercept.note).where(Intercept.conversation_id == conv_id))).scalars().all()
-            return [r for r in rows if r and "UNANSWERED CHECK" in r]
+            return [r for r in rows if r and ("UNANSWERED CHECK" in r or "CLOSED UNANSWERED" in r)]
     if eng:
         eng.dispose()
     return asyncio.run(go())
@@ -157,3 +157,53 @@ def test_out_of_hours_is_queued_for_the_next_staffed_start_without_a_bell(env, w
     morning = night + timedelta(hours=8)                                       # 07:30 Nairobi
     out = asyncio.run(cm.sweep(env.redis, now=morning))
     assert out["supervisor"] == 1 and len(_bells(env)) == 1
+
+
+# ── closing a check whose reply day has passed (owner, 2026-11-14) ───────────
+def _inbound(env, conv_id, *, hours_ago, channel="whatsapp", ext=None, ctx=None, cid=None):
+    import uuid
+    from app.models.message import Message, MsgDirection, MsgSender
+
+    async def go():
+        async with env.maker() as db:
+            db.add(Message(conversation_id=uuid.UUID(conv_id), channel=channel,
+                           wa_id=(ext if channel == "whatsapp" else None), external_id=ext,
+                           direction=MsgDirection.inbound, sender=MsgSender.user, text="any news?",
+                           comment_context=ctx, waba_msg_id=cid,
+                           created_at=datetime.now(timezone.utc) - timedelta(hours=hours_ago)))
+            await db.commit()
+    asyncio.run(go())
+
+
+def test_a_check_whose_reply_day_has_passed_is_closed_unanswered(env, world, monkeypatch):
+    from app.services import commitments as cm
+    _settings(monkeypatch)
+    monkeypatch.setattr(cm.settings, "commitment_lapse_hours", 24, raising=False)
+    old = _open_check(env, "254700000101", "the mitre", age_min=3 * 1440)
+    _inbound(env, old, hours_ago=50, ext="254700000101")
+    live = _open_check(env, "254700000102", "the cope", age_min=3 * 1440)
+    _inbound(env, live, hours_ago=2, ext="254700000102")          # they wrote two hours ago
+    fresh = _open_check(env, "254700000103", "the ring", age_min=30)
+    _inbound(env, fresh, hours_ago=50, ext="254700000103")        # old thread, new check
+    out = asyncio.run(cm.sweep(None))
+    assert out["lapsed"] == 1 and out["open"] == 2
+    closed = _deal(env, old)
+    assert closed["kind"] == "team_check_closed" and closed["owner"] == "lapsed"
+    assert closed["item"] == "the mitre" and closed["age_min"] >= 3 * 1440
+    assert _deal(env, live)["kind"] == "team_check" and _deal(env, fresh)["kind"] == "team_check"
+    notes = _flags(env, old)
+    assert any("CHECK CLOSED UNANSWERED" in n and "the mitre" in n and "approved template" in n for n in notes)
+    view = asyncio.run(cm.health_view())
+    assert view["closed_unanswered"] == 1 and view["open"] == 2
+    # idempotent: a second sweep closes nothing more
+    assert asyncio.run(cm.sweep(None))["lapsed"] == 0
+
+
+def test_the_setting_at_zero_closes_nothing(env, world, monkeypatch):
+    from app.services import commitments as cm
+    _settings(monkeypatch)
+    monkeypatch.setattr(cm.settings, "commitment_lapse_hours", 0, raising=False)
+    old = _open_check(env, "254700000104", age_min=5 * 1440)
+    _inbound(env, old, hours_ago=100, ext="254700000104")
+    assert asyncio.run(cm.sweep(None))["lapsed"] == 0
+    assert _deal(env, old)["kind"] == "team_check"

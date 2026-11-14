@@ -91,7 +91,7 @@ def test_public_price_text_is_one_currency(monkeypatch):
     monkeypatch.setattr(rt.settings, "usd_kes_rate", 100, raising=False)
     assert rt._public_price_text(13000, 140, "KES") == "KES 13,000"
     assert rt._public_price_text(13000, 140, "USD") == "$130"      # the hub's $140 is past 5% of KES/100
-    assert rt._public_price_text(13000, 132, "USD") == "$132"      # within 5%: the hub's own USD
+    assert rt._public_price_text(13000, 132, "USD") == "$130"      # KES/100, always (owner, 2026-11-14)
     assert rt._public_price_text(13000, None, "USD") == "$130"     # no hub USD → KES / rate
     assert rt._public_price_text(None, 140, "KES") == "KES 14,000"  # no hub KES → USD × rate
     assert rt._public_price_text(450, 4.5, "USD") == "$4.50"

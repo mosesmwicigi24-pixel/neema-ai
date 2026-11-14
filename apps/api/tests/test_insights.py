@@ -90,7 +90,12 @@ def test_an_unpaid_order_no_longer_scores_like_a_paid_one():
 def test_score_inputs_use_paid_figures_and_the_open_order():
     u = _user()
     orders = [_order(total=12000, paid=True, days=20), _order(total=5000, paid=False, days=2)]
-    inputs = ins.score_inputs(user=u, orders=orders, conversations=[_conv(1), _conv(2, "messenger")],
+    # days_since_contact is read against the real clock: the threads are dated
+    # from it, not from the fixed NOW (which made this fail from 12 Nov on).
+    real = datetime.now(timezone.utc)
+    c1, c2 = _conv(1), _conv(2, "messenger")
+    c1.last_message_at, c2.last_message_at = real - timedelta(days=1), real - timedelta(days=2)
+    inputs = ins.score_inputs(user=u, orders=orders, conversations=[c1, c2],
                               identities=[], person_state={"agent_cart": {"items": [{"name": "x"}]}},
                               now=NOW)
     assert inputs["order_count"] == 1 and inputs["total_spent"] == 12000.0

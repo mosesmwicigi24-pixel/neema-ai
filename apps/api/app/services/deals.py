@@ -371,8 +371,10 @@ async def clear_team_check(db, conversation_id, *, by: str = "team") -> bool:
             age = deal.next_action.get("age_min")
             await _tl.note(db, channel=conv.channel or "whatsapp",
                            contact=(conv.wa_id or conv.external_id or ""), kind="commitment",
-                           summary="Promised check answered",
-                           detail=(f"'{prev.get('item')}' — answered by {by}"
+                           summary=("Promised check closed unanswered" if by == "lapsed"
+                                    else "Promised check answered"),
+                           detail=((f"'{prev.get('item')}' — closed: the customer's reply window passed"
+                                    if by == "lapsed" else f"'{prev.get('item')}' — answered by {by}")
                                    + (f" after {age} min" if age is not None else "")),
                            args={"item": prev.get("item"), "by": by, "age_min": age})
     except Exception:

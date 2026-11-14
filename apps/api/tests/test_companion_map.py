@@ -99,7 +99,7 @@ def test_search_rows_carry_the_map(monkeypatch):
     piece = rows["Cassock"]
     assert [g["name"] for g in piece["goes_with"]][:2] == ["Single Sided Stole", "CINCTURE BELT"]
     assert all(isinstance(g["price"], (int, float)) for g in piece["goes_with"])
-    assert piece["part_of_set"]["name"] == "Cassock Set" and piece["part_of_set"]["price"] == 200
+    assert piece["part_of_set"]["name"] == "Cassock Set" and piece["part_of_set"]["price"] == 195   # KES/100 (owner, 2026-11-14)
     assert "AND the set's total" in piece["part_of_set"]["note"]
     sset = rows["Cassock Set"]
     priced = {e["piece"]: e for e in sset["set"]["pieces_priced"]}

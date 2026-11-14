@@ -55,7 +55,7 @@ def test_display_small_items_keep_cents_never_zero_dollars():
 
 def test_to_display_prefers_hub_usd_else_divides():
     usd, kes = _ctx("USD"), _ctx("KES")
-    assert _to_display(10000, usd, price_usd=95) == 95     # hub USD wins
+    assert _to_display(10000, usd, price_usd=95) == 100    # KES/100 wins (owner, 2026-11-14)
     assert _to_display(10000, usd, price_usd=None) == 100  # no hub USD → /rate
     assert _to_display(10000, usd, price_usd=0) == 100     # 0/invalid → /rate
     assert _to_display(10000, usd, price_usd="bad") == 100

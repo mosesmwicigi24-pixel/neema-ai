@@ -2560,6 +2560,14 @@ async def run_turn(db: AsyncSession, redis, wa_id: str, user_text: str, llm: LLM
                 error=str(exc)[:200])
             if _gate_outcome == "unowned" and turn_facts is not None:
                 turn_facts["unowned_hold"] = True     # the sender must not call this silence
+    if reply:
+        # A note to self is not a message (agent/voice.stage_direction).
+        from app.agent.voice import stage_direction as _stage
+        if _stage(reply):
+            _log.info("turn %s: the draft was only a note that no reply is needed — sending nothing", key)
+            if turn_facts is not None:
+                turn_facts["stage_direction"] = True
+            reply = ""
     if _photo_refer is not None and reply:
         # A referred photo is never priced, whatever the draft says: a money
         # figure swaps the reply for the plain hand-over line. Then a person
