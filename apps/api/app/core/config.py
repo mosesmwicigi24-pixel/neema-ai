@@ -102,9 +102,17 @@ class Settings(BaseSettings):
     # The dashboard fetches these to build its RTCPeerConnection. coturn on our own
     # box supplies turn_url/username/credential; a public STUN is the always-on
     # fallback for same-network testing.
+    # turn_url may list several, comma-separated (UDP, TCP and TLS forms of one
+    # relay): "turn:host:3478,turn:host:3478?transport=tcp,turns:host:5349".
     turn_url: str = ""
     turn_username: str = ""
     turn_credential: str = ""
+    # OUR OWN RELAY, short-lived credentials (2026-11-15): coturn's shared
+    # secret (`use-auth-secret`). When set, each device is handed a username
+    # that expires and a credential derived from the secret — the secret
+    # itself never leaves the server. Takes precedence over turn_username.
+    turn_secret: str = ""
+    turn_ttl_seconds: int = 6 * 3600
     stun_url: str = "stun:stun.l.google.com:19302"
     wa_invite_lang: str = "en"
     # Shared secret for the HUB's pushes (payment, order-event, customer-history

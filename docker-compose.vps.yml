@@ -58,3 +58,50 @@ services:
         image: ghcr.io/mosesmwicigi24-pixel/neema-ai-web:${IMAGE_TAG:-latest}
         ports:
             - "127.0.0.1:3000:3000"
+
+    # OUR OWN CALL RELAY (TURN) — owner, 2026-11-15: "we're not able to get
+    # through calls". On mobile data and many office networks a call's audio
+    # cannot flow directly between the device and WhatsApp; it needs a relay.
+    # Until now the only relay offered was a free public one.
+    #
+    # OFF by default (compose profile "turn"): this box is shared, and the
+    # relay needs ports opened on purpose. To switch it on, see
+    # docs/CALL_RELAY.md — in short: set TURN_SECRET, TURN_EXTERNAL_IP and
+    # TURN_URL in .env, open UDP+TCP 3478 and UDP 49160-49200, then
+    #   docker compose -f docker-compose.yml -f docker-compose.vps.yml --profile turn up -d turn
+    #
+    # Host networking: a relay hands out ports from a range, which Docker's
+    # port mapping handles badly. Credentials are short-lived and derived from
+    # TURN_SECRET by the API (services/wa_calling.turn_credentials); the
+    # secret never reaches a device. Private address ranges are refused as
+    # relay targets so the relay cannot be used to reach this box's own
+    # services.
+    turn:
+        image: coturn/coturn:4.6
+        profiles: ["turn"]
+        network_mode: host
+        restart: unless-stopped
+        command:
+            - -n
+            - --log-file=stdout
+            - --listening-port=3478
+            - --min-port=49160
+            - --max-port=49200
+            - --external-ip=${TURN_EXTERNAL_IP:-}
+            - --realm=${TURN_REALM:-neema.bethanyhouse.co.ke}
+            - --use-auth-secret
+            - --static-auth-secret=${TURN_SECRET:-}
+            - --fingerprint
+            - --no-cli
+            - --no-tls
+            - --no-dtls
+            - --no-multicast-peers
+            - --denied-peer-ip=0.0.0.0-0.255.255.255
+            - --denied-peer-ip=10.0.0.0-10.255.255.255
+            - --denied-peer-ip=100.64.0.0-100.127.255.255
+            - --denied-peer-ip=127.0.0.0-127.255.255.255
+            - --denied-peer-ip=169.254.0.0-169.254.255.255
+            - --denied-peer-ip=172.16.0.0-172.31.255.255
+            - --denied-peer-ip=192.168.0.0-192.168.255.255
+            - --total-quota=60
+            - --stale-nonce=600

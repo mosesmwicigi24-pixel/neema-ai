@@ -324,6 +324,12 @@ async def mark_failed(call_id: str) -> dict | None:
     return await _close(call_id, "failed", only_if=("ringing",))
 
 
+async def mark_audio_failed(call_id: str) -> dict | None:
+    """An ANSWERED call whose audio never connected on our side (2026-11-15:
+    these were logged `completed`, with a duration, as if someone had spoken)."""
+    return await _close(call_id, "failed", only_if=("answered",))
+
+
 async def mark_rejected(call_id: str) -> dict | None:
     """The customer declined our outbound call (Meta's REJECTED status). Also
     corrects a `no_answer` written by a terminate that beat the status."""

@@ -29,7 +29,7 @@ import { useWs } from "@/lib/websocket";
 import {
     callsApi, apiErrorStatus, apiErrorDetail, apiErrorInfo, isNetworkError,
     type ApiCall, type CallIceConfig, type CallPermission, type CallErrorAction,
-    type CallChannel, type CallChannels, type CallSdpResp,
+    type CallChannel, type CallChannels, type CallSdpResp, type CallAudioFailure,
 } from "@/lib/api";
 
 export type CallPhase =
@@ -221,6 +221,23 @@ const RECONNECT_GRACE_MS = 10_000;
 const CONNECT_GUARD_MS = 20_000;
 /** Answered on the agent's own phone (same agent id, another device). */
 export const YOU_ELSEWHERE = "you on another device";
+
+/** "iPhone · Safari" — the device family and browser, never the full user agent. */
+function describePlatform(): string {
+    if (typeof navigator === "undefined") return "";
+    const ua = navigator.userAgent || "";
+    const device = /iPhone/.test(ua) ? "iPhone" : /iPad/.test(ua) || (/Macintosh/.test(ua) && navigator.maxTouchPoints > 1) ? "iPad"
+        : /Android/.test(ua) ? "Android" : /Macintosh/.test(ua) ? "Mac" : /Windows/.test(ua) ? "Windows" : /Linux/.test(ua) ? "Linux" : "other";
+    const browser = /CriOS|Chrome\//.test(ua) && !/Edg\//.test(ua) ? "Chrome" : /Edg\//.test(ua) ? "Edge"
+        : /FxiOS|Firefox\//.test(ua) ? "Firefox" : /Safari\//.test(ua) ? "Safari" : "other";
+    return `${device} · ${browser}`;
+}
+
+function describeNetwork(): string {
+    const c = (typeof navigator !== "undefined"
+        ? (navigator as Navigator & { connection?: { type?: string; effectiveType?: string } }).connection : undefined);
+    return c?.type || c?.effectiveType || "unknown";
+}
 
 const MIC: MediaTrackConstraints = { echoCancellation: true, noiseSuppression: true, autoGainControl: true };
 
@@ -616,6 +633,54 @@ export function CallProvider({ children }: { children: ReactNode }) {
               duration, notice: null });
     }, [put, teardown, setWaiting, startRinging]);
 
+    // WHY THE AUDIO FAILED (2026-11-15): "The call audio couldn't connect" was
+    // shown here and recorded nowhere. Before the peer is torn down, read what
+    // it saw — its states, the kinds of network path it found, whether our
+    // relay was offered — and send it; then end the call as FAILED (the server
+    // logged these as completed). The read is capped so the screen never waits.
+    const relayErrorsRef = useRef(0);
+    const pcBuiltAtRef = useRef(0);
+    const failAudio = useCallback((id: string, stage: CallAudioFailure["stage"], still: () => boolean) => {
+        const pc = pcRef.current;
+        const snap = snapRef.current;
+        const body: CallAudioFailure = {
+            stage, client: "web",
+            direction: snap.call?.direction === "outbound" ? "outbound" : "inbound",
+            connection: pc?.connectionState, ice: pc?.iceConnectionState, gathering: pc?.iceGatheringState,
+            relay_offered: !!cfgRef.current?.cfg?.relay,
+            relay_errors: relayErrorsRef.current,
+            seconds: pcBuiltAtRef.current ? Math.round((Date.now() - pcBuiltAtRef.current) / 1000) : 0,
+            platform: describePlatform(),
+            network: describeNetwork(),
+        };
+        const read = (async () => {
+            if (!pc) return;
+            const local: Record<string, number> = {}, remote: Record<string, number> = {};
+            const kindOf: Record<string, string> = {};
+            let pairLocal = "";
+            const stats = await pc.getStats();
+            stats.forEach((r: { type: string; id: string; candidateType?: string; state?: string;
+                                nominated?: boolean; localCandidateId?: string }) => {
+                if (r.type === "local-candidate" && r.candidateType) {
+                    local[r.candidateType] = (local[r.candidateType] ?? 0) + 1;
+                    kindOf[r.id] = r.candidateType;
+                } else if (r.type === "remote-candidate" && r.candidateType) {
+                    remote[r.candidateType] = (remote[r.candidateType] ?? 0) + 1;
+                } else if (r.type === "candidate-pair" && (r.state === "succeeded" || r.nominated) && r.localCandidateId) {
+                    pairLocal = r.localCandidateId;
+                }
+            });
+            body.local = local; body.remote = remote;
+            body.pair = pairLocal ? (kindOf[pairLocal] ?? "unknown") : "none";
+        })().catch(() => { /* the report goes without the path detail */ });
+        Promise.race([read, new Promise((r) => setTimeout(r, 700))]).finally(() => {
+            callsApi.diagnostics(id, body).catch(() => { /* never in the caller's way */ });
+            if (snapRef.current.call?.callId !== id || !still()) return;
+            endWith("failed", { reason: "The call audio couldn't connect" });
+            terminateInBackground(id, () => callsApi.terminate(id, "failed"));
+        });
+    }, [endWith, terminateInBackground]);
+
     // Answered, but the audio must arrive: never sit on "Connecting…" forever
     // (a lost SDP answer, a path ICE can't open).
     const armConnectGuard = useCallback((id: string) => {
@@ -623,11 +688,10 @@ export function CallProvider({ children }: { children: ReactNode }) {
         connectGuardRef.current = setTimeout(() => {
             connectGuardRef.current = null;
             if (snapRef.current.phase === "connecting" && snapRef.current.call?.callId === id) {
-                endWith("failed", { reason: "The call audio couldn't connect" });
-                terminateInBackground(id);
+                failAudio(id, "connect_guard", () => snapRef.current.phase === "connecting");
             }
         }, CONNECT_GUARD_MS);
-    }, [endWith, terminateInBackground]);
+    }, [failAudio]);
 
     // Our outbound call: the customer picked up — media follows the SDP answer.
     const customerAnswered = useCallback(() => {
@@ -750,11 +814,15 @@ export function CallProvider({ children }: { children: ReactNode }) {
         const id = s.call?.callId;
         const droppedAt = droppedAtRef.current;
         droppedAtRef.current = null;
-        if (!s.answeredAt) endWith("failed", { reason: "The call audio couldn't connect" });
-        else endWith("connection_lost", droppedAt
+        if (!s.answeredAt) {
+            if (id) failAudio(id, "ice_failed", () => true);
+            else endWith("failed", { reason: "The call audio couldn't connect" });
+            return;
+        }
+        endWith("connection_lost", droppedAt
             ? { duration: Math.max(0, Math.round((droppedAt - s.answeredAt) / 1000)) } : {});
         terminateInBackground(id);
-    }, [endWith, terminateInBackground]);
+    }, [endWith, terminateInBackground, failAudio]);
 
     const onMedia = useCallback((pc: RTCPeerConnection, st: string) => {
         if (pc !== pcRef.current) return;
@@ -798,11 +866,18 @@ export function CallProvider({ children }: { children: ReactNode }) {
     }, [put, stopTone, loseConnection]);
 
     const buildPc = useCallback((iceServers: RTCIceServer[]) => {
+        relayErrorsRef.current = 0;
+        pcBuiltAtRef.current = Date.now();
         const pc = new RTCPeerConnection({ iceServers });
         pc.ontrack = (e) => {
             const stream = e.streams[0] ?? new MediaStream([e.track]);
             remoteStreamRef.current = stream;
-            if (remoteAudioRef.current) remoteAudioRef.current.srcObject = stream;
+            if (remoteAudioRef.current) {
+                remoteAudioRef.current.srcObject = stream;
+                // Safari (iPhone, iPad, Mac) does not always honour `autoplay`
+                // for a stream attached after the tap: start it explicitly.
+                remoteAudioRef.current.play?.().catch(() => { /* the next gesture starts it */ });
+            }
             // A recorder that started before the customer's audio arrived mixes it in now.
             if (recCtxRef.current && recDestRef.current) {
                 try { recCtxRef.current.createMediaStreamSource(stream).connect(recDestRef.current); } catch { /* ignore */ }
@@ -816,7 +891,10 @@ export function CallProvider({ children }: { children: ReactNode }) {
             if (st === "connected" || st === "completed") onMedia(pc, "connected");
             else if (!("connectionState" in pc) && (st === "disconnected" || st === "failed")) onMedia(pc, st);
         };
-        pc.onicecandidateerror = (e) => console.debug("[call] ICE candidate error:", (e as RTCPeerConnectionIceErrorEvent)?.errorText);
+        pc.onicecandidateerror = (e) => {
+            relayErrorsRef.current += 1;
+            console.debug("[call] ICE candidate error:", (e as RTCPeerConnectionIceErrorEvent)?.errorText);
+        };
         return pc;
     }, [onMedia]);
 

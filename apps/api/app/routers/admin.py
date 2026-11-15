@@ -3262,7 +3262,10 @@ async def calls_ice_config(agent: Agent = Depends(get_current_agent)):
     server won't write)."""
     from app.services.wa_calling import ice_servers
     from app.core.config import settings
+    from app.services.wa_calling import relay_configured
     return {"ice_servers": ice_servers(), "record": settings.call_recording_enabled,
+            # is OUR relay among them (not only the public fallback)?
+            "relay": relay_configured(),
             "transcribe": bool(settings.whisper_enabled),
             "auto_transcribe": bool(settings.whisper_enabled and settings.whisper_auto),
             # Meta transcribes the call itself (opt-in): "Summary in a minute".
@@ -4160,6 +4163,29 @@ async def _hang_up_messenger(call_id: str, meta: dict) -> Exception | None:
     return None
 
 
+@router.post("/calls/{call_id}/diagnostics")
+async def calls_diagnostics_report(call_id: str, request: Request, body: dict | None = None,
+                                   agent: Agent = Depends(get_current_agent)):
+    """A device reports what it saw when a call's audio failed to connect
+    (services/call_diagnostics). Stored as a short fixed record; never a
+    reason to fail the caller's flow."""
+    from app.services import call_diagnostics
+    row = await call_diagnostics.record(_redis(request), call_id, agent, body)
+    return {"ok": True, "reading": row["reading"]}
+
+
+@router.get("/calls-diagnostics")
+async def calls_diagnostics_recent(request: Request, limit: int = 50,
+                                   agent: Agent = Depends(get_current_agent)):
+    """The recent audio-failure reports, newest first, with a count per
+    plain-language reading."""
+    from app.services import call_diagnostics
+    from app.services.wa_calling import relay_configured
+    out = await call_diagnostics.recent(_redis(request), limit)
+    out["relay"] = relay_configured()
+    return out
+
+
 @router.post("/calls/{call_id}/terminate")
 async def calls_terminate(
     call_id: str,
@@ -4212,6 +4238,10 @@ async def calls_terminate(
         info = await call_log.mark_cancelled(call_id, agent.id)
     elif status == "ringing":
         info = await call_log.mark_declined(call_id, agent.id)
+    elif status == "answered" and reason == "failed":
+        # Answered, but the audio never formed (the device's 20 s guard): that
+        # is a failed call, not a completed one — it stays a follow-up.
+        info = await call_log.mark_audio_failed(call_id)
     elif status == "answered":
         info = await call_log.mark_ended(call_id)
     if info is not None:
