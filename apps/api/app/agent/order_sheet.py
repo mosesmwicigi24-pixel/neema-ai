@@ -154,6 +154,9 @@ def sheet_note(items: list, total, currency: str, pending: list[dict]) -> str:
     for p in pending:
         lines.append(f"  AWAITING A COLLEAGUE'S PRICE (not in the total, still part of the order): "
                      f"{pending_words(p)}")
+    if pending:
+        lines.append("While a piece awaits its price: do NOT offer to start or place the order, and "
+                     "never give the total as the whole order.")
     lines.append("A correction changes only the piece it names — every other piece above stands. "
                  "Count the pieces the customer asked for against this record before you "
                  "quote a total or offer to place the order.)")

@@ -329,6 +329,10 @@ def test_the_thread_test_reads_the_order_record_not_the_wording():
         "items": [{"name": "Cassock Set", "qty": 2,
                    "units": [{"for": "himself"}, {"for": "himself"}]}],
         "pending": [{"description": "purple set with stole and cross", "for": "his spiritual father"}]})
+    # a held stole or cross is not a garment
+    assert ot.order_state({"items": [], "pending": [{"description": "stole and silver cross"}]})["garment_pieces"] == 0
+    assert any("offered to place" in b for b in
+               ot.check_turn({}, "It is USD 390; a colleague prices the rest. Shall I place it now?", full, None, []))
     assert full["garment_pieces"] == 3 and full["for_someone_else"]
     assert ot.check_turn(ask3, "Two sets are USD 390; a colleague will confirm the purple set's price.",
                          full, {"garment_pieces": 3}, []) == []
@@ -354,3 +358,27 @@ def test_the_thread_test_draws_its_own_pictures_and_stays_off_real_systems():
     assert "_local_db_only()" in inspect.getsource(ot.run)
     assert '"sandbox": True' in src and "_cleanup_contacts(redis, [CONTACT])" in src
     assert [len(t["photos"]) for t in ot.TURNS] == [2, 1, 0, 0, 0]
+
+
+def test_an_offer_to_place_the_order_must_be_backed_by_the_record():
+    offer = "The three cassocks come to $390. Shall I place it now?"
+    held = [{"tool": "update_cart", "out": {"ok": True, "items": [{"name": "Cassock"}],
+                                            "awaiting_price": ["stole and silver cross"]}}]
+    assert "awaits a colleague" in review.order_offer_unready(offer, held)
+    ready = [{"tool": "get_cart", "out": {"items": [{"name": "Cassock"}]}}]
+    assert review.order_offer_unready(offer, ready) is None
+    # a total over an empty record, with an offer to start
+    tok = review.ORDER_STATE.set({"lines": 0, "awaiting": 0})
+    try:
+        multi = ("Everything comes to $455. Your cassocks are $130 each, the stole $25 and the cross $40. "
+                 "Shall I start your two cassocks?")
+        assert "nothing is on the order record" in review.order_offer_unready(multi, [])
+        # the ordinary single-item sale is left alone
+        assert review.order_offer_unready("The Cassock is $130. Shall I start your order?", []) is None
+        assert review.order_offer_unready("Everything comes to $455.", []) is None
+        kinds = [f["kind"] for f in review.rule_findings("how much", multi, [], tool_results=[])]
+        assert "order_unready" in kinds
+    finally:
+        review.ORDER_STATE.reset(tok)
+    # no state known: the rule stays out of the way
+    assert review.order_offer_unready(offer, []) is None

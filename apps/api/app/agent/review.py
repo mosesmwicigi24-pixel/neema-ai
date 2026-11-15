@@ -1109,6 +1109,49 @@ def cart_claim_without_change(answer: str, tool_results: list | None) -> str | N
     return m.group(0)
 
 
+# What the order record held when the turn began (runtime.run_turn sets it):
+# {"lines": n, "awaiting": n}. A cart tool's result in the turn is newer.
+import contextvars as _cv
+ORDER_STATE: "_cv.ContextVar[dict | None]" = _cv.ContextVar("order_state", default=None)
+
+_ORDER_OFFER_RE = re.compile(
+    r"\bshall\s+i\s+(?:start|place|create|proceed|go\s+ahead|confirm)\b[^?\n]{0,60}\?"
+    r"|\bready\s+to\s+(?:place|start)\b|\b(?:start|place)\s+(?:your|the|this)\s+order\s+now\b"
+    r"|\bnianze\s+oda\b", re.IGNORECASE)
+_TOTAL_WORD_RE = re.compile(r"\b(?:total|comes?\s+to|altogether|in\s+all|everything|jumla)\b", re.IGNORECASE)
+
+
+def order_offer_unready(answer: str, tool_results: list | None) -> str | None:
+    """An offer to start or place the order that the record cannot back
+    (run 43711949562, 2026-11-15): "Everything comes to $455 … shall I start
+    your two cassocks?" with nothing on the order, and "Shall I place it
+    now?" while a piece awaited a colleague's price. Returns what is wrong,
+    or None. A single item quoted and offered is the ordinary sale and is
+    left alone: only a TOTAL over an empty record, or an offer over a piece
+    still awaiting its price, is flagged."""
+    if not _ORDER_OFFER_RE.search(answer or ""):
+        return None
+    state = dict(ORDER_STATE.get() or {})
+    for e in tool_results or []:
+        if str((e or {}).get("tool") or "") in ("update_cart", "get_cart"):
+            out = _tool_out(e)
+            if isinstance(out.get("items"), list):
+                state = {"lines": len(out["items"]), "awaiting": len(out.get("awaiting_price") or [])}
+    if not state:
+        return None
+    if int(state.get("awaiting") or 0) > 0:
+        return ("it offers to start or place the order while a piece still awaits a colleague's "
+                "price — say what is on the order, what awaits its price, and that a colleague "
+                "will confirm it here; make no offer to place the order yet")
+    if int(state.get("lines") or 0) == 0 and _TOTAL_WORD_RE.search(answer or "") \
+            and len(set(money_figures(answer))) >= 3:
+        return ("it gives a total for several pieces and offers to start, but nothing is on the "
+                "order record — give the prices without the offer, and say you are noting each "
+                "piece (who it is for) so the order is exact; the pieces go on the order with "
+                "update_cart before any offer to start it")
+    return None
+
+
 def promise_only(answer: str, seen: list) -> dict | None:
     """A reply that only promises to check, while a PRICED hub row is already
     in hand: the row, or None. A promise with nothing in hand (a product we
@@ -1450,6 +1493,9 @@ def rule_findings(comment: str, answer: str, seen: list,
                             "change this turn — either make the change with update_cart (a removal "
                             "needs the customer's own words) or say what is true: what the order "
                             "holds now, and the one thing you need from them"})
+    _unready = order_offer_unready(answer, tool_results) if mode == "dm" else None
+    if _unready:
+        out.append({"kind": "order_unready", "hard": False, "text": _unready})
     if payment_method_missing(comment, answer):
         out.append({"kind": "payment_method", "hard": False,
                     "text": "they asked how to pay and the draft names no way to pay — name the ways "

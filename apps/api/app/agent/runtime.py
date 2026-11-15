@@ -2202,19 +2202,19 @@ async def run_turn(db: AsyncSession, redis, wa_id: str, user_text: str, llm: LLM
             _pc_catalog = await _svc_pc.catalog_items(db, redis)
             _pc_caption = (media.get("caption") or "").strip()
             # every photo of the burst is checked, not only the first
-            for _cu, _cb in [(media.get("url"), img_block)] + _more_imgs:
+            for _pcu, _pcb in [(media.get("url"), img_block)] + _more_imgs:
                 if settings.photo_check_mode == "live":
                     _chk = await asyncio.wait_for(
-                        _pc.check_photo(redis, _cb, _pc_catalog, _pc_caption), timeout=45)
+                        _pc.check_photo(redis, _pcb, _pc_catalog, _pc_caption), timeout=45)
                     _refer = _chk.get("verdict") == "refer"
-                    await _pc.record(_chk, channel=channel, contact=key, media_url=_cu,
+                    await _pc.record(_chk, channel=channel, contact=key, media_url=_pcu,
                                      mode="live", acted=_refer)
                     if _refer and _photo_refer is None:
                         _photo_refer = _chk
                         turn_notes.append(_pc.REFER_NOTE.format(why=_pc.why(_chk)))
                 else:
-                    _pc.run_in_background(redis, _cb, _pc_catalog, _pc_caption,
-                                          channel=channel, contact=key, media_url=_cu)
+                    _pc.run_in_background(redis, _pcb, _pc_catalog, _pc_caption,
+                                          channel=channel, contact=key, media_url=_pcu)
         except Exception as exc:
             _log.info("photo check skipped for %s: %s", key, exc)
     if img_block:
@@ -2484,6 +2484,9 @@ async def run_turn(db: AsyncSession, redis, wa_id: str, user_text: str, llm: LLM
             from app.agent.tools import _cart_display as _cd
             _cart_now = await _cartmod.get_cart(db, key, channel)
             _pend_now = _sheet.pending_of(_cart_now)
+            from app.agent import review as _rv_state
+            _rv_state.ORDER_STATE.set({"lines": len(_cart_now.get("items") or []),
+                                       "awaiting": len(_pend_now)})
             if _cart_now.get("items") or _pend_now:
                 _ci, _ct = await _cd(_cart_now, ctx)
                 turn_notes.append(_sheet.sheet_note(_ci, _ct, currency, _pend_now))

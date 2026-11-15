@@ -62,6 +62,8 @@ REASK = r"what would you like to order|which (?:item|product)s? (?:would you lik
 BLIND = r"(?:can(?:'|’)?t|cannot|unable to|could ?n(?:'|’)?t) (?:see|view|open) (?:the|your|this|that|those|these) " \
         r"(?:photo|picture|image)|does not deliver|did(?: not|n(?:'|’)?t) (?:come through|arrive)"
 OTHER = r"father|spiritual|him\b|his\b"
+GARMENT = r"cassock|robe|\bset\b|vestment|gown|\balb\b|chasuble|apostolic"
+OFFER = r"shall i (?:start|place|create|proceed|go ahead)|(?:start|place) (?:your|the) order now"
 
 
 def words(text: str) -> int:
@@ -112,15 +114,16 @@ def order_state(cart: dict) -> dict:
     from app.agent import order_sheet
     items = cart.get("items") or []
     pending = order_sheet.pending_of(cart)
-    garments = [i for i in items if re.search(r"cassock|robe|set|vestment|gown|alb|chasuble|apostolic",
-                                              str(i.get("name") or ""), re.IGNORECASE)]
+    garments = [i for i in items if re.search(GARMENT, str(i.get("name") or ""), re.IGNORECASE)]
     units = [u for i in items for u in (i.get("units") or []) if isinstance(u, dict)]
     whom = " ".join(str(x.get("for") or "") for x in units + pending)
     return {
         "lines": [{"name": i.get("name"), "qty": int(i.get("qty") or 0),
                    "units": i.get("units") or []} for i in items],
         "awaiting_price": pending,
-        "garment_pieces": sum(int(i.get("qty") or 0) for i in garments) + len(pending),
+        # a held stole or cross is not a garment; a held robe is
+        "garment_pieces": sum(int(i.get("qty") or 0) for i in garments)
+        + sum(1 for p in pending if re.search(GARMENT, p.get("description") or "", re.IGNORECASE)),
         "for_someone_else": bool(re.search(OTHER, whom, re.IGNORECASE)),
     }
 
@@ -147,6 +150,10 @@ def check_turn(turn: dict, reply: str, state: dict, before: dict | None, tools: 
     placed = [t for t in tools if t.get("tool") == "create_order" and (t.get("out") or {}).get("sandbox")]
     if placed and (state["awaiting_price"] or state["garment_pieces"] < 3):
         out.append("an order was placed without all three garments priced")
+    if state["awaiting_price"] and re.search(OFFER, r, re.IGNORECASE):
+        out.append("offered to place the order while a piece awaits its price")
+    if not state["lines"] and re.search(OFFER, r, re.IGNORECASE) and turn.get("pieces"):
+        out.append("offered to start the order with nothing on the record")
     if turn.get("closing") and state["awaiting_price"] \
             and not re.search(r"colleague|team|confirm|price", r, re.IGNORECASE):
         out.append("gave a closing total without saying a piece still awaits its price")
@@ -308,6 +315,7 @@ async def run(out_path: str | None = None) -> dict:
     print(f"\nSUMMARY  turns {s['passed']}/{s['turns']} · garments on the order at the end "
           f"{s['garment_pieces_at_end']} (asked for 3) · awaiting a price {s['awaiting_price_at_end']} · "
           f"failure kinds: {json.dumps(s['failure_kinds'], ensure_ascii=False)}")
+    print(f"TOKENS   {json.dumps(s['usage'])}")
     if out_path:
         with open(out_path, "w", encoding="utf-8") as fh:
             json.dump(record, fh, ensure_ascii=False, indent=1)
