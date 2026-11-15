@@ -39,3 +39,12 @@ export function summarizeFlag(note: string | null | undefined): FlagSummary | nu
         .slice(0, MAX_POINTS);
     return { tag, headline, points };
 }
+
+/** A held reply's reason in a few words, for the one-line card
+ *  (owner, 2026-11-15): "Reply held · figures not verified". */
+export function heldLine(sum: FlagSummary): string {
+    const why = sum.points.find((p) => /why/i.test(p.label))?.text ?? "";
+    if (/unverified figure|not the hub price/i.test(why)) return "figures not verified";
+    if (why) return why.length > 60 ? why.slice(0, 60).replace(/\s+\S*$/, "") + "…" : why;
+    return "a colleague must answer";
+}

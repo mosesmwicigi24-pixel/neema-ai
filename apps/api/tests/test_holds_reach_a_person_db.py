@@ -183,8 +183,8 @@ def test_the_same_thread_is_released_once_a_colleague_has_answered(rig):
     # staff see on the thread itself why Neema has it back
     released = notes[-1]
     assert released.direction.value == "outbound" and released.media_type == "note"
-    assert "Returned to Neema automatically" in released.text
-    assert "45 minutes" in released.text and "a colleague answered" in released.text
+    assert "Back to Neema — no colleague reply" in released.text
+    assert "45 min;" in released.text and "a colleague answered" in released.text
 
 
 def test_a_customer_who_only_said_thanks_has_nothing_pending(rig):
@@ -242,7 +242,7 @@ def test_a_held_thread_stays_with_staff_until_a_person_replies(rig, note, hold_l
     assert _release_tick(rig) == 1
     mode, rows, notes = _state(rig, cid)
     assert mode == "ai" and [r.action.value for r in rows].count("release") == 1
-    assert "Returned to Neema automatically" in notes[-1].text
+    assert "Back to Neema — no colleague reply" in notes[-1].text
     assert "a colleague answered" in notes[-1].text
 
 
