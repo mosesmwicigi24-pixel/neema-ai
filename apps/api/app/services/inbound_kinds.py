@@ -68,8 +68,17 @@ _UNSUPPORTED_LABELS: dict[str, tuple[str, str, bool]] = {
     "pin": ("pinned message", "Pins don't reach business accounts.", False),
     "keep_in_chat": ("kept message", "WhatsApp doesn't share this with businesses.", False),
     "group_invite": ("group invite link", "Group invites don't reach business accounts.", True),
+    # An ALBUM (several photos sent together). Meta sends this notice AND each
+    # photo as its own image message, so nothing is missing: the notice never
+    # wakes the AI, and never tells her "we cannot see it" — the photos that
+    # follow are the message (the Melchizkek thread, 2026-11-15: four albums,
+    # each answered as if the pictures had not arrived).
+    "album": ("album", "The photos in it arrive as separate messages, just below.", False),
+    "media_album": ("album", "The photos in it arrive as separate messages, just below.", False),
+    "image_album": ("album", "The photos in it arrive as separate messages, just below.", False),
     "unknown": ("message", "", True),
 }
+_ALBUM_KEYS = {"album", "media_album", "image_album"}
 
 _GENERIC_ADVICE = "You can ask them to send it as a photo or text."
 
@@ -383,6 +392,8 @@ def describe(msg: dict) -> Described:
         text = "🗑️ Deleted a message"
     elif kind == "edited":
         text = "✏️ Edited an earlier message (WhatsApp doesn't share the new wording)"
+    elif key in _ALBUM_KEYS:
+        text = "📷 Sent an album — its photos are shown separately, just below."
     elif key == "unknown":
         text = f"Sent something WhatsApp doesn't let us show here. {_GENERIC_ADVICE}"
     else:
@@ -391,6 +402,8 @@ def describe(msg: dict) -> Described:
     agent_text = (f"(The customer sent {_a(label)} {label} "
                   "that WhatsApp does not deliver to businesses, so we cannot see what it says. "
                   "If it seems to matter, kindly ask them to send it as a photo or a text.)")
+    if key in _ALBUM_KEYS:
+        agent_text = "(The customer sent several photos together; each one follows as its own photo.)"
     return done(text, kind, {"label": label, "advice": advice or _GENERIC_ADVICE,
                              "subtype": None if key == "unknown" else key},
                 agent_text=agent_text, wake=wake, keep_payload=True)

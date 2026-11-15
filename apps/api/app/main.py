@@ -6,7 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 import redis.asyncio as aioredis
 
 from app.core.config import settings
-from app.routers import auth, admin, hub_bridge, websocket, health, crm, roles, media, meta_webhook, public, short_link, order_link, whatsapp_webhook, web_chat, analytics, hub_events, manychat, tiktok_webhook, sms
+from app.routers import auth, admin, hub_bridge, websocket, health, crm, roles, media, meta_webhook, public, short_link, order_link, whatsapp_webhook, web_chat, analytics, hub_events, manychat, tiktok_webhook, sms, ops_read
 from app.database import AsyncSessionLocal
 from sqlalchemy import text
 
@@ -564,6 +564,9 @@ app.include_router(public.router,     prefix="/api/public", tags=["Public Catalo
 app.include_router(web_chat.router,   prefix="/api/web",   tags=["Web Chat"])
 app.include_router(manychat.router,   prefix="/api/manychat", tags=["ManyChat Relay"])
 app.include_router(tiktok_webhook.router, prefix="/api/tiktok", tags=["TikTok Native"])
+# Read-only access to the record by key — every route is 404 unless
+# OPS_READ_KEY is set on the server (routers/ops_read).
+app.include_router(ops_read.router, prefix="/api/ops/read", tags=["Ops (read-only)"])
 
 
 @app.get("/api/health")

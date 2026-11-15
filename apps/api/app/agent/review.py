@@ -1081,6 +1081,34 @@ def stock_affirmed_unconfirmed(answer: str, tool_results: list | None) -> bool:
     return checking
 
 
+_CART_CLAIM_RE = re.compile(
+    r"\b(?:i\s*(?:'|’)?(?:ve| have)|i|we\s*(?:'|’)?(?:ve| have))\s+(?:now\s+|just\s+|also\s+)?"
+    r"(added|removed|replaced|swapped|updated|changed|taken\s+(?:off|out))\b"
+    r"[^.!?\n]{0,60}\b(?:cart|order|basket|list)\b"
+    r"|\b(?:nimeongeza|nimeondoa|nimebadilisha)\b", re.IGNORECASE)
+
+
+def cart_claim_without_change(answer: str, tool_results: list | None) -> str | None:
+    """"I've added / removed / replaced … in your order" in a turn whose cart
+    did not change (the Melchizkek thread, 2026-11-15: the reply said one
+    thing and the cart held another). The claim's words, or None. A turn
+    whose update_cart succeeded and changed something is grounded."""
+    m = _CART_CLAIM_RE.search(answer or "")
+    if not m:
+        return None
+    for e in tool_results or []:
+        name = str((e or {}).get("tool") or "")
+        out = _tool_out(e)
+        if (e or {}).get("truncated"):
+            return None                      # a cut record cannot prove "no change"
+        if name == "update_cart" and out.get("ok") and not out.get("unchanged") \
+                and not out.get("error"):
+            return None
+        if name == "create_order" and not out.get("error"):
+            return None
+    return m.group(0)
+
+
 def promise_only(answer: str, seen: list) -> dict | None:
     """A reply that only promises to check, while a PRICED hub row is already
     in hand: the row, or None. A promise with nothing in hand (a product we
@@ -1415,6 +1443,13 @@ def rule_findings(comment: str, answer: str, seen: list,
                             "and the team is still confirming — say it is being checked and you will come "
                             "back here, neither that we have it nor that we don't; serve the rest of their "
                             "list meanwhile"})
+    _claim = cart_claim_without_change(answer, tool_results) if mode == "dm" else None
+    if _claim:
+        out.append({"kind": "cart_claim", "hard": False,
+                    "text": f"it says the order was changed (\"{_claim}\") but the cart did not "
+                            "change this turn — either make the change with update_cart (a removal "
+                            "needs the customer's own words) or say what is true: what the order "
+                            "holds now, and the one thing you need from them"})
     if payment_method_missing(comment, answer):
         out.append({"kind": "payment_method", "hard": False,
                     "text": "they asked how to pay and the draft names no way to pay — name the ways "
