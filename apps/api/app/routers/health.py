@@ -110,6 +110,13 @@ async def health(request: Request):
                           "duplicate": c.get("duplicate", 0)}
     except Exception:
         pass
+    # WHERE EACH FACT COMES FROM (owner, 2026-11-16): hub or Neema's own copy,
+    # and how fresh the hub copy in hand is.
+    try:
+        from app.services import sources as _sources
+        out["sources"] = await _sources.read(getattr(request.app.state, "redis", None))
+    except Exception:
+        pass
     # THE KES PRICE IS THE TRUTH (owner, 2026-10-02): the hub rows whose own
     # USD disagrees with KES / rate — Neema quotes KES / rate past 5%, and the
     # team fixes the hub. Cached an hour.

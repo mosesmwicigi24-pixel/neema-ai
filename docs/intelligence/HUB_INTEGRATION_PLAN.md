@@ -50,6 +50,19 @@ The hub owns every **business fact**: what is sold, at what price, to whom, what
 | A5 | The kwacha fallback uses the hub's rate (as PR #377 does for rands) | Removes the 5 vs 7.14 mismatch |
 | A6 | A "sources" check in `/api/health`: for each fact above, where it came from and how old the copy is | The owner can see drift without reading code |
 
+**Stage A progress (2026-11-16, on the branch, tested without the model, not merged):**
+
+| # | State |
+|---|---|
+| A1 | Built. The AI reads past orders from the hub's customer record: capped at 3 seconds, reused for 5 minutes, Neema's mirror only when the hub cannot say. WhatsApp contacts only; a Messenger or Instagram contact still reads the mirror. |
+| A2 | Not started. To be shown to the owner before it replaces the Orders screen. |
+| A3 | Not started. About 40 hand-typed prices in the instructions; changing them changes how the AI writes and needs a model run. |
+| A4 | Built. Adding, editing or deleting a product in Neema's own table is refused while the hub is the source ("Products are managed in the hub"). The dashboard's buttons are still shown; the server refuses. |
+| A5 | Built. A missing kwacha price converts at the hub's rate read from its product prices. |
+| A6 | Built. `/api/health` has a `sources` section: each fact, hub or own copy, and how fresh the hub copy is. |
+
+The hub and Neema run on the same server in different containers (owner, 2026-11-16), so a server outage takes both; a hub-container outage alone is still covered by the last-good copies.
+
 ### Stage B — needs the hub to expose something (hub-side work)
 
 | # | The hub provides | Neema then |

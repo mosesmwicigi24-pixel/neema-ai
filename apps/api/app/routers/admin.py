@@ -2648,12 +2648,26 @@ async def list_catalog(
     return items
 
 
+def _hub_owns_the_catalogue() -> None:
+    """THE HUB IS THE CATALOGUE (owner, 2026-11-16). Neema's own product table
+    is only the fallback for a hub outage; editing it made a second catalogue
+    nobody else could see. While the hub is the source, products are changed
+    in the hub — and this says so, plainly, to whoever tries here."""
+    from app.core.config import settings
+    if (settings.catalog_source or "").lower() == "hub":
+        raise HTTPException(
+            status_code=409,
+            detail="Products are managed in the hub. Change the product there and Neema "
+                   "follows within about ten minutes.")
+
+
 @router.post("/catalog")
 async def create_catalog_item(
     body: dict,
     db: AsyncSession = Depends(get_db),
     agent: Agent = Depends(get_current_agent),
 ):
+    _hub_owns_the_catalogue()
     from app.models.catalog import Catalog
     from decimal import Decimal, InvalidOperation
     if not body.get("name"):
@@ -2685,6 +2699,7 @@ async def update_catalog_item(
     db: AsyncSession = Depends(get_db),
     agent: Agent = Depends(get_current_agent),
 ):
+    _hub_owns_the_catalogue()
     from app.models.catalog import Catalog
     from decimal import Decimal, InvalidOperation
     result = await db.execute(
@@ -2714,6 +2729,7 @@ async def delete_catalog_item(
     db: AsyncSession = Depends(get_db),
     agent: Agent = Depends(get_current_agent),
 ):
+    _hub_owns_the_catalogue()
     from app.models.catalog import Catalog
     result = await db.execute(
         select(Catalog).where(Catalog.id == item_id)
