@@ -82,6 +82,26 @@ def clean_pending(description, details=None) -> dict | None:
     return row
 
 
+_SMALL = {"the", "a", "an", "and", "with", "for", "of", "in", "as", "to", "his", "her", "their",
+          "my", "one", "set", "picture", "pictured", "photo", "instead", "not"}
+
+
+def same_held_item(a: dict, b: dict) -> bool:
+    """Is `b` the item already held as `a`, described again? (Run
+    43713060582: "let the cross be silver" held the purple cassock a SECOND
+    time instead of changing the first.) The same person — or no person named
+    on one side — and descriptions that share most of their words."""
+    fa, fb = _norm(a.get("for")), _norm(b.get("for"))
+    if fa and fb and fa != fb:
+        return False
+    wa = {w for w in _norm(a.get("description")).split() if w not in _SMALL}
+    wb = {w for w in _norm(b.get("description")).split() if w not in _SMALL}
+    if not wa or not wb:
+        return False
+    shared = len(wa & wb)
+    return shared >= 2 and shared / min(len(wa), len(wb)) >= 0.5
+
+
 def pending_of(cart: dict | None) -> list[dict]:
     p = (cart or {}).get("pending")
     return [x for x in p if isinstance(x, dict) and x.get("description")] if isinstance(p, list) else []

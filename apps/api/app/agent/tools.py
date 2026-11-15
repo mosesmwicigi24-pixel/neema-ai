@@ -1263,14 +1263,15 @@ async def _hold_item(args: dict, ctx: ToolContext, cart: dict) -> dict:
     if row is None:
         return {"error": "describe the item to hold, in the customer's words (`description`)"}
     pending = order_sheet.pending_of(cart)
-    known = next((p for p in pending
-                  if order_sheet._norm(p["description"]) == order_sheet._norm(row["description"])
-                  and (p.get("for") or "") == (row.get("for") or "")), None)
+    # the same piece described again (a correction to it) changes that piece
+    known = next((p for p in pending if order_sheet.same_held_item(p, row)), None)
     if known is None and len(pending) >= order_sheet.MAX_PENDING:
         return {"error": "too many items are awaiting a price — hand this order to a colleague "
                          "with handoff_to_human"}
     asked = True
     if known is not None:
+        row = dict(known, **row)             # what was known stays unless said again
+        known.clear()
         known.update(row)
     else:
         pending.append(row)

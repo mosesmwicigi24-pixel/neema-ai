@@ -382,3 +382,20 @@ def test_an_offer_to_place_the_order_must_be_backed_by_the_record():
         review.ORDER_STATE.reset(tok)
     # no state known: the rule stays out of the way
     assert review.order_offer_unready(offer, []) is None
+
+
+def test_a_correction_to_a_held_piece_changes_that_piece(monkeypatch):
+    # run 43713060582: "let the cross be silver" held the purple cassock twice
+    store, call, asked = _rig(monkeypatch)
+    call(action="hold", description="purple cassock with gold piping, stole and gold cross as pictured",
+         details=[{"for": "his spiritual father", "photo": "photo 3", "as_pictured": True}])
+    call(action="hold", description="purple cassock with gold piping, stole and silver cross",
+         details=[{"for": "his spiritual father"}])
+    assert len(store["pending"]) == 1 and len(asked) == 1
+    held = store["pending"][0]
+    assert "silver cross" in held["description"] and held["photo"] == "photo 3"
+    # a different piece, or the same words for someone else, is its own item
+    call(action="hold", description="white and red apostolic cassock", details=[{"for": "himself"}])
+    call(action="hold", description="purple cassock with gold piping, stole and silver cross",
+         details=[{"for": "his deacon"}])
+    assert len(store["pending"]) == 3

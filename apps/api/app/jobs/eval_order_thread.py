@@ -57,7 +57,7 @@ TURNS = [
 ]
 
 # What must never be said in this conversation.
-REASK = r"what would you like to order|which (?:item|product)s? (?:would you like|are you interested)|" \
+REASK = r"(?:what|which) would you like to order|which (?:item|product)s? (?:would you like|are you interested)|" \
         r"what are you looking for|how can i (?:help|assist) you"
 BLIND = r"(?:can(?:'|’)?t|cannot|unable to|could ?n(?:'|’)?t) (?:see|view|open) (?:the|your|this|that|those|these) " \
         r"(?:photo|picture|image)|does not deliver|did(?: not|n(?:'|’)?t) (?:come through|arrive)"
@@ -116,7 +116,8 @@ def order_state(cart: dict) -> dict:
     pending = order_sheet.pending_of(cart)
     garments = [i for i in items if re.search(GARMENT, str(i.get("name") or ""), re.IGNORECASE)]
     units = [u for i in items for u in (i.get("units") or []) if isinstance(u, dict)]
-    whom = " ".join(str(x.get("for") or "") for x in units + pending)
+    whom = " ".join(str(x.get("for") or "") for x in units + pending) + " " \
+        + " ".join(str(p.get("description") or "") + " " + str(p.get("note") or "") for p in pending)
     return {
         "lines": [{"name": i.get("name"), "qty": int(i.get("qty") or 0),
                    "units": i.get("units") or []} for i in items],
