@@ -1919,7 +1919,7 @@ def _fx_text(fx: dict | None, comment: str) -> str:
     code = currency_asked(comment)
     if not code or code not in fx:
         return ""
-    return f"The rate to use (a fact): 1 USD = {float(fx[code]):g} {code} — convert from the USD price only.\n"
+    return f"Today's rate (a fact): 1 USD = {float(fx[code]):g} {code} — convert from the USD price only.\n"
 
 
 # ── the tally: what the gate did today (health, the team's eye) ──────────────
