@@ -114,6 +114,10 @@ jobs:
       - name: The three-garment order thread (photos)
         if: ${{ inputs.order_thread == 'true' }}
         shell: bash
+        env:
+          # the job draws its pictures into the media folder; the server's
+          # default (/var/neema/…) is not writable on a runner
+          MEDIA_DIR: ${{ runner.temp }}/neema-media
         run: set -o pipefail; python -m app.jobs.eval_order_thread --out order-thread-eval.json 2>&1 | tee order-thread-eval.log
       - uses: actions/upload-artifact@v4
         if: always()
