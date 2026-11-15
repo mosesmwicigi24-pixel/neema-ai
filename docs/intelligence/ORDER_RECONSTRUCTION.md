@@ -82,7 +82,7 @@ Changes made between and after the runs:
 
 Set against the real thread: no garment was dropped in either run, the correction did not remove or swap a piece, and the piece with no price went to a colleague instead of being replaced by a listed product.
 
-Still seen in run 2 and **not fixed**: the re-ask on turn 1 ("Which would you like to order?") and the confirming question on turn 2 after he had said it plainly. The prompt already forbids both; the test now reports the first.
+The re-ask on turn 1 of run 2 ("Which would you like to order?") is now a gate rule on the owner's word ("fix the re-ask"): `asked_again`, soft — when the customer's message has already chosen by pointing ("these two", "this one", "both"), a reply that asks what they want is sent back for a rewrite. "I want a cassock" still leaves "which one?" a fair question. **Tested without the model only.** The confirming question on turn 2 ("Is this a third piece?") is left as it is.
 
 Cost: run 2 recorded 696,722 cached input tokens read, 49,222 written, 3,777 output and 38 uncached input (the writer's calls). At the list price assumed for the configured writer model (USD 3 per million input, 0.30 cached read, 3.75 cache write, 15 output) that is about USD 0.45. The reviewer's calls are not in that count. Run 1 printed no token count; it is the same shape. A first dispatch (run 43711828629) stopped before any model call: the runner could not write the media folder.
 

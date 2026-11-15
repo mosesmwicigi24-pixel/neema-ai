@@ -399,3 +399,21 @@ def test_a_correction_to_a_held_piece_changes_that_piece(monkeypatch):
     call(action="hold", description="purple cassock with gold piping, stole and silver cross",
          details=[{"for": "his deacon"}])
     assert len(store["pending"]) == 3
+
+
+def test_she_does_not_ask_what_they_want_when_they_have_said():
+    said = "Hello. I want these two made for me. How much are they?"
+    reply = "The black one is our Cassock at $130 and the white one $130. Which would you like to order?"
+    assert review.asked_again(said, reply)
+    assert "asked_again" in [f["kind"] for f in review.rule_findings(said, reply, [], tool_results=[])]
+    for theirs, ours in (("Make these two for me", "Lovely. What would you like to order?"),
+                         ("Nataka hizi mbili", "Sawa. Which one would you like?"),
+                         ("I'll take both", "Which would you prefer?")):
+        assert review.asked_again(theirs, ours), (theirs, ours)
+    # naming a KIND of thing is not a choice: "which one?" is then a fair question
+    assert review.asked_again("I want a cassock", "We make it in black and white. Which would you like?") is None
+    assert review.asked_again("I need a stole for Easter", "Which would you prefer?") is None
+    # a real open question, and a precise one, are left alone
+    assert review.asked_again("How much are your cassocks?", "They start at $130. Which would you like?") is None
+    assert review.asked_again(said, "Noted, both for you. What chest size shall we cut them to?") is None
+    assert review.asked_again(said, "Is the purple one for you or for your spiritual father?") is None

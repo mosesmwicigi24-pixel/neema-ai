@@ -45,6 +45,7 @@ conversation flagged with the reviewer's reasons and the draft.
 """
 from __future__ import annotations
 
+import contextvars as _cv
 import json
 import logging
 import re
@@ -1111,7 +1112,6 @@ def cart_claim_without_change(answer: str, tool_results: list | None) -> str | N
 
 # What the order record held when the turn began (runtime.run_turn sets it):
 # {"lines": n, "awaiting": n}. A cart tool's result in the turn is newer.
-import contextvars as _cv
 ORDER_STATE: "_cv.ContextVar[dict | None]" = _cv.ContextVar("order_state", default=None)
 
 _ORDER_OFFER_RE = re.compile(
@@ -1150,6 +1150,32 @@ def order_offer_unready(answer: str, tool_results: list | None) -> str | None:
                 "piece (who it is for) so the order is exact; the pieces go on the order with "
                 "update_cart before any offer to start it")
     return None
+
+
+_REASK_RE = re.compile(
+    r"\b(?:what|which(?:\s+(?:one|ones|item|items|piece|pieces|of\s+(?:these|them)))?)\s+would\s+you\s+like"
+    r"(?:\s+to\s+(?:order|buy|get|have))?\s*\?"
+    r"|\bwhat\s+(?:are\s+you\s+looking\s+for|can\s+i\s+get\s+(?:for\s+)?you|would\s+you\s+like\s+to\s+order)\b"
+    r"|\bwhich\s+(?:one\s+)?(?:do\s+you\s+want|would\s+you\s+prefer)\s*\?", re.IGNORECASE)
+# They have CHOSEN — by pointing ("these two", "this one", "both"), not by
+# naming a kind of thing: "I want a cassock" still leaves "which one?" open.
+_SAID_WANT_RE = re.compile(
+    r"\b(?:want|need|take|taking|make|made|order|like|get|buy)\b[^.?!\n]{0,24}?"
+    r"\b(?:th(?:ese|ose)(?:\s+(?:two|three|ones|\d))?|this\s+one|that\s+one|both|them|all\s+(?:of\s+them|three|two))\b"
+    r"|\b(?:th(?:ese|ose)(?:\s+(?:two|three|ones))?|this\s+one|both)\b[^.?!\n]{0,30}?"
+    r"\b(?:for\s+(?:me|my|him|her|us)|made|mine)\b"
+    r"|\b(?:nataka|ninataka|naomba|nitachukua)\s+(?:hii|hizi|hiyo|hizo|zote)\b", re.IGNORECASE)
+
+
+def asked_again(comment: str, answer: str) -> str | None:
+    """"Which would you like to order?" to someone who has just said which
+    (run 43713060582, 2026-11-15: "I want these two made for me" → "Which
+    would you like to order?"). The question's words, or None. Only when THIS
+    message already says what they want — a real open question is untouched."""
+    m = _REASK_RE.search(answer or "")
+    if not m or not _SAID_WANT_RE.search(comment or ""):
+        return None
+    return m.group(0)
 
 
 def promise_only(answer: str, seen: list) -> dict | None:
@@ -1493,6 +1519,13 @@ def rule_findings(comment: str, answer: str, seen: list,
                             "change this turn — either make the change with update_cart (a removal "
                             "needs the customer's own words) or say what is true: what the order "
                             "holds now, and the one thing you need from them"})
+    _again = asked_again(comment, answer) if mode == "dm" else None
+    if _again:
+        out.append({"kind": "asked_again", "hard": False,
+                    "text": f"it asks what they want (\"{_again}\") when their message already says — "
+                            "take what they said as the choice: confirm it in a few words and ask only "
+                            "the next thing you truly need (a size, a colour not yet given, who a piece "
+                            "is for), or nothing"})
     _unready = order_offer_unready(answer, tool_results) if mode == "dm" else None
     if _unready:
         out.append({"kind": "order_unready", "hard": False, "text": _unready})
