@@ -90,9 +90,75 @@ def _who(c) -> tuple[str, str] | None:
     return (ch, h) if h else None
 
 
+BUSY_WINDOW = timedelta(hours=4)      # a call "live" for longer is a stale row, not a busy person
+
+
+async def busy_agents(db=None) -> set[str]:
+    """The agents on a call right now: they answered one that is still live,
+    or they are ringing a customer. From the call rows themselves — the same
+    truth the Calls page shows — so nothing new has to be kept in step."""
+    from app.database import AsyncSessionLocal
+    since = datetime.now(timezone.utc) - BUSY_WINDOW
+
+    async def read(s) -> set[str]:
+        rows = (await s.execute(
+            select(Call.agent_id).where(
+                Call.agent_id.isnot(None), Call.started_at >= since,
+                (Call.status == "answered")
+                | ((Call.status == "ringing") & (Call.direction == "outbound"))))).scalars().all()
+        return {str(a) for a in rows if a}
+    if db is not None:
+        return await read(db)
+    async with AsyncSessionLocal() as s:
+        return await read(s)
+
+
+async def ring_skip(event: dict) -> list[str]:
+    """Whose devices a new ring should NOT reach (owner, 2026-11-15): the
+    agents on a call — unless that is every agent, when all of them ring and
+    see "is also calling". [] when the rule is off or anything goes wrong:
+    a ring that reaches too many is a nuisance, one that reaches nobody is a
+    lost customer."""
+    from app.core.config import settings
+    if not getattr(settings, "call_ring_skip_busy", True):
+        return []
+    try:
+        from app.database import AsyncSessionLocal
+        from app.models.agent import Agent
+        async with AsyncSessionLocal() as s:
+            busy = await busy_agents(s)
+            if not busy:
+                return []
+            everyone = {str(a) for a in (await s.execute(select(Agent.id))).scalars().all()}
+        if not (everyone - busy):
+            return []                       # nobody is free: everyone hears it
+        return sorted(busy & everyone)
+    except Exception as exc:
+        _log.warning("busy check failed — the call rings everyone: %s", exc)
+        return []
+
+
+def frame_is_for(frame: str, agent_id: str) -> bool:
+    """Should this websocket frame reach this agent's socket? Everything does,
+    except a ring that names them in `skip_agents`. Never raises; anything it
+    cannot read is delivered."""
+    if '"skip_agents"' not in frame or '"incoming_call"' not in frame:
+        return True
+    try:
+        ev = json.loads(frame)
+        return not (ev.get("type") == "incoming_call"
+                    and str(agent_id) in {str(a) for a in (ev.get("skip_agents") or [])})
+    except Exception:
+        return True
+
+
 async def publish(redis, event: dict) -> None:
     """Tell every connected agent — and, for a ring and its end, every
     registered phone whose app may be closed (services/push.py). Never raises."""
+    if event.get("type") == "incoming_call" and "skip_agents" not in event:
+        skip = await ring_skip(event)
+        if skip:
+            event = dict(event, skip_agents=skip)
     try:
         from app.services import push
         push.schedule(event)
@@ -322,6 +388,12 @@ async def mark_cancelled(call_id: str, agent_id=None) -> dict | None:
 
 async def mark_failed(call_id: str) -> dict | None:
     return await _close(call_id, "failed", only_if=("ringing",))
+
+
+async def mark_audio_failed(call_id: str) -> dict | None:
+    """An ANSWERED call whose audio never connected on our side (2026-11-15:
+    these were logged `completed`, with a duration, as if someone had spoken)."""
+    return await _close(call_id, "failed", only_if=("answered",))
 
 
 async def mark_rejected(call_id: str) -> dict | None:

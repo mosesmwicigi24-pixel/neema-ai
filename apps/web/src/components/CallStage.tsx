@@ -364,6 +364,14 @@ function AudioMenu({ onClose }: { onClose: () => void }) {
                     ))}
                 </>
             )}
+            {!c.canPickOutput && (
+                // iPhone and iPad browsers do not let a page choose between the
+                // loudspeaker and the earpiece: say so, and say what does.
+                <div className="px-3 pt-2 pb-2" style={{ fontSize: 12, lineHeight: 1.4, color: WA.muted }}>
+                    This browser can&apos;t switch between loudspeaker and earpiece. Use a headset or
+                    the phone&apos;s own audio control, or take calls in the Neema app, which has a speaker switch.
+                </div>
+            )}
         </div>
     );
 }

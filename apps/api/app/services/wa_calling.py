@@ -404,6 +404,27 @@ async def download_media(media_id: str) -> tuple[bytes, str]:
 
 # ── ICE ──────────────────────────────────────────────────────────────────────
 
+def turn_credentials(secret: str, ttl: int = 6 * 3600, *, now: float | None = None,
+                     label: str = "neema") -> dict:
+    """A relay username that EXPIRES and its credential, as coturn's
+    `use-auth-secret` expects (the TURN REST scheme): username =
+    "<unix expiry>:<label>", credential = base64(HMAC-SHA1(secret, username)).
+    A device is handed these, never the secret; a leaked pair stops working
+    when it expires."""
+    import base64
+    import hashlib
+    import hmac
+    import time
+    expires = int((now if now is not None else time.time()) + max(int(ttl or 0), 60))
+    username = f"{expires}:{label}"
+    digest = hmac.new(secret.encode(), username.encode(), hashlib.sha1).digest()
+    return {"username": username, "credential": base64.b64encode(digest).decode()}
+
+
+def relay_configured() -> bool:
+    """Is OUR relay set (not only the public fallback)?"""
+    return bool(settings.turn_url)
+
 def ice_servers() -> list[dict]:
     """ICE servers for the browser's RTCPeerConnection. Our own coturn is primary;
     a public STUN + a public TURN (openrelay) are added as fallbacks so media can
@@ -411,8 +432,11 @@ def ice_servers() -> list[dict]:
     NAT/mobile networks in both directions (browser ↔ Meta)."""
     servers: list[dict] = []
     if settings.turn_url:
-        entry: dict = {"urls": settings.turn_url}
-        if settings.turn_username:
+        urls = [u.strip() for u in str(settings.turn_url).split(",") if u.strip()]
+        entry: dict = {"urls": urls[0] if len(urls) == 1 else urls}
+        if settings.turn_secret:
+            entry.update(turn_credentials(settings.turn_secret, settings.turn_ttl_seconds))
+        elif settings.turn_username:
             entry["username"] = settings.turn_username
             entry["credential"] = settings.turn_credential
         servers.append(entry)

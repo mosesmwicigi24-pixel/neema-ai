@@ -1109,8 +1109,28 @@ export interface CallTranscriptResp {
     recording_url: string | null;
 }
 
+/** A device's report of a call whose audio did not connect (no number, no audio). */
+export interface CallAudioFailure {
+    stage: "connect_guard" | "ice_failed" | "ice_lost" | "no_answer_sdp" | "mic" | "signalling" | "other";
+    direction?: "inbound" | "outbound";
+    connection?: string;
+    ice?: string;
+    gathering?: string;
+    local?: Record<string, number>;
+    remote?: Record<string, number>;
+    pair?: string;
+    relay_offered?: boolean;
+    relay_errors?: number;
+    seconds?: number;
+    client: "web";
+    platform?: string;
+    network?: string;
+}
+
 export interface CallIceConfig {
     ice_servers: RTCIceServer[];
+    /** Is OUR relay among the servers (not only the public fallback)? */
+    relay?: boolean;
     record?: boolean;          // server kill switch for the browser recording
     transcribe?: boolean;      // Whisper is on (on-demand transcription works)
     auto_transcribe?: boolean; // …and runs by itself after every upload
@@ -1320,8 +1340,11 @@ export const callsApi = {
     answer: (callId: string, sdp: string) =>
         post<CallSdpResp>(`${callPath(callId)}/answer`, { sdp }),
     /** Hang up, decline or cancel — the server decides which from where the call is. */
-    terminate: (callId: string) =>
-        post<{ ok: boolean; outcome?: string | null }>(`${callPath(callId)}/terminate`, {}),
+    terminate: (callId: string, reason?: "failed") =>
+        post<{ ok: boolean; outcome?: string | null }>(`${callPath(callId)}/terminate`, reason ? { reason } : {}),
+    /** What this device saw when a call's audio failed to connect. */
+    diagnostics: (callId: string, body: CallAudioFailure) =>
+        post<{ ok: boolean; reading?: string }>(`${callPath(callId)}/diagnostics`, body),
     callback: (callId: string) =>
         post<{ ok: boolean }>(`${callPath(callId)}/callback`, {}),
     followUpDone: (callId: string) =>
