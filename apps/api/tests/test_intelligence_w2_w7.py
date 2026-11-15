@@ -53,7 +53,11 @@ def test_the_handoff_tool_rings_the_team():
 
 def test_a_caption_less_photo_is_a_turn_in_history():
     src = inspect.getsource(rt._history)
-    assert "[the customer sent a photo]" in src and "MsgDirection.inbound" in src
+    # the line itself now comes from photo_memory (2026-11-15): the bare
+    # placeholder when the photo has no number yet, its number once it has
+    from app.services import photo_memory
+    assert photo_memory.history_line(None) == "[the customer sent a photo]"
+    assert "_photo_line(getattr(m, \"raw_meta\", None))" in src and "MsgDirection.inbound" in src
 
 
 def test_a_complaint_read_by_the_floor_earns_the_care_first_length():

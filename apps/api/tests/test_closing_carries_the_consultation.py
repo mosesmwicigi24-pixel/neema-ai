@@ -274,7 +274,12 @@ def test_the_cart_refuses_what_cannot_be_sold_and_removes_a_variant_by_its_base_
     assert "unknown action" in asyncio.run(tools._update_cart({"action": "drop", "product": "Cassock"}, ctx))["error"]
     out = asyncio.run(tools._update_cart({"action": "add", "product": "New Chasuble"}, ctx))
     assert "no price in the hub" in out["error"] and "check_availability" in out["next_step"]
+    # a removal needs the customer's own words (2026-11-15) — without them, nothing moves
     out = asyncio.run(tools._update_cart({"action": "remove", "product": "Straight Collar"}, ctx))
+    assert out["ok"] is False and "NOT CHANGED" in out["error"]
+    ctx.customer_words = ("please take the collar off",)
+    out = asyncio.run(tools._update_cart({"action": "remove", "product": "Straight Collar",
+                                          "customer_said": "take the collar off"}, ctx))
     assert out["ok"] and [i["name"] for i in store["items"]] == ["Cassock"]
     out = asyncio.run(tools._update_cart({"action": "remove", "product": "Straight Collar"}, ctx))
     assert out["ok"] is False and "not in the cart" in out["error"]

@@ -977,7 +977,8 @@ async def _answered_after(db: AsyncSession, key: str, channel: str, inbound_ids:
 
 async def _history(db: AsyncSession, key: str, limit: int = 20,
                    *, channel: str = "whatsapp", post_id: str | None = None,
-                   exclude_ids: list | None = None) -> list[dict]:
+                   exclude_ids: list | None = None,
+                   seen: dict | None = None) -> list[dict]:
     # WhatsApp keys on wa_id (the compat shim); other channels key on
     # (channel, external_id) since their messages carry no wa_id.
     where = (Message.wa_id == key) if channel == "whatsapp" else (
@@ -1027,12 +1028,28 @@ async def _history(db: AsyncSession, key: str, limit: int = 20,
         # be heard) — never "[audio received]", which taught the model to say
         # it can't listen to audio (services/voice_notes).
         text = (_voice_line(m) or m.text or "").strip()
+        _is_photo = m.direction == MsgDirection.inbound and (m.media_type or "") == "image"
+        if _is_photo and seen is not None:
+            seen["photos"] = True          # the caller numbers them (photo_memory)
+        if text and _is_photo:
+            # a captioned photo keeps its number beside its caption
+            from app.services.photo_memory import history_line as _photo_line
+            _pl = _photo_line(getattr(m, "raw_meta", None), "")
+            if _pl:
+                text = f"{_pl} {text}"
         if not text:
             # A caption-less photo or video the customer sent is a turn, not
             # a gap: without this line the model never knew it happened
             # (W5, 2026-11-06). Outbound empty rows stay out.
             if m.direction == MsgDirection.inbound and (m.media_type or "") in ("image", "video"):
-                text = "[the customer sent a photo]" if m.media_type == "image" else "[the customer sent a video]"
+                if m.media_type == "image":
+                    # its number, and what the photo check knows of it
+                    # (services/photo_memory) — never the bare placeholder
+                    # when the photo has been indexed.
+                    from app.services.photo_memory import history_line as _photo_line
+                    text = _photo_line(getattr(m, "raw_meta", None))
+                else:
+                    text = "[the customer sent a video]"
             else:
                 continue
         role = "user" if m.direction == MsgDirection.inbound else "assistant"
@@ -1894,10 +1911,29 @@ async def run_turn(db: AsyncSession, redis, wa_id: str, user_text: str, llm: LLM
     # colour named three messages ago is still the colour" needs reach.
     # A public comment turn reads THIS post's thread only (owner, 2026-09-23):
     # the same person's comments under another post are another conversation.
+    _hist_seen: dict = {}
     messages = await _history(db, key,
                               limit=(14 if public_comment else 40), channel=channel,
                               post_id=(comment_post_id if public_comment else None),
-                              exclude_ids=inbound_ids)
+                              exclude_ids=inbound_ids, seen=_hist_seen)
+    # EVERY PHOTO HAS A NUMBER (services/photo_memory, 2026-11-15): when this
+    # chat holds photos (or this turn brings one) they are numbered, so a past
+    # photo reads "[the customer sent photo 2 — our own photo of …]" and a
+    # later "these two" can be handed the pictures it points at. A chat with
+    # no photo does no extra read.
+    _photos: list[dict] = []
+    if not public_comment and not read_only and not scribe_only and settings.tier2_vision \
+            and (_hist_seen.get("photos") or (media and media.get("type") == "image")):
+        try:
+            from app.services import photo_memory as _pm
+            _pm_report: dict = {}
+            _photos = await _pm.index(db, redis, channel=channel, key=key, report=_pm_report)
+            if _pm_report.get("changed") and _hist_seen.get("photos"):
+                # numbered just now: read the history once more so it shows them
+                messages = await _history(db, key, limit=40, channel=channel,
+                                          exclude_ids=inbound_ids)
+        except Exception as exc:
+            _log.info("photo index skipped for %s: %s", key, exc)
     # A message that landed while the previous turn was composing was not seen
     # by that reply. Say so — the model then answers only what is new, or
     # nothing at all (two answers to one question was the most visible robotic
@@ -2145,6 +2181,14 @@ async def run_turn(db: AsyncSession, redis, wa_id: str, user_text: str, llm: LLM
         # to_thread: the loader does blocking I/O (local disk, or an HTTPS fetch
         # of a Meta CDN attachment / post thumbnail) — keep the event loop free.
         img_block = await asyncio.to_thread(load_image_block, media.get("url"))
+    # The other photos of the same burst (wa_native._drain), loaded once here
+    # so the photo check and the turn itself both see every one of them.
+    _more_imgs: list[tuple[str, dict]] = []
+    if img_block:
+        for _x in (media.get("more") or []):
+            _xb = await asyncio.to_thread(load_image_block, _x.get("url"))
+            if _xb is not None:
+                _more_imgs.append((_x.get("url"), _xb))
     # THE PHOTO CHECK (owner, 2026-10-29): is this photo something we sell, or
     # an AI-made / heavily embroidered design a person must price? Shadow mode
     # checks and records off the reply path and changes nothing; live mode
@@ -2157,18 +2201,20 @@ async def run_turn(db: AsyncSession, redis, wa_id: str, user_text: str, llm: LLM
             from app.services import photo_check as _pc
             _pc_catalog = await _svc_pc.catalog_items(db, redis)
             _pc_caption = (media.get("caption") or "").strip()
-            if settings.photo_check_mode == "live":
-                _chk = await asyncio.wait_for(
-                    _pc.check_photo(redis, img_block, _pc_catalog, _pc_caption), timeout=45)
-                _refer = _chk.get("verdict") == "refer"
-                await _pc.record(_chk, channel=channel, contact=key, media_url=media.get("url"),
-                                 mode="live", acted=_refer)
-                if _refer:
-                    _photo_refer = _chk
-                    turn_notes.append(_pc.REFER_NOTE.format(why=_pc.why(_chk)))
-            else:
-                _pc.run_in_background(redis, img_block, _pc_catalog, _pc_caption,
-                                      channel=channel, contact=key, media_url=media.get("url"))
+            # every photo of the burst is checked, not only the first
+            for _pcu, _pcb in [(media.get("url"), img_block)] + _more_imgs:
+                if settings.photo_check_mode == "live":
+                    _chk = await asyncio.wait_for(
+                        _pc.check_photo(redis, _pcb, _pc_catalog, _pc_caption), timeout=45)
+                    _refer = _chk.get("verdict") == "refer"
+                    await _pc.record(_chk, channel=channel, contact=key, media_url=_pcu,
+                                     mode="live", acted=_refer)
+                    if _refer and _photo_refer is None:
+                        _photo_refer = _chk
+                        turn_notes.append(_pc.REFER_NOTE.format(why=_pc.why(_chk)))
+                else:
+                    _pc.run_in_background(redis, _pcb, _pc_catalog, _pc_caption,
+                                          channel=channel, contact=key, media_url=_pcu)
         except Exception as exc:
             _log.info("photo check skipped for %s: %s", key, exc)
     if img_block:
@@ -2186,14 +2232,28 @@ async def run_turn(db: AsyncSession, redis, wa_id: str, user_text: str, llm: LLM
                 lead = ""
             messages.pop()
         text = "\n".join(p for p in (lead, caption) if p)
-        messages.append({"role": "user", "content": [
-            img_block,
-            {"type": "text", "text": text or
-             "(The customer sent this photo. Identify the item and search our catalogue for it.)"},
+        # EVERY PHOTO OF THE BURST, each under its number (2026-11-15): two
+        # cassocks sent together are two pictures on the turn, never one.
+        _blocks: list = []
+        _turn_imgs = [(media.get("url"), img_block)] + _more_imgs
+        _by_url = {p.get("url"): p for p in _photos}
+        for _u, _b in _turn_imgs:
+            _lab = (_by_url.get(_u) or {}).get("label")
+            if _lab and len(_turn_imgs) > 1:
+                _blocks.append({"type": "text", "text": f"{_lab}:"})
+            _blocks.append(_b)
+        _many = sum(1 for b in _blocks if b.get("type") == "image") > 1
+        messages.append({"role": "user", "content": _blocks + [
+            {"type": "text", "text": text or (
+                "(The customer sent these photos together. Each is a separate item they are "
+                "showing you: identify each one and search our catalogue for it.)" if _many else
+                "(The customer sent this photo. Identify the item and search our catalogue for it.)")},
         ]})
     # The just-received message is already persisted by /message; only append it
     # if history didn't capture it (defensive) so the model always sees it last.
-    elif not messages or messages[-1]["role"] != "user" or user_text.strip() not in messages[-1]["content"]:
+    elif not messages or messages[-1]["role"] != "user" or (
+            isinstance(messages[-1]["content"], str)
+            and user_text.strip() not in messages[-1]["content"]):
         text = user_text.strip()
         if not text and media:
             # Image-only turn whose photo couldn't be loaded — never send an
@@ -2201,6 +2261,31 @@ async def run_turn(db: AsyncSession, redis, wa_id: str, user_text: str, llm: LLM
             text = ("(The customer sent a photo that could not be loaded. Ask them "
                     "to describe the item in words so you can help.)")
         messages.append({"role": "user", "content": text or "(empty message)"})
+
+    # WORDS THAT POINT AT EARLIER PHOTOS (2026-11-15): "these two are mine",
+    # "this one is his", "all as in the picture" arrive with no picture. The
+    # recent photos go back in front of her, each under its number, so the
+    # words have something to point at. Only on a text turn; only photos the
+    # message can be about (services/photo_memory.to_attach).
+    if img_block is None and _photos and messages and messages[-1]["role"] == "user" \
+            and isinstance(messages[-1]["content"], str):
+        try:
+            from app.agent.media import load_image_block as _load_img
+            _again = _pm.to_attach(_photos, user_text)
+            _re_blocks: list = []
+            for _p in _again:
+                _b = await asyncio.to_thread(_load_img, _p.get("url"))
+                if _b is None:
+                    continue
+                _re_blocks.append({"type": "text", "text": (
+                    f"{_p['label']} (sent earlier in this chat"
+                    + (f"; {_p['seen']}" if _p.get("seen") else "") + "):")})
+                _re_blocks.append(_b)
+            if _re_blocks:
+                messages[-1] = {"role": "user", "content": _re_blocks + [
+                    {"type": "text", "text": messages[-1]["content"]}]}
+        except Exception as exc:
+            _log.info("earlier photos not attached for %s: %s", key, exc)
 
     # Leading context turn: prepended so it stays behind the cached system
     # prefix and ahead of the real transcript, and never touches the dedup
@@ -2386,7 +2471,27 @@ async def run_turn(db: AsyncSession, redis, wa_id: str, user_text: str, llm: LLM
                       market_locked=bool(loc.get("country_iso")),
                       seen_products=(product_sink if product_sink is not None else []),
                       read_only=read_only,
-                      said=frozenset(k for k in _said if str(k).startswith("set:")))
+                      said=frozenset(k for k in _said if str(k).startswith("set:")),
+                      customer_words=((user_text,) if (user_text or "").strip() else ()))
+    # THE ORDER SO FAR, EVERY TURN (agent/order_sheet, 2026-11-15): the cart
+    # is the record of what was agreed — who each piece is for, which photo,
+    # what awaits a colleague's price. She used to see it only when she asked
+    # (get_cart) and rebuilt the order from the chat each turn; one garment
+    # of three was lost that way.
+    if not public_comment and not scribe_only:
+        try:
+            from app.agent import cart as _cartmod, order_sheet as _sheet
+            from app.agent.tools import _cart_display as _cd
+            _cart_now = await _cartmod.get_cart(db, key, channel)
+            _pend_now = _sheet.pending_of(_cart_now)
+            from app.agent import review as _rv_state
+            _rv_state.ORDER_STATE.set({"lines": len(_cart_now.get("items") or []),
+                                       "awaiting": len(_pend_now)})
+            if _cart_now.get("items") or _pend_now:
+                _ci, _ct = await _cd(_cart_now, ctx)
+                turn_notes.append(_sheet.sheet_note(_ci, _ct, currency, _pend_now))
+        except Exception as exc:
+            _log.info("order sheet note skipped for %s: %s", key, exc)
     totals = {"input_tokens": 0, "output_tokens": 0, "cache_read_tokens": 0,
               "cache_write_tokens": 0, "cache_write_1h_tokens": 0}
 
@@ -2631,7 +2736,8 @@ async def run_turn(db: AsyncSession, redis, wa_id: str, user_text: str, llm: LLM
         except Exception as exc:
             _log.info("conversation budget skipped for %s: %s", key, exc)
     if turn_facts is not None:
-        turn_facts.update({"tools": tool_log, "held": list(_held), "review": _gate_outcome})
+        turn_facts.update({"tools": tool_log, "held": list(_held), "review": _gate_outcome,
+                           "usage": dict(totals)})
 
     # Measure spend so cost is visible, not guessed at (best-effort). Two
     # honesty rules learned when the bill was audited (2026-08-18): log the

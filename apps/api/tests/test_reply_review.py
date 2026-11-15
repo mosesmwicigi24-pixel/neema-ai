@@ -460,7 +460,7 @@ def test_run_turn_gates_every_real_turn_and_reports_to_the_caller():
     assert "if reply and not read_only and not scribe_only and _gate_applies(user_text):" in src
     assert "reply, _held, _gate_outcome = await _gate_turn_reply(" in src
     assert "fx=_fx_rates, closer=is_closer(user_text or \"\"), tools=tools," in src
-    assert 'turn_facts.update({"tools": tool_log, "held": list(_held), "review": _gate_outcome})' in src
+    assert 'turn_facts.update({"tools": tool_log, "held": list(_held), "review": _gate_outcome,' in src
     # the gate runs before the spend is measured and the reply returned
     assert src.index("await _gate_turn_reply(") < src.index("svc.log_agent_usage(")
     assert "_gate_post_product = str((_known or {}).get(\"name\") or \"\")" in src

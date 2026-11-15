@@ -27,6 +27,7 @@ from app.services import messaging as svc
 from app.services.market import users_for_person
 from app.services.state_lock import lock_for_write
 from app.agent import cart as cartmod
+from app.agent import order_sheet
 from app.agent import memory as memorymod
 
 _log = logging.getLogger("neema.agent")
@@ -63,6 +64,12 @@ class ToolContext:
     # Set rows whose CONTENTS this customer has already been told
     # (`set:<slug>`, agent/said_once): the row then says "the set", not the list.
     said: frozenset = field(default_factory=frozenset)
+    # Cart lines ADDED in this very turn (their names): undoing one's own
+    # addition needs no customer quote (agent/order_sheet).
+    cart_touched: list = field(default_factory=list)
+    # The message being answered — one of the places a removal's quote may be
+    # found (the stored record is the other).
+    customer_words: tuple = ()
 
 
 def _channel_label(ctx: "ToolContext") -> str:
@@ -180,7 +187,8 @@ TOOLS: list[dict] = [
     },
     {
         "name": "get_cart",
-        "description": "Return the customer's current cart (items, quantities, line and total price).",
+        "description": "Return the customer's current cart (items, quantities, who each piece is "
+                       "for, line and total price, and any item awaiting a colleague's price).",
         "input_schema": {"type": "object", "properties": {}},
     },
     {
@@ -189,11 +197,30 @@ TOOLS: list[dict] = [
                        "The product must exist in the catalogue (call search_catalog if unsure). "
                        "`add` = put a NEW item in the cart; an `add` of an item already "
                        "in it changes nothing. `set` = the quantity the customer wants IN "
-                       "TOTAL — use it to change the number of an item already in the cart.",
+                       "TOTAL — use it to change the number of an item already in the cart. "
+                       "When pieces are for different people, colours or photos, pass "
+                       "`details`: one entry PER PIECE. `hold` = an item the customer wants "
+                       "that has NO catalogue price (a design 'as in the picture', a colour "
+                       "or set we do not list): it is kept on the order as awaiting a "
+                       "colleague's price and a colleague is asked — NEVER put a different "
+                       "catalogue product in its place. `remove`, `clear`, and a `set` that "
+                       "LOWERS a quantity need `customer_said`: the customer's own words "
+                       "asking for it, quoted exactly; without them the cart is not changed.",
         "input_schema": {
             "type": "object",
             "properties": {
-                "action": {"type": "string", "enum": ["add", "set", "remove", "clear"]},
+                "action": {"type": "string", "enum": ["add", "set", "remove", "clear", "hold"]},
+                "details": {"type": "array", "description": "One entry per piece on this line.",
+                            "items": {"type": "object", "properties": {
+                                "for": {"type": "string", "description": "who this piece is for, in the customer's words (e.g. 'himself', 'his spiritual father')"},
+                                "colour": {"type": "string"},
+                                "photo": {"type": "string", "description": "the photo it was chosen from, e.g. 'photo 2'"},
+                                "as_pictured": {"type": "boolean", "description": "true when they asked for it exactly as in that photo"},
+                                "note": {"type": "string", "description": "anything else said about this piece (stole, cross, trim, size)"},
+                                "status": {"type": "string", "enum": ["confirmed", "tentative"],
+                                           "description": "confirmed = the customer said yes to this piece; tentative = raised, not yet confirmed"}}}},
+                "description": {"type": "string", "description": "hold only: the item in the customer's words"},
+                "customer_said": {"type": "string", "description": "remove / clear / a lower quantity: the customer's exact words asking for it"},
                 "product": {"type": "string", "description": "Product name or SKU (ignored for clear). "
                             "For a product with variants, pass the chosen variant's SKU (e.g. "
                             "'COM-T-001-L-GOL') so the cart is priced for that exact size/colour."},
@@ -1167,7 +1194,109 @@ async def _cart_display(cart: dict, ctx: ToolContext) -> tuple[list, object]:
 async def _get_cart(args: dict, ctx: ToolContext) -> dict:
     cart = await cartmod.get_cart(ctx.db, ctx.wa_id, ctx.channel)
     items, total = await _cart_display(cart, ctx)
-    return {"items": items, "total": total, "currency": ctx.currency}
+    return _with_pending({"items": items, "total": total, "currency": ctx.currency}, cart)
+
+
+def _with_pending(out: dict, cart: dict) -> dict:
+    """A cart result always says what is still awaiting a colleague's price —
+    those pieces are part of the order though they are not in the total."""
+    pending = order_sheet.pending_of(cart)
+    if pending:
+        out["awaiting_price"] = [order_sheet.pending_words(p) for p in pending]
+        out["awaiting_price_note"] = ("These pieces are part of the order but are NOT in the total: "
+                                      "a colleague is pricing them. Never give the total as the whole "
+                                      "order, and never replace them with a catalogue product.")
+    return out
+
+
+async def _said_in_record(ctx: ToolContext) -> list[str]:
+    """Where a removal's quote may be found: the message being answered, and
+    the recent words of the customer and of any human colleague in this chat
+    (a colleague's correction is authority too)."""
+    said = [str(w) for w in (ctx.customer_words or ()) if w]
+    try:
+        from sqlalchemy import or_
+        from app.models.message import Message, MsgDirection, MsgSender
+        where = (Message.wa_id == ctx.wa_id) if ctx.channel == "whatsapp" else (
+            (Message.channel == ctx.channel) & (Message.external_id == ctx.wa_id))
+        rows = (await ctx.db.execute(
+            select(Message.text).where(where)
+            .where(or_(Message.direction == MsgDirection.inbound,
+                       Message.sender == MsgSender.human_agent))
+            .where(Message.media_type.is_(None) | (Message.media_type != "note"))
+            .where(Message.text.isnot(None))
+            .order_by(Message.created_at.desc()).limit(12))).scalars().all()
+        said.extend(str(t) for t in rows if t)
+    except Exception:
+        _log.info("cart guard: record unreadable for %s", ctx.wa_id, exc_info=True)
+    return said
+
+
+async def _removal_refused(args: dict, ctx: ToolContext, cart: dict, what: str) -> dict | None:
+    """A REMOVAL NEEDS THE CUSTOMER'S WORDS (owner, 2026-11-15). In the
+    Melchizkek thread a correction to one garment removed another and swapped
+    the style, on the model's own reading. Removing a line, clearing the cart
+    or lowering a quantity now needs `customer_said` — and the quote must be
+    in the record. None when the removal may go ahead."""
+    quote = str(args.get("customer_said") or "").strip()
+    if quote and order_sheet.quote_found(quote, await _said_in_record(ctx)):
+        return None
+    items, total = await _cart_display(cart, ctx)
+    return _with_pending({
+        "ok": False, "unchanged": True, "items": items, "total": total, "currency": ctx.currency,
+        "error": (f"NOT CHANGED — {what} needs the customer's own words asking for it"
+                  + (" (the words you quoted are not in what they wrote)" if quote else "")),
+        "next_step": ("If the customer really asked for this, call again with `customer_said` = "
+                      "their exact words. If they did not, leave the order as it is: a correction "
+                      "to one piece never removes another. If you are unsure which piece they "
+                      "mean, ask them that one question."),
+    }, cart)
+
+
+async def _hold_item(args: dict, ctx: ToolContext, cart: dict) -> dict:
+    """AN ITEM WITH NO HUB PRICE GOES TO A PERSON (owner, 2026-11-15: "if she
+    cannot find the price of the item … a human agent"). It stays on the order
+    as awaiting a colleague's price; the team is asked; nothing takes its
+    place."""
+    row = order_sheet.clean_pending(args.get("description") or args.get("product"),
+                                    args.get("details"))
+    if row is None:
+        return {"error": "describe the item to hold, in the customer's words (`description`)"}
+    pending = order_sheet.pending_of(cart)
+    # the same piece described again (a correction to it) changes that piece
+    known = next((p for p in pending if order_sheet.same_held_item(p, row)), None)
+    if known is None and len(pending) >= order_sheet.MAX_PENDING:
+        return {"error": "too many items are awaiting a price — hand this order to a colleague "
+                         "with handoff_to_human"}
+    asked = True
+    if known is not None:
+        row = dict(known, **row)             # what was known stays unless said again
+        known.clear()
+        known.update(row)
+    else:
+        pending.append(row)
+        if not ctx.read_only:
+            try:
+                res = await _check_availability(
+                    {"item": order_sheet.pending_words(row), "_unpriced": True}, ctx)
+                asked = bool(res.get("team_check_open"))
+            except Exception:
+                _log.warning("hold: team not asked for %s", ctx.wa_id, exc_info=True)
+                asked = False
+    cart["pending"] = pending
+    cart = await cartmod.save_cart(ctx.db, ctx.wa_id, cart, ctx.channel)
+    items, total = await _cart_display(cart, ctx)
+    return _with_pending({
+        "ok": True, "held": order_sheet.pending_words(row), "team_asked": asked,
+        "items": items, "total": total, "currency": ctx.currency,
+        "note": ("Kept on the order as AWAITING A COLLEAGUE'S PRICE"
+                 + (" and a colleague has been asked" if asked else
+                    " — the colleague could NOT be alerted: call handoff_to_human now")
+                 + ". Tell the customer plainly: this piece is made to their picture, a colleague "
+                   "will confirm its price here, and you have it noted exactly as they described. "
+                   "Do NOT quote a price for it, do NOT offer a catalogue product in its place, "
+                   "and do NOT give the total as the whole order."),
+    }, cart)
 
 
 async def _update_cart(args: dict, ctx: ToolContext) -> dict:
@@ -1176,10 +1305,16 @@ async def _update_cart(args: dict, ctx: ToolContext) -> dict:
     items = cart["items"]
 
     if action == "clear":
+        if items or order_sheet.pending_of(cart):
+            refused = await _removal_refused(args, ctx, cart, "clearing the whole order")
+            if refused:
+                return refused
         cart = await cartmod.clear_cart(ctx.db, ctx.wa_id, ctx.channel)
         return {"ok": True, "items": [], "total": 0, "currency": ctx.currency}
+    if action == "hold":
+        return await _hold_item(args, ctx, cart)
     if action not in ("add", "set", "remove"):
-        return {"error": f"unknown action '{action}' — use add, set, remove or clear"}
+        return {"error": f"unknown action '{action}' — use add, set, remove, clear or hold"}
 
     prod = (args.get("product") or "").strip()
     if not prod:
@@ -1193,7 +1328,9 @@ async def _update_cart(args: dict, ctx: ToolContext) -> dict:
     catalog = await svc.catalog_items(ctx.db, ctx.redis)
     line = hub_client.resolve_hub_line({"name": prod, "sku": prod, "qty": qty}, catalog)
     if not line and action in ("add", "set"):
-        return {"error": f"'{prod}' not found in the catalogue", "suggestion": "call search_catalog"}
+        return {"error": f"'{prod}' not found in the catalogue", "suggestion": "call search_catalog",
+                "if_no_price_exists": "an item the customer wants that the catalogue does not price "
+                                      "is kept with update_cart hold — never swapped for another product"}
     if line and action in ("add", "set") and not float(line.get("unit_price") or 0):
         # An unpriced hub row is not sellable yet: a KES 0 line would reach the
         # order and the customer would hear a total that is not one.
@@ -1224,10 +1361,23 @@ async def _update_cart(args: dict, ctx: ToolContext) -> dict:
             gone = list(same)
         kept = [i for i in items if not any(i is g for g in gone)
                 and not _is_line_of(i, key) and not _is_line_of(i, prod)]
-        if len(kept) == len(items):
-            return {"ok": False, "error": f"'{prod}' is not in the cart",
-                    "items": (await _cart_display(cart, ctx))[0], "currency": ctx.currency}
+        # an item awaiting a price is removed by its description
+        pend = order_sheet.pending_of(cart)
+        pkept = [p for p in pend if order_sheet._norm(prod) not in order_sheet._norm(p["description"])] \
+            if len(kept) == len(items) else pend
+        if len(kept) == len(items) and len(pkept) == len(pend):
+            return _with_pending({"ok": False, "error": f"'{prod}' is not in the cart",
+                                  "items": (await _cart_display(cart, ctx))[0],
+                                  "currency": ctx.currency}, cart)
+        mine = {str(n).lower() for n in ctx.cart_touched}
+        leaving = [i for i in items if not any(i is k for k in kept)]
+        if len(pkept) != len(pend) or any(str(i.get("name", "")).lower() not in mine for i in leaving):
+            refused = await _removal_refused(args, ctx, cart, f"removing '{prod}'")
+            if refused:
+                return refused
         cart["items"] = kept
+        if len(pkept) != len(pend):
+            cart["pending"] = pkept
     elif action in ("add", "set"):
         had = 0
         for i in same:
@@ -1241,13 +1391,38 @@ async def _update_cart(args: dict, ctx: ToolContext) -> dict:
             # conversations — usually the customer only confirming it again —
             # and every one doubled the total. The cart is left exactly as it
             # was; a different number is a `set` with the TOTAL.
+            _d = order_sheet.clean_units(args.get("details"))
+            if _d and _d != (same[0].get("units") or []):
+                # the number stands; what is KNOWN about the pieces is updated
+                same[0]["units"] = _d[:had]
+                cart = await cartmod.save_cart(ctx.db, ctx.wa_id, cart, ctx.channel)
+                items, total = await _cart_display(cart, ctx)
+                return _with_pending({
+                    "ok": True, "items": items, "total": total, "currency": ctx.currency,
+                    "note": f"'{line['name']}' stays ×{had}; the details of its pieces were updated."},
+                    cart)
             items, total = await _cart_display(cart, ctx)
-            return {"ok": True, "unchanged": True, "items": items, "total": total,
-                    "currency": ctx.currency,
-                    "note": (f"'{line['name']}' is already in the cart ×{had} — nothing was "
-                             f"added. If the customer wants a different number, call "
-                             f"update_cart set with the TOTAL quantity they want.")}
+            return _with_pending({
+                "ok": True, "unchanged": True, "items": items, "total": total,
+                "currency": ctx.currency,
+                "note": (f"'{line['name']}' is already in the cart ×{had} — nothing was "
+                         f"added. If the customer wants a different number (a second piece "
+                         f"for someone else is a different number), call update_cart set "
+                         f"with the TOTAL quantity they want and `details` for each piece.")}, cart)
         new_qty = qty      # set: the total; add: a line not yet in the cart
+        # (an old cart may hold the same line twice: folding those is not a removal)
+        _had_line = max((int(i.get("qty") or 0) for i in same), default=0)
+        if action == "set" and had and new_qty < _had_line \
+                and str(line.get("name", "")).lower() not in {str(n).lower() for n in ctx.cart_touched}:
+            refused = await _removal_refused(
+                args, ctx, cart, f"lowering '{line['name']}' from {had} to {new_qty}")
+            if refused:
+                return refused
+        # WHO EACH PIECE IS FOR (agent/order_sheet): given → it replaces what
+        # the line held; not given → what the line already held is kept.
+        units = order_sheet.clean_units(args.get("details"))
+        if not units and same:
+            units = [u for u in (same[0].get("units") or []) if isinstance(u, dict)]
         cat = next((p for p in catalog if p.get("hub_product_id") == line["product_id"]), {})
         row = {
             "hub_product_id": line["product_id"],
@@ -1264,6 +1439,10 @@ async def _update_cart(args: dict, ctx: ToolContext) -> dict:
             "in_stock": bool(cat.get("in_stock", True)),
             "made_to_order": bool(line.get("is_producible")),
         }
+        if units:
+            row["units"] = units[:max(new_qty, 1)] if len(units) > new_qty else units
+        if not same:
+            ctx.cart_touched.append(line["name"])
         if same:
             # the line keeps its place; any duplicate of it (an old cart) folds in
             first = same[0]
@@ -1275,7 +1454,7 @@ async def _update_cart(args: dict, ctx: ToolContext) -> dict:
 
     cart = await cartmod.save_cart(ctx.db, ctx.wa_id, cart, ctx.channel)
     items, total = await _cart_display(cart, ctx)
-    return {"ok": True, "items": items, "total": total, "currency": ctx.currency}
+    return _with_pending({"ok": True, "items": items, "total": total, "currency": ctx.currency}, cart)
 
 
 def _sourcing_gaps(cart_items: list, catalog: list) -> list[str]:
@@ -1394,6 +1573,27 @@ async def _create_order(args: dict, ctx: ToolContext) -> dict:
     cart = await cartmod.get_cart(ctx.db, ctx.wa_id, ctx.channel)
     if not cart["items"]:
         return {"error": "cart is empty — add items before creating an order"}
+    _awaiting = order_sheet.pending_of(cart)
+    if _awaiting:
+        # NEVER A PARTIAL ORDER BY OMISSION (2026-11-15): the pieces a
+        # colleague is pricing are part of what the customer asked for.
+        return {"error": "no order was created — these pieces are still awaiting a colleague's "
+                         "price: " + "; ".join(order_sheet.pending_words(p) for p in _awaiting),
+                "awaiting_price": [order_sheet.pending_words(p) for p in _awaiting],
+                "next_step": "Tell the customer a colleague is confirming the price of those "
+                             "pieces and will complete the whole order with them here. Do not "
+                             "place the rest without them unless the customer, in their own "
+                             "words, asks to leave those pieces out (then update_cart remove, "
+                             "with customer_said)."}
+    _unsure = [f"{i.get('name')}: {order_sheet.unit_words(u)}" for i in cart["items"]
+               for u in (i.get("units") or []) if isinstance(u, dict) and u.get("status") == "tentative"]
+    if _unsure:
+        return {"error": "no order was created — these pieces are recorded as not yet confirmed "
+                         "by the customer: " + "; ".join(_unsure),
+                "next_step": "Read the whole order back (every piece, who it is for, the total) "
+                             "and ask them to confirm it. When they have, mark the pieces "
+                             "confirmed (update_cart set, the same quantity, details with status "
+                             "'confirmed') and call create_order again."}
 
     # Every order — WhatsApp, Messenger or Instagram — is billed to a real phone
     # and lands in the hub's WhatsApp Orders. No phone, no order.
@@ -1446,7 +1646,11 @@ async def _create_order(args: dict, ctx: ToolContext) -> dict:
         figures = _meas.describe(await _meas.get_measurements(ctx.db, ctx.wa_id, ctx.channel))
     except Exception:
         figures = ""
-    order_note = "; ".join(x for x in (notes, (f"Measurements on file: {figures}" if figures else ""))
+    # who each piece is for, its colour and its photo — from the cart's own
+    # record, so the workshop gets it even when the writer's notes omit it
+    _pieces = order_sheet.for_order(cart)
+    order_note = "; ".join(x for x in (notes, (f"Pieces: {_pieces}" if _pieces else ""),
+                                       (f"Measurements on file: {figures}" if figures else ""))
                            if x)
     # Where the parcel goes, when the notes name a country or a Kenyan town:
     # the SHIPPING destination (services/geography), kept apart from where the
@@ -2316,6 +2520,9 @@ async def _check_availability(args: dict, ctx: ToolContext) -> dict:
     except Exception:
         _log.info("availability: catalogue unreadable — asking the team", exc_info=True)
         stocked = []
+    unpriced = bool(args.get("_unpriced"))     # internal: update_cart hold
+    if unpriced:
+        stocked = []        # a near-named catalogue row is NOT this item
     if stocked:
         return {"ok": True, "item": item, "team_asked": False, "availability": "available",
                 "rows": [{"name": p.get("name"), "currency": ctx.currency,
@@ -2351,9 +2558,13 @@ async def _check_availability(args: dict, ctx: ToolContext) -> dict:
             external_id=getattr(conv, "external_id", None),
             person_id=conv.person_id, conversation_id=conv.id,
             direction=MsgDirection.outbound, sender=MsgSender.human_agent,
-            text=(f"🔎 AVAILABILITY CHECK — the customer asked for: {item}\n"
-                  "They were told we're confirming, NOT that we lack it. "
-                  "Please confirm and reply here."),
+            text=((f"💰 PRICE NEEDED — the customer wants: {item}\n"
+                   "It has no price in the hub, so Neema has NOT quoted it and has not "
+                   "put another product in its place. Please price it and reply here.")
+                  if unpriced else
+                  (f"🔎 AVAILABILITY CHECK — the customer asked for: {item}\n"
+                   "They were told we're confirming, NOT that we lack it. "
+                   "Please confirm and reply here.")),
             media_type="note",
         ))
         await ctx.db.commit()

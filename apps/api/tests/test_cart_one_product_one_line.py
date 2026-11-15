@@ -96,8 +96,9 @@ def test_a_repeat_add_changes_nothing_and_says_how_to_change_the_number(monkeypa
     assert [(i["hub_product_id"], i["qty"]) for i in store["items"]] == [(50, 1)]
     assert out["total"] == 22000
     assert out["note"] == ("'Golden Communion Tray' is already in the cart ×1 — nothing was "
-                           "added. If the customer wants a different number, call update_cart "
-                           "set with the TOTAL quantity they want.")
+                           "added. If the customer wants a different number (a second piece "
+                           "for someone else is a different number), call update_cart set "
+                           "with the TOTAL quantity they want and `details` for each piece.")
     # a bigger repeat add is refused the same way — never silently summed
     out = call("add", "Golden Communion Tray", 3)
     assert store["items"][0]["qty"] == 1 and "×1" in out["note"]

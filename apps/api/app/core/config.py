@@ -251,6 +251,14 @@ class Settings(BaseSettings):
     # enquiries merges into ONE model call — half the turns on a typing
     # customer, and one coherent answer instead of two overlapping ones.
     whatsapp_debounce_seconds: int = 30
+    # READ-ONLY ACCESS BY KEY (routers/ops_read): empty = off. 32+ characters.
+    ops_read_key: str = ""
+    # How many customer photos one turn may carry: every photo of a burst, and
+    # the recent ones a later message points at ("these two", "this one is
+    # his"). Each costs vision tokens, so it is capped.
+    turn_photos_max: int = 4
+    # How far back a message may point at a photo ("as in the picture").
+    photo_reference_minutes: int = 180
     # Messenger / Instagram / TikTok DMs: rapid-fire messages are combined for
     # this long and answered ONCE (cost audit, 2026-09-26). Shorter than
     # WhatsApp's: a chat bubble expects a quicker turn, and "typing…" shows

@@ -331,6 +331,7 @@ async def _drain(redis, wa_id: str, token: int) -> tuple[str, dict | None, list[
     except Exception:
         return None
     texts, media, ids = [], None, []
+    images: list[dict] = []
     for r in raw:
         try:
             item = json.loads(r)
@@ -341,8 +342,20 @@ async def _drain(redis, wa_id: str, token: int) -> tuple[str, dict | None, list[
         # Prefer an image so the agent SEES what they sent; else keep the latest.
         if item.get("media") and (media is None or item["media"].get("type") == "image"):
             media = item["media"]
+        # EVERY photo of the burst (the Melchizkek thread, 2026-11-15: two
+        # cassocks sent together, "make these two for me", and the turn was
+        # handed one picture — "thank you for the photo… if this photo shows
+        # a different piece"). In the order they were sent, each once.
+        m = item.get("media")
+        if m and m.get("type") == "image" and m.get("url") and \
+                all(m["url"] != x.get("url") for x in images):
+            images.append(m)
         if item.get("id"):
             ids.append(str(item["id"]))
+    if media is not None and len(images) > 1:
+        cap = max(int(getattr(settings, "turn_photos_max", 4) or 4), 1)
+        images = images[-cap:]
+        media = dict(images[0], more=images[1:])
     return "\n".join(texts), media, ids
 
 

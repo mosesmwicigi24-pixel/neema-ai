@@ -25,6 +25,12 @@ on:
       giveaway:
         description: "Also run the giveaway comment thread (app.jobs.eval_giveaway) (true/false)"
         default: "false"
+      cases:
+        description: "Run the case set (true/false) — false to run only the threads chosen below/above"
+        default: "true"
+      order_thread:
+        description: "Also run the three-garment order thread with photos (app.jobs.eval_order_thread) (true/false)"
+        default: "false"
 
 jobs:
   eval:
@@ -88,6 +94,7 @@ jobs:
       # number. A tuning file with --repeat 1 is an investigation run whose
       # transcripts may be read per case (slice 7).
       - name: The case set (default blind held-out, pass^3)
+        if: ${{ inputs.cases != 'false' }}
         shell: bash
         run: |
           set -o pipefail
@@ -102,11 +109,23 @@ jobs:
         if: ${{ inputs.giveaway == 'true' }}
         shell: bash
         run: set -o pipefail; python -m app.jobs.eval_giveaway --out giveaway-eval.json 2>&1 | tee giveaway-eval.log
+      # Three garments for two people, chosen by photo: the order record is
+      # checked after every turn. Nothing reaches a customer or the hub.
+      - name: The three-garment order thread (photos)
+        if: ${{ inputs.order_thread == 'true' }}
+        shell: bash
+        env:
+          # the job draws its pictures into the media folder; the server's
+          # default (/var/neema/…) is not writable on a runner
+          MEDIA_DIR: ${{ runner.temp }}/neema-media
+        run: set -o pipefail; python -m app.jobs.eval_order_thread --out order-thread-eval.json 2>&1 | tee order-thread-eval.log
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: agent-eval-results
           path: |
+            apps/api/order-thread-eval.json
+            apps/api/order-thread-eval.log
             apps/api/giveaway-eval.json
             apps/api/giveaway-eval.log
             apps/api/agent-eval-transcript.txt

@@ -45,6 +45,7 @@ conversation flagged with the reviewer's reasons and the draft.
 """
 from __future__ import annotations
 
+import contextvars as _cv
 import json
 import logging
 import re
@@ -1081,6 +1082,102 @@ def stock_affirmed_unconfirmed(answer: str, tool_results: list | None) -> bool:
     return checking
 
 
+_CART_CLAIM_RE = re.compile(
+    r"\b(?:i\s*(?:'|’)?(?:ve| have)|i|we\s*(?:'|’)?(?:ve| have))\s+(?:now\s+|just\s+|also\s+)?"
+    r"(added|removed|replaced|swapped|updated|changed|taken\s+(?:off|out))\b"
+    r"[^.!?\n]{0,60}\b(?:cart|order|basket|list)\b"
+    r"|\b(?:nimeongeza|nimeondoa|nimebadilisha)\b", re.IGNORECASE)
+
+
+def cart_claim_without_change(answer: str, tool_results: list | None) -> str | None:
+    """"I've added / removed / replaced … in your order" in a turn whose cart
+    did not change (the Melchizkek thread, 2026-11-15: the reply said one
+    thing and the cart held another). The claim's words, or None. A turn
+    whose update_cart succeeded and changed something is grounded."""
+    m = _CART_CLAIM_RE.search(answer or "")
+    if not m:
+        return None
+    for e in tool_results or []:
+        name = str((e or {}).get("tool") or "")
+        out = _tool_out(e)
+        if (e or {}).get("truncated"):
+            return None                      # a cut record cannot prove "no change"
+        if name == "update_cart" and out.get("ok") and not out.get("unchanged") \
+                and not out.get("error"):
+            return None
+        if name == "create_order" and not out.get("error"):
+            return None
+    return m.group(0)
+
+
+# What the order record held when the turn began (runtime.run_turn sets it):
+# {"lines": n, "awaiting": n}. A cart tool's result in the turn is newer.
+ORDER_STATE: "_cv.ContextVar[dict | None]" = _cv.ContextVar("order_state", default=None)
+
+_ORDER_OFFER_RE = re.compile(
+    r"\bshall\s+i\s+(?:start|place|create|proceed|go\s+ahead|confirm)\b[^?\n]{0,60}\?"
+    r"|\bready\s+to\s+(?:place|start)\b|\b(?:start|place)\s+(?:your|the|this)\s+order\s+now\b"
+    r"|\bnianze\s+oda\b", re.IGNORECASE)
+_TOTAL_WORD_RE = re.compile(r"\b(?:total|comes?\s+to|altogether|in\s+all|everything|jumla)\b", re.IGNORECASE)
+
+
+def order_offer_unready(answer: str, tool_results: list | None) -> str | None:
+    """An offer to start or place the order that the record cannot back
+    (run 43711949562, 2026-11-15): "Everything comes to $455 … shall I start
+    your two cassocks?" with nothing on the order, and "Shall I place it
+    now?" while a piece awaited a colleague's price. Returns what is wrong,
+    or None. A single item quoted and offered is the ordinary sale and is
+    left alone: only a TOTAL over an empty record, or an offer over a piece
+    still awaiting its price, is flagged."""
+    if not _ORDER_OFFER_RE.search(answer or ""):
+        return None
+    state = dict(ORDER_STATE.get() or {})
+    for e in tool_results or []:
+        if str((e or {}).get("tool") or "") in ("update_cart", "get_cart"):
+            out = _tool_out(e)
+            if isinstance(out.get("items"), list):
+                state = {"lines": len(out["items"]), "awaiting": len(out.get("awaiting_price") or [])}
+    if not state:
+        return None
+    if int(state.get("awaiting") or 0) > 0:
+        return ("it offers to start or place the order while a piece still awaits a colleague's "
+                "price — say what is on the order, what awaits its price, and that a colleague "
+                "will confirm it here; make no offer to place the order yet")
+    if int(state.get("lines") or 0) == 0 and _TOTAL_WORD_RE.search(answer or "") \
+            and len(set(money_figures(answer))) >= 3:
+        return ("it gives a total for several pieces and offers to start, but nothing is on the "
+                "order record — give the prices without the offer, and say you are noting each "
+                "piece (who it is for) so the order is exact; the pieces go on the order with "
+                "update_cart before any offer to start it")
+    return None
+
+
+_REASK_RE = re.compile(
+    r"\b(?:what|which(?:\s+(?:one|ones|item|items|piece|pieces|of\s+(?:these|them)))?)\s+would\s+you\s+like"
+    r"(?:\s+to\s+(?:order|buy|get|have))?\s*\?"
+    r"|\bwhat\s+(?:are\s+you\s+looking\s+for|can\s+i\s+get\s+(?:for\s+)?you|would\s+you\s+like\s+to\s+order)\b"
+    r"|\bwhich\s+(?:one\s+)?(?:do\s+you\s+want|would\s+you\s+prefer)\s*\?", re.IGNORECASE)
+# They have CHOSEN — by pointing ("these two", "this one", "both"), not by
+# naming a kind of thing: "I want a cassock" still leaves "which one?" open.
+_SAID_WANT_RE = re.compile(
+    r"\b(?:want|need|take|taking|make|made|order|like|get|buy)\b[^.?!\n]{0,24}?"
+    r"\b(?:th(?:ese|ose)(?:\s+(?:two|three|ones|\d))?|this\s+one|that\s+one|both|them|all\s+(?:of\s+them|three|two))\b"
+    r"|\b(?:th(?:ese|ose)(?:\s+(?:two|three|ones))?|this\s+one|both)\b[^.?!\n]{0,30}?"
+    r"\b(?:for\s+(?:me|my|him|her|us)|made|mine)\b"
+    r"|\b(?:nataka|ninataka|naomba|nitachukua)\s+(?:hii|hizi|hiyo|hizo|zote)\b", re.IGNORECASE)
+
+
+def asked_again(comment: str, answer: str) -> str | None:
+    """"Which would you like to order?" to someone who has just said which
+    (run 43713060582, 2026-11-15: "I want these two made for me" → "Which
+    would you like to order?"). The question's words, or None. Only when THIS
+    message already says what they want — a real open question is untouched."""
+    m = _REASK_RE.search(answer or "")
+    if not m or not _SAID_WANT_RE.search(comment or ""):
+        return None
+    return m.group(0)
+
+
 def promise_only(answer: str, seen: list) -> dict | None:
     """A reply that only promises to check, while a PRICED hub row is already
     in hand: the row, or None. A promise with nothing in hand (a product we
@@ -1415,6 +1512,23 @@ def rule_findings(comment: str, answer: str, seen: list,
                             "and the team is still confirming — say it is being checked and you will come "
                             "back here, neither that we have it nor that we don't; serve the rest of their "
                             "list meanwhile"})
+    _claim = cart_claim_without_change(answer, tool_results) if mode == "dm" else None
+    if _claim:
+        out.append({"kind": "cart_claim", "hard": False,
+                    "text": f"it says the order was changed (\"{_claim}\") but the cart did not "
+                            "change this turn — either make the change with update_cart (a removal "
+                            "needs the customer's own words) or say what is true: what the order "
+                            "holds now, and the one thing you need from them"})
+    _again = asked_again(comment, answer) if mode == "dm" else None
+    if _again:
+        out.append({"kind": "asked_again", "hard": False,
+                    "text": f"it asks what they want (\"{_again}\") when their message already says — "
+                            "take what they said as the choice: confirm it in a few words and ask only "
+                            "the next thing you truly need (a size, a colour not yet given, who a piece "
+                            "is for), or nothing"})
+    _unready = order_offer_unready(answer, tool_results) if mode == "dm" else None
+    if _unready:
+        out.append({"kind": "order_unready", "hard": False, "text": _unready})
     if payment_method_missing(comment, answer):
         out.append({"kind": "payment_method", "hard": False,
                     "text": "they asked how to pay and the draft names no way to pay — name the ways "
