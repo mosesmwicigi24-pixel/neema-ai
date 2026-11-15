@@ -582,7 +582,11 @@ async def catalog_items(db: AsyncSession, redis) -> list[dict]:
     if settings.catalog_source == "hub":
         try:
             from app.core.hub_client import fetch_hub_catalog
-            return await fetch_hub_catalog(redis)
+            _hub_cat = await fetch_hub_catalog(redis)
+            # the hub's currency rates ride its product prices (services/fx)
+            from app.services import fx as _fx_hub
+            _fx_hub.remember(_hub_cat)
+            return _hub_cat
         except Exception as exc:
             import logging
             logging.getLogger("neema.hub").warning(

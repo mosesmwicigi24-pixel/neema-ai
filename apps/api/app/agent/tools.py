@@ -81,8 +81,12 @@ def _channel_label(ctx: "ToolContext") -> str:
 def _kes_rate_for(ctx: "ToolContext", ccy: str):
     """KES per 1 unit of a display currency — the conversion fallback when the
     hub carries no explicit price row in that currency."""
-    return {"USD": ctx.usd_rate or 100,
-            "ZMW": settings.zmw_kes_rate or 5}.get(ccy)
+    # the hub's own rate, read from its product prices, before the number in
+    # settings (owner, 2026-11-16: the hub is the one source of truth)
+    from app.services import fx as _fx
+    if ccy == "USD":
+        return ctx.usd_rate or 100
+    return _fx.hub_per(ccy, (settings.zmw_kes_rate or 5) if ccy == "ZMW" else None)
 
 
 def _display(kes, ctx: "ToolContext"):

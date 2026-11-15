@@ -50,3 +50,18 @@ def test_the_turn_prefers_the_hubs_rate_over_the_public_one():
     assert "_fx.hub_rates(_fx_cat, settings.usd_kes_rate)" in src and "_fx.hub_line(" in src
     # the gate verifies against the same merged rates
     assert "fx=_fx_rates" in src
+
+
+def test_the_kwacha_fallback_is_the_hubs_rate_once_the_catalogue_was_read(monkeypatch):
+    from app.agent import tools
+    from app.agent.tools import ToolContext
+    monkeypatch.setattr(fx, "_HUB_PER", {"rates": {}, "mark": None})
+    ctx = ToolContext(db=None, redis=None, wa_id="260970000001", currency="ZMW")
+    assert tools._kes_rate_for(ctx, "ZMW") == 5            # nothing read yet: the setting
+    fx.remember(CATALOG)
+    assert tools._kes_rate_for(ctx, "ZMW") == 7.14 and fx.hub_per("ZAR") == 6.5
+    assert tools._kes_rate_for(ctx, "USD") == 100          # the house dollar is untouched
+    fx.remember([])                                        # an empty read keeps the last good rates
+    fx.remember(None)
+    assert fx.hub_per("ZMW") == 7.14
+    assert fx.hub_per("NGN") is None and fx.hub_per("NGN", 1.0) == 1.0

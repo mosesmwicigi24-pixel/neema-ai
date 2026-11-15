@@ -180,6 +180,36 @@ def hub_kes_per_unit(catalog: list | None) -> dict[str, float]:
     return {code: round(median(v), 2) for code, v in seen.items() if len(v) >= HUB_MIN_SAMPLES}
 
 
+# The last rates read from the hub's catalogue, kept in the process so the
+# places that convert without a catalogue in hand (a missing kwacha row, the
+# gate) use the hub's rate and not a number typed into settings.
+_HUB_PER: dict = {"rates": {}, "mark": None}
+
+
+def remember(catalog: list | None) -> None:
+    """Note the hub's rates from a catalogue that was just read. Cheap: it
+    recomputes only when the catalogue's size or first row changed. Never
+    raises; an unreadable catalogue leaves the last good rates in place."""
+    try:
+        if not catalog:
+            return
+        first = catalog[0] if isinstance(catalog[0], dict) else {}
+        mark = (len(catalog), first.get("hub_product_id"), str(first.get("prices")))
+        if mark == _HUB_PER["mark"]:
+            return
+        got = hub_kes_per_unit(catalog)
+        if got:
+            _HUB_PER.update(rates=got, mark=mark)
+    except Exception as exc:
+        _log.info("hub rates not remembered: %s", exc)
+
+
+def hub_per(code: str, default: float | None = None) -> float | None:
+    """KES per 1 unit of `code` as the hub last showed it, else `default`."""
+    v = _HUB_PER["rates"].get(str(code).upper())
+    return float(v) if v else default
+
+
 def hub_rates(catalog: list | None, usd_kes_rate: float = 100) -> dict[str, float]:
     """The hub's rates as "1 USD = N <currency>", the shape the writer and the
     gate already use: the house KES-per-USD over the hub's KES-per-unit."""
