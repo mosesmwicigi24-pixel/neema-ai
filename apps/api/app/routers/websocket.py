@@ -6,6 +6,7 @@ import logging
 
 from app.core.media_urls import sign_ws_text
 
+from app.services.call_log import frame_is_for
 router = APIRouter()
 _log = logging.getLogger("neema.ws")
 
@@ -68,6 +69,11 @@ async def websocket_endpoint(websocket: WebSocket, agent_id: str):
                     frame = sign_ws_text(frame)
                 except Exception as exc:
                     _log.warning("ws media signing failed — frame relayed unsigned: %s", exc)
+                # A ring skips the sockets of whoever is already on a call
+                # (services/call_log.ring_skip, owner 2026-11-15).
+                if not frame_is_for(frame if isinstance(frame, str) else frame.decode("utf-8", "replace"),
+                                    agent_id):
+                    continue
                 try:
                     await websocket.send_text(frame)
                 except Exception:

@@ -111,6 +111,11 @@ class Settings(BaseSettings):
     # secret (`use-auth-secret`). When set, each device is handed a username
     # that expires and a credential derived from the secret — the secret
     # itself never leaves the server. Takes precedence over turn_username.
+    # RING ONLY FREE STAFF (owner, 2026-11-15: "ring all free staff at once,
+    # skipping only the busy ones"). A new call does not ring the devices of
+    # someone already on a call; when everyone is on a call it rings everyone
+    # (they see "is also calling"). False = every device rings, as before.
+    call_ring_skip_busy: bool = True
     turn_secret: str = ""
     turn_ttl_seconds: int = 6 * 3600
     stun_url: str = "stun:stun.l.google.com:19302"

@@ -50,3 +50,14 @@ Every call whose audio fails now sends a short report from the device: the conne
 - The relay listens without TLS (port 3478, UDP and TCP). A network that allows only port 443 will still fail; a TLS listener on 443 needs a certificate and a free port 443, which this shared server's web proxy holds.
 - The public fallback relay is still offered after ours, as before.
 - Relay traffic counts against the server's bandwidth: roughly 0.5 MB per call-minute.
+
+## Ringing only free staff
+
+Owner's choice, 2026-11-15: "ring all free staff at once, skipping only the busy ones".
+
+- Who is busy is read from the call rows themselves: someone who answered a call that is still live, or who is ringing a customer.
+- A new call does not ring the devices of a busy person: their browser socket and their phone's push are both skipped. What follows the ring (answered, ended) still reaches everyone.
+- When every member of staff is on a call, the call rings everyone, and they see "is also calling".
+- Switch: `CALL_RING_SKIP_BUSY=false` makes every device ring, as before.
+
+Limits: the server does not know who has the app open, so "free" means "not on a call", not "at their desk". Someone who ends their call while a second one is still ringing is not rung for it; it appears in their missed list if nobody else answers.

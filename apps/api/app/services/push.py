@@ -132,7 +132,7 @@ def _dead_token(r: httpx.Response) -> bool:
     return "UNREGISTERED" in codes or ("INVALID_ARGUMENT" in codes and "token" in str(err.get("message", "")).lower())
 
 
-async def _tokens() -> list[str]:
+async def _tokens(skip_agents=()) -> list[str]:
     from app.database import AsyncSessionLocal
     from app.models.agent import Agent
     from app.models.push_device import PushDevice
@@ -142,7 +142,8 @@ async def _tokens() -> list[str]:
             return []
         live = {str(a) for a in (await db.execute(select(Agent.id))).scalars().all()}
     # A phone still registered to an agent who was since removed never rings.
-    return [t for t, a in rows if a in live]
+    skip = {str(a) for a in (skip_agents or ())}
+    return [t for t, a in rows if str(a) in live and str(a) not in skip]
 
 
 async def _forget(tokens: list[str]) -> None:
@@ -164,7 +165,10 @@ async def send_call_event(event: dict, *, tokens: list[str] | None = None,
     if acc is None or event.get("type") not in CALL_EVENTS or not event.get("call_id"):
         return out
     try:
-        targets = tokens if tokens is not None else await _tokens()
+        # a ring does not wake the phone of someone already on a call
+        # (services/call_log.ring_skip); its answered / ended still reach all
+        _skip = event.get("skip_agents") if event.get("type") == "incoming_call" else ()
+        targets = tokens if tokens is not None else await _tokens(_skip)
         if not targets:
             return out
         url = FCM_URL.format(project=acc["project_id"])
