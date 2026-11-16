@@ -52,11 +52,10 @@ FOLLOW = {
     "en": "A colleague will follow up with you shortly on the rest.",
     "sw": "Mwenzangu wa timu atakufuatilia hivi karibuni kuhusu mengine.",
 }
-_THREAD_NOTE = ("⏳ Unclaimed for {mins} min — Neema answered the price/stock question from the "
-                "hub and told the customer a colleague will follow up. The chat still needs "
-                "a person: please pick it up.")
-_THREAD_NOTE_SKIP = ("⏳ Unclaimed for {mins} min — the customer is waiting on something only a "
-                     "person can answer. Please pick it up.")
+# Short lines (owner, 2026-11-15): they live in the thread note's history.
+_THREAD_NOTE = ("⏳ Unclaimed {mins} min — Neema gave the hub price/stock and said a "
+                "colleague will follow up. Needs a person.")
+_THREAD_NOTE_SKIP = "⏳ Unclaimed {mins} min — only a person can answer this. Please pick it up."
 
 
 def _handled_key(msg_id) -> str:

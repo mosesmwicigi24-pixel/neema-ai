@@ -37,6 +37,7 @@ import { nearestCallId, mediaKey } from "@/lib/callCard";
 import { MessageKindCard, MessageKindPill } from "@/components/ui/MessageKindCard";
 import { EmojiPicker } from "@/components/views/composer/EmojiPicker";
 import { FlagCard } from "@/components/ui/FlagCard";
+import { ThreadNoteDock } from "@/components/ui/ThreadNoteDock";
 import { useVoiceRecorder, voiceSupported, VoiceBar } from "@/components/views/composer/VoiceRecorder";
 import { AttachMenu, ToolsMenu, useEnterSends, insertAtCursor, type AttachKind } from "@/components/views/composer/ComposerMenus";
 
@@ -1063,6 +1064,8 @@ export function ConversationsView({
     const [generatingDraft, setGeneratingDraft] = useState<boolean>(false);
     const [transferModal, setTransferModal] = useState<boolean>(false);
     const [noteModal, setNoteModal] = useState<boolean>(false);
+    // The header's Note button opens the thread note's editor (owner, 2026-11-15).
+    const [noteEditSignal, setNoteEditSignal] = useState(0);
     const [noteText, setNoteText] = useState<string>("");
     const [showFilters, setShowFilters] = useState<boolean>(false);
     // The open chat's "more" menu (hand to a colleague, profile, clear history).
@@ -1315,6 +1318,10 @@ export function ConversationsView({
     // first page whatever their age; while older messages are still unloaded,
     // a call older than the oldest loaded message would sit at the top out of
     // place — it appears once scrolling back reaches its day.
+    // Internal notes live in the thread note above the reply box, not in the
+    // chat (owner, 2026-11-15: "too many and too long").
+    const threadNotes = useMemo(() => activeMessages.filter((m) => m.isNote), [activeMessages]);
+
     const threadItems = useMemo(() => {
         if (!threadHasMore[activeConvId]) return sortedActiveMessages;
         const oldest = sortedActiveMessages.find((m) => m.type !== "system_event" && m.created_at);
@@ -3394,7 +3401,7 @@ export function ConversationsView({
                                     <Btn
                                         key="note"
                                         small
-                                        onClick={() => setNoteModal(true)}
+                                        onClick={() => setNoteEditSignal((n) => n + 1)}
                                         variant="secondary"
                                     >
                                         Note
@@ -3574,7 +3581,7 @@ export function ConversationsView({
                                 // ── Sort: escalation system events nudged just after their
                                 // preceding inbound message so they always appear below it.
                                 // (Calls older than the loaded page wait for it — threadItems.)
-                                const sortedMessages = threadItems;
+                                const sortedMessages = threadItems.filter((m) => !m.isNote);
                                 const dividerIdx =
                                     snap > 0
                                         ? Math.max(
@@ -4343,6 +4350,17 @@ export function ConversationsView({
                             })()}
                             <div ref={messagesEndRef} />
                         </div>
+
+                        {/* The thread note: one floating line above the reply box,
+                            opening into the team note, Neema's brief and the history. */}
+                        <ThreadNoteDock
+                            convId={activeConv.id}
+                            notes={threadNotes}
+                            editSignal={noteEditSignal}
+                            onUseLine={activeConv.intercept_mode === "human" &&
+                                (activeConv.assigned_agent_id === currentAgentId || adminHere)
+                                ? (t) => setReplyText(t) : undefined}
+                        />
 
                         {/* Reply box — shown when agent owns the conv, or is admin/superuser (canCompose) */}
                         {activeConv.intercept_mode === "human" &&
