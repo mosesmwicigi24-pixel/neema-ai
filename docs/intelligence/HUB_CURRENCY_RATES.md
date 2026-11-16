@@ -12,7 +12,7 @@ The hub's Currencies page sets a customer price per currency: KES 6.50 = 1 ZAR, 
 |---|---|---|
 | KES | 40 | — |
 | USD | 40 | — |
-| ZMW | 40 | KES 7.14 |
+| ZMW | 40 | KES 7.14 on these 40; across all 106 priced products the rows are mixed (62 at KES 5.00, 37 at 7.14, 7 at neither), and the middle value is 5.00 |
 | GBP | 17 | KES 150 |
 | ZAR | 8 | KES 6.50 |
 
@@ -37,3 +37,18 @@ No setting, no migration. USD stays KES/100.
 
 - Not run with the model: the writer's wording with the new line has not been seen.
 - Only 8 products carry a rand row. If the hub stops writing them, or fewer than three remain, Neema falls back to the public rate without saying so to anyone but the log.
+
+## The hub's rate is the only rate (owner, 2026-11-16)
+
+"Always take the conversion rate at the hub. It may not be equivalent to today's conversion rate to avoid fluctuations and rate changes. Go with hub."
+
+- The public daily feed is switched off (`fx_public_feed`, default false). A currency the hub prices in is converted at the hub's rate. A currency the hub does **not** price in (naira, cedis, Ugandan shillings, …) is **not converted**: the customer is given the USD price and told it is charged in USD.
+- Neema's instructions no longer speak of "today's rate": the rate is "our own rate, fixed by us so prices do not move with the market".
+- To quote another currency, give it a customer price on the hub's Currencies page and let the hub write that price on its products; Neema picks the rate up from there.
+
+**Kwacha, settled by the owner's hub screen ("Use this", 2026-11-16).** The hub's Edit ZMW screen states its rule: customer price KES 7.14 = 1 ZMW; "A product with no ZMW price of its own is converted from its shillings price at the customer rate above. Exact, never rounded. A ZMW price typed on a product always holds." Neema follows the same rule:
+
+- a product's own hub kwacha price is quoted as the hub holds it (this is why 62 products priced in August still read at KES 5.00 to the kwacha: their price is stored on the product, and on the hub it "always holds");
+- the rate in force is read from the **newest** products (`HUB_NEWEST`, 9), not from all of them, so it follows the Currencies page: read from the live hub on 2026-11-16 it gives ZMW 7.14, ZAR 6.50, GBP 150. Before this, the middle value across all products gave 5.00.
+
+To move the older products to 7.14, their stored kwacha price has to be cleared or re-entered in the hub; Neema then follows.

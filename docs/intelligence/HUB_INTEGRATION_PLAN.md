@@ -56,12 +56,18 @@ The hub owns every **business fact**: what is sold, at what price, to whom, what
 |---|---|
 | A1 | Built. The AI reads past orders from the hub's customer record: capped at 3 seconds, reused for 5 minutes, Neema's mirror only when the hub cannot say. WhatsApp contacts only; a Messenger or Instagram contact still reads the mirror. |
 | A2 | Not started. To be shown to the owner before it replaces the Orders screen. |
-| A3 | Not started. About 40 hand-typed prices in the instructions; changing them changes how the AI writes and needs a model run. |
+| A3 | Built (`agent/prompt_prices.py`). The 34 sentences in the instructions that carry a product price are listed with the hub product each belongs to and are filled with the hub's figure when the instructions are built; `prompt.py` itself is unchanged, so with no catalogue in hand the text is exactly as written. A test fails if a money figure appears that is neither listed nor named as a non-price. Six typed prices had drifted from the hub on 2026-11-16: Cassock Set $210 (hub $195), 200-piece wafers KES 500 (400), glass cups KES 20 (100), mitre $60 ($55), skull cap $20 ($15), Ornate Chasuble KES 13,000 (14,000). **Not run with the model.** Limits: the first turns after a restart, before the catalogue has been read, use the text as written; variant examples (collar sizes) and the examples in the Messenger, comment and web addenda are still as written. |
 | A4 | Built. Adding, editing or deleting a product in Neema's own table is refused while the hub is the source ("Products are managed in the hub"). The dashboard's buttons are still shown; the server refuses. |
 | A5 | Built. A missing kwacha price converts at the hub's rate read from its product prices. |
 | A6 | Built. `/api/health` has a `sources` section: each fact, hub or own copy, and how fresh the hub copy is. |
 
 The hub and Neema run on the same server in different containers (owner, 2026-11-16), so a server outage takes both; a hub-container outage alone is still covered by the last-good copies.
+
+**Model check for A3 (run 43812006504, 16 Nov 05:42–05:44 UTC, branch b7a2dba, on the owner's word "go to the next part").** The three-garment thread, five turns, real model, drawn photos: **5 of 5 turns passed**. Three garments on the order at the end, the purple piece held for a colleague's price and held once (the duplicate seen in run 43713060582 did not recur). She quoted "our Cassock Set at $195", the hub's figure. Still seen: "Which would you like?" at the end of turns 1 and 2, though he had said "I want these two made for me"; the soft gate rule added for it did not remove it. Tokens: 501,563 cached read, 139,595 cache write, 3,638 output, 34 input; about USD 0.73 at the list prices assumed for the writer model, reviewer calls not counted. One run is evidence, not a measurement.
+
+**Read from the live server after PR #377 deployed (89a1c3d, 16 Nov 05:5x UTC), `/api/health` `sources`:** catalogue from the hub; rates read from the hub's prices: GBP 149.99, ZAR 6.50, **ZMW 5.00**; customer order history from the hub; last hub event 7.8 hours earlier.
+
+**Finding: the hub's kwacha prices are not at one rate.** Across 106 products with a kwacha price (KES 500 and over), 62 are priced at KES 5.00 to the kwacha, 37 at KES 7.14 (the rate on the hub's Currencies page) and 7 at neither (for example Cassock KES 13,000 = ZMW 2,400). Neema quotes each product's own hub kwacha price, so a Zambian customer sees whatever the hub holds for that product. This is hub data and can only be corrected in the hub.
 
 ### Stage B — needs the hub to expose something (hub-side work)
 

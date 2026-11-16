@@ -586,6 +586,9 @@ async def catalog_items(db: AsyncSession, redis) -> list[dict]:
             # the hub's currency rates ride its product prices (services/fx)
             from app.services import fx as _fx_hub
             _fx_hub.remember(_hub_cat)
+            # …and so do the example prices in Neema's instructions
+            from app.agent import prompt_prices as _pp_hub
+            _pp_hub.remember(_hub_cat)
             return _hub_cat
         except Exception as exc:
             import logging

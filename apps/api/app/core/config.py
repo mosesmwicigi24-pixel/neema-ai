@@ -367,6 +367,13 @@ class Settings(BaseSettings):
     # (and all Messenger/IG, which have no phone) is quoted the hub's own USD row,
     # else KES / rate to the cent. Never rounded (owner rule, 2026-09-03).
     usd_kes_rate: int = 100
+    # THE HUB'S RATE, ALWAYS (owner, 2026-11-16: "Always take the conversion
+    # rate at the hub. It may not be equivalent to today's conversion rate to
+    # avoid fluctuations and rate changes. Go with hub"). A currency the hub
+    # prices in is converted at the hub's rate; one it does not price in is
+    # NOT converted — the customer is quoted USD. True brings back the public
+    # daily feed for those currencies (services/fx).
+    fx_public_feed: bool = False
     # KES per 1 Zambian Kwacha (owner: "5 KES to be one Kwacha") — the fallback
     # for ZMW display when a product somehow lacks its hub ZMW price row.
     zmw_kes_rate: int = 5
