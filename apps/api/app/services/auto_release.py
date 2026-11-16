@@ -55,9 +55,9 @@ _log = logging.getLogger("neema.agent")
 
 _NOTE = "Returned to AI automatically — no agent reply for {mins} minutes"
 # The same handover, on the thread itself (an internal note — never sent).
-_THREAD_NOTE = ("↩ Returned to Neema automatically — no colleague reply for {mins} minutes, "
-                "and {why}, so nobody is left waiting. Neema will answer their next "
-                "message; take the thread back any time.")
+# One short line (owner, 2026-11-15: notes "too many and too long"); it sits in
+# the thread note's history, not in the chat.
+_THREAD_NOTE = "↩ Back to Neema — no colleague reply in {mins} min; {why}."
 
 
 # Intercept rows that open a hold (a flag/escalation hands the thread to the

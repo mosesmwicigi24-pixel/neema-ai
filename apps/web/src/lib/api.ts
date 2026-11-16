@@ -121,6 +121,13 @@ async function req<T>(
     return res.json();
 }
 
+/** One note per thread, edited in place by the team. */
+export interface TeamNote {
+    text: string;
+    by_name: string | null;
+    at: string | null;
+}
+
 export interface PostIdentity {
     post_id: string;
     channel: string;
@@ -525,6 +532,13 @@ export const conversationsApi = {
         ),
     addNote: (id: string, text: string) =>
         post<Message>(`/admin/conversations/${id}/note`, { text }),
+    /** The thread's one team note (owner, 2026-11-15), edited in place. */
+    teamNote: (id: string) =>
+        get<TeamNote>(`/admin/conversations/${id}/team-note`),
+    /** Replace it. `expectedAt` is the `at` the editor opened on: a colleague's
+     *  edit in between is refused with 409 and their version. */
+    saveTeamNote: (id: string, text: string, expectedAt: string | null) =>
+        put<TeamNote>(`/admin/conversations/${id}/team-note`, { text, expected_at: expectedAt }),
     /** Can a free-form reply go out right now? (Meta/WhatsApp 24h window.) */
     window: (id: string) =>
         get<{

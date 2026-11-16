@@ -48,6 +48,11 @@ class Conversation(Base):
     # inbound message before it is read, even before anyone replies (owner,
     # 2026-11-04: "when someone opens a chat, the counter should remove it").
     read_at             : Mapped[datetime | None]  = mapped_column(DateTime(timezone=True), nullable=True)
+    # One note per thread the team edits in place (owner, 2026-11-15), shown
+    # in the floating panel above the reply box. Never sent to the model.
+    team_note           : Mapped[str | None]      = mapped_column(Text, nullable=True)
+    team_note_by        : Mapped[uuid.UUID | None] = mapped_column(ForeignKey("agents.id", ondelete="SET NULL"), nullable=True)
+    team_note_at        : Mapped[datetime | None]  = mapped_column(DateTime(timezone=True), nullable=True)
     status              : Mapped[ConvStatus]      = mapped_column(PgEnum(ConvStatus), default=ConvStatus.open)
     created_at          : Mapped[datetime]        = mapped_column(DateTime(timezone=True), default=datetime.utcnow)
     updated_at          : Mapped[datetime]        = mapped_column(DateTime(timezone=True), default=datetime.utcnow, onupdate=datetime.utcnow)

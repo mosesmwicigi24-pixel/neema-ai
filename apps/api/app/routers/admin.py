@@ -1724,6 +1724,77 @@ async def add_note(
     }
 
 
+# ── The team note: one per thread, edited in place (owner, 2026-11-15) ──────
+# Notes used to stack up in the chat as separate cards. The team now keeps ONE
+# note per thread in the floating panel above the reply box; the old note rows
+# stay as that panel's history. Internal only — never sent to the model.
+TEAM_NOTE_MAX = 1000
+
+
+def _team_note_out(conv: Conversation, by_name: str | None) -> dict:
+    return {
+        "text": conv.team_note or "",
+        "by_name": by_name,
+        "at": conv.team_note_at.isoformat() if conv.team_note_at else None,
+    }
+
+
+async def _team_note_conv(db: AsyncSession, conv_id: str) -> Conversation:
+    try:
+        cid = UUID(str(conv_id))
+    except (ValueError, TypeError):
+        raise HTTPException(status_code=404, detail="Conversation not found")
+    conv = await db.get(Conversation, cid)
+    if conv is None:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+    return conv
+
+
+@router.get("/conversations/{conv_id}/team-note")
+async def get_team_note(conv_id: str, db: AsyncSession = Depends(get_db),
+                        agent: Agent = Depends(get_current_agent)):
+    conv = await _team_note_conv(db, conv_id)
+    by = await db.get(Agent, conv.team_note_by) if conv.team_note_by else None
+    return _team_note_out(conv, by.name if by else None)
+
+
+@router.put("/conversations/{conv_id}/team-note")
+async def put_team_note(conv_id: str, body: dict, request: Request,
+                        db: AsyncSession = Depends(get_db),
+                        agent: Agent = Depends(get_current_agent)):
+    """Replace the thread's team note. An empty text clears it. `expected_at`
+    (the `at` the editor started from) guards against overwriting a colleague's
+    edit made in the meantime: a mismatch is a 409 carrying the current note."""
+    raw = body.get("text")
+    if raw is not None and not isinstance(raw, str):
+        raise HTTPException(status_code=422, detail="text must be a string")
+    text = (raw or "").strip()
+    if len(text) > TEAM_NOTE_MAX:
+        raise HTTPException(status_code=422, detail=f"A team note is at most {TEAM_NOTE_MAX} characters")
+    conv = await _team_note_conv(db, conv_id)
+    if "expected_at" in body:
+        current = conv.team_note_at.isoformat() if conv.team_note_at else None
+        if (body.get("expected_at") or None) != current:
+            by = await db.get(Agent, conv.team_note_by) if conv.team_note_by else None
+            raise HTTPException(status_code=409, detail={
+                "message": "A colleague changed this note while you were editing.",
+                "current": _team_note_out(conv, by.name if by else None)})
+    from datetime import datetime, timezone
+    conv.team_note = text or None
+    conv.team_note_by = agent.id
+    conv.team_note_at = datetime.now(timezone.utc)
+    await db.commit()
+    out = _team_note_out(conv, agent.name)
+    # Live to every open tab on this thread; non-fatal, a reload shows it too.
+    import json as _json
+    try:
+        await request.app.state.redis.publish(f"ws:channel:{conv.id}", _json.dumps({
+            "type": "team_note", "conversationId": str(conv.id), "note": out}))
+    except Exception as exc:
+        logging.getLogger("neema.redis").warning("team note publish failed (%s): %s", conv.id, exc)
+    return out
+
+
 @router.post("/conversations/{conv_id}/intercept")
 async def intercept(conv_id: str, request: Request, db: AsyncSession = Depends(get_db),
                     agent: Agent = Depends(get_current_agent)):
