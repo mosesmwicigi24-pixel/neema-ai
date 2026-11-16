@@ -64,5 +64,11 @@ async def read(redis) -> dict:
             last = None
     out["hub"].append({"fact": "order_events", "source": "hub",
                        "last_event_seconds_ago": int(time.time() - last) if last else None})
+    try:
+        from app.agent import prompt_prices
+        out["hub"].append(dict({"fact": "example_prices_in_instructions", "source": "hub"},
+                               **prompt_prices.status()))
+    except Exception:
+        pass
     out["hub"].append({"fact": "customer_order_history", "source": "hub" if settings.hub_api_token else "neema_mirror"})
     return out

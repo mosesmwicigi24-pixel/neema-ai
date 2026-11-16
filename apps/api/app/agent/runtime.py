@@ -1867,6 +1867,13 @@ async def run_turn(db: AsyncSession, redis, wa_id: str, user_text: str, llm: LLM
         house_voice=_house,
         offer=_offer,
     )
+    # The example prices in the instructions are the hub's own figures
+    # (agent/prompt_prices, owner 2026-11-16) — never the ones typed in.
+    try:
+        from app.agent import prompt_prices as _pp
+        system = _pp.fill(system, settings.usd_kes_rate)
+    except Exception as exc:
+        _log.info("example prices left as written for %s: %s", key, exc)
     if is_meta:
         system += _public_comment_addendum(currency) if public_comment else _meta_addendum(currency)
     elif is_tiktok:
