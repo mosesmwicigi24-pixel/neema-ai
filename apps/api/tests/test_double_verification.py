@@ -143,8 +143,11 @@ def test_the_turn_hands_the_writer_todays_rate_only_when_asked():
     assert "if _fx_rates.get(_fx_code) else _fx.no_rate_line(_fx_code))" in src
     assert "extra_known=_turn_note" in src
     p = " ".join(build_system_prompt(currency="USD").split())
-    assert "TODAY'S RATE GIVEN IN YOUR CONTEXT" in p
-    assert "never invent a rate from memory" in p and "never promise to 'confirm the rate with the team'" in p
+    # owner, 2026-11-16: the hub's rate is the only rate — the instructions no
+    # longer speak of "today's rate", and a currency with no hub rate is not converted
+    assert "ONLY THE RATE GIVEN IN YOUR CONTEXT" in p and "TODAY'S RATE" not in p
+    assert "never convert from memory or from a market rate" in p
+    assert "never promise to 'confirm the rate with the team'" in p
     assert "central-bank" not in p
 
 

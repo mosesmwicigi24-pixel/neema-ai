@@ -2107,7 +2107,9 @@ async def run_turn(db: AsyncSession, redis, wa_id: str, user_text: str, llm: LLM
         from app.services import fx as _fx
         _fx_code = _fx.currency_asked(user_text) if currency == "USD" else None
         if _fx_code:
-            _fx_rates = await _fx.rates(redis)
+            # The public daily feed is OFF unless settings.fx_public_feed: the
+            # hub's rate is the only rate (owner, 2026-11-16).
+            _fx_rates = await _fx.rates(redis) if settings.fx_public_feed else {}
             # A currency the HUB prices in is quoted at the hub's own rate,
             # read from its product prices — never the public feed's
             # (owner, 2026-11-16: "quote rands from the hub rates").
@@ -2121,6 +2123,9 @@ async def run_turn(db: AsyncSession, redis, wa_id: str, user_text: str, llm: LLM
                 _log.info("hub rates unreadable for %s — public rate used: %s", key, exc)
             if _hub_per.get(_fx_code) and _fx_rates.get(_fx_code):
                 turn_notes.append(_fx.hub_line(_fx_code, _fx_rates[_fx_code], _hub_per[_fx_code]))
+            elif not settings.fx_public_feed:
+                _fx_rates.pop(_fx_code, None)
+                turn_notes.append(_fx.hub_only_line(_fx_code))
             else:
                 turn_notes.append(_fx.context_line(_fx_code, _fx_rates[_fx_code])
                                   if _fx_rates.get(_fx_code) else _fx.no_rate_line(_fx_code))

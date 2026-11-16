@@ -245,6 +245,16 @@ def context_line(code: str, rate: float) -> str:
             "promise to 'confirm the rate' — this IS the rate.)")
 
 
+def hub_only_line(code: str) -> str:
+    """The customer asked for a currency the hub does not price in. We go by
+    the hub's rates only (owner, 2026-11-16), so there is nothing to convert
+    with: the price is in USD."""
+    return (f"\n\n(They asked for prices in {code}. We do not price in {code}: give the USD "
+            "price and say plainly that it is charged in USD and their bank or payment "
+            f"service converts it when they pay. Give NO figure in {code} — not from memory, "
+            "not from a market rate — and never promise to confirm a rate.)")
+
+
 def no_rate_line(code: str) -> str:
     return (f"\n\n(They asked for prices in {code} and no rate is available today: give the "
             "USD price and say it is charged in USD and converts at the day's rate when "

@@ -37,3 +37,13 @@ No setting, no migration. USD stays KES/100.
 
 - Not run with the model: the writer's wording with the new line has not been seen.
 - Only 8 products carry a rand row. If the hub stops writing them, or fewer than three remain, Neema falls back to the public rate without saying so to anyone but the log.
+
+## The hub's rate is the only rate (owner, 2026-11-16)
+
+"Always take the conversion rate at the hub. It may not be equivalent to today's conversion rate to avoid fluctuations and rate changes. Go with hub."
+
+- The public daily feed is switched off (`fx_public_feed`, default false). A currency the hub prices in is converted at the hub's rate. A currency the hub does **not** price in (naira, cedis, Ugandan shillings, …) is **not converted**: the customer is given the USD price and told it is charged in USD.
+- Neema's instructions no longer speak of "today's rate": the rate is "our own rate, fixed by us so prices do not move with the market".
+- To quote another currency, give it a customer price on the hub's Currencies page and let the hub write that price on its products; Neema picks the rate up from there.
+
+**Open question for the owner (kwacha).** The hub's product prices in kwacha are at two rates (62 products at KES 5.00, 37 at 7.14, 7 at neither). Neema quotes each product's own hub kwacha price. Whether Neema should instead apply one rate (7.14) to every product is a price change for Zambian customers (the 62 older products would read about 30% lower in kwacha) and is the owner's to decide; the cleaner fix is to reprice those products in the hub.
