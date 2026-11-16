@@ -81,3 +81,15 @@ def test_only_the_hubs_rate_converts_and_a_currency_without_one_is_not_converted
     p = " ".join(build_system_prompt(currency="USD").split())
     assert "It is our own rate, fixed by us so prices do not move with the market" in p
     assert "today's rate or an approximation" in p
+
+
+def test_the_current_rate_is_read_from_the_newest_products():
+    # The hub's own rule (its Edit ZMW screen): a product with no price of its
+    # own is converted at the customer rate; "a ZMW price typed on a product
+    # always holds". So 62 August products still carry KES 5.00 to the kwacha
+    # beside 37 at today's 7.14 — and the rate in force is the newest one.
+    old = [{"hub_product_id": i, "price": 5000, "prices": {"KES": 5000, "ZMW": 1000}} for i in range(1, 63)]
+    new = [{"hub_product_id": 100 + i, "price": 8000, "prices": {"KES": 8000, "ZMW": 1120}} for i in range(37)]
+    assert fx.hub_kes_per_unit(old + new)["ZMW"] == 7.14
+    assert fx.hub_kes_per_unit(new + old)["ZMW"] == 7.14          # whatever order they arrive in
+    assert fx.hub_kes_per_unit(old)["ZMW"] == 5.0                 # only old rows: that is all the hub shows

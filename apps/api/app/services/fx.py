@@ -148,6 +148,7 @@ async def rates(redis) -> dict[str, float]:
 # to change a rate (the hub) and nothing here to keep in step. A currency the
 # hub prices in is never converted at the public feed's rate.
 HUB_MIN_SAMPLES = 3
+HUB_NEWEST = 9                # the current rate is read from this many of the newest products
 
 
 def hub_kes_per_unit(catalog: list | None) -> dict[str, float]:
@@ -156,7 +157,7 @@ def hub_kes_per_unit(catalog: list | None) -> dict[str, float]:
     The middle value across products (a single odd row cannot move it); a
     currency on fewer than HUB_MIN_SAMPLES products is left out."""
     from statistics import median
-    seen: dict[str, list[float]] = {}
+    seen: dict[str, list[tuple[float, float]]] = {}
     for p in catalog or []:
         prices = p.get("prices") if isinstance(p, dict) else None
         if not isinstance(prices, dict):
@@ -176,8 +177,24 @@ def hub_kes_per_unit(catalog: list | None) -> dict[str, float]:
             except (TypeError, ValueError):
                 continue
             if amt > 0:
-                seen.setdefault(code, []).append(kes / amt)
-    return {code: round(median(v), 2) for code, v in seen.items() if len(v) >= HUB_MIN_SAMPLES}
+                try:
+                    newness = float(p.get("hub_product_id") or 0)
+                except (TypeError, ValueError):
+                    newness = 0.0
+                seen.setdefault(code, []).append((newness, kes / amt))
+    # THE RATE THE HUB IS WRITING NOW (owner's hub screen, 2026-11-16): the
+    # hub converts a product with no price of its own at the customer rate,
+    # and "a price typed on a product always holds" — so older products keep
+    # the rate of the day they were priced (62 kwacha rows at KES 5.00, from
+    # August, beside 37 at today's 7.14). The current rate is read from the
+    # NEWEST products, not from all of them.
+    out: dict[str, float] = {}
+    for code, rows in seen.items():
+        if len(rows) < HUB_MIN_SAMPLES:
+            continue
+        newest = [r for _, r in sorted(rows, key=lambda x: x[0], reverse=True)[:HUB_NEWEST]]
+        out[code] = round(median(newest), 2)
+    return out
 
 
 # The last rates read from the hub's catalogue, kept in the process so the
