@@ -140,6 +140,97 @@ async def rates(redis) -> dict[str, float]:
     return {}
 
 
+# ── THE HUB'S OWN RATE (owner, 2026-11-16: "quote rands from the hub rates") ──
+# The hub's Currencies page sets a customer price per currency ("KES 6.50 =
+# 1 ZAR") and the hub writes each product's price in that currency from it.
+# Neema reads those product prices already. The rate is taken FROM them — the
+# KES price over the rand price, across the catalogue — so there is one place
+# to change a rate (the hub) and nothing here to keep in step. A currency the
+# hub prices in is never converted at the public feed's rate.
+HUB_MIN_SAMPLES = 3
+
+
+def hub_kes_per_unit(catalog: list | None) -> dict[str, float]:
+    """KES per 1 unit of each currency the hub prices in, read from the
+    catalogue's own price rows: {"ZAR": 6.5, "GBP": 150.0, "ZMW": 7.14}.
+    The middle value across products (a single odd row cannot move it); a
+    currency on fewer than HUB_MIN_SAMPLES products is left out."""
+    from statistics import median
+    seen: dict[str, list[float]] = {}
+    for p in catalog or []:
+        prices = p.get("prices") if isinstance(p, dict) else None
+        if not isinstance(prices, dict):
+            continue
+        try:
+            kes = float(prices.get("KES") or p.get("price") or 0)
+        except (TypeError, ValueError):
+            continue
+        if kes < 500:          # tiny prices round too coarsely to read a rate from
+            continue
+        for code, amount in prices.items():
+            code = str(code).upper()
+            if code in ("KES", "USD"):
+                continue
+            try:
+                amt = float(amount or 0)
+            except (TypeError, ValueError):
+                continue
+            if amt > 0:
+                seen.setdefault(code, []).append(kes / amt)
+    return {code: round(median(v), 2) for code, v in seen.items() if len(v) >= HUB_MIN_SAMPLES}
+
+
+# The last rates read from the hub's catalogue, kept in the process so the
+# places that convert without a catalogue in hand (a missing kwacha row, the
+# gate) use the hub's rate and not a number typed into settings.
+_HUB_PER: dict = {"rates": {}, "mark": None}
+
+
+def remember(catalog: list | None) -> None:
+    """Note the hub's rates from a catalogue that was just read. Cheap: it
+    recomputes only when the catalogue's size or first row changed. Never
+    raises; an unreadable catalogue leaves the last good rates in place."""
+    try:
+        if not catalog:
+            return
+        first = catalog[0] if isinstance(catalog[0], dict) else {}
+        mark = (len(catalog), first.get("hub_product_id"), str(first.get("prices")))
+        if mark == _HUB_PER["mark"]:
+            return
+        got = hub_kes_per_unit(catalog)
+        if got:
+            _HUB_PER.update(rates=got, mark=mark)
+    except Exception as exc:
+        _log.info("hub rates not remembered: %s", exc)
+
+
+def hub_per(code: str, default: float | None = None) -> float | None:
+    """KES per 1 unit of `code` as the hub last showed it, else `default`."""
+    v = _HUB_PER["rates"].get(str(code).upper())
+    return float(v) if v else default
+
+
+def hub_rates(catalog: list | None, usd_kes_rate: float = 100) -> dict[str, float]:
+    """The hub's rates as "1 USD = N <currency>", the shape the writer and the
+    gate already use: the house KES-per-USD over the hub's KES-per-unit."""
+    out: dict[str, float] = {}
+    for code, kes_per in hub_kes_per_unit(catalog).items():
+        if kes_per > 0:
+            out[code] = round(float(usd_kes_rate or 100) / kes_per, 6)
+    return out
+
+
+def hub_line(code: str, rate: float, kes_per: float) -> str:
+    """What the writer is told when the customer asked for a currency the HUB
+    prices in: our own rate, whole units, no "today's rate"."""
+    eg = round(convert_usd(130, rate))
+    return (f"\n\n(They asked for prices in {code}. OUR RATE, set by Bethany House: "
+            f"KES {kes_per:g} = 1 {code} (that is 1 USD = {rate:.4f} {code}). Convert from the "
+            f"price you are quoting and round to the whole {code}: e.g. $130 = {eg:,} {code}. "
+            "This is our own price, not a market rate: do not say \"today's rate\" or "
+            "\"approximately\", and never promise to confirm it.)")
+
+
 def convert_usd(usd: float, rate: float) -> float:
     """The figure the arithmetic gives, to the cent — never tidied."""
     return round(float(usd) * float(rate), 2)

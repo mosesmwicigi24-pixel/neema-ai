@@ -147,7 +147,8 @@ def _row_figures(p: dict, currency: str = "USD") -> set[float]:
     a Zambian customer; any per-currency price; its variants'."""
     out: set[float] = set()
     usd_rate = float(settings.usd_kes_rate or 100)
-    zmw_rate = float(settings.zmw_kes_rate or 5)
+    from app.services import fx as _fx_hub
+    zmw_rate = float(_fx_hub.hub_per("ZMW", settings.zmw_kes_rate or 5))
 
     def _add_pair(kes, usd):
         k, u = _num(kes), _num(usd)

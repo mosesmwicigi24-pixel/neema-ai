@@ -169,6 +169,79 @@ async def _recent_orders_summary(db: AsyncSession, wa_id: str, limit: int = 3,
     return lines
 
 
+HUB_ORDERS_TTL = 300          # seconds a customer's hub order lines are reused
+HUB_ORDERS_WAIT = 3.0         # a reply never waits longer than this on the hub
+
+
+def _hub_order_lines(orders: list, limit: int = 3) -> list[str]:
+    """The hub's orders for this customer, as the same short lines the local
+    mirror gave — newest first; shop, website and chat orders alike."""
+    def when_of(o):
+        return str(o.get("created_at") or "")
+    lines = []
+    for o in sorted([o for o in (orders or []) if isinstance(o, dict)], key=when_of, reverse=True)[:limit]:
+        if str(o.get("status") or "").lower() in ("cancelled", "canceled"):
+            continue
+        day = ""
+        try:
+            from datetime import datetime as _dt
+            day = f" ({_dt.fromisoformat(when_of(o).replace('Z', '+00:00')).strftime('%d %b %Y')})"
+        except Exception:
+            day = ""
+        names = []
+        for it in (o.get("items") or [])[:6]:
+            n = str(it.get("name") or "").strip()
+            if not n:
+                continue
+            q = it.get("qty") or it.get("quantity")
+            names.append(n + (f" ×{q}" if q and q not in (1, "1") else ""))
+        total = o.get("total") if o.get("total") is not None else o.get("subtotal")
+        basket = "; ".join(names)
+        lines.append(f"{o.get('order_number') or o.get('id')}{day} — "
+                     f"{o.get('currency_code') or ''} {total}".rstrip()
+                     + (f" — {basket}" if basket else ""))
+    return lines
+
+
+async def _hub_orders_summary(redis, wa_id: str, limit: int = 3) -> list[str] | None:
+    """THE HUB IS THE RECORD OF WHAT A CUSTOMER BOUGHT (owner, 2026-11-16).
+    The AI used to read Neema's own mirror, which holds only orders placed in
+    chat: a customer who also buys at the shop or on the website looked new.
+    The staff panel already reads the hub; this is the same read. None when
+    the hub cannot say (not configured, unreachable, slow) — the caller then
+    uses the local mirror; [] when the hub knows them and they have no orders."""
+    import asyncio
+    import json
+    from app.core import hub_client
+    from app.core.config import settings
+    from app.core.phone import is_plausible_phone
+    if not (settings.hub_api_token and wa_id and is_plausible_phone(wa_id)):
+        return None
+    key = f"hub:customer_orders_lines:{wa_id}"
+    if redis is not None:
+        try:
+            hit = await redis.get(key)
+            if hit:
+                got = json.loads(hit)
+                return got if isinstance(got, list) else None
+        except Exception:
+            pass
+    try:
+        summary = await asyncio.wait_for(hub_client.fetch_customer_summary(wa_id, redis),
+                                         timeout=HUB_ORDERS_WAIT)
+    except Exception:
+        return None
+    if summary is None:
+        return None                     # unknown to the hub, or the hub did not answer
+    lines = _hub_order_lines(summary.get("orders") or [], limit)
+    if redis is not None:
+        try:
+            await redis.set(key, json.dumps(lines), ex=HUB_ORDERS_TTL)
+        except Exception:
+            pass
+    return lines
+
+
 async def build_memory_context(db: AsyncSession, redis, wa_id: str, user: User | None = None,
                                channel: str = "whatsapp") -> str | None:
     """Return a short block combining stored facts + a past-orders summary, or
@@ -206,7 +279,13 @@ async def build_memory_context(db: AsyncSession, redis, wa_id: str, user: User |
         except Exception:
             pass
     person_id = store.id if (channel != "whatsapp" and isinstance(store, Person)) else None
-    orders = await _recent_orders_summary(db, wa_id, person_id=person_id)
+    # The hub's record first (shop, website and chat orders); Neema's own
+    # mirror only when the hub cannot say.
+    orders = None
+    if channel == "whatsapp":
+        orders = await _hub_orders_summary(redis, wa_id)
+    if not orders:
+        orders = await _recent_orders_summary(db, wa_id, person_id=person_id)
     # Sizes already on file — so a returning customer is never re-measured. Read
     # through the measurements service (person-first), not `store`, so figures taken
     # on the website or Messenger surface on WhatsApp too.
