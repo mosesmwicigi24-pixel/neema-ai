@@ -12,7 +12,7 @@ The hub's Currencies page sets a customer price per currency: KES 6.50 = 1 ZAR, 
 |---|---|---|
 | KES | 40 | — |
 | USD | 40 | — |
-| ZMW | 40 | KES 7.14 |
+| ZMW | 40 | KES 7.14 on these 40; across all 106 priced products the rows are mixed (62 at KES 5.00, 37 at 7.14, 7 at neither), and the middle value is 5.00 |
 | GBP | 17 | KES 150 |
 | ZAR | 8 | KES 6.50 |
 

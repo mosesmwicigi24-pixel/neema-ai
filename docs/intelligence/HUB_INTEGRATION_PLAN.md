@@ -63,6 +63,12 @@ The hub owns every **business fact**: what is sold, at what price, to whom, what
 
 The hub and Neema run on the same server in different containers (owner, 2026-11-16), so a server outage takes both; a hub-container outage alone is still covered by the last-good copies.
 
+**Model check for A3 (run 43812006504, 16 Nov 05:42–05:44 UTC, branch b7a2dba, on the owner's word "go to the next part").** The three-garment thread, five turns, real model, drawn photos: **5 of 5 turns passed**. Three garments on the order at the end, the purple piece held for a colleague's price and held once (the duplicate seen in run 43713060582 did not recur). She quoted "our Cassock Set at $195", the hub's figure. Still seen: "Which would you like?" at the end of turns 1 and 2, though he had said "I want these two made for me"; the soft gate rule added for it did not remove it. Tokens: 501,563 cached read, 139,595 cache write, 3,638 output, 34 input; about USD 0.73 at the list prices assumed for the writer model, reviewer calls not counted. One run is evidence, not a measurement.
+
+**Read from the live server after PR #377 deployed (89a1c3d, 16 Nov 05:5x UTC), `/api/health` `sources`:** catalogue from the hub; rates read from the hub's prices: GBP 149.99, ZAR 6.50, **ZMW 5.00**; customer order history from the hub; last hub event 7.8 hours earlier.
+
+**Finding: the hub's kwacha prices are not at one rate.** Across 106 products with a kwacha price (KES 500 and over), 62 are priced at KES 5.00 to the kwacha, 37 at KES 7.14 (the rate on the hub's Currencies page) and 7 at neither (for example Cassock KES 13,000 = ZMW 2,400). Neema quotes each product's own hub kwacha price, so a Zambian customer sees whatever the hub holds for that product. This is hub data and can only be corrected in the hub.
+
 ### Stage B — needs the hub to expose something (hub-side work)
 
 | # | The hub provides | Neema then |
