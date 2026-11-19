@@ -167,3 +167,19 @@ def test_over_cap_lines_are_link_free_and_sell_nothing_false():
 def test_still_neutral_when_we_cannot_identify_the_product():
     out = rt._comment_public_reply("", dm_sent=False, name_tag=" Grace", seed="grace")
     assert out in [p.replace("{name}", " Grace") for p in rt._NEUTRAL_ACK_POOL]
+
+
+def test_neema_is_told_how_she_got_the_chat_back_and_thirty_minutes_is_the_rule():
+    # owner, 2026-11-19
+    import inspect
+    from app.agent import runtime
+    assert settings.auto_release_minutes == 30 and settings.auto_release_waiting is True
+    note = auto_release.PICKED_UP_NOTE.format(mins=30)
+    assert "did not reply for 30 minutes" in note
+    assert "Do not say or imply that a colleague answered" in note
+    assert "has not been able to pick it up yet" in note
+    src = inspect.getsource(runtime.run_turn)
+    assert "_ar.PICKED_UP_KEY.format(channel=channel, key=key)" in src
+    assert "turn_notes.append(_ar.PICKED_UP_NOTE.format(" in src and "await redis.delete(_ark)" in src
+    sweep = inspect.getsource(auto_release.sweep_auto_release)
+    assert "_auto_released_since(db, conv.id, ws)" in sweep        # once per wait

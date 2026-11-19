@@ -334,7 +334,17 @@ class Settings(BaseSettings):
     # could undo it, so the customer got no further replies from Neema at all.
     # Releasing never makes her speak; it only lets her answer the NEXT message.
     # Set 0 to disable the sweep and go back to manual-release-only.
-    auto_release_minutes: int = 45
+    # 30 (owner, 2026-11-19: "If the human interception remains for 30 minutes
+    # without being released and without chats continue, release that chat to
+    # Neema"). Was 45.
+    auto_release_minutes: int = 30
+    # THE CUSTOMER WHO WAITED (same instruction): a chat a person holds, where
+    # the customer has waited this whole time with no colleague reply, also
+    # goes back to Neema, who answers the waiting message. Once per waiting
+    # message — if it comes back to staff (a flag, an escalation) it stays
+    # with them until a person replies. False = such a chat stays with the
+    # person, as it did from 2026-10-10.
+    auto_release_waiting: bool = True
     # ── Business facts Neema answers logistics/FAQ questions from ─────────────
     # Free text (location/branches, hours, delivery, payment, contacts) injected
     # into the system prompt. Without it Neema only knows the catalogue and can't
