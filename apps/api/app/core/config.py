@@ -362,6 +362,19 @@ class Settings(BaseSettings):
     # format). WhatsApp delivers a plain message only to a number that has
     # written to the business number in the last 24 hours. Empty = bell only.
     owner_alert_numbers: str = "254700706875,254721951853"
+    # ── THE POLICY LAYER (agent/policy.py; owner's directive, 2026-11-20) ────
+    # shadow: every decision is recorded, no message is changed.
+    # enforce: findings of the policies listed in policy_enforce hold the
+    # message ("*" = every critical policy). Activation is the owner's word.
+    policy_mode: str = "shadow"
+    policy_enforce: str = ""
+    # The route guards found by the audit (a second "stop" answered by the
+    # sweep; "team answer" sent twice or to a customer who opted out). False =
+    # recorded only, exactly as today; True = the guard acts.
+    policy_guards_active: bool = False
+    # Payment at collection in the shop needs an explicitly approved policy
+    # (owner, 2026-11-20). False = saying it is a FIN-04 finding.
+    policy_pay_at_collection: bool = False
     # ── Business facts Neema answers logistics/FAQ questions from ─────────────
     # Free text (location/branches, hours, delivery, payment, contacts) injected
     # into the system prompt. Without it Neema only knows the catalogue and can't

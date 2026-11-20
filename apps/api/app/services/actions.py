@@ -526,6 +526,18 @@ async def _send(db, redis, conv, text: str, action=None, shadow: list | None = N
     issues = initiated_issues(text)
     if issues["hard"]:
         raise HeldByRules(", ".join(issues["hard"]))
+    # THE POLICY LAYER (agent/policy.py): a message Neema starts is read
+    # against the same company rules as a reply (audit C1, 2026-11-20).
+    from app.agent import policy as _pol
+    _p_find = _pol.evaluate(text, route=_pol.INITIATED,
+                            source_text=str(getattr(action, "payload", "") or ""))
+    if _p_find:
+        _p_held = _pol.enforced(_p_find)
+        await _pol.record(redis, _p_find, route=_pol.INITIATED, channel=conv.channel,
+                          key=str(conv.wa_id or conv.external_id or ""),
+                          ref=str(getattr(action, "id", "") or ""))
+        if _p_held:
+            raise HeldByRules(", ".join(f"policy {f['policy']}" for f in _p_held))
     if issues["soft"]:
         _log.info("initiated message to …%s sent with notes: %s",
                   str(conv.wa_id or conv.external_id)[-4:], "; ".join(issues["soft"]))

@@ -2733,6 +2733,49 @@ async def run_turn(db: AsyncSession, redis, wa_id: str, user_text: str, llm: LLM
             if turn_facts is not None:
                 turn_facts["stage_direction"] = True
             reply = ""
+    if not read_only and not scribe_only and _gate_outcome in ("rewritten", "soft", "held", "unowned"):
+        # The gate's own verdict goes into the one policy record: corrected,
+        # sent with notes after a rewrite that did not clear them, or held.
+        try:
+            from app.agent import policy as _pol
+            await _pol.record(
+                redis, [_pol.finding("GATE", {
+                    "rewritten": "a finding was corrected by one rewrite",
+                    "soft": "sent after one rewrite with soft findings still on it",
+                    "held": "; ".join(str(h) for h in _held)[:200] or "held",
+                    "unowned": "held, and nobody could be told"}[_gate_outcome])],
+                route=_pol.LIVE, channel=channel, key=key,
+                outcome={"rewritten": "corrected", "soft": "detected",
+                         "held": "prevented", "unowned": "escalated"}[_gate_outcome])
+        except Exception:
+            pass
+    if reply and not read_only and not scribe_only and _gate_outcome not in ("held", "unowned"):
+        # THE POLICY LAYER (agent/policy.py): company rules read against the
+        # record. Shadow by default — recorded, the reply untouched. (A held
+        # reply is already the fixed hold line, with the team flagged.)
+        try:
+            from app.agent import policy as _pol
+            _p_said = [user_text or ""] + [
+                (_m.get("content") if isinstance(_m.get("content"), str) else "")
+                for _m in messages if isinstance(_m, dict) and _m.get("role") == "user"][-8:]
+            _p_find = _pol.evaluate(reply, route=_pol.LIVE, tool_log=tool_log, said=_p_said,
+                                    source_text=str(_turn_note or ""))
+            if _p_find:
+                _p_held = _pol.enforced(_p_find)
+                await _pol.record(redis, _p_find, route=_pol.LIVE, channel=channel, key=key)
+                if turn_facts is not None:
+                    turn_facts["policy"] = [f["policy"] for f in _p_find]
+                if _p_held:
+                    _p_issues = [f"policy {f['policy']}: {f['reason']}" for f in _p_held]
+                    if public_comment or is_closer(user_text or ""):
+                        reply = ""
+                    else:
+                        await _flag_held_reply(db, channel, key, _p_issues, reply, redis=redis)
+                        reply = _hold_dm_for(user_text, swahili=looks_swahili(user_text or ""), money=False)
+                    _held = list(_held) + _p_issues
+                    _gate_outcome = "held"
+        except Exception as exc:
+            _log.warning("policy check skipped for %s: %s", key, exc)
     if reply and customer_name and not public_comment:
         # A name is not a prefix (agent/voice.drop_repeated_name).
         try:
@@ -3322,6 +3365,19 @@ async def schedule_reply(redis, wa_id: str, text: str, dedup_id: str | None,
     from app.services import intent as _intent
     if _intent.is_opt_out(text):            # the words decide, photo or not (verification 1.4)
         await _handle_opt_out(redis, "whatsapp", wa_id, text)
+        # A "stop" is answered once, then with silence — and the silence is
+        # DELIBERATE: marked, so the missed-reply sweep does not read a second
+        # "stop" as an unanswered message and reply to it (audit H1, 2026-11-20).
+        # Acts only when the route guards are switched on; recorded either way.
+        try:
+            from app.agent import policy as _pol
+            if _pol.guards_active():
+                await _mark_silenced(redis, "whatsapp", wa_id)
+            await _pol.record(redis, [_pol.finding("RTE-01", "a 'stop' left unmarked could be answered by the missed-reply sweep")],
+                              route="opt_out", channel="whatsapp", key=str(wa_id),
+                              outcome="prevented" if _pol.guards_active() else "detected")
+        except Exception:
+            pass
         return True
     if _intent.wants_a_person(text):        # THE PERSON DOOR (owner, 2026-11-07): no model turn
         await _handle_person_request(redis, "whatsapp", wa_id, text)
@@ -3625,6 +3681,19 @@ async def schedule_meta_reply(redis, channel: str, external_id: str, text: str,
     from app.services import intent as _intent
     if _intent.is_opt_out(text):            # the words decide, photo or not (verification 1.4)
         await _handle_opt_out(redis, channel, external_id, text)
+        # A "stop" is answered once, then with silence — and the silence is
+        # DELIBERATE: marked, so the missed-reply sweep does not read a second
+        # "stop" as an unanswered message and reply to it (audit H1, 2026-11-20).
+        # Acts only when the route guards are switched on; recorded either way.
+        try:
+            from app.agent import policy as _pol
+            if _pol.guards_active():
+                await _mark_silenced(redis, channel, external_id)
+            await _pol.record(redis, [_pol.finding("RTE-01", "a 'stop' left unmarked could be answered by the missed-reply sweep")],
+                              route="opt_out", channel=channel, key=str(external_id),
+                              outcome="prevented" if _pol.guards_active() else "detected")
+        except Exception:
+            pass
         return True
     if _intent.wants_a_person(text):        # THE PERSON DOOR (owner, 2026-11-07): no model turn
         await _handle_person_request(redis, channel, external_id, text)

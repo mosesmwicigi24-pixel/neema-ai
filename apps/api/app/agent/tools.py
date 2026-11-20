@@ -1236,6 +1236,31 @@ async def _said_in_record(ctx: ToolContext) -> list[str]:
     return said
 
 
+async def _recent_customer_words(ctx: ToolContext, limit: int = 3) -> list[str]:
+    """The customer's own last few messages, newest first, read in a session
+    of its own (the order step's reads on `ctx.db` are left exactly as they
+    are). The message being answered comes first."""
+    said = [str(w) for w in (ctx.customer_words or ()) if w][:limit]
+    try:
+        from app.database import AsyncSessionLocal
+        from app.models.message import Message, MsgDirection
+        where = (Message.wa_id == ctx.wa_id) if ctx.channel == "whatsapp" else (
+            (Message.channel == ctx.channel) & (Message.external_id == ctx.wa_id))
+        async with AsyncSessionLocal() as db:
+            rows = (await db.execute(
+                select(Message.text).where(where)
+                .where(Message.direction == MsgDirection.inbound)
+                .where(Message.media_type.is_(None) | (Message.media_type != "note"))
+                .where(Message.text.isnot(None))
+                .order_by(Message.created_at.desc()).limit(limit))).scalars().all()
+        for t in rows:
+            if t and str(t) not in said:
+                said.append(str(t))
+    except Exception:
+        pass
+    return said[:limit]
+
+
 async def _removal_refused(args: dict, ctx: ToolContext, cart: dict, what: str) -> dict | None:
     """A REMOVAL NEEDS THE CUSTOMER'S WORDS (owner, 2026-11-15). In the
     Melchizkek thread a correction to one garment removed another and swapped
@@ -1577,6 +1602,22 @@ async def _create_order(args: dict, ctx: ToolContext) -> dict:
     cart = await cartmod.get_cart(ctx.db, ctx.wa_id, ctx.channel)
     if not cart["items"]:
         return {"error": "cart is empty — add items before creating an order"}
+    # AN ORDER NEEDS THE CUSTOMER'S YES (policy ORD-01; decision D4,
+    # 2026-11-20). Read from the record, as a removal already is. Recorded
+    # always; refused only when the policy is enforced.
+    try:
+        from app.agent import policy as _pol
+        if not ctx.read_only and not _pol.customer_agreed(await _recent_customer_words(ctx)):
+            _f = [{"policy": "ORD-01", "severity": "critical", "excerpt": "",
+                   "reason": "order step called with no yes in the customer's recent words"}]
+            _held = _pol.enforced(_f)
+            await _pol.record(ctx.redis, _f, route=_pol.ORDER_TOOL, channel=ctx.channel, key=str(ctx.wa_id or ""))
+            if _held:
+                return {"error": "no order was created — the customer has not said yes yet",
+                        "next_step": "Show them the order and its total and ask plainly whether to go "
+                                     "ahead. Create the order only after they say yes."}
+    except Exception as _exc:
+        _log.info("order consent check skipped for %s: %s", ctx.wa_id, _exc)
     _awaiting = order_sheet.pending_of(cart)
     if _awaiting:
         # NEVER A PARTIAL ORDER BY OMISSION (2026-11-15): the pieces a
@@ -2696,10 +2737,24 @@ async def _raise_complaint(args: dict, ctx: ToolContext) -> dict:
     ctx.db.add(Intercept(conversation_id=conv.id, action=InterceptAction.flag, note=note[:2000]))
     # Deliberately NOT conv.intercept_mode = human — see the docstring.
     await ctx.db.commit()
+    # A COMPLAINT RINGS THE TEAM (audit C10; decision D12, 2026-11-20). It
+    # wrote one Activity row and told nobody, while the customer was told a
+    # colleague was on it. Best-effort; never on a draft.
+    told = False
+    if not ctx.read_only:
+        try:
+            told = await _team_note(
+                ctx, kind="complaint", title=f"⚠️ Complaint ({severity})",
+                text=("⚠️ COMPLAINT — " + issue[:160] + ". Neema keeps answering facts; "
+                      "the decision is yours."),
+                body=f"{_channel_label(ctx)} {ctx.wa_id} — {issue[:120]}")
+        except Exception as exc:
+            _log.warning("complaint ring failed for %s: %s", ctx.wa_id, exc)
     _log.info("complaint raised on %s/%s (severity=%s)", ctx.channel, ctx.wa_id, severity)
     return {
         "ok": True,
         "logged": True,
+        "team_told": told,
         "severity": severity,
         "you_may": "explain what happened, give real order status, correct wrong information, "
                    "re-send a payment link, and say a colleague is picking it up (and by when "
