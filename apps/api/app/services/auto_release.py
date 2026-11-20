@@ -224,6 +224,33 @@ async def _bell(redis, conv, title: str, body: str, **extra) -> None:
         _log.info("auto-release bell not sent for %s: %s", conv.id, exc)
 
 
+def owner_numbers() -> list[str]:
+    """The owner's own phones, digits only."""
+    raw = str(getattr(settings, "owner_alert_numbers", "") or "")
+    out = []
+    for part in raw.split(","):
+        n = re.sub(r"\D", "", part)
+        if 9 <= len(n) <= 15 and n not in out:
+            out.append(n)
+    return out
+
+
+async def forward_to_owner(text: str) -> int:
+    """An alert addressed to the owner, sent to the owner's own phones over
+    WhatsApp from the business number. Returns how many WhatsApp accepted —
+    accepted is not delivered: outside the 24-hour window it fails later,
+    silently. Never raises."""
+    sent = 0
+    for n in owner_numbers():
+        try:
+            from app.services import messaging as svc
+            await svc._send_waba(n, text[:900])
+            sent += 1
+        except Exception as exc:
+            _log.warning("owner alert not sent to …%s: %s", n[-3:], exc)
+    return sent
+
+
 async def _send_holding_line(redis, conv, ext: str, text: str) -> None:
     from app.database import AsyncSessionLocal
     from app.services import messaging as svc
@@ -278,6 +305,10 @@ async def _chase_money_hold(redis, conv_id, kind: str, since: datetime) -> dict:
                 await _bell(redis, conv, f"🔴 OWNER: {kind} has waited {hours:g} h for a person",
                             f"{ext}: handed to the team and nobody has replied. "
                             "Please take it or assign it now.", money=kind, for_owner=True)
+                await forward_to_owner(
+                    f"🔴 Neema alert: {kind} has waited {hours:g} h for a person.\n"
+                    f"Chat: {ext} ({conv.channel}). Handed to the team and nobody has "
+                    "replied. Please take it or assign it in the dashboard.")
     except Exception:
         _log.warning("money-hold chase failed for %s", conv_id, exc_info=True)
     return out

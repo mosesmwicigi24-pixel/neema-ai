@@ -356,6 +356,12 @@ class Settings(BaseSettings):
     money_hold_owner_minutes: int = 120
     # …and Neema sends one honest holding line to a customer who is waiting.
     money_hold_line: bool = True
+    # THE OWNER'S OWN PHONES (owner, 2026-11-20: "forward my alerts to …").
+    # Alerts addressed to the owner also go, as a WhatsApp message from the
+    # business number, to these numbers (comma-separated, international
+    # format). WhatsApp delivers a plain message only to a number that has
+    # written to the business number in the last 24 hours. Empty = bell only.
+    owner_alert_numbers: str = "254700706875,254721951853"
     # ── Business facts Neema answers logistics/FAQ questions from ─────────────
     # Free text (location/branches, hours, delivery, payment, contacts) injected
     # into the system prompt. Without it Neema only knows the catalogue and can't

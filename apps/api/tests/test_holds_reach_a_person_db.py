@@ -383,6 +383,14 @@ def thirty(rig, monkeypatch):
     import app.services.auto_release as ar
     monkeypatch.setattr(ar, "_send_holding_line", _send)
     rig.sent = sent
+    rig.owner: list = []
+
+    async def _waba(number, text, *a, **k):
+        rig.owner.append((number, text))
+        return "wamid.test"
+    from app.services import messaging as svc
+    monkeypatch.setattr(svc, "_send_waba", _waba)
+    monkeypatch.setattr(settings, "owner_alert_numbers", "+254 700 000 001, 254700000002", raising=False)
     return rig
 
 
@@ -430,6 +438,7 @@ def test_a_money_matter_stays_with_a_person_and_is_chased(thirty, reason, kind):
     assert kind in notes[-1].text
     bells = _bell_titles(rig)
     assert len(bells) == 1 and bells[0].startswith("💰") and "OWNER" not in bells[0]
+    assert rig.owner == []                                 # the team alert is not the owner's
     from app.services.auto_release import HOLDING_LINE
     assert rig.sent == [(WA, HOLDING_LINE["en"])]          # one honest line
     # a second tick repeats nothing
@@ -448,8 +457,11 @@ def test_the_owner_is_alerted_at_two_hours_once(thirty):
     assert len(bells) == 2 and bells[0].startswith("💰") and bells[1].startswith("🔴 OWNER")
     from app.services.auto_release import HOLDING_LINE
     assert rig.sent == [(WA, HOLDING_LINE["sw"])]
+    # the owner's own phones get it too, once each
+    assert [n for n, _ in rig.owner] == ["254700000001", "254700000002"]
+    assert "a refund has waited" in rig.owner[0][1] and WA in rig.owner[0][1]
     assert _release_tick(rig) == 0
-    assert len(_bell_titles(rig)) == 2 and len(rig.sent) == 1
+    assert len(_bell_titles(rig)) == 2 and len(rig.sent) == 1 and len(rig.owner) == 2
     assert _state(rig, cid)[0] == "human"
 
 

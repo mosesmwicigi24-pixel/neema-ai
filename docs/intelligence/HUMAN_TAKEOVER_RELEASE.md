@@ -75,7 +75,6 @@ It gives no time, no promise and no decision. Each step happens once per matter.
 |---|---|---|
 | A delayed order is treated like the three named (refund, part-payment, complaint) | The hub hands it over with "a human should tell the customer personally" | Let Neema take it back after 30 minutes |
 | The warning is only for a chat where the customer is waiting | Otherwise every chat a colleague finishes rings a bell 20 minutes later | Warn on every held chat |
-| The owner alert uses the team bell, with the title addressed to the owner | The app has no private channel to one person, and no phone alert except for calls | A WhatsApp or SMS to the owner's own number (needs that number configured) |
 | After the 2-hour alert nothing further is sent | One line to the customer, two alerts to staff; more would be noise | Repeat the owner alert daily |
 
 **Risks, and what was not verified**
@@ -87,8 +86,15 @@ It gives no time, no promise and no decision. Each step happens once per matter.
 - Old unanswered money matters already held when this goes live are alerted on the first run, all at once.
 - Settings: `auto_release_warn_minutes` (20, 0 = off), `money_hold_owner_minutes` (120, 0 = off), `money_hold_line` (true). No migration.
 
+### 3. The owner's alert on the owner's own phones (owner, 2026-11-20)
+
+The 2-hour money alert is also sent as a WhatsApp message from the business number to the numbers in `owner_alert_numbers` (two numbers, set by the owner). Only alerts addressed to the owner are forwarded; the team's alerts are not.
+
+- WhatsApp delivers a plain message only to a number that has written to the business number in the last 24 hours. Outside that window the message is accepted and then dropped, and the app is not told. An approved WhatsApp template would remove this limit; none exists for staff alerts.
+- Not sent on the live system yet.
+
 ## Suggestions (not built)
 
 1. **A daily count** on the dashboard: chats handed back because nobody replied, per colleague. It shows where takeovers are being abandoned.
 2. **Working hours.** Outside staffed hours a takeover could release sooner, since nobody is coming.
-3. **A private alert to the owner** (WhatsApp or SMS to the owner's own number) for the 2-hour money alert, instead of the shared bell.
+3. **An approved WhatsApp template for owner alerts**, so they arrive even when the owner's phone has not written to the business number that day.
