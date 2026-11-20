@@ -6460,7 +6460,10 @@ async def _run_comment_engage(redis, channel: str, comment: dict, own_pages: set
     _caption = post_caption(comment.get("post_context"))
     campaign = bool(_caption) and is_campaign_post(_caption)
     # Under a shop post "Prize?" is the price; under a giveaway it is the prize.
-    reading = await read_comment(comment_text, redis=redis, prize_is_price=not campaign)
+    if campaign and is_prize_for_price(comment_text):
+        reading = await read_comment(comment_text, redis=redis, prize_is_price=False)
+    else:
+        reading = await read_comment(comment_text, redis=redis)
     if _prior:
         reading = dict(reading, returning=len(_prior), commenter=first,
                        explained=any(_EXPLAINED_RE.search(x) for x in _prior))
