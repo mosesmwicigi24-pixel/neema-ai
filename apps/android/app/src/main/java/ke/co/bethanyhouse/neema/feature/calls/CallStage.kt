@@ -468,6 +468,11 @@ private fun StatusLine(c: CallUiState) {
         }
         else -> Text(text, color = Sub, fontSize = 15.sp, textAlign = TextAlign.Center, modifier = live)
     }
+    // Why the audio didn't connect, as the server read this device's report (CallUiState.why).
+    if (c.phase == CallPhase.Ended && c.outcome is CallOutcome.Failed) c.why?.let {
+        Spacer(Modifier.height(8.dp))
+        Text(it, color = Sub, fontSize = 13.sp, textAlign = TextAlign.Center, modifier = Modifier.widthIn(max = 360.dp))
+    }
     // Before the call goes through: they left our last calls unanswered (a caution, never a block).
     c.callCaution()?.let {
         Spacer(Modifier.height(12.dp))

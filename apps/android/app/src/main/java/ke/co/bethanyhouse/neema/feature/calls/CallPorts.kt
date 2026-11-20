@@ -55,6 +55,10 @@ interface CallApi {
     suspend fun requestPermission(to: String, name: String? = null): PermissionRequestResponse
     /** POST /admin/calls/{id}/recording — pass [UploadFile.of] a File so it streams from disk. */
     suspend fun uploadRecording(callId: String, file: UploadFile)
+    /** Hang up a call whose audio never formed (`{"reason": "failed"}`): logged failed, not completed. */
+    suspend fun terminateFailed(callId: String) = terminate(callId)
+    /** POST /admin/calls/{id}/diagnostics: what this device saw; returns the server's reading. */
+    suspend fun diagnostics(callId: String, body: kotlinx.serialization.json.JsonObject): String? = null
 }
 
 /** [CallApi] over the real HTTP client. */
@@ -74,6 +78,9 @@ class NeemaCallApi(private val api: NeemaApi) : CallApi {
     override suspend fun requestMessengerPermission(psid: String) = api.calls.requestMessengerPermission(psid)
     override suspend fun requestPermission(to: String, name: String?) = api.calls.requestPermission(to, name)
     override suspend fun uploadRecording(callId: String, file: UploadFile) { api.calls.uploadRecording(callId, file) }
+    override suspend fun terminateFailed(callId: String) { api.calls.terminateFailed(callId) }
+    override suspend fun diagnostics(callId: String, body: kotlinx.serialization.json.JsonObject) =
+        api.calls.diagnostics(callId, body).reading
 }
 
 /** What a peer connection reports back (RTCPeerConnection's state-change handlers). */
@@ -106,6 +113,37 @@ interface CallPeer {
     /** pc.localDescription.sdp — with the gathered candidates, when there are any. */
     val localSdp: String?
     fun close()
+    /** What the connection saw so far (states, the kinds of path found): read when its audio fails. */
+    fun snapshot(): PeerSnapshot? = null
+}
+
+/**
+ * A peer's network picture, for "why didn't the audio connect"
+ * (services/call_diagnostics on the server): the last connection / ICE /
+ * gathering states, how many candidates of each kind (host, srflx, prflx,
+ * relay) this side gathered and the far side offered, the kind of the path
+ * that worked (if any), and how many relay servers refused us.
+ */
+data class PeerSnapshot(
+    val connection: String = "unknown",
+    val ice: String = "unknown",
+    val gathering: String = "unknown",
+    val local: Map<String, Int> = emptyMap(),
+    val remote: Map<String, Int> = emptyMap(),
+    val pair: String = "none",
+    val relayErrors: Int = 0,
+    val seconds: Int = 0,
+)
+
+/** The `typ` of each `a=candidate` / `candidate:` line in [sdp], counted. */
+internal fun candidateKinds(sdp: String?): Map<String, Int> {
+    if (sdp.isNullOrEmpty()) return emptyMap()
+    val out = mutableMapOf<String, Int>()
+    sdp.lineSequence().filter { it.contains("candidate:") }.forEach { line ->
+        val kind = Regex("""\btyp\s+(host|srflx|prflx|relay)\b""").find(line)?.groupValues?.get(1) ?: return@forEach
+        out[kind] = (out[kind] ?: 0) + 1
+    }
+    return out
 }
 
 enum class SdpType { Offer, Answer }

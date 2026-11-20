@@ -531,6 +531,36 @@ class CallAcceptanceTest {
         assertEquals(1, r.count("terminate wacid.1"))
     }
 
+    // Owner, 2026-11-20: WhatsApp calls stuck on "Connecting…". The failure now says why.
+    @Test fun s15_audioThatNeverArrivedReportsWhyAndHangsUpAsFailed() = rig { r ->
+        r.api.ice = IceConfig(record = true, relay = true)
+        assertTrue(r.place().await().isSuccess)
+        r.raw("""{"type":"outbound_answer","call_id":"wacid.out1","sdp":"v=0 their-answer"}""")
+        assertEquals(CallPhase.Connecting, r.state.phase)
+        r.pass(CallManager.CONNECT_GUARD_MS + 1)
+        assertEquals(CallManager.AUDIO_NOT_CONNECTED, r.words)
+        assertEquals("hung up as failed, once", listOf("wacid.out1"), r.api.failedTerminates)
+        assertEquals(1, r.count("terminate wacid.out1"))
+        val (id, body) = r.api.diagnostics.single()
+        assertEquals("wacid.out1", id)
+        val f = body.mapValues { (it.value as? kotlinx.serialization.json.JsonPrimitive)?.content }
+        assertEquals("connect_guard", f["stage"]); assertEquals("outbound", f["direction"]); assertEquals("android", f["client"])
+        assertEquals("true", f["relay_offered"]); assertEquals("failed", f["ice"]); assertEquals("2", f["relay_errors"])
+        assertEquals("""{"host":2,"srflx":1}""", body["local"].toString())
+        assertEquals("the reading is on the card", r.api.diagnosticsReading, r.state.why)
+    }
+
+    @Test fun s15_aReportThatCannotBeSentNeverHoldsTheCardUp() = rig { r ->
+        r.api.diagnosticsError = java.io.IOException("offline")
+        r.ring(); r.calls.answer(); r.settle()
+        r.media.peer.onEvent(PeerEvent.Ended); r.settle()
+        assertEquals(CallManager.AUDIO_NOT_CONNECTED, r.words)
+        assertEquals(CallPhase.Ended, r.state.phase)
+        assertEquals("ice_failed", (r.api.diagnostics.single().second["stage"] as kotlinx.serialization.json.JsonPrimitive).content)
+        assertEquals(null, r.state.why)
+        assertEquals(listOf("wacid.1"), r.api.failedTerminates)
+    }
+
     // ── 16. Recording enabled / disabled ────────────────────────────────────
     @Test fun s16_recordingOn() = rig { r ->
         r.live()
