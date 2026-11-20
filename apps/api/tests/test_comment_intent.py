@@ -113,3 +113,22 @@ def test_note_helper_takes_no_redis():
     import inspect
     params = list(inspect.signature(rt._note_silent_decision).parameters)
     assert params == ["channel", "ext", "cid", "intent"]
+
+
+# ── "Prize?" is "Price?" (owner, 2026-11-20) ─────────────────────────────────
+
+def test_prize_under_a_shop_post_is_the_price():
+    import asyncio
+    from app.agent.runtime import is_bare_price_ask, is_prize_for_price, read_comment
+    for c in ("Prize?", "Prize", "prise pls", "What is the prize", "how much is the prize?", "Prce"):
+        assert is_prize_for_price(c) and is_bare_price_ask(c), c
+        r = asyncio.run(read_comment(c))
+        assert (r["intent"], r["kind"], r["ask"]) == ("high", "question", "price"), (c, r)
+    for c in ("Praise God", "Amen", "I won a prize at your shop last year and loved it"):
+        assert not is_prize_for_price(c), c
+
+
+def test_prize_under_a_giveaway_is_still_a_prize():
+    from app.agent.runtime import is_bare_price_ask
+    assert not is_bare_price_ask("Prize?", prize_is_price=False)
+    assert is_bare_price_ask("Price?", prize_is_price=False)

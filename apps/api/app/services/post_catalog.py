@@ -397,13 +397,32 @@ def _piece_kind(piece: str, kinds: dict) -> str:
     return found
 
 
+# WHAT AN ITEM IS WORN WITH IS NOT WHAT THE POST SELLS (owner, 2026-11-20).
+# "Episcopal cross … made so that it looks right with a cassock, a cope or a
+# full vestment set" was read as a list of three items, so a price question
+# under the cross was answered with the Cope — Complete Set. The words after
+# "looks right with / goes well with / pairs with / matches" name companions,
+# to the end of that sentence; they are dropped before the list is read.
+# ("Comes with", "complete with", "worn with" list a set's own pieces: kept.)
+_COMPANION_RE = re.compile(
+    r"\b(?:looks?|looking|goes|go|going|pairs?|pairing|paired|works?|sits?|match(?:es|ing)?)"
+    r"(?:\s+(?:so|just|very|really|right|well|good|great|best|beautifully|perfectly|"
+    r"nicely|at\s+home))*\s+(?:with|alongside|beside|over|under|on)\b[^.!?\n]*",
+    re.IGNORECASE)
+
+
+def without_companions(caption: str) -> str:
+    """The caption without its "looks right with …" clauses."""
+    return _COMPANION_RE.sub(" ", caption or "")
+
+
 def caption_item_kinds(caption: str, catalog: list[dict]) -> list[str]:
     """The kinds of item a caption ENUMERATES as a list — two or more list
     pieces in a row, each naming one kind ("cassock, shirt, collar, cincture
     belt and stole" → [cassock, shirt, collar, belt, stole]). [] for a caption
     that names one item, or none, or mentions a second kind only in passing
     ("Silver Communion Trays in stock. Each holds 40 cups")."""
-    text = _canonical(caption or "")
+    text = without_companions(_canonical(caption or ""))
     if not text.strip():
         return []
     kinds = _kinds_of(catalog)

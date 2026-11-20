@@ -780,12 +780,32 @@ _BARE_PRICE_ASK_RE = re.compile(
     re.IGNORECASE)
 
 
-def is_bare_price_ask(text: str) -> bool:
-    """True only for the naked price question the no-model pool answers well."""
+# "PRIZE?" IS "PRICE?" (owner, 2026-11-20, a Facebook post of the Episcopal
+# Cross): one "Prize?" was answered "There's no prize on this post", the next
+# "Prize" got the thank-you for praise. Under a shop post the word is the
+# price, misspelt — prize, prise, prce, pric, praiz. Under a giveaway post a
+# prize is a prize, so the caller says which it is.
+_PRIZE_FOR_PRICE_RE = re.compile(
+    r"^[\s\W]*(?:(?:the|what(?:'s|\s+is)?(?:\s+the)?|how\s+much(?:\s+is)?(?:\s+the)?)\s+)?"
+    r"(?:pri[zs]es?|prices|prce|pric|praiz|priece|pirce)"
+    r"(?:\s+(?:please|pls|plz|tafadhali))?[\s\W]*$", re.IGNORECASE)
+
+
+def is_prize_for_price(text: str) -> bool:
     t = (text or "").strip()
-    if not t or len(t.split()) > 5 or re.search(r"\d", t):
+    return bool(t) and len(t.split()) <= 6 and not re.search(r"\d", t) \
+        and bool(_PRIZE_FOR_PRICE_RE.match(t))
+
+
+def is_bare_price_ask(text: str, *, prize_is_price: bool = True) -> bool:
+    """True only for the naked price question the no-model pool answers well.
+    `prize_is_price=False` on a giveaway post, where a prize is a prize."""
+    t = (text or "").strip()
+    if not t or len(t.split()) > 6 or re.search(r"\d", t):
         return False
-    return bool(_BARE_PRICE_ASK_RE.match(t))
+    if prize_is_price and is_prize_for_price(t):
+        return True
+    return len(t.split()) <= 5 and bool(_BARE_PRICE_ASK_RE.match(t))
 
 
 def route_comment_model(user_text: str) -> str:
@@ -4478,7 +4498,7 @@ def _reading_context(reading: dict | None) -> str:
     return ""
 
 
-async def read_comment(text: str, redis=None) -> dict:
+async def read_comment(text: str, redis=None, *, prize_is_price: bool = True) -> dict:
     """READ THE INTENT, GRADE IT (owner, 2026-09-22). One reading of a public
     comment: `intent` — the plan's key (high / low / negative / goodwill /
     spam, exactly as before); `kind` — what it IS: a request (show or send us
@@ -4495,6 +4515,10 @@ async def read_comment(text: str, redis=None) -> dict:
     t = (text or "").strip()
     if not t:
         return _reading("low", "other")
+    # "Prize?" under a shop post is the price, misspelt — read before the
+    # praise readers, which thanked one for it (owner, 2026-11-20).
+    if prize_is_price and is_prize_for_price(t):
+        return _settle_reading(t, _reading("high", "question", ask="price"))
     # Cheering us on is read FIRST: "we can't wait to have you in Zambia" has
     # the word "wait" in it, and a model told to lean negative on anything
     # wait-shaped answered it with an apology and a complaint ticket.
@@ -4508,7 +4532,7 @@ async def read_comment(text: str, redis=None) -> dict:
         return _settle_reading(t, _reading("high", "greeting"))
     # "How much?" / "Bei?" — the commonest comment there is — is a price
     # question by its shape; no model line is needed to say so.
-    if is_bare_price_ask(t):
+    if is_bare_price_ask(t, prize_is_price=prize_is_price):
         return _settle_reading(t, _reading("high", "question", ask="price"))
     # Past the daily spend stop, even this light call waits for midnight: fall
     # to the same default the except-arm uses. "high" then flows into run_turn
@@ -6430,15 +6454,16 @@ async def _run_comment_engage(redis, channel: str, comment: dict, own_pages: set
         await _note_silent_decision(channel, ext, cid,
                                     "an acknowledgement after our earlier reply — nothing to add")
         return
-    reading = await read_comment(comment_text, redis=redis)
-    if _prior:
-        reading = dict(reading, returning=len(_prior), commenter=first,
-                       explained=any(_EXPLAINED_RE.search(x) for x in _prior))
     # A CAMPAIGN POST (owner, 2026-09-26): its comments are entries and cheers.
     # The host answers every one with words in it — the canned thanks and the
     # complaint lines are for shop posts.
     _caption = post_caption(comment.get("post_context"))
     campaign = bool(_caption) and is_campaign_post(_caption)
+    # Under a shop post "Prize?" is the price; under a giveaway it is the prize.
+    reading = await read_comment(comment_text, redis=redis, prize_is_price=not campaign)
+    if _prior:
+        reading = dict(reading, returning=len(_prior), commenter=first,
+                       explained=any(_EXPLAINED_RE.search(x) for x in _prior))
     if campaign:
         reading = _host_reading(dict(reading, campaign=_caption), comment_text)
     intent = reading["intent"]
