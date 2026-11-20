@@ -60,6 +60,10 @@ class _FakeDB:
 def _run_sweep(monkeypatch, conv, last_touch, minutes=45):
     monkeypatch.setattr(settings, "auto_release_minutes", minutes, raising=False)
     db = _FakeDB([conv], last_touch)
+
+    async def _no_money_hold(_db, _conv):      # money holds: test_holds_reach_a_person_db.py
+        return None
+    monkeypatch.setattr(auto_release, "_money_hold", _no_money_hold)
     monkeypatch.setattr(auto_release, "AsyncSessionLocal", lambda: db, raising=False)
     import app.database
     monkeypatch.setattr(app.database, "AsyncSessionLocal", lambda: db, raising=False)

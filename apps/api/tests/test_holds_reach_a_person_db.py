@@ -341,3 +341,155 @@ def test_the_sweeper_escalates_once_per_unanswered_message(rig, monkeypatch):
     assert len(attempts) == 6
     assert len(_flags(rig, cid)) == 2
     assert len(_bells(rig)) == 2 and "Still there?" in _bells(rig)[1]["body"]
+
+
+# ── the warning, and money matters (owner, 2026-11-20: "Merge and do 1 and 2") ──
+
+def _intercept(rig, conv_id, *, at, note, action="intercept"):
+    async def go():
+        from app.models.intercept import Intercept, InterceptAction
+        async with rig.maker() as db:
+            db.add(Intercept(conversation_id=conv_id, action=InterceptAction(action), note=note,
+                             created_at=at))
+            await db.commit()
+    asyncio.run(go())
+
+
+def _bell_titles(rig):
+    import json
+    return [json.loads(p)["title"] for ch, p in rig.redis.published if ch == "ws:channel:agents:all"]
+
+
+@pytest.fixture
+def thirty(rig, monkeypatch):
+    from app.core.config import settings
+    monkeypatch.setattr(settings, "auto_release_minutes", 30, raising=False)
+    monkeypatch.setattr(settings, "auto_release_warn_minutes", 20, raising=False)
+    monkeypatch.setattr(settings, "money_hold_owner_minutes", 120, raising=False)
+    monkeypatch.setattr(settings, "money_hold_line", True, raising=False)
+    sent: list = []
+
+    async def _send(redis, conv, ext, text):
+        from app.models.message import Message, MsgDirection, MsgSender
+        sent.append((ext, text))
+        async with rig.maker() as db:
+            db.add(Message(id=uuid.uuid4(), conversation_id=conv.id, channel=conv.channel,
+                           wa_id=conv.wa_id, external_id=conv.external_id,
+                           direction=MsgDirection.outbound, sender=MsgSender.ai, text=text,
+                           raw_meta={"v": 1, "kind": "person_hold_line"},
+                           created_at=datetime.now(timezone.utc)))
+            await db.commit()
+
+    import app.services.auto_release as ar
+    monkeypatch.setattr(ar, "_send_holding_line", _send)
+    rig.sent = sent
+    return rig
+
+
+def test_the_colleague_is_warned_at_twenty_minutes_once(thirty):
+    rig = thirty
+    cid = _conv(rig, since=_ago(hours=2))
+    _msg(rig, cid, inbound=False, sender="human_agent", at=_ago(hours=1), text="One moment, Pastor.")
+    _msg(rig, cid, inbound=True, at=_ago(minutes=22), text="Are you still there? How much is it?")
+    assert _release_tick(rig) == 0
+    assert _state(rig, cid)[0] == "human"                  # still the person's
+    bells = _bell_titles(rig)
+    assert len(bells) == 1 and "goes back to Neema in 8 min" in bells[0]
+    assert bells[0].startswith("⏰ Team:")                  # nobody assigned
+    assert _release_tick(rig) == 0
+    assert len(_bell_titles(rig)) == 1                     # once per wait
+
+
+def test_no_warning_early_and_none_when_nobody_is_waiting(thirty):
+    rig = thirty
+    early = _conv(rig, since=_ago(hours=2))
+    _msg(rig, early, inbound=True, at=_ago(minutes=10), text="How much is the purple stole?")
+    quiet = _conv(rig, ext="254700000078", since=_ago(hours=2))
+    _msg(rig, quiet, inbound=True, at=_ago(minutes=40), text="How much?", ext="254700000078")
+    _msg(rig, quiet, inbound=False, sender="human_agent", at=_ago(minutes=22),
+         text="KES 2,500, Pastor.", ext="254700000078")
+    assert _release_tick(rig) == 0
+    assert _bell_titles(rig) == []
+
+
+@pytest.mark.parametrize("reason,kind", [
+    ("Refund requested — human judgement required", "a refund"),
+    ("Partial payment received — a human should reconcile with the customer", "a part-payment"),
+    ("Order delayed — a human should tell the customer personally", "a delayed order"),
+])
+def test_a_money_matter_stays_with_a_person_and_is_chased(thirty, reason, kind):
+    rig = thirty
+    cid = _conv(rig, since=_ago(minutes=45))
+    _intercept(rig, cid, at=_ago(minutes=45), note=reason)
+    _msg(rig, cid, inbound=True, at=_ago(minutes=40), text="When do I get my money back?")
+    assert _release_tick(rig) == 0
+    mode, rows, notes = _state(rig, cid)
+    assert mode == "human"
+    assert not [r for r in rows if r.action.value == "release"]
+    assert [n.text for n in notes if n.text.startswith("💰 Still needs a person")]
+    assert kind in notes[-1].text
+    bells = _bell_titles(rig)
+    assert len(bells) == 1 and bells[0].startswith("💰") and "OWNER" not in bells[0]
+    from app.services.auto_release import HOLDING_LINE
+    assert rig.sent == [(WA, HOLDING_LINE["en"])]          # one honest line
+    # a second tick repeats nothing
+    assert _release_tick(rig) == 0
+    assert len(_bell_titles(rig)) == 1 and len(rig.sent) == 1
+    assert _state(rig, cid)[0] == "human"
+
+
+def test_the_owner_is_alerted_at_two_hours_once(thirty):
+    rig = thirty
+    cid = _conv(rig, since=_ago(hours=3))
+    _intercept(rig, cid, at=_ago(hours=3), note="Refund requested — human judgement required")
+    _msg(rig, cid, inbound=True, at=_ago(hours=2, minutes=50), text="Nataka pesa zangu tafadhali")
+    assert _release_tick(rig) == 0
+    bells = _bell_titles(rig)
+    assert len(bells) == 2 and bells[0].startswith("💰") and bells[1].startswith("🔴 OWNER")
+    from app.services.auto_release import HOLDING_LINE
+    assert rig.sent == [(WA, HOLDING_LINE["sw"])]
+    assert _release_tick(rig) == 0
+    assert len(_bell_titles(rig)) == 2 and len(rig.sent) == 1
+    assert _state(rig, cid)[0] == "human"
+
+
+def test_no_holding_line_when_the_customer_is_not_waiting(thirty):
+    rig = thirty
+    cid = _conv(rig, since=_ago(minutes=45))
+    _intercept(rig, cid, at=_ago(minutes=45), note="Refund requested — human judgement required")
+    assert _release_tick(rig) == 0
+    assert rig.sent == [] and len(_bell_titles(rig)) == 1
+    assert _state(rig, cid)[0] == "human"
+
+
+def test_a_complaint_handed_to_the_team_is_a_money_matter(thirty):
+    rig = thirty
+    cid = _conv(rig, since=_ago(minutes=50))
+    _hold(rig, cid, at=_ago(minutes=55), note="COMPLAINT (HIGH) — a colleague must follow up and close this.")
+    _msg(rig, cid, inbound=False, sender="human_agent", note=True, at=_ago(minutes=50),
+         text="🙋 HANDED TO THE TEAM — customer wants a refund for a torn cassock. Neema has stepped back")
+    _msg(rig, cid, inbound=True, at=_ago(minutes=48), text="This is not acceptable.")
+    assert _release_tick(rig) == 0
+    assert _state(rig, cid)[0] == "human"
+    assert len(rig.sent) == 1
+
+
+def test_once_a_colleague_replies_the_ordinary_rule_returns(thirty):
+    rig = thirty
+    cid = _conv(rig, since=_ago(hours=3))
+    _intercept(rig, cid, at=_ago(hours=3), note="Refund requested — human judgement required")
+    _msg(rig, cid, inbound=True, at=_ago(hours=2), text="When do I get my money back?")
+    _msg(rig, cid, inbound=False, sender="human_agent", at=_ago(minutes=50),
+         text="Your refund was sent this morning, Pastor.")
+    assert _release_tick(rig) == 1                         # quiet 50 min, nobody waiting
+    assert _state(rig, cid)[0] == "ai"
+    assert rig.sent == [] and _bell_titles(rig) == []
+
+
+def test_an_ordinary_held_chat_is_still_released(thirty):
+    rig = thirty
+    cid = _conv(rig, since=_ago(hours=2))
+    _intercept(rig, cid, at=_ago(hours=2), note="Agent took over")
+    _msg(rig, cid, inbound=True, at=_ago(minutes=40), text="How much is the purple stole?")
+    assert _release_tick(rig) == 1
+    assert _state(rig, cid)[0] == "ai"
