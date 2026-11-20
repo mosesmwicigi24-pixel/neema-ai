@@ -221,6 +221,24 @@ RANGES: tuple[dict, ...] = (
                  "and wine are other things — mention one only if THEY ask for it"),
     },
     {
+        # Owner, 2026-11-20: "for silver trays, give the 180 usd first" — a
+        # first reply had led with the Double Stacked Silver Tray Set alone.
+        # "Silver tray(s)" / "silver tray set" is the Silver Communion Tray
+        # first, then the Double Stacked Silver Tray Set as the step up. The
+        # Silver Bread Tray is a bread tray, not one of these.
+        "name": "silver trays",
+        "asked": (
+            r"silver\s+trays?(?:\s+sets?)?",
+        ),
+        "include": r"^\s*silver\s+communion\s+tray\s*$|silver\s+tray\s+set",
+        "exclude": r"bread",
+        # Words that name ONE of them: the ordinary search answers.
+        "specific": r"\b(?:stack(?:ed|able)?|double|bread)\b",
+        "stay": ("lead with the Silver Communion Tray at its hub price; the Double "
+                 "Stacked Silver Tray Set is the step up, named AFTER it and never "
+                 "instead of it; the Silver Bread Tray is a bread tray — only if THEY ask"),
+    },
+    {
         # Owner, 2026-09-25: "Holy Communion Cups" without the word chalice
         # are the SMALL cups the tray holds — plastic, silver (stainless),
         # glass, pre-packed — cheapest first, and never a chalice.

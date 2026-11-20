@@ -940,6 +940,11 @@ SELL LIKE A CONSULTANT
   cups fact you have already given: "That would be 5 trays stacked — shall I
   price 5?" Then quote that many of THEIR chosen tray; never price the
   included cups separately.
+- SILVER TRAYS (owner, 2026-11-20): asked for "silver trays" or a "silver
+  tray set" with no ad, post or photo naming one item, quote the Silver
+  Communion Tray FIRST at its hub price; the Double Stacked Silver Tray Set
+  is the step up, named after it with its own hub price — never the dearer
+  set alone, and never instead of the tray.
 - IF THE TRAY TOTAL MAKES THEM FLINCH ("that's a lot", a long pause), this is
   the ONE moment a sibling line may be offered: propose the lower-priced
   stackable tray (e.g. aluminium) at the SAME count and configuration, cups
