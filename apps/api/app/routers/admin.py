@@ -1840,6 +1840,16 @@ async def ask_neema(conv_id: str, request: Request, body: dict,
     return {"answer": answer or "I couldn't find that in what we have on file."}
 
 
+@router.get("/policy/report")
+async def policy_report(request: Request, days: int = 7,
+                        agent: Agent = Depends(get_current_agent)):
+    """Which company policies were found in outbound messages, on which
+    route, and what happened (agent/policy.py). Staff only; nothing here is
+    shown to a customer."""
+    from app.agent import policy as _pol
+    return await _pol.report(request.app.state.redis, days=max(1, min(int(days or 7), 45)))
+
+
 @router.post("/conversations/{conv_id}/answer")
 async def answer_through_neema(conv_id: str, request: Request, body: dict,
                                db: AsyncSession = Depends(get_db),
@@ -1871,6 +1881,43 @@ async def answer_through_neema(conv_id: str, request: Request, body: dict,
                             detail="outside the messaging window — send it as a "
                                    "template, or reply yourself when they next write")
     key = conv.wa_id if conv.channel == "whatsapp" else conv.external_id
+    _redis = request.app.state.redis
+    # ── audit C2, 2026-11-20: this route sent model text with no check ──────
+    # Two route guards, acting only when settings.policy_guards_active; until
+    # then each is RECORDED and the message goes as it does today.
+    from app.agent import policy as _pol
+    _guard = _pol.guards_active()
+    # RTE-01: the customer asked not to be messaged — a person may still
+    # reply as themselves; Neema does not
+    try:
+        from app.services import intent as _intent
+        if await _intent.opted_out(db, _redis, conv):
+            await _pol.record(_redis, [_pol.finding("RTE-01", "team answer to a customer who asked not to be messaged")],
+                              route=_pol.TEAM_ANSWER, channel=conv.channel, key=str(key or ""),
+                              ref=str(agent.id), outcome="prevented" if _guard else "detected")
+            if _guard:
+                raise HTTPException(status_code=409,
+                                    detail="this customer asked not to be messaged — reply yourself if it is needed")
+    except HTTPException:
+        raise
+    except Exception:
+        pass
+    # RTE-02: one click, one message — the same facts for the same chat once
+    if _redis is not None:
+        import hashlib as _hl
+        _once = "teamanswer:once:%s:%s" % (conv.id, _hl.sha1(facts.encode()).hexdigest()[:16])
+        try:
+            if not await _redis.set(_once, "1", nx=True, ex=120):
+                await _pol.record(_redis, [_pol.finding("RTE-02", "the same team answer submitted twice within two minutes")],
+                                  route=_pol.TEAM_ANSWER, channel=conv.channel, key=str(key or ""),
+                                  ref=str(agent.id), outcome="prevented" if _guard else "detected")
+                if _guard:
+                    raise HTTPException(status_code=409,
+                                        detail="that answer is already being sent — check the thread")
+        except HTTPException:
+            raise
+        except Exception:
+            pass
     text = (await runtime.run_turn(
         db, request.app.state.redis, wa_id=key,
         user_text=("[TEAM ANSWER — not a customer message. A colleague has "
@@ -1886,6 +1933,26 @@ async def answer_through_neema(conv_id: str, request: Request, body: dict,
         read_only=True)).strip()
     if not text:
         raise HTTPException(status_code=502, detail="Neema could not compose the answer")
+    # THE POLICY LAYER (agent/policy.py): what Neema wrote is read against the
+    # colleague's own facts — a figure, a date or a discount they did not give
+    # is a finding. Shadow by default; when enforced the colleague is told and
+    # nothing is sent.
+    try:
+        from app.agent import policy as _pol
+        _p_find = _pol.evaluate(text, route=_pol.TEAM_ANSWER, source_text=facts, status_known=True)
+        if _p_find:
+            _p_held = _pol.enforced(_p_find)
+            await _pol.record(_redis, _p_find, route=_pol.TEAM_ANSWER, channel=conv.channel,
+                              key=str(key or ""), ref=str(agent.id))
+            if _p_held:
+                raise HTTPException(
+                    status_code=409,
+                    detail="not sent — the drafted message " + "; ".join(f["reason"] for f in _p_held)
+                           + ". Reply yourself, or give the fact in your note.")
+    except HTTPException:
+        raise
+    except Exception:
+        pass
     from app.services import messaging as svc
     from app.services import outreach_log as _ol
     _meta = _ol.stamp("team_answer", _ol.ANSWER, reference=str(agent.id))

@@ -1,6 +1,6 @@
 # Instruction enforcement audit
 
-Started 2026-11-20 on the owner's directive "System-wide instruction enforcement audit and hardening". Status: **audit complete; no enforcement changed; nothing deployed.**
+Started 2026-11-20 on the owner's directive "System-wide instruction enforcement audit and hardening". Status: **audit complete; Phase 1 built in record-only mode; not deployed.**
 
 ## Result
 
@@ -29,7 +29,9 @@ By risk: 27 critical, 161 high, 299 medium, 343 low.
 | `D_COVERAGE_MATRIX.md` | D. Rules by domain and status; 40 outbound routes against each safeguard |
 | `E_CONFLICT_REGISTER.md` | E. 22 conflicts with resolutions, then every conflicting rule |
 | `H_DECISIONS.md` | H. Twelve decisions for management |
-| F, G | Written when enforcement is built |
+| `F_IMPLEMENTATION_RECORD.md` | F. What Phase 1 built |
+| `G_VERIFICATION_REPORT.md` | G. Tests, false-alarm measurement, coverage |
+| `PLAN.md` | The prioritised plan for the remaining rules |
 
 ## Method
 

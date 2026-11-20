@@ -286,6 +286,19 @@ async def _celebrate(db, redis, conv, event: dict) -> dict:
         from app.agent.review import initiated_issues
         _issues = initiated_issues(text, paid_known=str(event.get("type") or "").endswith(".paid"),
                                    status_known=True)       # the hub's event IS the status
+        try:
+            # THE POLICY LAYER (agent/policy.py) — audit C1, 2026-11-20
+            from app.agent import policy as _pol
+            _p_find = _pol.evaluate(text, route=_pol.HUB_EVENT, status_known=True,
+                                    source_text=f"{brief} {json.dumps(event, default=str)}")
+            if _p_find:
+                _p_held = _pol.enforced(_p_find)
+                await _pol.record(redis, _p_find, route=_pol.HUB_EVENT, channel=conv.channel,
+                                  key=str(recipient or ""), ref=str(event.get("order_number") or ""))
+                if _p_held:
+                    _issues["hard"] = list(_issues["hard"]) + [f"policy {f['policy']}" for f in _p_held]
+        except Exception as _exc:
+            _log.info("policy check skipped on a hub announcement: %s", _exc)
         if _issues["hard"]:
             await _notify_agents(redis, "✋ " + (event.get("type") or "hub event"),
                                  f"{event.get('order_number') or ''}: the drafted announcement was held by "

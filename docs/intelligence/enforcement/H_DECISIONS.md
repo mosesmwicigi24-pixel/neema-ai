@@ -1,6 +1,22 @@
 # H. Decisions for Bethany House management
 
-These are company decisions. Nothing below is built or changed until answered.
+## Decided by the owner, 2026-11-20
+
+| # | Policy as given |
+|---|---|
+| 1 | Discounts must be authorised and recorded before being quoted. Customer inactivity does not authorise a discount. |
+| 2 | Refunds, remakes and replacements require authorised staff approval. Neema may acknowledge and escalate without making commitments. |
+| 3 | Pay on delivery is not permitted. Payment at collection requires an explicitly approved policy. |
+| 4 | Confirmed orders require clear customer authorisation. Draft carts and quotations remain permissible. |
+| 5 | Complaints must create a tracked case, notify the responsible team and preserve Neema's ability to assist the customer. |
+
+These replace D1–D4 and D12 below.
+
+## Still open — each needs its own answer
+
+D5 (repairs), D6 (delivery and production times), D7 (availability wording), D8 (unsolicited check-ins), D9 (who may type guidance), D10 (outreach caps), D11 (second "I'll get back to you").
+
+## The original list
 
 | # | Question | Why it is needed | If no answer |
 |---|---|---|---|
