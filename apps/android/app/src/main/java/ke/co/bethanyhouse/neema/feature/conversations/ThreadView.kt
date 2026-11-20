@@ -187,9 +187,7 @@ internal fun ThreadMessages(
 ) {
     val sorted = remember(messages) { sortThread(messages) }
     val rows = remember(sorted, unreadSnap) { buildThreadRows(sorted, unreadSnap).asReversed() }
-    // Newest at the TOP (owner, 2026-11-20: "new content at the top, newest to
-    // oldest"): row 0 is the newest; older pages are appended below it, so
-    // loading them never moves the reader.
+    // Newest at the bottom (reverseLayout): prepending older pages never moves the reader.
     // Saveable per thread: a reader scrolled back through history keeps their place across rotation.
     val state: LazyListState = androidx.compose.runtime.saveable.rememberSaveable(convId, saver = LazyListState.Saver) { LazyListState() }
     val newest = sorted.lastOrNull()
@@ -218,9 +216,13 @@ internal fun ThreadMessages(
                 Text("No messages yet", fontSize = 14.sp, color = Palette.SagePale)
             }
             else -> LazyColumn(
-                state = state, modifier = Modifier.fillMaxSize(),
+                state = state, reverseLayout = true, modifier = Modifier.fillMaxSize(),
                 contentPadding = PaddingValues(horizontal = 12.dp, vertical = 12.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp),
+                // As WhatsApp (owner, 2026-11-20): oldest at the top, newest at the
+                // bottom, and a SHORT thread starts right under the header instead
+                // of sinking to the bottom. With reverseLayout the arrangement is
+                // mirrored, so `Bottom` here places spare space below the messages.
+                verticalArrangement = Arrangement.spacedBy(8.dp, Alignment.Bottom),
             ) {
                 items(rows, key = { it.key }, contentType = { it::class }) { row ->
                     ThreadRowView(row, channel, recovered, brokenVideos, cb)
@@ -232,7 +234,7 @@ internal fun ThreadMessages(
                             "Couldn't load older messages — tap to retry", fontSize = 11.sp, fontWeight = FontWeight.Medium, color = Palette.Amber700,
                             modifier = Modifier.clip(RoundedCornerShape(50)).clickable(onClickLabel = "Retry loading older messages", onClick = cb.onLoadOlder).padding(horizontal = 10.dp, vertical = 4.dp),
                         )
-                        else Text("↓ scroll for older messages", fontSize = 10.sp, color = Palette.Stone400)
+                        else Text("↑ scroll for older messages", fontSize = 10.sp, color = Palette.Stone400)
                     }
                 }
             }
@@ -249,7 +251,7 @@ private fun ThreadRowView(row: TRow, channel: String?, recovered: Map<String, St
             line = Palette.Moss700.copy(alpha = 0.3f), bg = Palette.Willow100, fg = Palette.Moss700,
         )
         is TPostHead -> Box(Modifier.fillMaxWidth(0.8f).padding(top = 8.dp)) {
-            CommentContextCard(row.ctx, true, channel, "Your post — their comments above", cb.onView, cb.fetchVideo)
+            CommentContextCard(row.ctx, true, channel, "Your post — their comments below", cb.onView, cb.fetchVideo)
         }
         is TEscalated -> Column(Modifier.fillMaxWidth().padding(vertical = 4.dp), horizontalAlignment = Alignment.CenterHorizontally) {
             val t = tint(Palette.Amber50, Palette.Amber700, Palette.Amber200)

@@ -284,6 +284,12 @@ private struct HeaderButton: View {
 
 // ═══════════════════════════ Thread list ═══════════════════════════
 
+extension View {
+    /// A list that grows upward: the scroll view and each row are flipped, so the newest row sits at the bottom
+    /// and prepending older pages never moves the reader (Compose's `reverseLayout`).
+    func flipped() -> some View { scaleEffect(x: 1, y: -1) }
+}
+
 struct ThreadMessagesView: View {
     let convId: String
     let channel: String?
@@ -324,13 +330,18 @@ struct ThreadMessagesView: View {
             } else if messages.isEmpty {
                 Text("No messages yet").font(NeemaFont.manrope(14)).foregroundColor(Palette.sagePale).frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
-                // Newest at the TOP, oldest below (owner, 2026-11-20: "new content at
-                // the top, newest to oldest"); older pages load as the reader swipes up
-                // to the end of the list, appended below, so the reader never moves.
+                // As WhatsApp (owner, 2026-11-20): oldest at the top, newest at the bottom,
+                // and a SHORT thread starts right under the header. The list is flipped,
+                // so a spacer FIRST (the visual bottom) takes the spare height; once the
+                // messages fill the screen it is zero and nothing changes.
+                GeometryReader { geo in
                 ScrollView {
+                    VStack(spacing: 0) {
+                    Spacer(minLength: 0)
                     LazyVStack(spacing: 8) {
                         ForEach(rows.reversed()) { row in
                             ThreadRowView(row: row, channel: channel, recovered: recovered, brokenVideos: brokenVideos, cb: cb)
+                                .flipped()
                         }
                         if hasMore {
                             Group {
@@ -343,14 +354,19 @@ struct ThreadMessagesView: View {
                                     }
                                     .accessibilityLabel("Retry loading older messages")
                                 } else {
-                                    Text("↓ scroll for older messages").font(NeemaFont.manrope(10)).foregroundColor(Palette.stone400)
+                                    Text("↑ scroll for older messages").font(NeemaFont.manrope(10)).foregroundColor(Palette.stone400)
                                 }
                             }
                             .frame(maxWidth: .infinity).padding(4)
+                            .flipped()
                             .onAppear { if !olderError && !loadingOlder { cb.onLoadOlder() } }
                         }
                     }
                     .padding(.horizontal, 12).padding(.vertical, 12)
+                    }
+                    .frame(minHeight: geo.size.height)
+                }
+                .flipped()
                 }
             }
             if loading && !messages.isEmpty {
@@ -374,7 +390,7 @@ private struct ThreadRowView: View {
             DividerPill(text: "\(n) new \(n == 1 ? "message" : "messages")", line: Palette.moss700.opacity(0.3), bg: Palette.willow100, fg: Palette.moss700)
         case .postHead(let ctx, _):
             HStack {
-                CommentContextCard(ctx: ctx, inbound: true, channel: channel, heading: "Your post — their comments above", onView: cb.onView, fetchVideo: cb.fetchVideo)
+                CommentContextCard(ctx: ctx, inbound: true, channel: channel, heading: "Your post — their comments below", onView: cb.onView, fetchVideo: cb.fetchVideo)
                     .frame(maxWidth: 420)
                 Spacer(minLength: 0)
             }
