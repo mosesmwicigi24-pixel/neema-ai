@@ -220,9 +220,8 @@ internal fun ThreadMessages(
                 contentPadding = PaddingValues(horizontal = 12.dp, vertical = 12.dp),
                 // As WhatsApp (owner, 2026-11-20): oldest at the top, newest at the
                 // bottom, and a SHORT thread starts right under the header instead
-                // of sinking to the bottom. With reverseLayout the arrangement is
-                // mirrored, so `Bottom` here places spare space below the messages.
-                verticalArrangement = Arrangement.spacedBy(8.dp, Alignment.Bottom),
+                // of sinking to the bottom (spare space goes below the messages).
+                verticalArrangement = Arrangement.spacedBy(8.dp, Alignment.Top),
             ) {
                 items(rows, key = { it.key }, contentType = { it::class }) { row ->
                     ThreadRowView(row, channel, recovered, brokenVideos, cb)
