@@ -228,7 +228,7 @@ def test_retired_flags_are_gone_and_debounce_stays():
     for retired in ("whatsapp_native", "whatsapp_forward_url",
                     "tier2_all", "tier2_enabled_wa_ids"):
         assert retired not in Settings.model_fields, retired
-    assert Settings.model_fields["whatsapp_debounce_seconds"].default == 30
+    assert Settings.model_fields["whatsapp_debounce_seconds"].default == 60   # owner, 2026-11-20
 
 
 # ── inventory-driven parity: doc requests, first contact, 15s window ─────────
@@ -265,6 +265,6 @@ def test_doc_request_escalates_instead_of_scheduling(monkeypatch):
     assert escalated["n"] == 1 and scheduled["n"] == 0
 
 
-def test_debounce_default_is_thirty_seconds():
+def test_debounce_default_is_one_minute():
     from app.core.config import Settings
-    assert Settings.model_fields["whatsapp_debounce_seconds"].default == 30
+    assert Settings.model_fields["whatsapp_debounce_seconds"].default == 60   # owner, 2026-11-20

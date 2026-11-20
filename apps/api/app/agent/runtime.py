@@ -3810,10 +3810,16 @@ async def _run_meta_after_burst(redis, channel: str, external_id: str, text: str
     the ids of every buffered row, so the turn excludes them from history and
     appends them once (the overlap rule, as on WhatsApp)."""
     if token is not None:
-        await asyncio.sleep(max(settings.meta_debounce_seconds, 1))
+        from app.services.wa_native import reply_wait
+        _first = f"agent:burst:first:{channel}:{external_id}"
+        await asyncio.sleep(await reply_wait(redis, _first, settings.meta_debounce_seconds))
         drained = await _meta_drain(redis, channel, external_id, token)
         if drained is None:
             return False                       # superseded — a later flush owns it
+        try:
+            await redis.delete(_first)         # the burst is answered: the next one starts fresh
+        except Exception:
+            pass
         text, media, ids = drained
         inbound_ids = ids or inbound_ids
     if not ((text or "").strip() or media):

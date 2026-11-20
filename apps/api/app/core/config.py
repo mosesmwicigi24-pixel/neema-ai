@@ -263,7 +263,14 @@ class Settings(BaseSettings):
     # 15s; raised to 30s (owner, 2026-08-12) so a burst of
     # enquiries merges into ONE model call — half the turns on a typing
     # customer, and one coherent answer instead of two overlapping ones.
-    whatsapp_debounce_seconds: int = 30
+    # 60 (owner, 2026-11-20: "Make Neema wait for one minute and combine any
+    # message that comes in one minute and give one response. That allow Neema
+    # to avoid answering in increased turns"). The minute restarts with each
+    # new message, so a customer still typing is not answered mid-thought —
+    # up to `reply_window_max_seconds` from their first message, after which
+    # she answers what she has (a steady typer is never left waiting forever).
+    whatsapp_debounce_seconds: int = 60
+    reply_window_max_seconds: int = 120
     # READ-ONLY ACCESS BY KEY (routers/ops_read): empty = off. 32+ characters.
     ops_read_key: str = ""
     # How many customer photos one turn may carry: every photo of a burst, and
@@ -273,10 +280,9 @@ class Settings(BaseSettings):
     # How far back a message may point at a photo ("as in the picture").
     photo_reference_minutes: int = 180
     # Messenger / Instagram / TikTok DMs: rapid-fire messages are combined for
-    # this long and answered ONCE (cost audit, 2026-09-26). Shorter than
-    # WhatsApp's: a chat bubble expects a quicker turn, and "typing…" shows
-    # meanwhile. 0 disables the buffer.
-    meta_debounce_seconds: int = 12
+    # this long and answered ONCE (cost audit, 2026-09-26). Was 12; one minute
+    # on every private channel (owner, 2026-11-20). 0 disables the buffer.
+    meta_debounce_seconds: int = 60
     whatsapp_verify_token: str = ""
     # Set only when the WhatsApp product lives in a DIFFERENT Meta app than
     # Messenger (different X-Hub-Signature-256 secret). Falls back to
