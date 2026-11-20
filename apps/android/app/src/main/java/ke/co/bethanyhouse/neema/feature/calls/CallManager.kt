@@ -192,6 +192,12 @@ data class CallUiState(
     val refusal: CallRefusal? = null,
     /** WhatsApp records and transcribes this call itself (ice-config `meta_transcription`). */
     val metaTranscription: Boolean = false,
+    /**
+     * After "The call audio couldn't connect": the server's one-line reading of
+     * what this device saw (no path at all, no relay, relay unreachable…), so
+     * the reason is on the card, not only in a log.
+     */
+    val why: String? = null,
 ) {
     val speaker: Boolean get() = route.kind == AudioRouteKind.Speaker
     /** A Messenger call (CALLING_UX.md §2.0): Messenger's look, never the PSID on screen. */
@@ -564,6 +570,8 @@ class CallManager internal constructor(
     private var autoTranscribes = false
     /** WhatsApp records + transcribes the call itself: "summary in a minute" even with nothing recorded here. */
     private var metaTranscribes = false
+    /** ice-config `relay`: our own relay was offered to this call (for the audio-failure report). */
+    private var relayOffered = false
     /** A `call_status: ringing` for our call that beat connect's reply (applied once the id is known). */
     private var earlyRinging: String? = null
     private var recording: CallRecording? = null
@@ -1384,6 +1392,7 @@ class CallManager internal constructor(
         transcribes = cfg.transcribe == true
         autoTranscribes = cfg.autoTranscribe == true
         metaTranscribes = cfg.metaTranscription == true
+        relayOffered = cfg.relay == true
         cfg.channels?.let { _channels.value = it }
         if (_state.value.metaTranscription != metaTranscribes) update { it.copy(metaTranscription = metaTranscribes) }
     }
@@ -1567,10 +1576,10 @@ class CallManager internal constructor(
      * reached — otherwise the customer's phone keeps ringing, or the call stays
      * up on their side, until Meta times it out.
      */
-    private fun terminateSoon(id: String, onTaken: ((String?) -> Unit)? = null) {
+    private fun terminateSoon(id: String, onTaken: ((String?) -> Unit)? = null, failed: Boolean = false) {
         ui.launch {
             for (attempt in 0..TERMINATE_RETRY_MS.size) {
-                try { api.terminate(id); return@launch }
+                try { if (failed) api.terminateFailed(id) else api.terminate(id); return@launch }
                 catch (e: CancellationException) { throw e }
                 catch (e: Exception) {
                     // 409: a colleague answered a moment earlier — their call is left alone.
@@ -2143,9 +2152,51 @@ class CallManager internal constructor(
     private fun loseConnection() {
         val id = _state.value.callId
         val since = liveSince
-        if (since == null) finish(CallOutcome.Failed(AUDIO_NOT_CONNECTED))
-        else finish(CallOutcome.ConnectionLost, connectedSeconds = (((droppedAt ?: now()) - since) / 1_000L).toInt().coerceAtLeast(0))
+        if (since == null) {
+            if (id != null && id != "pending") failAudio(id, "ice_failed")
+            else finish(CallOutcome.Failed(AUDIO_NOT_CONNECTED))
+            return
+        }
+        finish(CallOutcome.ConnectionLost, connectedSeconds = (((droppedAt ?: now()) - since) / 1_000L).toInt().coerceAtLeast(0))
         if (id != null && id != "pending") terminateSoon(id)
+    }
+
+    /**
+     * The audio never formed (owner, 2026-11-20: WhatsApp calls stuck on
+     * "Connecting…"). Read what the connection saw BEFORE it is torn down,
+     * end the call as failed (the server logged these as completed), hang up
+     * as failed, and send the report (services/call_diagnostics, the same
+     * report the web sends since #375); its one-line reading lands on the
+     * card. The report never holds the card up.
+     */
+    private fun failAudio(id: String, stage: String) {
+        val s = _state.value
+        val snap = runCatching { peer?.snapshot() }.getOrNull()
+        val body = kotlinx.serialization.json.buildJsonObject {
+            put("stage", kotlinx.serialization.json.JsonPrimitive(stage))
+            put("client", kotlinx.serialization.json.JsonPrimitive("android"))
+            put("direction", kotlinx.serialization.json.JsonPrimitive(if (s.outbound) "outbound" else "inbound"))
+            put("platform", kotlinx.serialization.json.JsonPrimitive(if (s.messenger) "Android · Messenger call" else "Android · WhatsApp call"))
+            put("relay_offered", kotlinx.serialization.json.JsonPrimitive(relayOffered))
+            if (snap != null) {
+                put("connection", kotlinx.serialization.json.JsonPrimitive(snap.connection))
+                put("ice", kotlinx.serialization.json.JsonPrimitive(snap.ice))
+                put("gathering", kotlinx.serialization.json.JsonPrimitive(snap.gathering))
+                put("local", kotlinx.serialization.json.JsonObject(snap.local.mapValues { kotlinx.serialization.json.JsonPrimitive(it.value) }))
+                put("remote", kotlinx.serialization.json.JsonObject(snap.remote.mapValues { kotlinx.serialization.json.JsonPrimitive(it.value) }))
+                put("pair", kotlinx.serialization.json.JsonPrimitive(snap.pair))
+                put("relay_errors", kotlinx.serialization.json.JsonPrimitive(snap.relayErrors))
+                put("seconds", kotlinx.serialization.json.JsonPrimitive(snap.seconds))
+            }
+        }
+        finish(CallOutcome.Failed(AUDIO_NOT_CONNECTED))
+        terminateSoon(id, failed = true)
+        ui.launch {
+            val reading = try { api.diagnostics(id, body) } catch (e: CancellationException) { throw e } catch (e: Exception) {
+                logW("call diagnostics not sent", e); null
+            }
+            if (!reading.isNullOrBlank()) update { if (it.callId == id && it.phase == CallPhase.Ended) it.copy(why = reading) else it }
+        }
     }
 
     /** Answered (or the customer picked up), but the audio must arrive: never sit on "Connecting…" forever. */
@@ -2156,8 +2207,7 @@ class CallManager internal constructor(
             connectGuard = null
             val s = _state.value
             if (s.phase == CallPhase.Connecting && s.callId == id && !s.reconnecting) {
-                finish(CallOutcome.Failed(AUDIO_NOT_CONNECTED))
-                terminateSoon(id)
+                failAudio(id, "connect_guard")
             }
         }
     }
