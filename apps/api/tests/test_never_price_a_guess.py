@@ -110,13 +110,18 @@ def test_the_design_captions_lead_words_find_nothing(monkeypatch):
 
 
 def test_any_token_fallback_rows_are_marked_partial(monkeypatch):
-    out = asyncio.run(_search_catalog({"query": "silver tray for communion cups"}, _ctx(monkeypatch)))
-    # no row carries all four words → the fallback answers, and says it is partial
+    # ("silver tray …" was this test's phrase until the owner's rule of
+    # 2026-11-20 made a silver tray the Silver Communion Tray: see below.)
+    out = asyncio.run(_search_catalog({"query": "apostolic bell with a tallit"}, _ctx(monkeypatch)))
+    # no row carries all of these words → the fallback answers, and says it is partial
     assert out["results"] and all(r.get("match") == "partial" for r in out["results"])
     assert all("confirm" in r.get("caution", "") for r in out["results"])
     exact = asyncio.run(_search_catalog({"query": "silver communion tray"}, _ctx(monkeypatch)))
     assert exact["results"][0]["name"] == "Silver Communion Tray"
     assert "match" not in exact["results"][0]
+    said = asyncio.run(_search_catalog({"query": "silver tray for communion cups"}, _ctx(monkeypatch)))
+    assert said["results"][0]["name"] == "Silver Communion Tray"
+    assert "match" not in said["results"][0]
 
 
 def test_an_empty_query_still_browses_the_shelf(monkeypatch):
