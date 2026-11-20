@@ -7,6 +7,8 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.selection.toggleable
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.input.ImeAction
 import ke.co.bethanyhouse.neema.feature.agents.isCramped
 import ke.co.bethanyhouse.neema.feature.agents.contentOn
@@ -298,6 +300,9 @@ fun ProfileScreen(dash: DashboardViewModel) {
                 // ── Appearance ──────────────────────────────────────────────
                 ProfileCard("Appearance") {
                     ToggleRow("Dark Mode", "Switch to dark theme", dark) { dash.setDark(!dark) }
+                    Spacer(Modifier.height(14.dp))
+                    val textScale by dash.textScale.collectAsStateWithLifecycle()
+                    TextSizeRow(textScale) { dash.setTextScale(it) }
                 }
 
                 // ── Notifications ───────────────────────────────────────────
@@ -526,6 +531,37 @@ private fun ToggleRow(label: String, desc: String, checked: Boolean, onToggle: (
         }
         Spacer(Modifier.width(12.dp))
         Switch(checked = checked, onCheckedChange = null, colors = neemaSwitchColors())
+    }
+}
+
+/** Text size for the whole app: A− and A+ move one step; the label says where it is. */
+@Composable
+internal fun TextSizeRow(scale: Float, onChange: (Float) -> Unit) {
+    val c = Neema.colors
+    val ts = ke.co.bethanyhouse.neema.core.ui.theme.TextScale
+    Row(Modifier.fillMaxWidth().heightIn(min = 48.dp), verticalAlignment = Alignment.CenterVertically) {
+        Column(Modifier.weight(1f)) {
+            Text("Text size", fontSize = 14.sp, fontWeight = FontWeight.Medium, color = c.text)
+            Text("Makes every screen's text larger or smaller", fontSize = 12.sp, color = c.faint, lineHeight = 16.sp)
+        }
+        Spacer(Modifier.width(8.dp))
+        TextSizeButton("A−", "Smaller text", ts.canShrink(scale), small = true) { onChange(ts.smaller(scale)) }
+        Text(ts.label(scale), fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = c.text,
+            textAlign = androidx.compose.ui.text.style.TextAlign.Center, modifier = Modifier.widthIn(min = 52.dp))
+        TextSizeButton("A+", "Larger text", ts.canGrow(scale), small = false) { onChange(ts.bigger(scale)) }
+    }
+}
+
+@Composable
+private fun TextSizeButton(text: String, label: String, enabled: Boolean, small: Boolean, onClick: () -> Unit) {
+    val c = Neema.colors
+    Box(
+        Modifier.size(44.dp).clip(RoundedCornerShape(10.dp)).border(1.dp, c.border, RoundedCornerShape(10.dp))
+            .clickable(enabled = enabled, role = Role.Button, onClickLabel = label, onClick = onClick)
+            .semantics { contentDescription = label },
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(text, fontSize = if (small) 13.sp else 17.sp, fontWeight = FontWeight.Bold, color = if (enabled) c.text else c.muted)
     }
 }
 

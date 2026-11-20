@@ -114,6 +114,7 @@ struct ProfileBody: View {
                 passwordCard
                 ProfileSection(title: "Appearance") {
                     ToggleRow(label: "Dark Mode", desc: "Switch to dark theme", on: app.dark) { app.setDark(!app.dark) }
+                    TextSizeRow()
                 }
                 notificationsCard
                 soundsCard
