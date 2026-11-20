@@ -2800,7 +2800,7 @@ async def run_turn(db: AsyncSession, redis, wa_id: str, user_text: str, llm: LLM
             and _gate_outcome not in ("held", "unowned"):
         # THE OFFICIAL-NUMBERS LINE IS WRITTEN BY CODE (audit C6): on the first
         # reply to a person, from the configured lines — a digit cannot be
-        # wrong. Whatever version the model wrote is replaced by this one.
+        # wrong. Whatever version the model wrote gives way to this one.
         try:
             from app.agent.voice import official_numbers_line, strip_numbers_line
             _first_reply = not any(isinstance(_m, dict) and _m.get("role") == "assistant"
