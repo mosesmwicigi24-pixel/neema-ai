@@ -50,6 +50,7 @@ class MainActivity : ComponentActivity() {
 
         setContent {
             val dark by dash.dark.collectAsStateWithLifecycle()
+            val textScale by dash.textScale.collectAsStateWithLifecycle()
             val session by dash.session.collectAsStateWithLifecycle()
             val expired by dash.sessionExpired.collectAsStateWithLifecycle()
             val size = calculateWindowSizeClass(this)
@@ -72,7 +73,7 @@ class MainActivity : ComponentActivity() {
             // alerts still reach the bell and the toast in the app, and
             // Profile links to the system settings — no nagging.
             LaunchedEffect(session != null) { if (session != null) maybeAskForNotifications() }
-            NeemaTheme(dark = dark) {
+            NeemaTheme(dark = dark, textScale = textScale) {
                 Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
                     val s = session
                     if (s == null) {

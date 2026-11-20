@@ -12,6 +12,7 @@ struct NeemaApp: App {
             RootView()
                 .environmentObject(app)
                 .environment(\.neema, app.dark ? NeemaColors.dark : NeemaColors.light)
+                .modifier(AppTextSize())   // Profile → Appearance → Text size, app-wide
                 .preferredColorScheme(app.session == nil ? .dark : (app.dark ? .dark : .light))
                 .onOpenURL { url in app.open(url) }
                 .onChange(of: scenePhase) { _, phase in app.setForeground(phase == .active) }

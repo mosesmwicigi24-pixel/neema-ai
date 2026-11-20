@@ -192,6 +192,8 @@ class DashboardViewModel(
 
     val dark: StateFlow<Boolean> = container.prefs.dark
     fun setDark(v: Boolean) = container.prefs.setDark(v)
+    val textScale: StateFlow<Float> = container.prefs.textScale
+    fun setTextScale(v: Float) = container.prefs.setTextScale(v)
 
     private var pollers = mutableListOf<Job>()
 
