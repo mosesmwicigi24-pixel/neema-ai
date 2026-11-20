@@ -529,8 +529,24 @@ async def _send(db, redis, conv, text: str, action=None, shadow: list | None = N
     # THE POLICY LAYER (agent/policy.py): a message Neema starts is read
     # against the same company rules as a reply (audit C1, 2026-11-20).
     from app.agent import policy as _pol
-    _p_find = _pol.evaluate(text, route=_pol.INITIATED,
+    _p_said: list[str] = []
+    try:
+        # what the message may draw its figures from: the conversation itself
+        # (its own session — this function's reads on `db` are left as they are)
+        from app.database import AsyncSessionLocal
+        from app.models.message import Message
+        async with AsyncSessionLocal() as _db2:
+            _p_said = [str(t) for t in (await _db2.execute(
+                select(Message.text).where(Message.conversation_id == conv.id,
+                                           Message.text.isnot(None))
+                .order_by(Message.created_at.desc()).limit(16))).scalars().all() if t]
+    except Exception:
+        _p_said = []
+    _p_find = _pol.evaluate(text, route=_pol.INITIATED, said=_p_said,
                             source_text=str(getattr(action, "payload", "") or ""))
+    if not _p_said:
+        # with no conversation to read, an unsourced figure cannot be told from a sourced one
+        _p_find = [f for f in _p_find if f["policy"] != "FIN-01"]
     if _p_find:
         _p_held = _pol.enforced(_p_find)
         await _pol.record(redis, _p_find, route=_pol.INITIATED, channel=conv.channel,

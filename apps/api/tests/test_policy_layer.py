@@ -297,3 +297,68 @@ def test_the_instructions_own_shipping_times_have_a_source():
     assert "ORD-02" in ids("Your order number is BH-10432.")
     assert "ORD-02" not in ids("Your order is placed once you confirm the total.")
     assert "FIN-02" not in ids("The final price is $630 for the three garments.")
+
+
+# ── Phase 2: the remaining critical fixes, each recorded or behind a switch ──
+
+def test_a_figure_on_a_message_neema_starts_needs_a_source():
+    said = ["The cassock set is $210, everything included."]
+    assert "FIN-01" not in ids("Still thinking about the cassock set at $210?", route=pol.INITIATED, said=said)
+    assert "FIN-01" in ids("Still thinking about the cassock set at $190?", route=pol.INITIATED, said=said)
+    # a colleague's own figure may be delivered; another may not
+    assert "FIN-01" not in ids("Yes, we make it — KES 3,500.", route=pol.TEAM_ANSWER, source_text="yes we make it, 3500")
+    assert "FIN-01" in ids("Yes, we make it — KES 3,800.", route=pol.TEAM_ANSWER, source_text="yes we make it, 3500")
+    # the live reply is the gate's to check, not this rule's
+    assert "FIN-01" not in ids("The cassock set is $190.")
+
+
+def test_a_near_match_rows_price_is_not_the_items(monkeypatch):
+    monkeypatch.setattr(settings, "usd_kes_rate", 100, raising=False)
+    tray = {"id": 4, "name": "Silver Communion Tray", "price": 18000, "price_usd": 180}
+    bread = {"id": 10, "name": "Silver Bread Tray", "price": 13000, "price_usd": 130}
+    assert pol.partial_only_figures("It is $130.", [tray, bread], {10}) == [130.0]
+    assert pol.partial_only_figures("It is $180.", [tray, bread], {10}) == []
+    assert pol.partial_only_figures("It is $130.", [tray, bread], set()) == []
+
+
+def test_a_check_in_needs_a_time_the_customer_named():
+    assert pol.customer_named_a_time(["Let me talk to the committee, come back to me on Friday"])
+    assert pol.customer_named_a_time(["nitakujulisha wiki ijayo"])
+    assert pol.customer_named_a_time(["after the service on Sunday"])
+    assert not pol.customer_named_a_time(["How much is the purple one?", "ok thanks"])
+    assert not pol.customer_named_a_time([])
+
+
+def test_the_official_numbers_line_is_built_from_the_configured_lines(monkeypatch):
+    from app.agent.voice import official_numbers_line, strip_numbers_line
+    monkeypatch.setattr(settings, "whatsapp_handoff_number", "+254727891989", raising=False)
+    monkeypatch.setattr(settings, "whatsapp_handoff_alt", "+254785490805", raising=False)
+    line = official_numbers_line()
+    assert line == ("Our official numbers are +254727891989 and +254785490805. "
+                    "Any other number is not from Bethany House.")
+    assert "+254727891989 na +254785490805" in official_numbers_line(swahili=True)
+    assert ids(line) == []
+    # whatever the model wrote, with a wrong digit, is removed
+    wrong = "Welcome to Bethany House.\n\nOur official numbers are +254727891998 and +254785490805. Any other number is not from Bethany House."
+    assert strip_numbers_line(wrong) == "Welcome to Bethany House."
+    assert strip_numbers_line("Which colour would you like?") == "Which colour would you like?"
+    # on one line with other sentences: only the two sentences go
+    one = "Welcome, Pastor. Our official numbers are +254727891998 and +254785490805. Any other number is not from Bethany House. Which colour?"
+    assert strip_numbers_line(one) == "Welcome, Pastor. Which colour?"
+
+
+def test_the_phase_two_switches_are_off():
+    from app.core.config import Settings
+    for name in ("official_numbers_by_code", "offer_price_after_grant", "second_deferral_line"):
+        assert Settings.model_fields[name].default is False, name
+
+
+def test_phase_two_is_wired():
+    import inspect
+    from app.agent import runtime, tools
+    assert "official_numbers_by_code" in inspect.getsource(runtime.run_turn)
+    assert "second_deferral_line" in inspect.getsource(runtime.closer_gate)
+    assert "offer_price_after_grant" in inspect.getsource(tools._search_catalog)
+    assert "ACT-03" in inspect.getsource(tools._schedule_check_in)
+    assert "open_team_check" in inspect.getsource(tools._raise_complaint)
+    assert "partial_only_figures" in inspect.getsource(runtime.run_turn)

@@ -700,7 +700,16 @@ async def closer_gate(redis, channel: str, key: str, text: str) -> bool:
         if not is_closer(text):
             await redis.delete(rkey)
             return False
-        if await redis.get(rkey):
+        _lid = await redis.get(rkey)
+        if _lid and getattr(settings, "second_deferral_line", False) \
+                and (_lid.decode() if isinstance(_lid, bytes) else str(_lid)) == "1" \
+                and not is_bare_closer(text):
+            # Decision D11 (2026-11-20): a SECOND "I'll get back to you" gets
+            # one short line; the third and later get silence.
+            await redis.set(rkey, "2", ex=_CLOSER_KEY_TTL)
+            _log.info("closer gate: a second deferral gets one line for %s/%s", channel, key)
+            return False
+        if _lid:
             await redis.expire(rkey, _CLOSER_KEY_TTL)   # keep the lid on
             _log.info("closer gate: politeness ping-pong ended for %s/%s", channel, key)
             await _mark_silenced(redis, channel, key)
@@ -731,7 +740,11 @@ async def mark_closer_answered(redis, channel: str, key: str, inbound_text: str,
     if not is_closer(inbound_text):
         return
     try:
-        await redis.set(f"closer:{channel}:{key}", "1", ex=_CLOSER_KEY_TTL)
+        _cur = await redis.get(f"closer:{channel}:{key}")
+        if (_cur.decode() if isinstance(_cur, bytes) else str(_cur or "")) == "2":
+            await redis.expire(f"closer:{channel}:{key}", _CLOSER_KEY_TTL)   # the second line is spent
+        else:
+            await redis.set(f"closer:{channel}:{key}", "1", ex=_CLOSER_KEY_TTL)
     except Exception:
         pass
 
@@ -2760,6 +2773,12 @@ async def run_turn(db: AsyncSession, redis, wa_id: str, user_text: str, llm: LLM
                 for _m in messages if isinstance(_m, dict) and _m.get("role") == "user"][-8:]
             _p_find = _pol.evaluate(reply, route=_pol.LIVE, tool_log=tool_log, said=_p_said,
                                     source_text=str(_turn_note or ""))
+            _p_part = _pol.partial_only_figures(reply, ctx.seen_products,
+                                                getattr(ctx, "partial_products", ()), currency)
+            if _p_part:
+                _p_find.append(_pol.finding(
+                    "PRD-02", "quotes a price that belongs only to a near-match row",
+                    ", ".join(f"{x:g}" for x in _p_part[:3])))
             if _p_find:
                 _p_held = _pol.enforced(_p_find)
                 await _pol.record(redis, _p_find, route=_pol.LIVE, channel=channel, key=key)
@@ -2776,6 +2795,23 @@ async def run_turn(db: AsyncSession, redis, wa_id: str, user_text: str, llm: LLM
                     _gate_outcome = "held"
         except Exception as exc:
             _log.warning("policy check skipped for %s: %s", key, exc)
+    if reply and not read_only and not scribe_only and not public_comment \
+            and getattr(settings, "official_numbers_by_code", False) \
+            and _gate_outcome not in ("held", "unowned"):
+        # THE OFFICIAL-NUMBERS LINE IS WRITTEN BY CODE (audit C6): on the first
+        # reply to a person, from the configured lines — a digit cannot be
+        # wrong. Whatever version the model wrote is replaced by this one.
+        try:
+            from app.agent.voice import official_numbers_line, strip_numbers_line
+            _first_reply = not any(isinstance(_m, dict) and _m.get("role") == "assistant"
+                                   for _m in messages[:-1])
+            reply = strip_numbers_line(reply)
+            if _first_reply and reply.strip():
+                _line = official_numbers_line(swahili=looks_swahili(user_text or ""))
+                if _line:
+                    reply = reply.rstrip() + "\n\n" + _line
+        except Exception as exc:
+            _log.info("official-numbers line skipped for %s: %s", key, exc)
     if reply and customer_name and not public_comment:
         # A name is not a prefix (agent/voice.drop_repeated_name).
         try:

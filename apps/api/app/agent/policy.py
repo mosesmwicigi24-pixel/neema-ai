@@ -55,6 +55,9 @@ POLICIES: dict[str, tuple[str, str, str]] = {
     "FUL-01": ("No delivery date or production time without a source", "high", "D6"),
     "FUL-02": ("Repairs: our items, 14 days, never 'for life'", "high", "D5"),
     "ACT-01": ("A promise to ask the team needs the team to have been asked", "high", "D7"),
+    "ACT-03": ("A check-in needs a time the customer named", "high", "D8"),
+    "FIN-01": ("Every figure has a source", "critical", ""),
+    "PRD-02": ("A near-match row's price is not the item's price", "critical", ""),
     # the existing reply gate's outcomes, recorded here so one report shows all
     "GATE": ("The reply gate's own verdict (agent/review.py)", "medium", ""),
     # route guards (bypass and duplicate-send findings of the audit)
@@ -225,6 +228,51 @@ _YES_RE = re.compile(
     re.IGNORECASE)
 
 
+_NAMED_TIME_RE = re.compile(
+    r"\b(?:" + _WHEN + r"|next (?:month|year|sunday|monday|tuesday|wednesday|thursday|friday|saturday)|"
+    r"(?:in|after|within) (?:a|an|one|two|three|\d{1,2}) (?:day|week|month|hour)s?|"
+    r"(?:end|start|beginning|middle) of (?:the |this |next )?(?:week|month|year)|"
+    r"(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)\w*|"
+    r"later (?:today|this week|this month)|in the (?:morning|afternoon|evening)|"
+    r"(?:after|before) (?:the )?(?:service|sunday|christmas|easter|payday|salary)|"
+    r"wiki ijayo|mwezi ujao|jioni|asubuhi|baadaye leo)\b", re.IGNORECASE)
+
+
+def customer_named_a_time(said: list[str] | tuple[str, ...] | None) -> bool:
+    """Did the customer say WHEN to come back to them? Read from their words."""
+    return any(_NAMED_TIME_RE.search(s) for s in (said or ()) if s)
+
+
+def unsourced_figures(text: str, sources: list[str]) -> list[float]:
+    """Money figures in `text` that appear in none of `sources` (the brief a
+    message was composed from, the conversation, a colleague's facts)."""
+    from app.agent.review import money_figures
+    have: set[float] = set()
+    for s in sources:
+        try:
+            have.update(money_figures(str(s or "")))
+            # a bare number in a brief or a hub event is a source too
+            have.update(float(n.replace(",", "")) for n in re.findall(r"(?<![\w.])\d[\d,]*(?:\.\d+)?", str(s or ""))
+                        if n.replace(",", "").replace(".", "").isdigit())
+        except Exception:
+            pass
+    return [f for f in money_figures(text or "") if not any(abs(f - h) < 0.51 for h in have)]
+
+
+def partial_only_figures(text: str, seen: list, partial_ids, currency: str = "USD") -> list[float]:
+    """Figures in `text` that belong ONLY to rows that matched some of the
+    customer's words (audit C11): the price of a near-match, quoted."""
+    from app.agent.review import _row_figures, money_figures
+    part, full = set(), set()
+    for p in seen or ():
+        try:
+            (part if p.get("id") in (partial_ids or ()) else full).update(_row_figures(p, currency))
+        except Exception:
+            pass
+    only = {f for f in part if not any(abs(f - g) < 0.51 for g in full)}
+    return [f for f in money_figures(text or "") if any(abs(f - o) < 0.51 for o in only)]
+
+
 def customer_agreed(said: list[str] | tuple[str, ...] | None, last: int = 3) -> bool:
     """Do the customer's (or a colleague's) recent words carry a yes? Read
     from the record — `said` newest first, as tools._said_in_record gives it."""
@@ -331,6 +379,17 @@ def evaluate(text: str | None, *, route: str, tool_log: list | None = None,
             continue
         add("FUL-01", f"gives a time ({when}) that no tool, colleague or customer stated", m)
         break
+
+    # FIN-01 — on the routes Neema composes from a brief (she starts the
+    # message, or re-words a colleague's facts) every figure has a source
+    if route in (INITIATED, HUB_EVENT, TEAM_ANSWER):
+        try:
+            loose = unsourced_figures(t, sources)
+            if loose:
+                add("FIN-01", "states a figure that is in neither the brief nor the conversation",
+                    excerpt=", ".join(f"{x:g}" for x in loose[:3]))
+        except Exception:
+            pass
 
     # ACT-01 — the team must actually have been asked
     if route == LIVE:

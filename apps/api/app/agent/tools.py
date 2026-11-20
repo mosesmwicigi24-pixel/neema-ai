@@ -46,6 +46,8 @@ class ToolContext:
     # Lets a caller link to the EXACT product the agent priced instead of
     # re-guessing it from the reply text. Survives dataclasses.replace().
     seen_products: list = field(default_factory=list)
+    # hub ids of rows that matched only SOME of the customer's words (audit C11)
+    partial_products: set = field(default_factory=set)
     # Draft/preview mode: look-only. Tools must not write ANYTHING — not even a
     # best-effort side log like a demand signal.
     read_only: bool = False
@@ -910,7 +912,21 @@ async def _search_catalog(args: dict, ctx: ToolContext) -> dict:
         # away margin on every one of them. This block is the card Neema holds
         # until it buys her something (see `apply_offer`), with the arithmetic
         # already done so that when she plays it the number is right.
-        if campaign and promo.applies_to(campaign, p) and isinstance(row.get("price"), (int, float)):
+        if campaign and promo.applies_to(campaign, p) and isinstance(row.get("price"), (int, float)) \
+                and getattr(settings, "offer_price_after_grant", False):
+            # Owner's policy 1 (2026-11-20): a discount is authorised and
+            # recorded BEFORE it is quoted, and inactivity does not earn it.
+            # The writer learns an offer exists, not its figure: apply_offer
+            # grants it, records it and hands back the exact price.
+            row["offer_available"] = {
+                "name": campaign["name"], "ends_on": campaign["ends_on"],
+                "hold": ("DO NOT mention this yet. Quote `price`. Only when they ASK for a "
+                         "discount or balk at the price, call `apply_offer` with this item: "
+                         "it grants the offer, records it and gives you the exact figure. "
+                         "Never state a discount or a reduced price before that call "
+                         "succeeds. A customer who has simply gone quiet has not earned it."),
+            }
+        elif campaign and promo.applies_to(campaign, p) and isinstance(row.get("price"), (int, float)):
             _off = promo.offer_price(campaign, row["price"])
             if _off is not None:
                 row["offer_available"] = {
@@ -1100,6 +1116,10 @@ async def _search_catalog(args: dict, ctx: ToolContext) -> dict:
         # exact product the agent priced — the model's row above omits the slug.
         if p.get("slug"):
             ctx.seen_products.append(p)
+        if partial:
+            ctx.partial_products.add(p.get("id"))
+        elif p.get("id") in ctx.partial_products:
+            ctx.partial_products.discard(p.get("id"))      # found again as a full match
         if len(results) >= 8:
             break
     if not results and query and not ctx.read_only:
@@ -2750,6 +2770,19 @@ async def _raise_complaint(args: dict, ctx: ToolContext) -> dict:
                 body=f"{_channel_label(ctx)} {ctx.wa_id} — {issue[:120]}")
         except Exception as exc:
             _log.warning("complaint ring failed for %s: %s", ctx.wa_id, exc)
+        # … AND IS A TRACKED CASE (owner's policy 5): the same open team check
+        # an availability question gets, so it has an owner, ages, is chased by
+        # the commitments sweep and holds sales nudges until a colleague
+        # answers. Its own session: the order of this turn's reads is untouched.
+        try:
+            from app.database import AsyncSessionLocal
+            from app.services.deals import open_team_check
+            async with AsyncSessionLocal() as _db2:
+                _conv2 = await _db2.get(Conversation, conv.id)
+                if _conv2 is not None:
+                    await open_team_check(_db2, _conv2, "Complaint: " + issue[:120])
+        except Exception as exc:
+            _log.info("complaint case not opened for %s: %s", ctx.wa_id, exc)
     _log.info("complaint raised on %s/%s (severity=%s)", ctx.channel, ctx.wa_id, severity)
     return {
         "ok": True,
@@ -3386,6 +3419,22 @@ async def _schedule_check_in(args: dict, ctx: ToolContext) -> dict:
     reason = (args.get("reason") or "").strip()
     if not reason:
         return {"error": "reason is required — what should the check-in be about?"}
+    # A CHECK-IN NEEDS A TIME THE CUSTOMER NAMED (policy ACT-03; decision D8,
+    # 2026-11-20). Read from their own recent words. Recorded always; refused
+    # only when the policy is enforced.
+    try:
+        from app.agent import policy as _pol
+        if not ctx.read_only and not _pol.customer_named_a_time(await _recent_customer_words(ctx, limit=4)):
+            _f = [_pol.finding("ACT-03", "check-in scheduled though the customer named no time")]
+            _held = _pol.enforced(_f)
+            await _pol.record(ctx.redis, _f, route="schedule_check_in", channel=ctx.channel,
+                              key=str(ctx.wa_id or ""))
+            if _held:
+                return {"error": "no check-in was booked — the customer has not said when to come back to them",
+                        "next_step": "Do not promise to check in. If it helps, ask when would suit them; "
+                                     "book it only once they name a time."}
+    except Exception as _exc:
+        _log.info("check-in time check skipped for %s: %s", ctx.wa_id, _exc)
     about = check_in_about(args)
     kind = _CHECK_IN_KINDS[about]
     if ctx.read_only:

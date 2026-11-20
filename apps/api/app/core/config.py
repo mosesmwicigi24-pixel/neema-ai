@@ -381,6 +381,16 @@ class Settings(BaseSettings):
     # Payment at collection in the shop needs an explicitly approved policy
     # (owner, 2026-11-20). False = saying it is a FIN-04 finding.
     policy_pay_at_collection: bool = False
+    # ── Phase 2 changes, each OFF until the owner switches it on ─────────────
+    # The official-numbers line of the first greeting is written by code from
+    # the configured lines (a digit can then not be wrong).
+    official_numbers_by_code: bool = False
+    # The offer price is given to the writer only once the offer is granted
+    # (owner's policy 1), and a quiet customer does not earn it.
+    offer_price_after_grant: bool = False
+    # A second "I'll get back to you" gets one short line, then silence
+    # (decision D11). Off = silence from the second, as today.
+    second_deferral_line: bool = False
     # ── Business facts Neema answers logistics/FAQ questions from ─────────────
     # Free text (location/branches, hours, delivery, payment, contacts) injected
     # into the system prompt. Without it Neema only knows the catalogue and can't
