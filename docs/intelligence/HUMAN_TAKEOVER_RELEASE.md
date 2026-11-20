@@ -37,15 +37,64 @@ Both exceptions above were the owner's earlier decisions. This instruction repla
 ## Risks, and what was not verified
 
 - **Not run with the model.** How Neema words the pick-up after a colleague's silence has not been seen.
-- **Sensitive holds come back too.** A chat handed to staff for a refund request, a part payment or a delayed order returns to Neema after thirty minutes like any other. Her instructions already keep her from promising a refund or a resolution, and the note tells her to say a colleague has not picked it up; but she is answering a customer who was told a person would.
 - **A chat held because sending failed** (three failed deliveries) is released once and will fail the same way: three more attempts, then it stays with staff.
 - **Older than the reply window:** a customer who has waited more than about 23 hours cannot be answered by Neema on that channel; the chat is released, and she answers when they next write.
 - **The timer runs every five minutes**, so "30 minutes" is 30 to 35.
 - The live effect on the 74 blocked follow-ups was not measured.
 
+## Added 2026-11-20 (owner: "Merge and do 1 and 2")
+
+### 1. The warning
+
+| When | What |
+|---|---|
+| The customer has waited 20 minutes (`auto_release_warn_minutes`) | One alert on the team bell, addressed by first name to the colleague the chat is assigned to ("Team" when nobody is): "this chat goes back to Neema in N min", with how long the customer has waited |
+
+Once per wait. Only where the customer is waiting; a chat nobody is waiting on returns quietly, as before.
+
+### 2. Money matters stay with a person, and are chased
+
+A held chat is a money matter when the reason it was handed over names a refund, a part-payment, a complaint or a delayed order. The reason is read from the hand-over records (a hub event, a complaint case, Neema's own hand-off reason), never from the customer's words.
+
+| When | What |
+|---|---|
+| Any time, while no colleague has replied | Not handed back to Neema |
+| 30 minutes | Team alerted again; a note on the thread; if the customer is waiting and the channel's reply window is open, Neema sends one holding line |
+| 2 hours (`money_hold_owner_minutes`) | Alert addressed to the owner; a note on the thread |
+| A colleague replies | The matter is closed; the ordinary 30-minute rule applies again |
+
+The holding line, in English or Swahili by the customer's last message:
+
+> Thank you for your patience. This needs a decision from one of my colleagues, and they have not been able to reply yet. I have raised it with them again, and they will answer you here.
+
+It gives no time, no promise and no decision. Each step happens once per matter.
+
+**Decisions taken that the owner may want to change**
+
+| Decision | Why | The alternative |
+|---|---|---|
+| A delayed order is treated like the three named (refund, part-payment, complaint) | The hub hands it over with "a human should tell the customer personally" | Let Neema take it back after 30 minutes |
+| The warning is only for a chat where the customer is waiting | Otherwise every chat a colleague finishes rings a bell 20 minutes later | Warn on every held chat |
+| After the 2-hour alert nothing further is sent | One line to the customer, two alerts to staff; more would be noise | Repeat the owner alert daily |
+
+**Risks, and what was not verified**
+
+- No model is involved in either addition; the alerts and the line are fixed text. Tested on a real database (11 new tests), not on the live system.
+- The bell reaches whoever has the dashboard or app open. A colleague who is offline sees nothing until they return.
+- A reason that only mentions one of the words (a held reply that quoted the refund policy) also keeps the chat with a person.
+- A money matter nobody ever answers stays silent after the holding line and the two alerts.
+- Old unanswered money matters already held when this goes live are alerted on the first run, all at once.
+- Settings: `auto_release_warn_minutes` (20, 0 = off), `money_hold_owner_minutes` (120, 0 = off), `money_hold_line` (true). No migration.
+
+### 3. The owner's alert on the owner's own phones (owner, 2026-11-20)
+
+The 2-hour money alert is also sent as a WhatsApp message from the business number to the numbers in `owner_alert_numbers` (two numbers, set by the owner). Only alerts addressed to the owner are forwarded; the team's alerts are not.
+
+- WhatsApp delivers a plain message only to a number that has written to the business number in the last 24 hours. Outside that window the message is accepted and then dropped, and the app is not told. An approved WhatsApp template would remove this limit; none exists for staff alerts.
+- Not sent on the live system yet.
+
 ## Suggestions (not built)
 
-1. **Warn before releasing.** At 20 minutes, ping the colleague who holds the chat: "release in 10 minutes unless you reply". Cheap, and it turns a silent hand-back into a prompt to answer.
-2. **Keep money matters with a person, but chase.** For refund, part-payment and complaint holds: instead of handing back to Neema, re-alert the team at 30 minutes and the owner at 2 hours, and let Neema send one honest holding line.
-3. **A daily count** on the dashboard: chats handed back because nobody replied, per colleague. It shows where takeovers are being abandoned.
-4. **Working hours.** Outside staffed hours a takeover could release sooner, since nobody is coming.
+1. **A daily count** on the dashboard: chats handed back because nobody replied, per colleague. It shows where takeovers are being abandoned.
+2. **Working hours.** Outside staffed hours a takeover could release sooner, since nobody is coming.
+3. **An approved WhatsApp template for owner alerts**, so they arrive even when the owner's phone has not written to the business number that day.

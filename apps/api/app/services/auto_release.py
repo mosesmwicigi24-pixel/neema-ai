@@ -48,6 +48,23 @@ THE PING-PONG CANNOT START: one automatic release per wait
 escalated again, it stays with staff until a person replies or the customer
 writes anew. `auto_release_waiting = false` restores the 2026-10-10 rule.
 
+TWO ADDITIONS (owner, 2026-11-20: "Merge and do 1 and 2"):
+
+  1. THE WARNING. `auto_release_warn_minutes` (20) into a customer's wait, the
+     colleague holding the chat is told, by name, on the team bell: it goes
+     back to Neema in about ten minutes unless they reply. Once per wait.
+     Only for a chat where the customer is waiting — a chat nobody is waiting
+     on returns quietly, as it always did.
+  2. MONEY MATTERS STAY WITH A PERSON, AND ARE CHASED. A chat held for a
+     refund, a part-payment, a complaint or a delayed order (`_money_hold`)
+     is never handed back while no colleague has replied: only a person may
+     decide those. Instead, at `auto_release_minutes` the team is alerted
+     again and — if the customer is waiting and the channel's window is open
+     — Neema sends ONE honest holding line (`HOLDING_LINE`: no promise, no
+     time, no decision); at `money_hold_owner_minutes` (120) the owner is
+     alerted. Each once per hold, recorded as a thread note. The moment a
+     colleague replies the hold is closed and the ordinary rule applies.
+
 A polite closer ("thanks", "🙏") is not waiting on anyone, and a chat nobody is
 waiting on is released when the colleague has been quiet for
 `auto_release_minutes`, as before. A release leaves an internal note on the
@@ -55,7 +72,9 @@ thread so staff can see why Neema has it back.
 """
 from __future__ import annotations
 
+import json
 import logging
+import re
 from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import and_, func, or_, select
@@ -83,6 +102,284 @@ PICKED_UP_NOTE = (
 # One short line (owner, 2026-11-15: notes "too many and too long"); it sits in
 # the thread note's history, not in the chat.
 _THREAD_NOTE = "↩ Back to Neema — no colleague reply in {mins} min; {why}."
+
+
+# ── 1. the warning ───────────────────────────────────────────────────────────
+WARNED_KEY = "agent:autorelease:warned:{conv}:{since}"
+
+# ── 2. money matters: with a person, chased ──────────────────────────────────
+# What makes a held chat a money matter: the reason it was handed over. Read
+# from the hand-over records themselves (hub escalations, a complaint case,
+# Neema's own hand-off reason) — never from the customer's words.
+_MONEY_KINDS = (
+    ("a refund", re.compile(r"\brefund", re.I)),
+    ("a part-payment", re.compile(r"\bpartial payment|\bpart[\s-]?pay", re.I)),
+    ("a complaint", re.compile(r"\bcomplain", re.I)),
+    ("a delayed order", re.compile(r"\border delayed", re.I)),
+)
+# Thread notes that carry a hand-over reason (tools._handoff_to_human, hub_events._escalate).
+_REASON_NOTES = ("🙋 HANDED TO THE TEAM", "⚠️")
+_CHASE_TEAM = "💰 Still needs a person"
+_CHASE_OWNER = "🔴 Owner alerted"
+_NOTE_TEAM = _CHASE_TEAM + " — {kind}, no colleague reply in {mins} min. Team alerted again."
+_NOTE_OWNER = _CHASE_OWNER + " — {kind} has waited {hours} h for a person."
+HOLDING_KIND = "person_hold_line"
+# The one line the customer gets while a money matter waits on a person. It
+# promises nothing, names no time and decides nothing — only what is true.
+HOLDING_LINE = {
+    "en": ("Thank you for your patience. This needs a decision from one of my colleagues, "
+           "and they have not been able to reply yet. I have raised it with them again, "
+           "and they will answer you here."),
+    "sw": ("Asante kwa uvumilivu wako. Jambo hili linahitaji uamuzi wa mwenzangu, na bado "
+           "hajaweza kujibu. Nimelifuatilia tena, na atakujibu hapa hapa."),
+}
+_WINDOW = timedelta(hours=23)           # the channels' reply window, as the sweeper uses it
+_SEND_CHANNELS = ("whatsapp", "messenger", "instagram")
+
+
+def money_kind(text) -> str | None:
+    """The money matter a hand-over reason names, or None."""
+    for kind, rx in _MONEY_KINDS:
+        if rx.search(str(text or "")):
+            return kind
+    return None
+
+
+def _aware(t: datetime | None) -> datetime | None:
+    return t if t is None or t.tzinfo is not None else t.replace(tzinfo=timezone.utc)
+
+
+async def _colleague_replied_since(db, conv_id, since: datetime) -> bool:
+    n = (await db.execute(
+        select(func.count()).select_from(Message).where(
+            Message.conversation_id == conv_id,
+            Message.sender == MsgSender.human_agent,
+            Message.created_at >= since,
+            or_(Message.media_type.is_(None), Message.media_type != "note",
+                and_(Message.agent_id.isnot(None),
+                     Message.text.startswith(_TEAM_ANSWER_NOTE))),
+        ))).scalar_one()
+    return bool(n)
+
+
+async def _money_hold(db, conv) -> tuple[str, datetime] | None:
+    """(kind, since) when this held chat is an OPEN money matter: it was handed
+    over for a refund, a part-payment, a complaint or a delayed order since it
+    was last released, and no colleague has replied since. `since` is when a
+    person became responsible for it."""
+    last_release = (await db.execute(
+        select(func.max(Intercept.created_at)).where(
+            Intercept.conversation_id == conv.id,
+            Intercept.action == InterceptAction.release))).scalar_one_or_none()
+    iq = select(Intercept.note, Intercept.created_at).where(
+        Intercept.conversation_id == conv.id, Intercept.note.isnot(None),
+        Intercept.action.in_(_HOLD_OPENS + (InterceptAction.intercept,)))
+    mq = select(Message.text, Message.created_at).where(
+        Message.conversation_id == conv.id, Message.media_type == "note",
+        or_(*[Message.text.startswith(p) for p in _REASON_NOTES]))
+    if last_release is not None:
+        iq = iq.where(Intercept.created_at > last_release)
+        mq = mq.where(Message.created_at > last_release)
+    found: list[tuple[datetime, str]] = []
+    for text, at in list((await db.execute(iq)).all()) + list((await db.execute(mq)).all()):
+        # the note's own first line is the reason; a drafted reply under it is not
+        kind = money_kind(str(text or "").split("\n\n", 1)[0])
+        if kind and at is not None:
+            found.append((_aware(at), kind))
+    if not found:
+        return None
+    at, kind = min(found)
+    since = max(at, _aware(conv.intercept_since) or at)
+    if await _colleague_replied_since(db, conv.id, at):
+        return None
+    return kind, since
+
+
+async def _noted_since(db, conv_id, prefix: str, since: datetime) -> bool:
+    n = (await db.execute(
+        select(func.count()).select_from(Message).where(
+            Message.conversation_id == conv_id, Message.media_type == "note",
+            Message.text.startswith(prefix), Message.created_at >= since))).scalar_one()
+    return bool(n)
+
+
+def _thread_note(conv, text: str) -> Message:
+    return Message(
+        channel=conv.channel, wa_id=conv.wa_id, external_id=conv.external_id,
+        person_id=conv.person_id, conversation_id=conv.id,
+        direction=MsgDirection.outbound, sender=MsgSender.ai,
+        text=text, media_type="note", created_at=datetime.now(timezone.utc))
+
+
+async def _bell(redis, conv, title: str, body: str, **extra) -> None:
+    if redis is None:
+        return
+    ext = conv.wa_id or conv.external_id
+    try:
+        await redis.publish("ws:channel:agents:all", json.dumps({
+            "event": "notification", "type": "human_transfer",
+            "title": title[:120], "body": body[:200],
+            "conversationId": str(conv.id), "conv_id": str(conv.id), "wa_id": ext, **extra}))
+    except Exception as exc:
+        _log.info("auto-release bell not sent for %s: %s", conv.id, exc)
+
+
+def owner_numbers() -> list[str]:
+    """The owner's own phones, digits only."""
+    raw = str(getattr(settings, "owner_alert_numbers", "") or "")
+    out = []
+    for part in raw.split(","):
+        n = re.sub(r"\D", "", part)
+        if 9 <= len(n) <= 15 and n not in out:
+            out.append(n)
+    return out
+
+
+async def forward_to_owner(text: str) -> int:
+    """An alert addressed to the owner, sent to the owner's own phones over
+    WhatsApp from the business number. Returns how many WhatsApp accepted —
+    accepted is not delivered: outside the 24-hour window it fails later,
+    silently. Never raises."""
+    sent = 0
+    for n in owner_numbers():
+        try:
+            from app.services import messaging as svc
+            await svc._send_waba(n, text[:900])
+            sent += 1
+        except Exception as exc:
+            _log.warning("owner alert not sent to …%s: %s", n[-3:], exc)
+    return sent
+
+
+async def _send_holding_line(redis, conv, ext: str, text: str) -> None:
+    from app.database import AsyncSessionLocal
+    from app.services import messaging as svc
+    meta = {"v": 1, "kind": HOLDING_KIND}
+    if conv.channel == "whatsapp":
+        wamid = await svc._send_waba(ext, text)
+        async with AsyncSessionLocal() as db:
+            await svc.save_outbound_message(db, redis, ext, text, waba_msg_id=wamid, raw_meta=meta)
+    else:
+        from app.services.meta_send import send_to_channel
+        from app.services.reply_sweeper import _page_id_for
+        async with AsyncSessionLocal() as db:
+            page_id = await _page_id_for(db, conv.channel, ext)
+        await send_to_channel(conv.channel, ext, text, page_id=page_id)
+        async with AsyncSessionLocal() as db:
+            await svc.save_outbound_channel_message(db, redis, conv.channel, ext, text,
+                                                    raw_meta=meta)
+
+
+async def _chase_money_hold(redis, conv_id, kind: str, since: datetime) -> dict:
+    """Chase one open money matter. Team at `auto_release_minutes`, with one
+    holding line to a waiting customer; the owner at `money_hold_owner_minutes`.
+    Each once per hold (the thread note is the record). Never raises."""
+    out = {"team": False, "owner": False, "line": False}
+    from app.database import AsyncSessionLocal
+    try:
+        now = datetime.now(timezone.utc)
+        age = now - since
+        team_at = int(getattr(settings, "auto_release_minutes", 0) or 0)
+        owner_at = int(getattr(settings, "money_hold_owner_minutes", 0) or 0)
+        async with AsyncSessionLocal() as db:
+            conv = await db.get(Conversation, conv_id)
+            if conv is None:
+                return out
+            ext = conv.wa_id if conv.channel == "whatsapp" else conv.external_id
+            mins = int(age.total_seconds() // 60)
+            if team_at > 0 and age >= timedelta(minutes=team_at) \
+                    and not await _noted_since(db, conv.id, _CHASE_TEAM, since):
+                db.add(_thread_note(conv, _NOTE_TEAM.format(kind=kind, mins=mins)))
+                await db.commit()
+                out["team"] = True
+                await _bell(redis, conv, f"💰 {kind.capitalize()} still needs a person — {mins} min",
+                            f"{ext}: no colleague has replied. Neema will not decide this — "
+                            "please pick it up.", money=kind)
+                out["line"] = await _maybe_holding_line(db, redis, conv, ext, since, now)
+            if owner_at > 0 and age >= timedelta(minutes=owner_at) \
+                    and not await _noted_since(db, conv.id, _CHASE_OWNER, since):
+                hours = round(age.total_seconds() / 3600, 1)
+                db.add(_thread_note(conv, _NOTE_OWNER.format(kind=kind, hours=f"{hours:g}")))
+                await db.commit()
+                out["owner"] = True
+                await _bell(redis, conv, f"🔴 OWNER: {kind} has waited {hours:g} h for a person",
+                            f"{ext}: handed to the team and nobody has replied. "
+                            "Please take it or assign it now.", money=kind, for_owner=True)
+                await forward_to_owner(
+                    f"🔴 Neema alert: {kind} has waited {hours:g} h for a person.\n"
+                    f"Chat: {ext} ({conv.channel}). Handed to the team and nobody has "
+                    "replied. Please take it or assign it in the dashboard.")
+    except Exception:
+        _log.warning("money-hold chase failed for %s", conv_id, exc_info=True)
+    return out
+
+
+async def _maybe_holding_line(db, redis, conv, ext, since: datetime, now: datetime) -> bool:
+    """One honest line, only to a customer who is waiting, only inside the
+    channel's window, only once for this hold."""
+    if not getattr(settings, "money_hold_line", True):
+        return False
+    if conv.channel not in _SEND_CHANNELS or not ext or str(ext).startswith("web_"):
+        return False
+    from app.agent.runtime import is_closer
+    last = (await db.execute(
+        select(Message.direction, Message.text, Message.created_at)
+        .where(Message.conversation_id == conv.id,
+               or_(Message.media_type.is_(None), Message.media_type != "note"))
+        .order_by(Message.created_at.desc()).limit(1))).first()
+    if last is None or last[0] != MsgDirection.inbound or is_closer(last[1] or ""):
+        return False
+    if now - _aware(last[2]) > _WINDOW:
+        return False
+    sent = (await db.execute(
+        select(func.count()).select_from(Message).where(
+            Message.conversation_id == conv.id, Message.created_at >= since,
+            func.coalesce(Message.raw_meta["kind"].astext, "") == HOLDING_KIND))).scalar_one()
+    if sent:
+        return False
+    from app.agent.voice import looks_swahili
+    try:
+        await _send_holding_line(redis, conv, ext,
+                                 HOLDING_LINE["sw" if looks_swahili(last[1] or "") else "en"])
+        return True
+    except Exception as exc:
+        _log.warning("holding line not sent for %s/%s: %s", conv.channel, conv.id, exc)
+        return False
+
+
+async def _warn_before_release(db, redis, conv, ws: datetime, mins: int) -> bool:
+    """Tell the colleague holding the chat that it goes back to Neema soon.
+    Once per wait; needs redis (it is both the bell and the once-only mark)."""
+    warn = int(getattr(settings, "auto_release_warn_minutes", 0) or 0)
+    if redis is None or warn <= 0 or warn >= mins:
+        return False
+    now = datetime.now(timezone.utc)
+    waited = now - ws
+    if waited < timedelta(minutes=warn):
+        return False
+    if await _auto_released_since(db, conv.id, ws):
+        return False                    # it will not be released again for this wait
+    try:
+        if not await redis.set(WARNED_KEY.format(conv=conv.id, since=int(ws.timestamp())), "1",
+                               nx=True, ex=6 * 3600):
+            return False
+    except Exception:
+        return False
+    who = "Team"
+    if conv.assigned_agent_id is not None:
+        try:
+            from app.models.agent import Agent
+            agent = await db.get(Agent, conv.assigned_agent_id)
+            who = (getattr(agent, "name", "") or "").split(" ")[0] or who
+        except Exception:
+            pass
+    left = max(1, mins - int(waited.total_seconds() // 60))
+    ext = conv.wa_id or conv.external_id
+    await _bell(redis, conv, f"⏰ {who}: this chat goes back to Neema in {left} min",
+                f"{ext} has waited {int(waited.total_seconds() // 60)} min for a reply. "
+                "Reply now to keep it — otherwise Neema answers.",
+                agent_id=(str(conv.assigned_agent_id) if conv.assigned_agent_id else None))
+    return True
 
 
 # Intercept rows that open a hold (a flag/escalation hands the thread to the
@@ -214,6 +511,7 @@ async def sweep_auto_release(redis=None, limit: int = 200) -> int:
 
     from app.database import AsyncSessionLocal
     released = 0
+    chase: list[tuple] = []
     try:
         async with AsyncSessionLocal() as db:
             convs = (await db.execute(
@@ -223,6 +521,12 @@ async def sweep_auto_release(redis=None, limit: int = 200) -> int:
             )).scalars().all()
 
             for conv in convs:
+                # A money matter no colleague has answered is never handed
+                # back: it is chased instead (after this session closes).
+                money = await _money_hold(db, conv)
+                if money is not None:
+                    chase.append((conv.id, money[0], money[1]))
+                    continue
                 touched = await _last_human_touch(db, conv.id)
                 # No colleague has spoken → fall back to when it was taken over,
                 # so a thread intercepted and then abandoned is still released.
@@ -231,17 +535,22 @@ async def sweep_auto_release(redis=None, limit: int = 200) -> int:
                     continue
                 if since.tzinfo is None:
                     since = since.replace(tzinfo=timezone.utc)
-                if since > cutoff:
-                    continue            # a colleague is actively on it — leave them to it
                 waiting, why = await _customer_waiting(db, conv.id)
                 waited = False
+                ws = None
+                if waiting and getattr(settings, "auto_release_waiting", True):
+                    ws = await _waiting_since(db, conv.id)
+                    if ws is not None and max(ws, since) > cutoff:
+                        # not yet due — but the colleague is warned when it is close
+                        await _warn_before_release(db, redis, conv, max(ws, since), mins)
+                if since > cutoff:
+                    continue            # a colleague is actively on it — leave them to it
                 if waiting:
                     # THE PERSON GETS THEIR 30 MINUTES, THEN NEEMA PICKS UP
                     # (owner, 2026-11-19). Counted from when the customer began
                     # waiting, and only once for that wait.
                     if not getattr(settings, "auto_release_waiting", True):
                         continue
-                    ws = await _waiting_since(db, conv.id)
                     if ws is None or ws > cutoff:
                         continue        # the person alerted still has time to reply
                     if await _auto_released_since(db, conv.id, ws):
@@ -279,6 +588,9 @@ async def sweep_auto_release(redis=None, limit: int = 200) -> int:
     except Exception:
         _log.warning("auto-release sweep failed", exc_info=True)
         return 0
+
+    for conv_id, kind, since in chase:
+        await _chase_money_hold(redis, conv_id, kind, since)
 
     if released:
         _log.info("auto-release: %d conversation(s) returned to AI after %dm quiet",

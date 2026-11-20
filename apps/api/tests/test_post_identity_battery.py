@@ -196,3 +196,28 @@ def test_a_vessel_for_the_bread_is_not_the_bread_range():
     for q in ("bowl for the communion wafers", "communion bread plate", "a tray for communion bread"):
         rng = range_for(q)
         assert rng is None or rng["name"] != "communion bread", q
+
+
+# ── what an item is worn with is not what the post sells (owner, 2026-11-20) ──
+
+_CROSS_POST = (
+    "Apostolic cross, finished to the standard a bishop or senior clergy deserves. It rests on "
+    "the chest as a quiet statement of the office you carry, and it is made so that it looks "
+    "right with a cassock, a cope or a full vestment set.\n\n"
+    "Pieces like this are noticed in the first moment you stand before your people. A well-made "
+    "cross says that the person wearing it takes their calling seriously.\n\n"
+    "#PectoralCross #ClergyVestments #BethanyHouse")
+
+
+def test_a_post_of_a_cross_is_the_cross_not_what_it_is_worn_with():
+    # live, 2026-11-20: "Prize?" under this post was priced as the Cope — Complete Set
+    assert pc.caption_item_kinds(_CROSS_POST, CATALOG) == []
+    name = _name(_CROSS_POST)
+    assert name and "cross" in name.lower() and "cope" not in name.lower(), name
+
+
+def test_a_sets_own_pieces_are_still_a_list():
+    cap = "Cassock set: comes with the cassock, shirt, collar, cincture belt and stole."
+    assert len(pc.caption_item_kinds(cap, CATALOG)) >= 2
+    assert "goes well with" not in pc.without_companions("It goes well with a mitre. Order today.")
+    assert "Order today" in pc.without_companions("It goes well with a mitre. Order today.")

@@ -197,3 +197,24 @@ def test_the_ad_headline_comes_from_the_person_state():
             return _Res(None)
 
     assert asyncio.run(rt._ad_headline(_NoIdent(), "messenger", "PSID")) == ""
+
+
+# ── silver trays: the $180 tray before the $360 set (owner, 2026-11-20) ──────
+
+def test_silver_trays_lead_with_the_silver_communion_tray():
+    for q in ("silver trays", "how much is the silver tray", "silver tray set", "Silver tray sets?"):
+        rng = range_for(q)
+        assert rng and rng["name"] == "silver trays", q
+        assert [p["name"] for p in range_members(rng, CATALOG)] == [
+            "Silver Communion Tray", "Double Stacked Silver Tray Set"], q
+    # one named row is still that row
+    assert range_for("double stacked silver tray set") is None
+    assert range_for("silver bread tray") is None
+    assert range_for("silver communion tray") is None
+
+
+def test_the_search_answers_silver_trays_cheapest_first(monkeypatch):
+    out = asyncio.run(_search_catalog({"query": "silver trays"}, _ctx(monkeypatch)))
+    names = [r["name"] for r in out["results"]]
+    assert names[:2] == ["Silver Communion Tray", "Double Stacked Silver Tray Set"]
+    assert "Silver Bread Tray" not in names
