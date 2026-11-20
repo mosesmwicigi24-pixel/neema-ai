@@ -142,3 +142,51 @@ def stage_direction(text: str | None) -> bool:
 def plain_public_voice(text: str | None) -> str:
     """Everything above, in order, for Neema's own public text. Idempotent."""
     return drop_butler_opener(plain_money(strip_markdown(text))).strip()
+
+
+# ── A NAME IS NOT A PREFIX (owner, 2026-11-20) ───────────────────────────────
+# "Neema was repeating the name of a person after every message sent, e.g.
+# Moses, … then Moses, …". The instruction ("use their name the way a person
+# does … not in every line") was only an instruction. This is the check: a
+# reply that OPENS by addressing the customer by name, when one of our last
+# replies in the same chat already used the name, loses that opening. The
+# name in a greeting ("Hello Moses"), at a thank-you or at the close is left
+# alone, and so is the first use.
+_NAME_TITLES = ("pastor", "pst", "ps", "bishop", "archbishop", "rev", "reverend", "apostle",
+                "prophet", "prophetess", "elder", "deacon", "deaconess", "dr", "fr", "father",
+                "sister", "brother", "mama", "mum", "mr", "mrs", "ms", "madam", "sir", "evangelist")
+
+
+def _name_words(name: str | None) -> list[str]:
+    out = []
+    for w in re.findall(r"[^\W\d_]+", name or "", flags=re.UNICODE):
+        if len(w) >= 3 and w.lower() not in _NAME_TITLES and w.lower() not in out:
+            out.append(w.lower())
+    return out
+
+
+def drop_repeated_name(reply: str | None, name: str | None, earlier: list[str] | None,
+                       window: int = 2) -> str:
+    """`reply` without its opening "Moses, " when one of our last `window`
+    replies in this chat already used the customer's name. Unchanged
+    otherwise — and always unchanged when nothing would be left."""
+    text = reply or ""
+    words = _name_words(name)
+    if not text.strip() or not words:
+        return text
+    alt = "|".join(re.escape(w) for w in words)
+    titles = "|".join(_NAME_TITLES)
+    opening = re.compile(
+        rf"^\s*(?:(?:{titles})\.?\s+)?(?:{alt})(?:\s+(?:{alt}))?\s*(?:[,:;!]|\s[—–-])\s*",
+        re.IGNORECASE)
+    m = opening.match(text)
+    if not m:
+        return text
+    used = re.compile(rf"\b(?:{alt})\b", re.IGNORECASE)
+    recent = [e for e in (earlier or []) if isinstance(e, str) and e.strip()][-window:]
+    if not any(used.search(e) for e in recent):
+        return text
+    rest = text[m.end():]
+    if len(rest.strip()) < 3:
+        return text
+    return rest[0].upper() + rest[1:]

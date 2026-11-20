@@ -2733,6 +2733,28 @@ async def run_turn(db: AsyncSession, redis, wa_id: str, user_text: str, llm: LLM
             if turn_facts is not None:
                 turn_facts["stage_direction"] = True
             reply = ""
+    if reply and customer_name and not public_comment:
+        # A name is not a prefix (agent/voice.drop_repeated_name).
+        try:
+            from app.agent.voice import drop_repeated_name as _drn
+            _said = []
+            for _m in messages:
+                if isinstance(_m, dict) and _m.get("role") == "assistant":
+                    _c = _m.get("content")
+                    if isinstance(_c, str):
+                        _said.append(_c)
+                    elif isinstance(_c, list):
+                        _said.append(" ".join(str(b.get("text") or "") for b in _c
+                                              if isinstance(b, dict) and b.get("type") == "text"))
+            # this turn's own draft is the last assistant entry when the loop appended it
+            if _said and _said[-1].strip() == reply.strip():
+                _said = _said[:-1]
+            _trimmed = _drn(reply, customer_name, _said)
+            if _trimmed != reply:
+                _log.info("turn %s: dropped a repeated opening name", key)
+                reply = _trimmed
+        except Exception as exc:
+            _log.info("name check skipped for %s: %s", key, exc)
     if _photo_refer is not None and reply:
         # A referred photo is never priced, whatever the draft says: a money
         # figure swaps the reply for the plain hand-over line. Then a person
@@ -6450,6 +6472,10 @@ async def _run_comment_engage(redis, channel: str, comment: dict, own_pages: set
     # the reply continues the exchange instead of starting it again.
     _post_id0 = str(comment.get("post_id") or (comment.get("post_context") or {}).get("post_id") or "")
     _prior = await _thread_prior(channel, ext, _post_id0)
+    if _prior:
+        # Named once under this post already: the canned lines do not name
+        # them again on every reply (owner, 2026-11-20).
+        name_tag = ""
     if _prior and _nothing_to_add(comment):
         _log.info("comment %s: an acknowledgement after our reply — reacting, not replying", cid)
         if settings.meta_comment_like and channel != "instagram":
