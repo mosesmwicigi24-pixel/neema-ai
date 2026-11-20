@@ -80,7 +80,9 @@ def test_a_returning_entrant_over_the_cap_is_not_thanked_for_joining_twice(monke
     out = _engage(monkeypatch, "Rev Alice from Nakuru, size 39", reading=LOW, identity=SHOE, over_cap=True)
     assert len(out["public"]) == 1
     # ... and that line says it arrived — never "thank you for joining in" again
-    assert out["public"][0] in [x.replace("{name}", ", John") for x in rt._CAMPAIGN_RETURN_POOL]
+    # (owner, 2026-11-20: a person already named under this post is not named
+    # again on every reply — the line is the pool's, without the name.)
+    assert out["public"][0] in [x.replace("{name}", "") for x in rt._CAMPAIGN_RETURN_POOL]
     assert "joining" not in out["public"][0] and "Thank" not in out["public"][0]
     # a question the reader could not classify (the model was down) is still a
     # question: never liked into silence (found by the giveaway dry run, 2026-11-14)
