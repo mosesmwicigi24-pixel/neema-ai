@@ -60,3 +60,36 @@ Each route uses the hold path it already has; nothing new is invented.
 ## Rollback
 
 Revert the commit. No migration and no stored data shape changed. The record lives in redis (`policy:tally:*`, `policy:recent`) and expires on its own.
+
+# Phase 2 build — ready for review, nothing switched on
+
+Built on the owner's word of 2026-11-20 ("build them now … ready for your review while Phase 1 gathers data"). No customer-facing message changes until a switch or a policy is turned on.
+
+## Recorded by the policy layer
+
+| ID | What is recorded | Where it is read | Finding it answers |
+|---|---|---|---|
+| FIN-01 | A money figure, on a message Neema starts, a hub announcement or a team answer, that is in neither the brief nor the conversation | `agent/policy.py` `unsourced_figures`; `services/actions.py` reads the conversation in its own session | C1 |
+| PRD-02 | A price in a live reply that belongs only to a row marked as a near-match | `agent/tools.py` remembers which seen rows were partial; `agent/policy.py` `partial_only_figures` | C11 |
+| ACT-03 | A check-in scheduled though the customer's recent words name no time. Refused when the policy is enforced. | `agent/tools.py` `_schedule_check_in` | D8, H11 |
+
+## Behind switches (all off)
+
+| Switch | When on | Finding it answers |
+|---|---|---|
+| `official_numbers_by_code` | On the first reply to a person in a private chat, the official-numbers line is built from the configured lines and appended; any version the model wrote, in any reply, is removed. | C6 |
+| `offer_price_after_grant` | The search tells the writer an offer exists but not its figure. The offer step grants it, records it and returns the figure. The instruction that a quiet customer earns the offer is gone. | C3, owner's policy 1 |
+| `second_deferral_line` | A second "I'll get back to you" gets one model line; the third and later get silence. | D11 |
+
+## Acting now (staff-facing only)
+
+A complaint opens a tracked team check, the same record an availability question opens: it has an owner, ages, is chased by the existing commitments sweep, and holds automatic sales nudges on that chat until a colleague answers. (Owner's policy 5.)
+
+## Not built in this round
+
+| Item | Why |
+|---|---|
+| D7: the three correction texts that say "say so plainly" | They also guard against a wrong item being substituted. Changing their wording needs a model run to confirm that guard still works. |
+| D5: making the repair texts agree | The instruction text is one long string with tests pinned to its wording; the edit is planned with D7's. |
+| D8: removing the instruction to book a check-in before a deadline | Same reason. ACT-03 already records the behaviour. |
+| H2 photos before the check, H3 templates in a held chat, H10 pause on a complaint, H12–H16 | Planned; see `PLAN.md` Phase 4. |
