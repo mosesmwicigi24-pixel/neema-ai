@@ -47,8 +47,28 @@ def test_a_customer_off_whatsapp_is_given_the_whatsapp_number(channel):
 
 def test_on_whatsapp_we_do_not_quote_the_number_they_are_already_texting():
     line = rt._hold_line("whatsapp")
-    assert settings.whatsapp_handoff_number.strip() not in line
+    # they are not SENT to the number they are already texting …
+    assert "via WhatsApp at" not in line
     assert "right here" in line
+    # … but since 2026-11-20 the greeting names our official numbers (below).
+
+
+@pytest.mark.parametrize("channel", ALL_CHANNELS)
+def test_the_greeting_names_our_official_numbers(channel):
+    # owner, 2026-11-20: "add in the greetings that our official numbers are
+    # +254727891989 / +254785490805. Any other number is not from Bethany House"
+    line = rt._hold_line(channel)
+    assert "Our official numbers are +254727891989 and +254785490805." in line
+    assert "Any other number is not from Bethany House." in line
+
+
+def test_the_first_greeting_rule_is_in_the_instructions():
+    import inspect
+    from app.agent import prompt
+    src = inspect.getsource(prompt)
+    assert "OUR OFFICIAL NUMBERS, IN THE FIRST GREETING" in src
+    assert "+254727891989 and +254785490805" in src
+    assert "never under a public comment" in src
 
 
 @pytest.mark.parametrize("channel", ALL_CHANNELS)
