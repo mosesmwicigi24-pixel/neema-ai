@@ -20,24 +20,38 @@ Releasing is safe by construction: it does not make Neema say anything. It only
 makes her *able* to answer the next message, instead of that message landing in
 a thread nobody is watching.
 
-BUT NEVER OVER A WAITING CUSTOMER (owner, 2026-10-10). A thread whose newest
-message is a customer message nobody — colleague or Neema — has answered stays
-with the person it was handed to: they were alerted, and they get the chance to
-reply. In 30 days 1,500 of 1,544 auto-releases happened on exactly such a
-thread, most of them minutes after the missed-reply sweeper had escalated it —
-a flag→release ping-pong every ~6 minutes that no colleague could ever catch.
-A polite closer ("thanks", "🙏") is not waiting on anyone.
+THIRTY MINUTES, THEN NEEMA PICKS UP (owner, 2026-11-19: "If the human
+interception remains for 30 minutes without being released and without chats
+continue, release that chat to Neema … this avoids chats that have been taken
+by humans to remain inactive").
 
-A HOLD STAYS WITH STAFF UNTIL A PERSON REPLIES (owner: "held replies → Human +
-notify"). A thread handed over by a flag — a reviewer hold, a sweeper
-escalation, a failed order — is waiting on a colleague even though Neema's own
-hand-off line ("a colleague will confirm it here") went out after the
-customer's message: that line is a promise, not an answer. Only a colleague's
-sent reply after the hold ends it (a staff take-over or release after the flag
-closes it too, and then the ordinary rules apply). The 45-minute clock
-itself is unchanged: once someone answers, it runs from the last colleague
-message as before. A release leaves an internal note on the thread itself so
-staff can see why Neema has it back.
+Two earlier rules kept a chat with the person for good, and those were the
+chats that sat inactive:
+
+  * 2026-10-10, "never over a waiting customer": a chat whose newest message
+    was an unanswered customer message was never released (in 30 days 1,500
+    of 1,544 releases had landed on such a chat minutes after the missed-reply
+    sweeper escalated it — a flag→release ping-pong every ~6 minutes);
+  * "a hold stays with staff until a person replies": a chat flagged to the
+    team (a held reply, a failed order, a delivery failure) waited for a
+    colleague however long that took.
+
+Now the person gets their thirty minutes, counted from when the customer began
+waiting (`_waiting_since`). After that the chat returns to Neema, and because
+its newest message is an unanswered customer message the missed-reply sweeper
+(services/reply_sweeper) answers it within a couple of minutes — while the
+channel's reply window is open (23 hours). She is told on that turn how she
+got the chat back (PICKED_UP_NOTE): no pretending a colleague answered.
+
+THE PING-PONG CANNOT START: one automatic release per wait
+(`_auto_released_since`). If her answer is held again, or the chat is
+escalated again, it stays with staff until a person replies or the customer
+writes anew. `auto_release_waiting = false` restores the 2026-10-10 rule.
+
+A polite closer ("thanks", "🙏") is not waiting on anyone, and a chat nobody is
+waiting on is released when the colleague has been quiet for
+`auto_release_minutes`, as before. A release leaves an internal note on the
+thread so staff can see why Neema has it back.
 """
 from __future__ import annotations
 
@@ -54,6 +68,17 @@ from app.models.message import Message, MsgDirection, MsgSender
 _log = logging.getLogger("neema.agent")
 
 _NOTE = "Returned to AI automatically — no agent reply for {mins} minutes"
+_NOTE_WAITED = "Returned to AI automatically — the customer waited {mins} minutes with no agent reply"
+WAITED_WHY = "the customer was still waiting for an answer"
+# Told to Neema on her next turn in a chat she got back this way.
+PICKED_UP_KEY = "agent:autoreleased:{channel}:{key}"
+PICKED_UP_NOTE = (
+    "\n\n(This chat was with a colleague, who did not reply for {mins} minutes, so it is back "
+    "with you. Do not say or imply that a colleague answered. Answer what the customer is "
+    "waiting for, as far as your tools and facts allow. If it truly needs a person — a "
+    "refund, a complaint decision, a price only a colleague can set — say honestly that a "
+    "colleague has not been able to pick it up yet and that you have raised it again, and "
+    "raise it with the proper tool. One short apology for the wait, once.)")
 # The same handover, on the thread itself (an internal note — never sent).
 # One short line (owner, 2026-11-15: notes "too many and too long"); it sits in
 # the thread note's history, not in the chat.
@@ -125,6 +150,45 @@ async def _customer_waiting(db, conv_id) -> tuple[bool, str]:
     return False, "Neema answered the customer's last message"
 
 
+async def _waiting_since(db, conv_id) -> datetime | None:
+    """Since when the customer has been waiting on a person: the moment the
+    latest unanswered hold was raised, else their first message after the
+    last thing they were sent. None when that cannot be told."""
+    hold = (await db.execute(
+        select(Intercept.action, Intercept.created_at)
+        .where(Intercept.conversation_id == conv_id, Intercept.action.in_(_HOLD_ROWS))
+        .order_by(Intercept.created_at.desc()).limit(1))).first()
+    visible = or_(Message.media_type.is_(None), Message.media_type != "note")
+    last_out = (await db.execute(
+        select(func.max(Message.created_at)).where(
+            Message.conversation_id == conv_id, visible,
+            Message.direction == MsgDirection.outbound))).scalar_one_or_none()
+    q = select(func.min(Message.created_at)).where(
+        Message.conversation_id == conv_id, visible, Message.direction == MsgDirection.inbound)
+    if last_out is not None:
+        q = q.where(Message.created_at > last_out)
+    first_in = (await db.execute(q)).scalar_one_or_none()
+    times = [t for t in (first_in, hold[1] if hold is not None and hold[0] in _HOLD_OPENS else None)
+             if t is not None]
+    if not times:
+        return None
+    t = min(times)
+    return t if t.tzinfo is not None else t.replace(tzinfo=timezone.utc)
+
+
+async def _auto_released_since(db, conv_id, since: datetime) -> bool:
+    """Was this chat already handed back automatically for THIS wait? One
+    automatic release per waiting message: if Neema's answer was held or the
+    chat was escalated again, it stays with staff until a person replies —
+    the flag→release ping-pong of 2026-10 cannot start."""
+    n = (await db.execute(
+        select(func.count()).select_from(Intercept).where(
+            Intercept.conversation_id == conv_id, Intercept.agent_id.is_(None),
+            Intercept.action == InterceptAction.release, Intercept.created_at >= since,
+        ))).scalar_one()
+    return bool(n)
+
+
 async def _last_human_touch(db, conv_id) -> datetime | None:
     """When a colleague last said something in this thread (None if never)."""
     return (await db.execute(
@@ -170,15 +234,26 @@ async def sweep_auto_release(redis=None, limit: int = 200) -> int:
                 if since > cutoff:
                     continue            # a colleague is actively on it — leave them to it
                 waiting, why = await _customer_waiting(db, conv.id)
+                waited = False
                 if waiting:
-                    continue            # the person alerted gets the chance to reply
+                    # THE PERSON GETS THEIR 30 MINUTES, THEN NEEMA PICKS UP
+                    # (owner, 2026-11-19). Counted from when the customer began
+                    # waiting, and only once for that wait.
+                    if not getattr(settings, "auto_release_waiting", True):
+                        continue
+                    ws = await _waiting_since(db, conv.id)
+                    if ws is None or ws > cutoff:
+                        continue        # the person alerted still has time to reply
+                    if await _auto_released_since(db, conv.id, ws):
+                        continue        # already handed back once for this wait: staff keep it
+                    waited, why = True, WAITED_WHY
 
                 conv.intercept_mode    = InterceptMode.ai
                 conv.assigned_agent_id = None
                 conv.intercept_since   = None
                 db.add(Intercept(conversation_id=conv.id, agent_id=None,
                                  action=InterceptAction.release,
-                                 note=_NOTE.format(mins=mins)))
+                                 note=(_NOTE_WAITED if waited else _NOTE).format(mins=mins)))
                 db.add(Message(
                     channel=conv.channel, wa_id=conv.wa_id, external_id=conv.external_id,
                     person_id=conv.person_id, conversation_id=conv.id,
@@ -191,6 +266,11 @@ async def sweep_auto_release(redis=None, limit: int = 200) -> int:
                 if redis is not None:
                     try:
                         await redis.delete(f"context:{conv.wa_id}")
+                        if waited:
+                            # Neema is told, on her next turn here, how she got it back.
+                            _k = conv.wa_id if conv.channel == "whatsapp" else conv.external_id
+                            await redis.set(PICKED_UP_KEY.format(channel=conv.channel, key=_k),
+                                            str(mins), ex=24 * 3600)
                     except Exception:
                         pass
 

@@ -162,47 +162,48 @@ def _held_with_unanswered_customer(rig):
     return cid
 
 
-def test_a_held_thread_with_an_unanswered_customer_message_is_not_released(rig):
-    cid = _held_with_unanswered_customer(rig)
-    assert _release_tick(rig) == 0
-    mode, rows, notes = _state(rig, cid)
-    assert mode == "human"                       # the alerted colleague keeps it
-    assert [r.action.value for r in rows] == []
-    assert len(notes) == 1                       # only the pre-existing note
-
-
-def test_the_same_thread_is_released_once_a_colleague_has_answered(rig):
-    cid = _held_with_unanswered_customer(rig)
-    _msg(rig, cid, inbound=False, sender="human_agent", at=_ago(minutes=60),
-         text="The purple stole is KES 3,500, Pastor.")
+def test_a_customer_who_waited_thirty_minutes_goes_back_to_neema_once(rig):
+    # owner, 2026-11-19: "If the human interception remains for 30 minutes
+    # without being released and without chats continue, release that chat to
+    # Neema." Until then a waiting customer kept the chat with the person for
+    # good (the rule of 2026-10-10).
+    cid = _held_with_unanswered_customer(rig)             # waited 90 minutes
     assert _release_tick(rig) == 1
     mode, rows, notes = _state(rig, cid)
     assert mode == "ai"
-    assert [r.action.value for r in rows] == ["release"]
-    assert "no agent reply for 45 minutes" in rows[0].note
-    # staff see on the thread itself why Neema has it back
-    released = notes[-1]
-    assert released.direction.value == "outbound" and released.media_type == "note"
-    assert "Back to Neema — no colleague reply" in released.text
-    assert "45 min;" in released.text and "a colleague answered" in released.text
+    assert [r.action.value for r in rows] == ["release"] and "waited" in rows[0].note
+    assert "the customer was still waiting for an answer" in notes[-1].text
+    # Neema is told, on her next turn, how she got the chat back
+    from app.services import auto_release
+    assert rig.redis.kv.get(auto_release.PICKED_UP_KEY.format(channel="whatsapp", key=WA))
 
-
-def test_a_customer_who_only_said_thanks_has_nothing_pending(rig):
-    cid = _conv(rig, since=_ago(hours=3))
-    _msg(rig, cid, inbound=True, at=_ago(hours=3), text="How much is the purple stole?")
-    _msg(rig, cid, inbound=False, sender="human_agent", at=_ago(hours=2), text="KES 3,500.")
-    _msg(rig, cid, inbound=True, at=_ago(hours=1), text="thanks")
-    assert _release_tick(rig) == 1
-    mode, _, notes = _state(rig, cid)
-    assert mode == "ai" and "polite close" in notes[-1].text
-
-
-def test_a_colleague_still_on_the_thread_keeps_it(rig):
-    cid = _conv(rig, since=_ago(hours=3))
-    _msg(rig, cid, inbound=True, at=_ago(hours=3), text="How much is the purple stole?")
-    _msg(rig, cid, inbound=False, sender="human_agent", at=_ago(minutes=10), text="KES 3,500.")
+    # ONCE PER WAIT: her answer is held and the chat is flagged back to staff —
+    # it now stays with them (the flag→release ping-pong of 2026-10 cannot start)
+    async def back_to_staff():
+        from app.models.conversation import Conversation, InterceptMode
+        async with rig.maker() as db:
+            c = await db.get(Conversation, cid)
+            c.intercept_mode = InterceptMode.human
+            await db.commit()
+    asyncio.run(back_to_staff())
+    _hold(rig, cid, at=_ago(minutes=0), note="HELD BACK BY THE REVIEWER — …")
     assert _release_tick(rig) == 0
     assert _state(rig, cid)[0] == "human"
+
+
+def test_the_person_still_has_their_thirty_minutes(rig):
+    cid = _conv(rig, since=_ago(hours=3))
+    _msg(rig, cid, inbound=False, sender="human_agent", at=_ago(hours=2), text="Which colour, Pastor?")
+    _msg(rig, cid, inbound=True, at=_ago(minutes=10), text="Purple. How much is it?")
+    assert _release_tick(rig) == 0                        # ten minutes is not thirty
+    assert _state(rig, cid)[0] == "human"
+
+
+def test_the_switch_keeps_a_waiting_customer_with_the_person(rig, monkeypatch):
+    from app.core.config import settings
+    monkeypatch.setattr(settings, "auto_release_waiting", False, raising=False)
+    cid = _held_with_unanswered_customer(rig)
+    assert _release_tick(rig) == 0 and _state(rig, cid)[0] == "human"
 
 
 # ── a hold stays with staff until a PERSON replies (owner: "held replies → Human + notify")
@@ -233,17 +234,32 @@ def _held_by_a_hold(rig, note, hold_line):
 
 
 @pytest.mark.parametrize("note,hold_line", _HOLDS)
-def test_a_held_thread_stays_with_staff_until_a_person_replies(rig, note, hold_line):
-    cid = _held_by_a_hold(rig, note, hold_line)
-    assert _release_tick(rig) == 0
-    assert _state(rig, cid)[0] == "human"
+def test_a_hold_nobody_answered_goes_back_once_then_stays_with_staff(rig, note, hold_line):
+    # owner, 2026-11-19 (30 minutes, every human-held chat). Before: a hold
+    # stayed with staff until a person replied, however long that took.
+    cid = _held_by_a_hold(rig, note, hold_line)           # flagged 119 minutes ago, no colleague reply
+    assert _release_tick(rig) == 1
+    mode, rows, notes = _state(rig, cid)
+    assert mode == "ai" and [r.action.value for r in rows].count("release") == 1
+    assert "the customer was still waiting for an answer" in notes[-1].text
+    assert _release_tick(rig) == 0                        # nothing left to release
+
+
+def test_a_hold_a_colleague_answered_is_released_as_before(rig):
+    note, line = _HOLDS[0]
+    cid = _held_by_a_hold(rig, note, line)
     _msg(rig, cid, inbound=False, sender="human_agent", at=_ago(minutes=60),
          text="The purple stole is KES 3,500, Pastor.")
     assert _release_tick(rig) == 1
     mode, rows, notes = _state(rig, cid)
-    assert mode == "ai" and [r.action.value for r in rows].count("release") == 1
-    assert "Back to Neema — no colleague reply" in notes[-1].text
-    assert "a colleague answered" in notes[-1].text
+    assert mode == "ai" and "a colleague answered" in notes[-1].text
+
+
+def test_a_fresh_hold_still_waits_for_a_person(rig):
+    cid = _conv(rig)
+    _msg(rig, cid, inbound=True, at=_ago(minutes=12), text="How much is the purple stole?")
+    _hold(rig, cid, at=_ago(minutes=11), note=_HOLDS[0][0])
+    assert _release_tick(rig) == 0 and _state(rig, cid)[0] == "human"
 
 
 def test_a_held_customer_who_signs_off_has_nothing_pending(rig):

@@ -1953,6 +1953,20 @@ async def run_turn(db: AsyncSession, redis, wa_id: str, user_text: str, llm: LLM
         except Exception as exc:
             _log.info("overlap check skipped for %s: %s", key, exc)
 
+    # BACK FROM A COLLEAGUE WHO DID NOT REPLY (services/auto_release, owner
+    # 2026-11-19): said once, on the first turn after the hand-back.
+    if redis is not None and not public_comment and not read_only and not scribe_only:
+        try:
+            from app.services import auto_release as _ar
+            _ark = _ar.PICKED_UP_KEY.format(channel=channel, key=key)
+            _arm = await redis.get(_ark)
+            if _arm:
+                _arm = _arm.decode() if isinstance(_arm, bytes) else str(_arm)
+                turn_notes.append(_ar.PICKED_UP_NOTE.format(mins=_arm if _arm.isdigit() else "30"))
+                await redis.delete(_ark)
+        except Exception as exc:
+            _log.info("hand-back note skipped for %s: %s", key, exc)
+
     # Voice + text are one memory: recent call summaries join the context
     # (best-effort — a calls hiccup never blocks a chat reply).
     try:
