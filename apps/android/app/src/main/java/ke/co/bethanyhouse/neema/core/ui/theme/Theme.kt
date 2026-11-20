@@ -441,7 +441,7 @@ private val NeemaType = Typography(
 )
 
 @Composable
-fun NeemaTheme(dark: Boolean, content: @Composable () -> Unit) {
+fun NeemaTheme(dark: Boolean, textScale: Float = 1f, content: @Composable () -> Unit) {
     val c = if (dark) DarkNeema else LightNeema
     // Dialogs (surfaceContainerHigh) and sheets (surfaceContainerLow) sit on
     // var(--bg2) like ui.tsx's Modal: white by day, prussian-900 by night.
@@ -462,7 +462,11 @@ fun NeemaTheme(dark: Boolean, content: @Composable () -> Unit) {
         surfaceContainerHigh = c.bg2, surfaceContainerLow = c.bg2, surfaceContainerHighest = c.bg3,
         outline = c.border, outlineVariant = c.hairline, error = c.red, onError = Color.White,
     )
-    CompositionLocalProvider(LocalNeemaColors provides c) {
+    // The app's text size (Profile → Appearance): every `sp` in the app scales
+    // with it, on top of the phone's own font size.
+    val d = androidx.compose.ui.platform.LocalDensity.current
+    val density = if (textScale == 1f) d else androidx.compose.ui.unit.Density(d.density, d.fontScale * textScale)
+    CompositionLocalProvider(LocalNeemaColors provides c, androidx.compose.ui.platform.LocalDensity provides density) {
         MaterialTheme(colorScheme = scheme, typography = NeemaType, content = content)
     }
 }

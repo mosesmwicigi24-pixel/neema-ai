@@ -39,6 +39,14 @@ class AppPrefs(context: Context, override: android.content.SharedPreferences? = 
     val dark: StateFlow<Boolean> = _dark.asStateFlow()
     fun setDark(v: Boolean) { _dark.value = v; raw.edit().putString("theme", if (v) "dark" else "light").apply() }
 
+    /** The app's text size, a step of [ke.co.bethanyhouse.neema.core.ui.theme.TextScale] (1 = the phone's own size). */
+    private val _textScale = MutableStateFlow(ke.co.bethanyhouse.neema.core.ui.theme.TextScale.clamp(raw.getFloat("text_scale", 1f)))
+    val textScale: StateFlow<Float> = _textScale.asStateFlow()
+    fun setTextScale(v: Float) {
+        val s = ke.co.bethanyhouse.neema.core.ui.theme.TextScale.clamp(v)
+        _textScale.value = s; raw.edit().putFloat("text_scale", s).apply()
+    }
+
     /** Keep the live connection (and notifications/incoming calls) running in the background. */
     private val _backgroundLive = MutableStateFlow(raw.getBoolean("background_live", true))
     val backgroundLive: StateFlow<Boolean> = _backgroundLive.asStateFlow()

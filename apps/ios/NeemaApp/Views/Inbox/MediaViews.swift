@@ -128,7 +128,8 @@ struct ImageBubble: View {
             if broken {
                 MediaFallback(kind: "image", messageId: messageId, inbound: inbound, onRecover: onRecover, onRecovered: { url = $0; broken = false })
             } else {
-                RemoteImage(url: u) { broken = true }
+                // The whole photo, never cropped and never larger than its box.
+                RemoteImage(url: u, contentMode: .fit) { broken = true }
                     .frame(maxWidth: 260, maxHeight: 240)
                     .frame(minWidth: 120, minHeight: 90)
                     .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
@@ -365,15 +366,15 @@ struct AlbumGrid: View {
         VStack(spacing: 4) {
             if n == 3 {
                 // 3 photos: the big one on top.
-                AlbumCell(item: shown[0], index: 0, more: false, extra: extra, onOpen: onOpen).frame(height: 160)
+                AlbumCell(item: shown[0], index: 0, more: false, extra: extra, height: 160, onOpen: onOpen)
                 HStack(spacing: 4) {
-                    ForEach(1..<3, id: \.self) { j in AlbumCell(item: shown[j], index: j, more: false, extra: extra, onOpen: onOpen).frame(height: 128) }
+                    ForEach(1..<3, id: \.self) { j in AlbumCell(item: shown[j], index: j, more: false, extra: extra, height: 128, onOpen: onOpen) }
                 }
             } else {
                 ForEach(Array(stride(from: 0, to: shown.count, by: 2)), id: \.self) { i in
                     HStack(spacing: 4) {
                         ForEach(i..<min(i + 2, shown.count), id: \.self) { j in
-                            AlbumCell(item: shown[j], index: j, more: j == 3 && extra > 0, extra: extra, onOpen: onOpen).frame(height: 128)
+                            AlbumCell(item: shown[j], index: j, more: j == 3 && extra > 0, extra: extra, height: 128, onOpen: onOpen)
                         }
                     }
                 }
@@ -388,17 +389,26 @@ private struct AlbumCell: View {
     let index: Int
     let more: Bool
     let extra: Int
+    let height: CGFloat
     let onOpen: (Int) -> Void
     var body: some View {
-        ZStack {
-            RemoteImage(url: item.src)
-            if more {
-                Color.black.opacity(0.55)
-                Text("+\(extra)").font(NeemaFont.manrope(20, .semibold)).foregroundColor(.white)
-            }
-        }
-        .frame(maxWidth: .infinity)
-        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+        // The cell's size is fixed FIRST and the photo fills it as an overlay:
+        // a fill-mode photo sized by itself took its own (tall) height and,
+        // on iPad, spilled out of the bubble over the messages around it
+        // (owner, 2026-11-20). Clipped to exactly this box.
+        Color.clear
+            .frame(maxWidth: .infinity)
+            .frame(height: height)
+            .overlay(RemoteImage(url: item.src))
+            .overlay(Group {
+                if more {
+                    ZStack {
+                        Color.black.opacity(0.55)
+                        Text("+\(extra)").font(NeemaFont.manrope(20, .semibold)).foregroundColor(.white)
+                    }
+                }
+            })
+            .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
         .contentShape(Rectangle())
         .onTapGesture { onOpen(index) }
         .accessibilityLabel(item.caption ?? "photo \(index + 1)")
