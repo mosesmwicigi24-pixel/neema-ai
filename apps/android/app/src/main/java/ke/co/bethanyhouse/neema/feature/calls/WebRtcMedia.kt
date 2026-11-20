@@ -132,6 +132,16 @@ internal class WebRtcMedia(private val context: Context) : CallMedia {
          */
         private val lock = Any()
         @Volatile private var closed = false
+        // What the connection saw, for the report when its audio fails (CallPeer.snapshot).
+        private val builtAt = System.currentTimeMillis()
+        @Volatile private var lastConnection = "new"
+        @Volatile private var lastIce = "new"
+        @Volatile private var lastGathering = "new"
+        @Volatile private var everConnected = false
+        @Volatile private var remoteKinds: Map<String, Int> = emptyMap()
+        private val localKinds = java.util.concurrent.ConcurrentHashMap<String, Int>()
+        private val relayErrors = java.util.concurrent.atomic.AtomicInteger(0)
+
         /** SDP steps waiting on WebRTC: a closed peer may never answer them, so close() fails them. */
         private val waiting = java.util.Collections.newSetFromMap(java.util.concurrent.ConcurrentHashMap<kotlinx.coroutines.CancellableContinuation<*>, Boolean>())
 
@@ -156,6 +166,8 @@ internal class WebRtcMedia(private val context: Context) : CallMedia {
             val observer = object : PeerConnection.Observer {
                 override fun onConnectionChange(newState: PeerConnection.PeerConnectionState) = rtcGuard("connection") {
                     Log.d(TAG, "connectionState: $newState")
+                    lastConnection = newState.name.lowercase()
+                    if (newState == PeerConnection.PeerConnectionState.CONNECTED) everConnected = true
                     when (newState) {
                         PeerConnection.PeerConnectionState.CONNECTED -> onEvent(PeerEvent.Connected)
                         // A blip, not the end: CallManager gives ICE a grace period to recover.
@@ -167,18 +179,22 @@ internal class WebRtcMedia(private val context: Context) : CallMedia {
                 }
                 override fun onIceConnectionChange(newState: PeerConnection.IceConnectionState) = rtcGuard("ice") {
                     Log.d(TAG, "iceConnectionState: $newState")
+                    lastIce = newState.name.lowercase()
                     if (newState == PeerConnection.IceConnectionState.CONNECTED ||
                         newState == PeerConnection.IceConnectionState.COMPLETED
                     ) onEvent(PeerEvent.Connected)
                 }
                 override fun onIceGatheringChange(newState: PeerConnection.IceGatheringState) = rtcGuard("gathering") {
+                    lastGathering = newState.name.lowercase()
                     if (newState == PeerConnection.IceGatheringState.COMPLETE) gathered.complete(Unit)
                 }
                 override fun onIceCandidate(candidate: IceCandidate) = rtcGuard("candidate") {
                     if (candidate.sdp?.contains("typ relay") == true) Log.d(TAG, "got TURN relay candidate ✓")
+                    candidateKinds(candidate.sdp).forEach { (k, n) -> localKinds.merge(k, n, Int::plus) }
                 }
                 override fun onIceCandidateError(event: IceCandidateErrorEvent) = rtcGuard("candidate-error") {
                     Log.w(TAG, "ICE candidate error: ${event.errorText} ${event.url}")
+                    if (event.url?.startsWith("turn") == true) relayErrors.incrementAndGet()
                 }
                 override fun onTrack(transceiver: RtpTransceiver) = rtcGuard("track") {
                     // Remote audio plays through the audio device module on its own.
@@ -248,6 +264,7 @@ internal class WebRtcMedia(private val context: Context) : CallMedia {
                 override fun onSetSuccess() = rtcGuard("sdp-set") { if (cont.isActive) cont.resume(Unit) }
                 override fun onSetFailure(error: String?) = rtcGuard("sdp-set-failed") { if (cont.isActive) cont.resumeWithException(IllegalStateException(error)) }
             }
+            if (!local) remoteKinds = candidateKinds(sdp)
             val desc = SessionDescription(if (type == SdpType.Offer) SessionDescription.Type.OFFER else SessionDescription.Type.ANSWER, sdp)
             try { live("setDescription") { if (local) pc.setLocalDescription(obs, desc) else pc.setRemoteDescription(obs, desc) } }
             catch (e: IllegalStateException) { if (cont.isActive) cont.resumeWithException(e) }
@@ -256,6 +273,15 @@ internal class WebRtcMedia(private val context: Context) : CallMedia {
         override suspend fun awaitGathering() = gathered.await()
 
         override val localSdp: String? get() = runCatching { live("localSdp") { pc.localDescription?.description } }.getOrNull()
+
+        /** Plain fields only, read without touching native code (safe after close). */
+        override fun snapshot() = PeerSnapshot(
+            connection = lastConnection, ice = lastIce, gathering = lastGathering,
+            local = HashMap(localKinds), remote = remoteKinds,
+            pair = if (everConnected) "unknown" else "none",
+            relayErrors = relayErrors.get(),
+            seconds = ((System.currentTimeMillis() - builtAt) / 1_000L).toInt(),
+        )
 
         /** Torn down off the main thread so close() never runs on the thread that delivers events. */
         override fun close() {

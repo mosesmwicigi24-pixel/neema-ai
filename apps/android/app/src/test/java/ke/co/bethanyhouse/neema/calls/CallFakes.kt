@@ -55,6 +55,11 @@ class FakeCallApi : CallApi {
     /** The last recording was handed over as a streamed file, not bytes in memory. */
     var lastUploadStreamed: Boolean? = null
     var lastConnect: Triple<String, String, String?>? = null
+    /** Calls hung up as failed (`{"reason": "failed"}`), and the audio-failure reports sent. */
+    val failedTerminates = mutableListOf<String>()
+    val diagnostics = mutableListOf<Pair<String, kotlinx.serialization.json.JsonObject>>()
+    var diagnosticsReading: String? = "Our relay was offered but the device could not reach it (port blocked, or the relay is down)."
+    var diagnosticsError: Exception? = null
 
     override suspend fun list(): List<Call> { log += "list"; listError?.let { throw it }; return calls }
     /** GET /admin/calls/{id}: the row from [calls], else 404 (as the handler). */
@@ -117,6 +122,10 @@ class FakeCallApi : CallApi {
             permission = CallPermission(null, "requested", channel = "messenger", externalId = psid), route = "calling_optin",
         )
     }
+    override suspend fun terminateFailed(callId: String) { failedTerminates += callId; terminate(callId) }
+    override suspend fun diagnostics(callId: String, body: kotlinx.serialization.json.JsonObject): String? {
+        diagnostics += callId to body; diagnosticsError?.let { throw it }; return diagnosticsReading
+    }
     override suspend fun terminate(callId: String) { log += "terminate $callId"; terminateGate?.await(); terminateErrors.removeFirstOrNull()?.let { throw it } }
     override suspend fun callback(callId: String) { log += "callback $callId"; callbackGate?.await(); callbackErrors.removeFirstOrNull()?.let { throw it } }
     override suspend fun connect(to: String, sdp: String, name: String?): String {
@@ -163,6 +172,12 @@ class FakePeer(val onEvent: (PeerEvent) -> Unit) : CallPeer {
     override suspend fun awaitGathering() = gathering.await()
     override val localSdp: String? get() { if (closed) usedAfterClose += "localSdp"; return ops.lastOrNull { it.startsWith("setLocal") }?.let { "$it+candidates" } }
     override fun close() { closed = true }
+    /** What the connection "saw" (read when its audio fails). */
+    var snap: ke.co.bethanyhouse.neema.feature.calls.PeerSnapshot? = ke.co.bethanyhouse.neema.feature.calls.PeerSnapshot(
+        connection = "failed", ice = "failed", gathering = "complete",
+        local = mapOf("host" to 2, "srflx" to 1), remote = mapOf("host" to 1), relayErrors = 2, seconds = 21,
+    )
+    override fun snapshot() = snap
 }
 
 class FakeRecording(bytes: Int, var muted: Boolean) : CallRecording {

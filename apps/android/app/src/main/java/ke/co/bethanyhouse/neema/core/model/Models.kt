@@ -676,6 +676,8 @@ data class IceConfig(
     @SerialName("meta_transcription") val metaTranscription: Boolean? = null,
     /** Which channels can call right now (the same as GET /calls/channels). */
     val channels: CallChannels? = null,
+    /** Our own relay (coturn) is among [iceServers], not only the public fallback. */
+    val relay: Boolean? = null,
 )
 
 /** One channel's calling, as GET /calls/channels says it. */
@@ -832,6 +834,8 @@ data class Attribution(
 // ── Small response envelopes ────────────────────────────────────────────────
 
 @Serializable data class OkResponse(val ok: Boolean = true)
+/** POST /admin/calls/{id}/diagnostics: the server's one-sentence reading of a failed call's audio. */
+@Serializable data class DiagnosticsResponse(val ok: Boolean = true, val reading: String? = null)
 @Serializable data class AnswerResponse(val answer: String = "")
 @Serializable data class SentResponse(val ok: Boolean = true, val sent: String = "")
 @Serializable data class DraftResponse(val draft: String? = null)

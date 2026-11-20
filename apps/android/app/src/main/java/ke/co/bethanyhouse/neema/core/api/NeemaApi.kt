@@ -349,6 +349,12 @@ class NeemaApi(val http: NeemaHttp) {
         suspend fun requestMessengerPermission(psid: String): PermissionRequestResponse =
             http.post("/admin/calls/request-permission", buildJsonObject { put("channel", "messenger"); put("psid", psid) })
         suspend fun terminate(callId: String): OkResponse = http.post("/admin/calls/${enc(callId)}/terminate", JsonObject(emptyMap()))
+        /** Hang up a call whose audio never formed: the server logs it failed, not completed. */
+        suspend fun terminateFailed(callId: String): OkResponse =
+            http.post("/admin/calls/${enc(callId)}/terminate", buildJsonObject { put("reason", "failed") })
+        /** Why a call's audio failed, as this device saw it (services/call_diagnostics). */
+        suspend fun diagnostics(callId: String, body: JsonObject): DiagnosticsResponse =
+            http.post("/admin/calls/${enc(callId)}/diagnostics", body)
         suspend fun callback(callId: String): OkResponse = http.post("/admin/calls/${enc(callId)}/callback", JsonObject(emptyMap()))
         suspend fun connect(to: String, sdp: String, name: String? = null): ConnectResponse =
             http.post("/admin/calls/connect", buildJsonObject { put("to", to); put("sdp", sdp); if (name != null) put("name", name) })
