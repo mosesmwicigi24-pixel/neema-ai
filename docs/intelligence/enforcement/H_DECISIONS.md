@@ -12,9 +12,31 @@
 
 These replace D1–D4 and D12 below.
 
-## Still open — each needs its own answer
+## Decided by the owner one by one, 2026-11-20
 
-D5 (repairs), D6 (delivery and production times), D7 (availability wording), D8 (unsolicited check-ins), D9 (who may type guidance), D10 (outreach caps), D11 (second "I'll get back to you").
+| # | Question | The owner's answer |
+|---|---|---|
+| D5 | Repairs and alterations | Our own items only, within 14 days of delivery, said plainly. A colleague may decide an exception; Neema never promises one. |
+| D6 | Delivery and production times | Only with a source: a tool, a colleague or the customer supplied it, or it is one of the DHL transit times already in her instructions. Otherwise a colleague confirms. |
+| D7 | Availability wording | She says she is confirming with a colleague, the check is actually raised, and she never says "out of stock". She may offer the nearest item. |
+| D8 | Check-ins | Only when the customer named a time. |
+| D9 | Who may type guidance that enters her instructions | Any colleague, as today, with every change recorded with who made it. |
+| D10 | Outreach caps | Stay record-only. |
+| D11 | A second "I'll get back to you" | One short line. The code, which stays silent today, is to be changed to match. |
+
+No decision is open.
+
+## What each answer leads to
+
+| # | Work | Changes what a customer sees? | Status |
+|---|---|---|---|
+| D5 | The policy layer already records "for life" (FUL-02). Add: the 14-day rule said plainly; make the three disagreeing texts agree; a purchase-date source so the rule can be checked. | Yes | Planned (Phase 4) |
+| D6 | The policy layer already records a time with no source (FUL-01). Switching it on holds such a reply. | Only when switched on | Recorded now |
+| D7 | The policy layer already records a promise to ask the team with nobody asked (ACT-01). Add: change the three correction texts that tell her to "say so plainly". | Yes | Planned (Phase 4) |
+| D8 | Record, then refuse, a check-in scheduled with no time named by the customer. Remove the instruction that tells her to book one before a deadline. | Yes | Planned (Phase 4) |
+| D9 | Record who changed standing orders, deal guidance and learned rules, and show it to staff. Links typed there are not trusted by the link check. | No | Planned (Phase 4) |
+| D10 | Nothing to build. | No | Done |
+| D11 | Change the closer gate so a second deferral gets one short line. | Yes | Planned (Phase 4) |
 
 ## The original list
 
