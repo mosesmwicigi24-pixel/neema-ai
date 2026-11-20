@@ -1236,6 +1236,31 @@ async def _said_in_record(ctx: ToolContext) -> list[str]:
     return said
 
 
+async def _recent_customer_words(ctx: ToolContext, limit: int = 3) -> list[str]:
+    """The customer's own last few messages, newest first, read in a session
+    of its own (the order step's reads on `ctx.db` are left exactly as they
+    are). The message being answered comes first."""
+    said = [str(w) for w in (ctx.customer_words or ()) if w][:limit]
+    try:
+        from app.database import AsyncSessionLocal
+        from app.models.message import Message, MsgDirection
+        where = (Message.wa_id == ctx.wa_id) if ctx.channel == "whatsapp" else (
+            (Message.channel == ctx.channel) & (Message.external_id == ctx.wa_id))
+        async with AsyncSessionLocal() as db:
+            rows = (await db.execute(
+                select(Message.text).where(where)
+                .where(Message.direction == MsgDirection.inbound)
+                .where(Message.media_type.is_(None) | (Message.media_type != "note"))
+                .where(Message.text.isnot(None))
+                .order_by(Message.created_at.desc()).limit(limit))).scalars().all()
+        for t in rows:
+            if t and str(t) not in said:
+                said.append(str(t))
+    except Exception:
+        pass
+    return said[:limit]
+
+
 async def _removal_refused(args: dict, ctx: ToolContext, cart: dict, what: str) -> dict | None:
     """A REMOVAL NEEDS THE CUSTOMER'S WORDS (owner, 2026-11-15). In the
     Melchizkek thread a correction to one garment removed another and swapped
@@ -1582,7 +1607,7 @@ async def _create_order(args: dict, ctx: ToolContext) -> dict:
     # always; refused only when the policy is enforced.
     try:
         from app.agent import policy as _pol
-        if not ctx.read_only and not _pol.customer_agreed(await _said_in_record(ctx)):
+        if not ctx.read_only and not _pol.customer_agreed(await _recent_customer_words(ctx)):
             _f = [{"policy": "ORD-01", "severity": "critical", "excerpt": "",
                    "reason": "order step called with no yes in the customer's recent words"}]
             _held = _pol.enforced(_f)
