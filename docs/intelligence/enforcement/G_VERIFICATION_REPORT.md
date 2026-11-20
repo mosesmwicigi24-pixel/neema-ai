@@ -72,7 +72,11 @@ Found and fixed during measurement: shipping times the instructions state as fac
 
 `apps/api/tests/test_policy_layer.py`: for each policy, the direct violation, paraphrases (English and Swahili), the legitimate sentence that must not be flagged, and the record that makes the claim true (a granted offer, a successful order step, a colleague's words, the customer's own number or date). Also: shadow holds nothing; enforce holds only listed policies; the stored record never holds a whole phone number; every route is wired; the defaults are record-only.
 
-Full API suite and CI on the Phase 1 commits: result to be added here when the run finishes.
+**Full API suite, run locally with the database on the Phase 1 code:** 3902 passed, 1 xpassed, 2 warnings in 762.37s (0:12:42).
+
+**CI on the pull request (commit b6902f0):** API tests, database tests (fresh-database replay), lint, import check, web build and image build all passed.
+
+CI on the first Phase 1 commit failed two existing order tests: the consent check added a read on the order step's own database session, which shifted those tests' scripted answers. The check now reads in a separate session; both tests pass unchanged.
 
 ## 5. Not tested, and limits
 
