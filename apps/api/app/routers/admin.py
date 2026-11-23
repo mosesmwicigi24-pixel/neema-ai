@@ -2503,6 +2503,9 @@ async def list_agents(
     return [dict(zip(keys, row)) for row in rows.fetchall()]
 
 
+SUPER_ADMIN_ROLE = "super_admin"
+
+
 @router.patch("/agents/{agent_id}/role")
 async def assign_agent_role(
     agent_id: str,
@@ -2535,6 +2538,25 @@ async def assign_agent_role(
     if agent.is_superuser and not current.is_superuser:
         raise HTTPException(status_code=403,
                             detail="Only a superuser can change a superuser's role")
+    # THE SUPER ADMIN ROLE IS THE SUPER ADMIN (owner, 2026-11-23: "we agreed
+    # super admin can pick any human intercepted conversation" — and the
+    # person holding the Super Admin role on the Team screen was still locked
+    # out, because the takeover reads the is_superuser flag and the role never
+    # set it). Giving the role sets the flag; only a super admin may give it;
+    # taking the role away clears it, never from the last super admin.
+    had_role = (await db.execute(text("SELECT custom_role_id FROM agents WHERE id = :id"),
+                                 {"id": agent_id})).scalar()
+    makes_super = custom_role_id == SUPER_ADMIN_ROLE
+    if makes_super and not current.is_superuser:
+        raise HTTPException(status_code=403,
+                            detail="Only the super admin can make someone a super admin")
+    if had_role == SUPER_ADMIN_ROLE and not makes_super:
+        others = (await db.execute(text(
+            "SELECT count(*) FROM agents WHERE is_superuser IS TRUE AND id <> :id"),
+            {"id": agent_id})).scalar() or 0
+        if not others:
+            raise HTTPException(status_code=409,
+                                detail="This is the only super admin — make someone else one first")
 
     custom_permissions = body.get("custom_permissions")
     if custom_permissions is not None:
@@ -2557,6 +2579,10 @@ async def assign_agent_role(
         """),
         {"role_id": custom_role_id, "perms": perms_json, "agent_id": agent_id},
     )
+    if makes_super:
+        agent.is_superuser = True
+    elif had_role == SUPER_ADMIN_ROLE:
+        agent.is_superuser = False
     await db.commit()
 
     row = await db.execute(

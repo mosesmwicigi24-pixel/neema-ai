@@ -340,3 +340,42 @@ def test_a_hub_record_with_orders_counted_but_none_listed_is_seen():
     assert into["stats_say_orders_but_none_listed"] == 1
     assert into["lists_of_records"] == {"customer.sales": 1, "customer.orders": 1}
     assert "X" not in str(into) and "name" in into["customer_keys"]
+
+
+# ── a total is never given without what it is made of (owner, 2026-11-23) ────
+
+_ORDER = [{"name": "Refiller Bottle 500ML", "qty": 2, "unit_price": 300},
+          {"name": "Episcopal Cross", "qty": 1, "unit_price": 2800},
+          {"name": "Cream Gold Cassock", "qty": 2, "unit_price": 2100}]
+
+
+def test_a_bare_total_gets_the_lines_it_is_made_of():
+    from app.agent.order_sheet import total_breakdown
+    said = ("Noted, 2 Cream Gold Cassocks, one for her and one for you. The order totals "
+            "ZMW 7,600, and your delivery address is saved.\n\nAre you ready to proceed with the order?")
+    out = total_breakdown(said, _ORDER, 7600, "ZMW")
+    first, second = out.split("\n\n")
+    assert "2 × Refiller Bottle 500ML = ZMW 600" in first
+    assert "1 × Episcopal Cross = ZMW 2,800" in first
+    assert "2 × Cream Gold Cassock = ZMW 4,200" in first
+    assert second == "Are you ready to proceed with the order?"
+
+
+def test_a_reply_that_names_every_line_or_gives_no_total_is_left_alone():
+    from app.agent.order_sheet import total_breakdown
+    full = ("2 refiller bottles ZMW 600, the Episcopal Cross ZMW 2,800 and 2 Cream Gold "
+            "Cassocks ZMW 4,200: ZMW 7,600 in all.")
+    assert total_breakdown(full, _ORDER, 7600, "ZMW") == full
+    no_total = "The Cream Gold Cassock is ZMW 2,100 each. How many do you need?"
+    assert total_breakdown(no_total, _ORDER, 7600, "ZMW") == no_total
+    one_line = "Your total is ZMW 4,200."
+    assert total_breakdown(one_line, _ORDER[2:], 4200, "ZMW") == one_line
+    # a line with no price yet: nothing is written that cannot be stood behind
+    unpriced = _ORDER[:2] + [{"name": "Robe", "qty": 1, "unit_price": None}]
+    assert total_breakdown("Total ZMW 3,400.", unpriced, 3400, "ZMW") == "Total ZMW 3,400."
+
+
+def test_the_order_note_asks_for_the_lines_with_the_total():
+    from app.agent.order_sheet import sheet_note
+    assert "WHEN YOU GIVE THE TOTAL" in sheet_note(_ORDER, 7600, "ZMW", [])
+    assert "WHEN YOU GIVE THE TOTAL" not in sheet_note(_ORDER[:1], 600, "ZMW", [])

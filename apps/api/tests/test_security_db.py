@@ -405,3 +405,42 @@ def test_the_live_feed_opens_only_for_a_current_agent(world, fresh_db, monkeypat
     assert asyncio.run(ws._authorised(create_access_token(ben), ben)) is True
     gone = str(uuid.uuid4())
     assert asyncio.run(ws._authorised(create_access_token(gone), gone)) is False
+
+
+# ── The Super Admin role IS the super admin (owner, 2026-11-23) ──────────────
+
+def test_the_super_admin_role_carries_the_takeover_flag(client, world, fresh_db):
+    sam, ann, ben = _as(world["su"]), _as(world["admin"]), world["agent"]
+    flag = lambda i: _row(fresh_db, "SELECT is_superuser FROM agents WHERE id = :i", i=i)[0]  # noqa: E731
+    # An admin who is not the super admin cannot make one.
+    assert client.patch(f"/api/admin/agents/{ben}/role", json={"custom_role_id": "super_admin"},
+                        headers=ann).status_code == 403
+    assert flag(ben) is False
+    # The super admin gives the role: the holder may now take over any chat.
+    assert client.patch(f"/api/admin/agents/{ben}/role", json={"custom_role_id": "super_admin"},
+                        headers=sam).status_code == 200
+    assert flag(ben) is True
+    # Taking the role away takes the power away.
+    assert client.patch(f"/api/admin/agents/{ben}/role", json={"custom_role_id": "lead"},
+                        headers=sam).status_code == 200
+    assert flag(ben) is False
+
+
+def test_the_last_super_admin_cannot_lose_the_role(client, world, fresh_db):
+    import sqlalchemy as sa
+    eng = sa.create_engine(fresh_db)
+    with eng.begin() as c:
+        c.execute(sa.text("UPDATE agents SET custom_role_id = 'super_admin' WHERE id = :i"), {"i": world["su"]})
+    eng.dispose()
+    r = client.patch(f"/api/admin/agents/{world['su']}/role", json={"custom_role_id": "lead"},
+                     headers=_as(world["su"]))
+    assert r.status_code == 409
+    assert _row(fresh_db, "SELECT is_superuser FROM agents WHERE id = :i", i=world["su"])[0] is True
+
+
+def test_boot_aligns_people_already_holding_the_role():
+    import app.main as m
+    import inspect
+    src = inspect.getsource(m)
+    assert "UPDATE agents SET is_superuser = TRUE" in src
+    assert src.index("'super_admin', 'Super Admin'") < src.index("UPDATE agents SET is_superuser = TRUE")
