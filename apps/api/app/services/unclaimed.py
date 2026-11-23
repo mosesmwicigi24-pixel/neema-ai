@@ -136,7 +136,7 @@ async def answer_fact(redis, conv, ext: str, text: str, media) -> str:
                                llm=build_llm(model=settings.tier2_model, purpose="unclaimed"),
                                media=media, channel=conv.channel,
                                external_id=(ext if conv.channel != "whatsapp" else None),
-                               extra_note=NOTE)
+                               extra_note=NOTE, lookup_only=True)
     reply = (reply or "").strip()
     if not reply or SKIP in reply.upper().split() or reply.upper().strip(".!") == SKIP:
         return ""

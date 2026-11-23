@@ -271,11 +271,10 @@ def test_every_route_is_wired():
     assert "audit H1" in inspect.getsource(runtime.schedule_meta_reply)
 
 
-def test_the_default_is_shadow():
+def test_shadow_is_one_setting_away():
+    # the defaults are switched on (owner, 2026-11-23: see the test below);
+    # POLICY_MODE=shadow returns every policy to record-only
     from app.core.config import Settings
-    assert Settings.model_fields["policy_mode"].default == "shadow"
-    assert Settings.model_fields["policy_enforce"].default == ""
-    assert Settings.model_fields["policy_guards_active"].default is False
     assert Settings.model_fields["policy_pay_at_collection"].default is False
 
 
@@ -347,10 +346,6 @@ def test_the_official_numbers_line_is_built_from_the_configured_lines(monkeypatc
     assert strip_numbers_line(one) == "Welcome, Pastor. Which colour?"
 
 
-def test_the_phase_two_switches_are_off():
-    from app.core.config import Settings
-    for name in ("official_numbers_by_code", "offer_price_after_grant", "second_deferral_line"):
-        assert Settings.model_fields[name].default is False, name
 
 
 def test_phase_two_is_wired():
@@ -362,3 +357,70 @@ def test_phase_two_is_wired():
     assert "ACT-03" in inspect.getsource(tools._schedule_check_in)
     assert "open_team_check" in inspect.getsource(tools._raise_complaint)
     assert "partial_only_figures" in inspect.getsource(runtime.run_turn)
+
+
+# ── switched on, and the rest of the build (owner, 2026-11-23) ───────────────
+
+def test_the_owner_switched_these_on():
+    from app.core.config import Settings
+    f = Settings.model_fields
+    assert f["policy_mode"].default == "enforce"
+    assert set(f["policy_enforce"].default.split(",")) == {"FIN-02", "FIN-03", "FIN-04", "FIN-05", "ORD-01", "ORD-02"}
+    for name in ("policy_guards_active", "official_numbers_by_code", "offer_price_after_grant",
+                 "second_deferral_line"):
+        assert f[name].default is True, name
+    assert f["policy_pay_at_collection"].default is False     # still needs an approved policy
+
+
+def test_only_the_six_listed_policies_hold_a_message(monkeypatch):
+    monkeypatch.setattr(settings, "policy_mode", "enforce", raising=False)
+    monkeypatch.setattr(settings, "policy_enforce", "FIN-02,FIN-03,FIN-04,FIN-05,ORD-01,ORD-02", raising=False)
+    f = pol.evaluate("We will refund you today. It will be ready in 9 days. Let me confirm with my colleague.",
+                     route=pol.LIVE)
+    assert {x["policy"] for x in f} == {"FIN-03", "FUL-01", "ACT-01"}
+    assert [x["policy"] for x in pol.enforced(f)] == ["FIN-03"]      # the other two are recorded only
+
+
+def test_a_promised_follow_up_is_booked():
+    text = "I'll check in with you on Friday."
+    assert "ACT-04" in ids(text)
+    assert "ACT-04" not in ids(text, tool_log=[{"tool": "schedule_check_in", "out": {"ok": True}}])
+    assert "ACT-04" not in ids("Take your time, I'm here when you're ready.")
+
+
+def test_a_price_from_memory_is_recorded():
+    earlier = ["The cassock set is $210, everything included."]
+    assert pol.stale_figures("As I said, the set is $210.", [], earlier) == [210.0]
+    looked = [{"tool": "search_catalog", "out": {"results": []}}]
+    assert pol.stale_figures("The set is $210.", looked, earlier) == []      # looked up again this turn
+    assert pol.stale_figures("Which colour would you like?", [], earlier) == []
+
+
+def test_a_held_chat_gets_no_automatic_template():
+    import inspect
+    from app.services import actions
+    src = inspect.getsource(actions.needs_approval)
+    assert src.index("conversation is human-held") < src.index("outside the 24h messaging window")
+
+
+def test_the_rest_of_the_build_is_wired():
+    import inspect
+    from app.agent import runtime, tools
+    from app.routers import crm, web_chat
+    from app.services import app_settings, conversation, unclaimed
+    assert "_pause_blocked" in inspect.getsource(tools._pause_conversation)
+    assert "lookup_only=True" in inspect.getsource(unclaimed.answer_fact)
+    assert "lookup_only" in inspect.getsource(runtime.run_turn)
+    assert "approve:once" in inspect.getsource(conversation.approve_draft)
+    assert "strip_markdown" in inspect.getsource(web_chat)
+    assert "record_change" in inspect.getsource(crm.update_deal)
+    assert "record_change" in inspect.getsource(app_settings.set_directives)
+    from app.agent.prompt import build_system_prompt
+    assert "on the day before their date" not in build_system_prompt(country_iso="KE", currency="KES")
+
+
+def test_guidance_changes_are_recorded_with_who():
+    r = _Redis()
+    asyncio.run(pol.record_change(r, "deal guidance", "Jane", "offer the set first"))
+    row = json.loads(r.l[0])
+    assert row["what"] == "deal guidance" and row["who"] == "Jane" and "offer the set" in row["detail"]

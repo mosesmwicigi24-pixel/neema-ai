@@ -244,6 +244,8 @@ async def web_chat(body: WebChatIn, request: Request, db: AsyncSession = Depends
     from app.agent.runtime import run_turn, build_llm, route_model, _hold_line, _still_ai
     try:
         reply = await run_turn(db, redis, wa_id, text, build_llm(model=route_model(text), purpose="web"))
+        from app.agent.voice import strip_markdown as _plain      # plain text here too (audit H14)
+        reply = _plain(reply)
         # A colleague who took the chat while the turn composed is not talked
         # over (the async channels re-check before sending; this one returns
         # the reply in the response, so it re-checks here — W1, verification 1).

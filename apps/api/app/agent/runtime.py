@@ -1767,6 +1767,7 @@ async def run_turn(db: AsyncSession, redis, wa_id: str, user_text: str, llm: LLM
                    *, channel: str = "whatsapp", external_id: str | None = None,
                    public_comment: bool = False, read_only: bool = False,
                    scribe_only: bool = False, deferred: bool = False,
+                   lookup_only: bool = False,
                    product_sink: list | None = None,
                    comment_reading: dict | None = None,
                    comment_post_id: str | None = None,
@@ -2605,6 +2606,11 @@ async def run_turn(db: AsyncSession, redis, wa_id: str, user_text: str, llm: LLM
         tools = [t for t in tools if t["name"] in _READONLY_TOOL_NAMES | _SCRIBE_TOOL_NAMES]
         ctx.allowed_tools = frozenset(
             _SCRIBE_TOOL_NAMES if scribe_only else _READONLY_TOOL_NAMES)
+    elif lookup_only:
+        # A real reply (the gate runs, it is sent) that may only LOOK THINGS UP:
+        # the unclaimed-chat answer in a chat a colleague owns (audit H12).
+        tools = [t for t in tools if t["name"] in _READONLY_TOOL_NAMES]
+        ctx.allowed_tools = frozenset(_READONLY_TOOL_NAMES)
     if scribe_only:
         # The instruction rides on the message, never in the shared rules
         # block — that block is cached fleet-wide and must not change.
@@ -2781,6 +2787,13 @@ async def run_turn(db: AsyncSession, redis, wa_id: str, user_text: str, llm: LLM
                 _p_find.append(_pol.finding(
                     "PRD-02", "quotes a price that belongs only to a near-match row",
                     ", ".join(f"{x:g}" for x in _p_part[:3])))
+            _p_earlier = [(_m.get("content") if isinstance(_m.get("content"), str) else "")
+                          for _m in messages[:-1] if isinstance(_m, dict) and _m.get("role") == "assistant"]
+            _p_stale = _pol.stale_figures(reply, tool_log, _p_earlier)
+            if _p_stale:
+                _p_find.append(_pol.finding(
+                    "FIN-10", "repeats a price from earlier in the chat with no look-up this turn",
+                    ", ".join(f"{x:g}" for x in _p_stale[:3])))
             if _p_find:
                 _p_held = _pol.enforced(_p_find)
                 await _pol.record(redis, _p_find, route=_pol.LIVE, channel=channel, key=key)
@@ -3260,6 +3273,9 @@ async def _run_and_send(redis, wa_id: str, text: str, media: dict | None = None,
                 return False
             unknown = None
             try:
+                # plain text on WhatsApp too (audit H14): no **bold**, no # headings
+                from app.agent.voice import strip_markdown as _plain
+                reply = _plain(reply)
                 wamid = await svc._send_waba(wa_id, reply)
             except svc.SendOutcomeUnknown as exc:
                 # Meta may have delivered it. Record it so nothing re-answers

@@ -3328,10 +3328,56 @@ async def _send_product_cards(args: dict, ctx: ToolContext) -> dict:
                     "attempt may well go through."}
 
 
+async def _pause_blocked(ctx: ToolContext) -> str | None:
+    """Why this chat may not be paused: a complaint raised in the last 7 days,
+    a team check still open, or items in the cart. Its own session."""
+    from datetime import timedelta
+    from sqlalchemy import or_
+    from app.database import AsyncSessionLocal
+    from app.models.conversation import Conversation
+    from app.models.intercept import Intercept, InterceptAction
+    async with AsyncSessionLocal() as db:
+        conv = (await db.execute(select(Conversation).where(
+            Conversation.channel == ctx.channel,
+            or_(Conversation.external_id == ctx.wa_id, Conversation.wa_id == ctx.wa_id)))).scalars().first()
+        if conv is None:
+            return None
+        since = datetime.now(timezone.utc) - timedelta(days=7)
+        n = (await db.execute(select(Intercept.id).where(
+            Intercept.conversation_id == conv.id, Intercept.action == InterceptAction.flag,
+            Intercept.created_at >= since, Intercept.note.like("COMPLAINT%")).limit(1))).first()
+        if n:
+            return "this customer has an open complaint"
+        try:
+            from app.services.deals import open_deal_for, team_check_open
+            deal = await open_deal_for(db, conversation_id=conv.id)
+            if deal is not None and team_check_open(deal):
+                return "the team still owes this customer an answer"
+        except Exception:
+            pass
+        try:
+            cart = await cartmod.get_cart(db, ctx.wa_id, ctx.channel)
+            if cart.get("items"):
+                return "this customer has an order in progress"
+        except Exception:
+            pass
+    return None
+
+
 async def _pause_conversation(args: dict, ctx: ToolContext) -> dict:
     """Code-enforced cooldown: the reply schedulers skip this contact while the
     key lives, so drift costs zero tokens for 2 hours. Best-effort — no redis,
     no pause (the agent's polite close still went out)."""
+    # A COMPLAINT OR AN OPEN ORDER IS NEVER PAUSED (audit H10, 2026-11-23): the
+    # pause lifts only on buying words, so a complaint with none got silence.
+    try:
+        _why = await _pause_blocked(ctx)
+    except Exception:
+        _why = None
+    if _why:
+        return {"ok": False, "paused": False, "error": f"not paused — {_why}",
+                "next_step": "Keep serving this customer. If they are off-topic, answer in one "
+                             "line and return to what they came for."}
     try:
         if ctx.redis is not None:
             await ctx.redis.set(f"agent:pause:{ctx.channel}:{ctx.wa_id}", "1", ex=2 * 3600)

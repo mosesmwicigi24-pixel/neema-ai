@@ -239,10 +239,14 @@ async def needs_approval(db, deal, conv, in_window: bool) -> str | None:
     """The reason this action must wait for a human — None when safe to auto-send."""
     from app.models.agent_action import AgentAction
     from app.models.conversation import InterceptMode
-    if not in_window:
-        return "outside the 24h messaging window"
+    # Human-held is read FIRST (audit H3, 2026-11-23): "outside the window"
+    # is the one reason that lets a template go out automatically, and it used
+    # to be returned before this check — so a chat a colleague held still got
+    # the automatic template.
     if conv is not None and conv.intercept_mode == InterceptMode.human:
         return "conversation is human-held"
+    if not in_window:
+        return "outside the 24h messaging window"
     # "Never sell into displeasure" binds the scheduler exactly as it binds a
     # live turn: a thread flagged for the team in the last 7 days (a complaint,
     # a failed reply, a sourcing gap) gets NO automatic refill/fit-check/nudge —
