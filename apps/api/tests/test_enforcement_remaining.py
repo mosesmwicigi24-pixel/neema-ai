@@ -198,9 +198,15 @@ def test_a_french_reply_to_someone_who_wrote_no_french_is_found():
 
 
 def test_their_earlier_messages_count_as_their_language():
-    sw = "Karibu sana! Tutakutumia kesho asubuhi, asante kwa kununua."
-    assert rv.language_unasked("Ok thanks", sw) == "sw"
-    assert rv.language_unasked("Ok thanks", sw, [{"role": "user", "content": "Habari, nataka kanzu"}]) is None
+    assert rv.language_unasked("Ok thanks", FRENCH) == "fr"
+    assert rv.language_unasked("Ok thanks", FRENCH, [{"role": "user", "content": "Bonjour, je cherche une chasuble"}]) is None
+
+
+def test_a_swahili_answer_to_a_terse_message_is_never_a_finding():
+    # one Swahili word the floor cannot place is still a Swahili speaker
+    sw = "Samahani, maharagwe hatuuzi — sisi ni mavazi ya kanisa na vifaa vya ushirika tu."
+    for ask in ("Maharagwe", "Bule 1,na white 1", "Price?"):
+        assert rv.language_unasked(ask, sw) is None
 
 
 def test_an_english_reply_and_a_wordless_customer_are_left_alone():

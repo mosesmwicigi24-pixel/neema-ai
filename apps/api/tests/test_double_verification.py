@@ -168,7 +168,7 @@ def test_the_verifier_reads_rands_and_allows_the_conversion_at_todays_rate():
     assert rv.two_currencies(ok, "how much is it") == ["USD", "ZAR"]
     assert rv.rule_issues("how much that in rands", ok, [cassock], fx=rate) == []
     block = rv.rewrite_block(["x"], "draft", [cassock], "USD", [], mode="dm", fx=rate, comment="in rands?")
-    assert "Today's rate (a fact): 1 USD = 16.43 ZAR" in block and "an exchange rate" in block
+    assert "The rate to use (a fact): 1 USD = 16.43 ZAR" in block and "an exchange rate" in block
     assert "never promise to 'confirm' a figure with the team" in block
 
 

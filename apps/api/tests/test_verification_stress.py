@@ -511,7 +511,7 @@ def test_the_writer_is_told_it_can_send_photos():
     assert "YOU CAN SEND PHOTOS on WhatsApp, Messenger, Instagram and the website" in p
     assert "\"I can't send photos from here\" is false" in p
     from app.agent import tools
-    src = inspect.getsource(tools._send_product_cards)
+    src = inspect.getsource(tools._send_product_cards) + inspect.getsource(tools._deliver_cards)
     assert "NEVER say you can't send photos: you can" in src
     assert "Rich cards aren't available here" not in src
 

@@ -1007,12 +1007,10 @@ def _shows(lang: str, text: str) -> bool:
 
 def language_unasked(comment: str, answer: str, transcript: list | None = None) -> str | None:
     """THE OTHER DIRECTION (audit H15; the live miss of 2026-11-20, an English
-    comment answered in French): the draft is plainly in French, Portuguese,
-    Hindi or Swahili and NOTHING the customer wrote — this message or their
+    comment answered in French): the draft is plainly in French, Portuguese
+    or Hindi and NOTHING the customer wrote — this message or their
     recent ones — shows that language. Returns the draft's language, else
     None. A customer with no words on record (a photo alone) is not judged."""
-    from app.agent.voice import looks_swahili
-    from app.services.customer_state import guess_language
     a = answer or ""
     if not a.strip():
         return None
@@ -1023,9 +1021,10 @@ def language_unasked(comment: str, answer: str, transcript: list | None = None) 
         lang = "fr"
     elif en < 3 and len(_PT_MARK_RE.findall(a)) >= 2:
         lang = "pt"
-    elif en < 3 and guess_language(a) == "sw" and looks_swahili(a):
-        lang = "sw"
     else:
+        # Swahili is NOT judged in this direction: customers here write one
+        # Swahili word the floor cannot place ("Maharagwe", "Bule 1,na white
+        # 1") and a Swahili answer to them is right (found by the suite).
         return None
     theirs = [comment or ""] + [t for role, t in transcript_text(transcript, limit=8)
                                 if role == "user"]

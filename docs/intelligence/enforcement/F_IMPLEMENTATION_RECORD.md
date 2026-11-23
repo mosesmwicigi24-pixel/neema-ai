@@ -177,7 +177,7 @@ Record-only, as `FIN-11` and `FIN-12`. A number the words mark as a price ("is 4
 
 ## 5. The language check, both ways (H15)
 
-A reply plainly in French, Portuguese, Hindi or Swahili when nothing the customer wrote — this message or their recent ones — shows that language is corrected by one rewrite (soft: never holds). This is the miss of 20 November (an English comment answered in French). The existing direction now also runs under public comments, as a correction, never a hold.
+A reply plainly in French, Portuguese or Hindi when nothing the customer wrote — this message or their recent ones — shows that language is corrected by one rewrite (soft: never holds). This is the miss of 20 November (an English comment answered in French). The existing direction now also runs under public comments, as a correction, never a hold.
 
 ## Conflicts
 
