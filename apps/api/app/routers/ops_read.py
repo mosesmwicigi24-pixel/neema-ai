@@ -241,16 +241,46 @@ async def served(request: Request, channel: str = Query("whatsapp", max_length=2
         .where(OrderEvent.wa_id.in_(numbers), OrderEvent.hub_order_id.isnot(None),
                OrderEvent.created_at >= since))).all() if numbers else []
     redis = getattr(request.app.state, "redis", None)
-    gate = asyncio.Semaphore(4)
+    gate = asyncio.Semaphore(2)
+    # WHY A LOOK-UP FAILED IS COUNTED, NEVER SWALLOWED (first run, 2026-11-23:
+    # 4 of 909 WhatsApp contacts "found" while 38 of them held orders Neema
+    # herself had put in the hub — hub_client's search hides every error as
+    # "no such customer"). The search is made here so its outcome is seen.
+    import httpx
+    from app.core.phone import national_digits, same_number
+    probe = {"search_ok": 0, "search_http_error": {}, "search_failed": 0, "no_match_in_results": 0,
+             "results_returned": 0}
+    base = settings.hub_api_url.rstrip("/")
+    has_neema_order = {w for w, _s in neema}
+    known = {"contacts_with_a_neema_order": len(has_neema_order), "of_those_found_in_hub": 0}
 
     async def one(conv_id, wa_id):
         if not is_plausible_phone(wa_id):
             return None
         async with gate:
             try:
+                q = national_digits(wa_id) or "".join(ch for ch in wa_id if ch.isdigit())
+                async with httpx.AsyncClient(timeout=15.0) as client:
+                    resp = await client.get(f"{base}/api/v1/admin/pos/customers/search",
+                                            headers=hub_client._api_headers(), params={"q": q})
+                if resp.status_code != 200:
+                    k = str(resp.status_code)
+                    probe["search_http_error"][k] = probe["search_http_error"].get(k, 0) + 1
+                    return "error"
+                data = (resp.json() or {}).get("data", []) or []
+                probe["search_ok"] += 1
+                probe["results_returned"] += 1 if data else 0
+                if data and not any(same_number(wa_id, c.get("phone")) for c in data):
+                    probe["no_match_in_results"] += 1
+            except Exception:
+                probe["search_failed"] += 1
+                return "error"
+            try:
                 summ = await hub_client.fetch_customer_summary(wa_id, redis)
             except Exception:
                 return "error"
+        if summ and wa_id in has_neema_order:
+            known["of_those_found_in_hub"] += 1
         return served_reading(firsts.get(conv_id), summ)
 
     results = await asyncio.gather(*(one(cid, wa) for cid, wa in rows))
@@ -296,6 +326,7 @@ async def served(request: Request, channel: str = Query("whatsapp", max_length=2
     return {"channel": channel, "days": days, "offset": offset, "page": tally,
             "orders_since_first_chat_by_type": by_type, "paid_value_by_currency": value,
             "first_purchase_after_first_chat": lag,
+            "hub_lookup": probe, "check_known_customers": known,
             "orders_neema_created": {"contacts": len({w for w, _s in neema}), "orders": len(neema),
                                      "paid": sum(1 for _w, s in neema if str(s or "").lower() in _PAID)},
             "more": len(rows) == limit}
