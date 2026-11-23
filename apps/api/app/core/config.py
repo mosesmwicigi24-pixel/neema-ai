@@ -393,6 +393,9 @@ class Settings(BaseSettings):
     # A second "I'll get back to you" gets one short line, then silence
     # (decision D11). Off = silence from the second, as today.
     second_deferral_line: bool = True       # on (owner, 2026-11-23)
+    # Photos, cards and the measurement guide a turn would send go out only
+    # once its reply has passed the gate and the policy step (audit H2).
+    media_after_check: bool = True
     # ── Business facts Neema answers logistics/FAQ questions from ─────────────
     # Free text (location/branches, hours, delivery, payment, contacts) injected
     # into the system prompt. Without it Neema only knows the catalogue and can't

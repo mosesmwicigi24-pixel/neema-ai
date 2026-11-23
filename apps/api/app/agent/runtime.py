@@ -144,8 +144,8 @@ def _public_comment_addendum(currency: str = "USD") -> str:
         "may offer the nearest by its own name with its hub price. Never say we do not have "
         "it.\n"
         "- ANSWER EVERY QUESTION IN THE COMMENT. 'Where is your location?' — Nairobi, "
-        "Kenya; 'do you have a shop in South Africa?' — no shop there, we deliver "
-        "there by DHL; then the item and its price. A comment with two questions "
+        "Kenya; 'do you have a shop in South Africa?' — we serve South Africa from "
+        "Nairobi and deliver there by DHL; then the item and its price. A comment with two questions "
         "gets two answers in one short reply; one left unanswered is a failed reply.\n"
         "- EVERY REPLY IS VERIFIED BEFORE IT POSTS (owner, 2026-09-25): a reviewer "
         "checks that every figure is a price search_catalog returned this turn, that "
@@ -244,7 +244,7 @@ def _public_comment_addendum(currency: str = "USD") -> str:
         "something shown, sent or offered ('share more designs for ladies', 'send "
         "the catalogue', 'more photos') — is answered WITH THE SHELF: search_catalog "
         "for it, name the two or three closest items with their prices, and say "
-        "you have sent photos to their inbox; never a bare 'send us a message'. A "
+        "the link to see them is in their inbox; never a bare 'send us a message'. A "
         "QUESTION is answered first, exactly. A COMPLAINT gets no price and no "
         "pitch: one humble line by its weight, and a colleague takes it up (the "
         "team has been told). PRAISE is thanked in kind. A MIXED comment — kind "
@@ -2233,6 +2233,22 @@ async def run_turn(db: AsyncSession, redis, wa_id: str, user_text: str, llm: LLM
     except Exception:
         pass
 
+    # THE REPAIR WINDOW, FROM THE RECORD (decision D5): a customer raising a
+    # repair or an alteration is answered from the delivery date we hold, not
+    # from a guess. Read only on such a message; nothing is said otherwise.
+    _repair_state = None
+    if not public_comment and not read_only and not scribe_only:
+        try:
+            from app.services import repair_window as _rw
+            _ask = _rw.asks_about_repair(user_text)
+            if _ask:
+                _orders = await _rw.for_contact(channel, key)
+                if _ask == "strong" or _rw.has_delivery(_orders):
+                    turn_notes.append(_rw.note(_orders))
+                    _repair_state = _rw.worst(_orders)
+        except Exception as exc:
+            _log.info("repair window note skipped for %s: %s", key, exc)
+
     # What "this product" means: the products past turns actually surfaced for
     # THIS contact (photo-only asks included — their text history shows
     # nothing). Makes a returning "is it available now?" resolvable without
@@ -2549,6 +2565,8 @@ async def run_turn(db: AsyncSession, redis, wa_id: str, user_text: str, llm: LLM
                       read_only=read_only,
                       said=frozenset(k for k in _said if str(k).startswith("set:")),
                       customer_words=((user_text,) if (user_text or "").strip() else ()))
+    if not read_only and not scribe_only and getattr(settings, "media_after_check", False):
+        ctx.outbox = []          # photos and cards wait for the reply to pass (audit H2)
     # THE ORDER SO FAR, EVERY TURN (agent/order_sheet, 2026-11-15): the cart
     # is the record of what was agreed — who each piece is for, which photo,
     # what awaits a colleague's price. She used to see it only when she asked
@@ -2635,6 +2653,7 @@ async def run_turn(db: AsyncSession, redis, wa_id: str, user_text: str, llm: LLM
     _turn_note = _attach_turn_notes(messages, turn_notes)
 
     reply = None
+    _stalled = False        # a stock "let me check" line went out for want of words
     # THE GATE BEFORE POSTING (owner, 2026-09-25): the transcript as the
     # writer saw it, and every tool result of the turn — the ground truth
     # the reply is verified against, and the facts a rewrite is given.
@@ -2672,7 +2691,12 @@ async def run_turn(db: AsyncSession, redis, wa_id: str, user_text: str, llm: LLM
                 reply = await _reply_in_words(llm, sys_blocks, messages, tools)
                 if reply:
                     messages.append({"role": "assistant", "content": [{"type": "text", "text": reply}]})
-            reply = reply or "One moment — let me check on that for you."
+            if not reply:
+                # The writer gave no words twice. The customer is never left
+                # unanswered — and "let me check" is made TRUE: a colleague is
+                # told, so the promise has an owner (conflict X12, policy ACT-01).
+                reply = "One moment — let me check on that for you."
+                _stalled = True
             break
 
         results = []
@@ -2706,11 +2730,26 @@ async def run_turn(db: AsyncSession, redis, wa_id: str, user_text: str, llm: LLM
         # Ran out of iterations: the tools have gathered what they could. One
         # last call, words only, turns that into the customer's answer —
         # never "let me get a colleague" when the facts are already in hand.
-        reply = resp.text or await _reply_in_words(llm, sys_blocks, messages, tools) \
-            or "Let me get a colleague to help you with this."
+        reply = resp.text or await _reply_in_words(llm, sys_blocks, messages, tools)
+        if not reply:
+            reply = "Let me get a colleague to help you with this."
+            _stalled = True
         if resp.text and getattr(resp, "stop_reason", "") == "max_tokens":
             reply = await _settle_truncated(reply, llm, sys_blocks, messages, tools, key, turn_facts)
 
+    if _stalled and not read_only and not scribe_only and not public_comment:
+        # the same bell and tracked check a complaint gets: the team is rung,
+        # the check has an owner and is chased; Neema stays on the thread
+        try:
+            from app.agent.tools import _team_note
+            await _team_note(
+                ctx, kind="no_words", title="✍️ Neema had no answer — please reply",
+                text=("✍️ Neema could not put an answer into words and told the customer we are "
+                      f"checking. Their message: \"{' '.join((user_text or '').split())[:240]}\". "
+                      "Please answer them here. Neema stays on the thread."),
+                body=f"no answer in words — {key}")
+        except Exception as exc:
+            _log.warning("stalled turn for %s could not be told to the team: %s", key, exc)
     # THE GATE BEFORE POSTING (owner, 2026-09-25) — EVERY channel: the reply
     # is verified against this turn's ground truth before anyone sends it;
     # a failing draft is rewritten once with the reasons and the facts; a
@@ -2794,6 +2833,37 @@ async def run_turn(db: AsyncSession, redis, wa_id: str, user_text: str, llm: LLM
                 _p_find.append(_pol.finding(
                     "FIN-10", "repeats a price from earlier in the chat with no look-up this turn",
                     ", ".join(f"{x:g}" for x in _p_stale[:3])))
+            # a price with no currency mark is read by the gate's own standard
+            _bare = _pol.bare_price_numbers(reply)
+            if _bare:
+                from app.agent import review as _rvb
+                _ccy = getattr(ctx, "currency", None) or currency
+                _bfacts = set(_rvb.figures_in_results(tool_log)) | set(_rvb.transcript_figures(turn_messages))
+                for _s in _p_said:
+                    for _n in re.findall(r"(?<![\w.])\d[\d,]*(?:\.\d+)?", _s or ""):
+                        try:
+                            _bfacts.add(round(float(_n.replace(",", "")), 2))
+                        except ValueError:
+                            pass
+                _bad = [n for n in _bare if _rvb.unverified_figures(
+                    f"{_ccy} {n:g}", ctx.seen_products, user_text or "",
+                    _rvb.prompt_figures(_ccy), facts=_bfacts, fx=_fx_rates, currency=_ccy)]
+                if _bad:
+                    _p_find.append(_pol.finding(
+                        "FIN-11", "a price written without a currency that no source carries",
+                        ", ".join(f"{x:g}" for x in _bad[:3])))
+            _p_find.extend(_pol.quality_findings(
+                reply, user_text=user_text or "", earlier_replies=_p_earlier, tool_log=tool_log))
+            _free = _pol.unsourced_free(reply, _p_said + [str(_turn_note or "")] + [
+                str(b) for b in (sys_blocks if isinstance(sys_blocks, list) else [sys_blocks])] + [
+                json.dumps([e.get("out") for e in tool_log], default=str, ensure_ascii=False)])
+            if _free:
+                _p_find.append(_pol.finding(
+                    "FIN-12", "calls something free that no source says is free", _free))
+            if _repair_state == "outside" and _pol.repair_offered(reply):
+                _p_find.append(_pol.finding(
+                    "FUL-02", "offers a repair though our record puts delivery outside 14 days",
+                    _pol.repair_offered(reply)))
             if _p_find:
                 _p_held = _pol.enforced(_p_find)
                 await _pol.record(redis, _p_find, route=_pol.LIVE, channel=channel, key=key)
@@ -2849,6 +2919,12 @@ async def run_turn(db: AsyncSession, redis, wa_id: str, user_text: str, llm: LLM
                 reply = _trimmed
         except Exception as exc:
             _log.info("name check skipped for %s: %s", key, exc)
+    # PHOTOS AND CARDS GO OUT WITH A REPLY THAT PASSED (audit H2): what the
+    # tools queued is delivered here, just ahead of the words — or withheld
+    # when the reply was held, and recorded so the withholding can be seen.
+    if getattr(ctx, "outbox", None):
+        reply = await _flush_outbox(ctx, reply, held=_gate_outcome in ("held", "unowned"),
+                                    redis=redis, channel=channel, key=key)
     if _photo_refer is not None and reply:
         # A referred photo is never priced, whatever the draft says: a money
         # figure swaps the reply for the plain hand-over line. Then a person
@@ -2863,8 +2939,17 @@ async def run_turn(db: AsyncSession, redis, wa_id: str, user_text: str, llm: LLM
     # two sets in a second message, priced from the hub rows. A sender that
     # can send two messages takes it from turn_facts; anyone else gets it as
     # the reply's last paragraph.
+    # No selling into a complaint, none after a decline (conflict register:
+    # the ladder ran "regardless").
+    _no_upsell = any(isinstance(e, dict) and e.get("tool") == "raise_complaint" for e in tool_log)
+    if not _no_upsell:
+        try:
+            from app.services.declines import customer_declined as _declined
+            _no_upsell = bool(_declined(user_text))
+        except Exception:
+            pass
     if reply and _photo_refer is None and not read_only and not scribe_only \
-            and not public_comment:
+            and not public_comment and not _no_upsell:
         try:
             from app.services import cassock_ladder
             from app.services import messaging as _svc_lad
@@ -2950,6 +3035,50 @@ async def run_turn(db: AsyncSession, redis, wa_id: str, user_text: str, llm: LLM
     if not is_meta and not is_tiktok and not read_only:
         from app.services.lead_signals import refresh_lead_signals
         await refresh_lead_signals(db, wa_id)
+    return reply
+
+
+async def _flush_outbox(ctx, reply: str, *, held: bool, redis, channel: str, key: str) -> str:
+    """Deliver the media this turn queued, or withhold it with a held reply.
+    A send that delivers nothing puts the same facts into the reply as text
+    (the hub's name, price and link — never the model's words). Never raises."""
+    items, ctx.outbox = list(ctx.outbox or []), []
+    if not items:
+        return reply
+    names = [n for it in items for n in (it.get("names") or [])]
+    if held:
+        _log.info("turn %s: reply held — %d queued photo/card send(s) withheld: %s",
+                  key, len(items), ", ".join(str(n) for n in names)[:200])
+        try:
+            from app.agent import policy as _pol
+            await _pol.record(redis, [_pol.finding(
+                "RTE-03", "cards or photos were withheld with a held reply",
+                ", ".join(str(n) for n in names)[:160])],
+                route=_pol.LIVE, channel=channel, key=key, outcome="prevented")
+        except Exception:
+            pass
+        return reply
+    extra: list[str] = []
+    for it in items:
+        try:
+            out = await it["send"]() or {}
+        except Exception as exc:
+            _log.warning("turn %s: queued %s send failed: %s", key, it.get("kind"), exc)
+            out = {}
+        if out.get("sent_cards"):
+            continue
+        if it.get("fallback"):
+            extra.append(str(it["fallback"]))
+        for p in out.get("products") or []:
+            line = " — ".join(x for x in (p.get("name"), p.get("price")) if x)
+            if p.get("link"):
+                line = f"{line}: {p['link']}" if line else str(p["link"])
+            if line:
+                extra.append(line)
+    if extra and (reply or "").strip():
+        reply = reply.rstrip() + "\n\n" + "\n".join(extra)
+    elif extra:
+        reply = "\n".join(extra)
     return reply
 
 
@@ -4635,7 +4764,7 @@ def _reading_context(reading: dict | None) -> str:
         return ("(Reading: this comment is a REQUEST — they want: "
                 f"{ask or 'to be shown what we have'}. Answer it with what we have for it "
                 "from the hub: search_catalog it, give the two or three closest items with "
-                "their prices, and say you have sent photos to their inbox. Never a bare "
+                "their prices, and say the link to see them is in their inbox. Never a bare "
                 "'send us a message'.)")
     if kind == "question":
         return ("(Reading: this comment is a QUESTION"
@@ -6920,6 +7049,23 @@ async def _run_comment_engage(redis, channel: str, comment: dict, own_pages: set
             # missing the `pages_messaging` permission, not that buyers are rare).
             _log.warning("comment DM not delivered for %s (%s) — the link had no "
                          "way to reach them: %s", cid, channel, exc)
+
+    # A PRIVATE MESSAGE IS SPOKEN OF ONLY WHEN ONE WENT (audit H5, X21): the
+    # answer was written before the attempt above. Dropped words are recorded.
+    if answer:
+        from app.agent.voice import honest_inbox_claims as _hic
+        _honest = _hic(answer, dm_sent=dm_sent, link_sent=bool(dm_sent and product_link),
+                       swahili=swahili)
+        if _honest != answer:
+            _log.info("comment %s: private-message claim corrected (dm_sent=%s)", cid, dm_sent)
+            try:
+                from app.agent import policy as _pol
+                await _pol.record(redis, [_pol.finding(
+                    "ACT-01", "a public reply spoke of a private message or photos that did not go",
+                    answer[:120])], route=_pol.LIVE, channel=channel, key=ext, outcome="corrected")
+            except Exception:
+                pass
+            answer = _honest
 
     # The public reply is composed from FACTS, never from links: whether we
     # answered, whether the DM landed, and what the post sells. No URL is even

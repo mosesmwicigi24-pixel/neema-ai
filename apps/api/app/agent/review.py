@@ -332,6 +332,21 @@ def allowed_figures(seen: list, *, known: set[float] | frozenset[float] = frozen
     for i, x in enumerate(rows_prices):
         for y in rows_prices[i + 1:]:
             allowed.add(round(x + y, 2))
+    # every piece of a set, added up (conflict X7): the instructions tell the
+    # writer to total each piece when no set row exists, and two-row sums
+    # alone held a correct three-piece total. The sum of the prices the reply
+    # itself states for the rows it names — each one that row's own price.
+    try:
+        named = products_named(answer, seen) if answer else []
+        if len(named) >= 3:
+            said = {round(v, 2) for v in money_figures(answer)}
+            per_row = [sorted(_row_figures(r, currency) & said)[:2] for r in named[:8]]
+            if all(per_row):
+                import itertools
+                for combo in itertools.islice(itertools.product(*per_row), 64):
+                    allowed.add(round(sum(combo), 2))
+    except Exception:
+        pass
     # a price or a fact plus a fee
     fees = [f for f in (set(known or ()) | set(facts or ())) if f > 0]
     for x in list(fee_anchors)[:200]:
@@ -971,6 +986,57 @@ def language_mismatch(comment: str, answer: str) -> str | None:
     return None
 
 
+def _shows(lang: str, text: str) -> bool:
+    """Does this text of the customer's show any sign of `lang`?"""
+    from app.agent.voice import looks_swahili
+    from app.services.customer_state import guess_language
+    if not (text or "").strip():
+        return False
+    if guess_language(text) == lang:
+        return True
+    if lang == "sw":
+        return looks_swahili(text)
+    if lang == "fr":
+        return bool(_FR_MARK_RE.search(text))
+    if lang == "pt":
+        return bool(_PT_MARK_RE.search(text))
+    if lang == "hi":
+        return bool(_DEVANAGARI_RE.search(text))
+    return False
+
+
+def language_unasked(comment: str, answer: str, transcript: list | None = None) -> str | None:
+    """THE OTHER DIRECTION (audit H15; the live miss of 2026-11-20, an English
+    comment answered in French): the draft is plainly in French, Portuguese,
+    Hindi or Swahili and NOTHING the customer wrote — this message or their
+    recent ones — shows that language. Returns the draft's language, else
+    None. A customer with no words on record (a photo alone) is not judged."""
+    from app.agent.voice import looks_swahili
+    from app.services.customer_state import guess_language
+    a = answer or ""
+    if not a.strip():
+        return None
+    en = len(_EN_MARK_RE.findall(a))
+    if _DEVANAGARI_RE.search(a):
+        lang = "hi"
+    elif en < 3 and len(_FR_MARK_RE.findall(a)) >= 3:
+        lang = "fr"
+    elif en < 3 and len(_PT_MARK_RE.findall(a)) >= 2:
+        lang = "pt"
+    elif en < 3 and guess_language(a) == "sw" and looks_swahili(a):
+        lang = "sw"
+    else:
+        return None
+    theirs = [comment or ""] + [t for role, t in transcript_text(transcript, limit=8)
+                                if role == "user"]
+    theirs = [t for t in theirs if re.search(r"[^\W\d_]{2,}", t or "")]
+    if not theirs:
+        return None
+    if any(_shows(lang, t) for t in theirs):
+        return None
+    return lang
+
+
 def initiated_issues(text: str, *, paid_known: bool = False, status_known: bool = False) -> dict:
     """The deterministic findings on a message NEEMA initiates — a follow-up,
     an after-sale announcement, the sweeper's bridge — which never pass the
@@ -1460,7 +1526,8 @@ def rule_findings(comment: str, answer: str, seen: list,
     if where_unanswered(comment, answer):
         out.append({"kind": "where", "hard": False,
                     "text": "their question about where we are / a shop in their country is "
-                    "unanswered — say Nairobi, Kenya, no shop there, DHL delivers to them"})
+                    "unanswered — say we are in Nairobi, Kenya and deliver to them by DHL; if they asked "
+                    "about a shop in their country, say once that we serve them from Nairobi"})
     links = foreign_links(answer, tool_results, known_text, transcript)
     if links:
         out.append({"kind": "link", "hard": True,
@@ -1470,8 +1537,25 @@ def rule_findings(comment: str, answer: str, seen: list,
         out.append({"kind": "status", "hard": True,
                     "text": "an order-status claim (shipped / on its way / delivered) with no "
                     "check_order_status behind it — check the order, never assume"})
-    _lang = language_mismatch(comment, answer) if mode == "dm" else None
-    if _lang:
+    _lang = language_mismatch(comment, answer)
+    _back = None if _lang else language_unasked(comment, answer, transcript)
+    if _back:
+        # SOFT: one rewrite, then it stands aside. English is the language
+        # when the customer has shown no other.
+        _bn = {"hi": "Hindi", "sw": "Swahili", "fr": "French", "pt": "Portuguese"}[_back]
+        out.append({"kind": "language", "hard": False,
+                    "text": f"the draft is in {_bn} and nothing they wrote is — answer in the "
+                    "language THEY wrote (English when it cannot be told), the same facts, the "
+                    "same length"})
+    if _lang and mode != "dm":
+        # under a public comment the same miss is corrected by the rewrite and
+        # never holds the reply (a held comment gets a canned line)
+        _name = {"hi": "Hindi", "sw": "Swahili", "fr": "French", "pt": "Portuguese"}[_lang]
+        out.append({"kind": "language", "hard": False,
+                    "text": f"they wrote in {_name} and the draft is not — answer in {_name}, "
+                    "the same facts, the same length (the hub's product names may stay as "
+                    "the hub names them)"})
+    elif _lang:
         _name = {"hi": "Hindi", "sw": "Swahili", "fr": "French", "pt": "Portuguese"}[_lang]
         # HARD (owner's decision, 2026-11-07): a plainly-English draft to a
         # customer the floor placed in Hindi, Swahili, French or Portuguese is
@@ -1534,8 +1618,8 @@ def rule_findings(comment: str, answer: str, seen: list,
         out.append({"kind": "payment_method", "hard": False,
                     "text": "they asked how to pay and the draft names no way to pay — name the ways "
                     "that work for them (in Kenya: M-Pesa till / paybill, Airtel Money, the card "
-                    "link; from abroad: card link, Western Union, Mukuru or the transfer rail the "
-                    "prompt lists for their country), then the one next step"})
+                    "link; from abroad: the card link and the transfer rails the prompt lists for THEIR "
+                    "country — never one it does not list), then the one next step"})
     _promised = promise_only(answer, seen)
     if _promised is not None:
         out.append({"kind": "promise", "hard": False,
@@ -1892,10 +1976,10 @@ def rewrite_block(issues: list[str], draft: str, seen: list, currency: str,
         "done. Rules: the item is exactly what they asked for (their finish, their kind — "
         "if we do not have it, say so plainly and offer the nearest from the rows "
         "above with its price); every figure is one of the facts above, in ONE "
-        "currency (plus the one they asked for by name, at today's rate above, if "
+        "currency (plus the one they asked for by name, at the rate given above, if "
         "any); answer every question they asked — and nothing they did not ask "
-        "(where we are is Nairobi, Kenya; a shop in their country — none, DHL "
-        "delivers — ONLY if they asked); never re-ask a detail they already gave; "
+        "(where we are is Nairobi, Kenya; a shop in their country — we serve them from "
+        "Nairobi and DHL delivers to them — ONLY if they asked); never re-ask a detail they already gave; "
         "never invent a pack size, a capacity, an order status, a delivery time or "
         f"an exchange rate; never promise to 'confirm' a figure with the team; {photos_rule}"
         "their colour is the colour ('bule' / 'bluu' is BLUE — our navy is the closest — never "
@@ -1925,7 +2009,7 @@ def _fx_text(fx: dict | None, comment: str) -> str:
     code = currency_asked(comment)
     if not code or code not in fx:
         return ""
-    return f"Today's rate (a fact): 1 USD = {float(fx[code]):g} {code} — convert from the USD price only.\n"
+    return f"The rate to use (a fact): 1 USD = {float(fx[code]):g} {code} — convert from the USD price only.\n"
 
 
 # ── the tally: what the gate did today (health, the team's eye) ──────────────

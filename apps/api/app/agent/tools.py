@@ -72,6 +72,12 @@ class ToolContext:
     # The message being answered — one of the places a removal's quote may be
     # found (the stored record is the other).
     customer_words: tuple = ()
+    # PHOTOS AND CARDS GO OUT WITH A REPLY THAT PASSED (audit H2). A live turn
+    # sets this to a list: a tool that would send media queues the send here
+    # and the turn delivers it once the reply has cleared the gate and the
+    # policy step — or withholds it with a held reply. None (a direct call, a
+    # test, an older caller) sends at once, as before.
+    outbox: list | None = None
 
 
 def _channel_label(ctx: "ToolContext") -> str:
@@ -1911,9 +1917,18 @@ async def _create_order(args: dict, ctx: ToolContext) -> dict:
                   "with them here. Neema stays on the thread."),
             body=f"order #{pushed.get('order_number')} — {ctx.wa_id}")
         result["team_told"] = told
+        # Mukuru is named only where a sender can use it (prompt.MUKURU_SEND_ISO);
+        # an unplaced customer keeps the full menu.
+        try:
+            from app.agent.prompt import MUKURU_SEND_ISO as _muk
+            _iso = (country_iso or "").upper()
+        except Exception:
+            _muk, _iso = set(), ""
+        _rails = ("Western Union, MoneyGram or Mukuru" if (not _iso or _iso in _muk)
+                  else "Western Union or MoneyGram")
         result["next_step"] = ("Give the order number and the order link (it shows the amount "
                                "and the payment options for their country); ask which transfer "
-                               "method suits them — Western Union, MoneyGram or Mukuru — and say a "
+                               f"method suits them — {_rails} — and say a "
                                "colleague confirms the route and the amount with them. Stay in the "
                                "conversation; never present the KES M-Pesa link as their way to pay.")
     if ctx.redis is not None:
@@ -2106,6 +2121,20 @@ async def _check_order_status(args: dict, ctx: ToolContext) -> dict:
     if out.get("live") is False:
         out["note"] = ("the hub did not answer just now — the order exists; say you will "
                        "confirm its status shortly, never guess it")
+    try:
+        # when it was delivered, from our own record of the hub's event — the
+        # date the 14-day repair window is counted from (decision D5)
+        from app.services import repair_window as _rw
+        rd = _rw.reading(delivered_at=(row.state or {}).get("delivered_at"),
+                         hub_status=row.hub_status, hub_fulfillment=row.hub_fulfillment_status,
+                         hub_status_at=row.hub_status_at)
+        if rd.get("exact"):
+            out["delivered_on"] = rd["delivered_at"].date().isoformat()
+            out["days_since_delivery"] = rd["days"]
+        if rd["window"] in ("inside", "outside"):
+            out["repair_window"] = rd["window"]
+    except Exception:
+        pass
     return out
 
 
@@ -3161,6 +3190,48 @@ async def _send_product_cards(args: dict, ctx: ToolContext) -> dict:
                 _extras.append(u)
         _extras = _extras[:5]
 
+    # AFTER THE CHECK (audit H2): in a live turn the cards are queued and go
+    # out with the reply once it has passed; a held reply withholds them.
+    rich = (ctx.channel == "whatsapp" and is_plausible_phone(ctx.wa_id)) \
+        or ctx.channel in ("messenger", "instagram")
+    sendable = [c for c in cards if c["image"] or c["url"]]
+    if ctx.outbox is not None and rich and sendable:
+        slugs = tuple(c["slug"] for c in cards)
+        if not any(o.get("key") == slugs for o in ctx.outbox):
+            async def _go(_cards=cards, _ex=_extras):
+                return await _deliver_cards(_cards, _ex, ctx)
+            ctx.outbox.append({"kind": "cards", "key": slugs, "send": _go,
+                               "names": [c["name"] for c in cards]})
+        album = len(_extras) if len(sendable) == 1 else 0
+        return {"ok": True, "sent_cards": len(sendable), "album_photos": album,
+                "note": _cards_note(ctx.channel, album)}
+    return await _deliver_cards(cards, _extras, ctx)
+
+
+def _cards_note(channel: str, album: int) -> str:
+    """What the writer is told once cards are on their way."""
+    if channel == "whatsapp":
+        if album:
+            return (f"The card AND {album} more photo(s) of it (the full gallery, "
+                    "as an album) were delivered. Reply with only a short line — "
+                    "never say you can't send more photos, and do NOT repeat the "
+                    "name, price or link as text.")
+        return ("Cards with photo, price and a View button were delivered to the "
+                "customer. Reply with only a short line (ask which one, or their "
+                "size/quantity) — do NOT repeat the names, prices or links as text.")
+    if album:
+        return (f"The card AND {album} more photo(s) of it (the full "
+                "gallery, as an album) were sent. Add only a short line — "
+                "never say you can't send more photos.")
+    return ("A swipeable carousel of product cards (photo, price, View "
+            "button) was sent. Add only a short line — do NOT re-list the "
+            "names, prices or links as text.")
+
+
+async def _deliver_cards(cards: list, _extras: list, ctx: ToolContext) -> dict:
+    """Send the prepared cards now. Returns what went (`sent_cards`), or the
+    card details as text (`products`) when nothing could be delivered."""
+    from app.core.phone import is_plausible_phone
     # Rich WhatsApp cards — only for a real WhatsApp phone (never a Meta PSID or a
     # web session key), and only when we have a storefront URL to link to.
     if ctx.channel == "whatsapp" and is_plausible_phone(ctx.wa_id):
@@ -3217,16 +3288,8 @@ async def _send_product_cards(args: dict, ctx: ToolContext) -> dict:
                 _log.info("product album sent to %s: %s (+%d photos)",
                           ctx.wa_id, cards[0]["slug"], album)
         if sent:
-            note = ("Cards with photo, price and a View button were delivered to the "
-                    "customer. Reply with only a short line (ask which one, or their "
-                    "size/quantity) — do NOT repeat the names, prices or links as text.")
-            if album:
-                note = (f"The card AND {album} more photo(s) of it (the full gallery, "
-                        "as an album) were delivered. Reply with only a short line — "
-                        "never say you can't send more photos, and do NOT repeat the "
-                        "name, price or link as text.")
             return {"ok": True, "sent_cards": sent, "album_photos": album,
-                    "note": note}
+                    "note": _cards_note("whatsapp", album)}
 
     # Rich cards on Messenger / Instagram — a NATIVE generic-template carousel
     # (photo + name + price + View button, swipeable), the web-chat card look.
@@ -3282,15 +3345,8 @@ async def _send_product_cards(args: dict, ctx: ToolContext) -> dict:
                     except Exception as exc:
                         _log.warning("send_product_cards: meta album photo failed "
                                      "for %s: %s", cards[0]["slug"], exc)
-                note = ("A swipeable carousel of product cards (photo, price, View "
-                        "button) was sent. Add only a short line — do NOT re-list the "
-                        "names, prices or links as text.")
-                if album:
-                    note = (f"The card AND {album} more photo(s) of it (the full "
-                            "gallery, as an album) were sent. Add only a short line — "
-                            "never say you can't send more photos.")
                 return {"ok": True, "sent_cards": len(elements),
-                        "album_photos": album, "note": note}
+                        "album_photos": album, "note": _cards_note(ctx.channel, album)}
             except Exception as exc:
                 _log.warning("send_product_cards: meta carousel failed: %s", exc)
                 # Last resort before words: send the photos as plain attachments.
@@ -3612,13 +3668,25 @@ async def _send_measurement_guide(args: dict, ctx: ToolContext) -> dict:
         return {"error": "no measurement guide is configured"}
     from app.core.phone import is_plausible_phone as _plausible_phone
     if ctx.channel == "whatsapp" and _plausible_phone(ctx.wa_id):
-        try:
+        async def _go():
             from app.services import messaging as _svc
             wamid = await _svc._send_waba_image(
                 ctx.wa_id, url, caption="How to take your measurements 📏")
             await _svc.save_outbound_message(
                 ctx.db, ctx.redis, ctx.wa_id, "[image] How-to-measure guide 📏",
                 waba_msg_id=wamid)
+            return {"ok": True, "sent_cards": 1}
+        if ctx.outbox is not None:
+            # with the reply, once it has passed (audit H2); if the image
+            # cannot be delivered then, the link rides the reply instead
+            if not any(o.get("key") == "measurement_guide" for o in ctx.outbox):
+                ctx.outbox.append({"kind": "guide", "key": "measurement_guide", "send": _go,
+                                   "names": ["how-to-measure guide"],
+                                   "fallback": f"How to take your measurements: {url}"})
+            return {"ok": True, "sent": "image",
+                    "note": "the diagram is with them — now ask for the figures in one short line"}
+        try:
+            await _go()
             return {"ok": True, "sent": "image",
                     "note": "the diagram is with them — now ask for the figures in one short line"}
         except Exception as exc:
