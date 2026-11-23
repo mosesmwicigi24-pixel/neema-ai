@@ -279,3 +279,24 @@ def test_quality_findings_never_hold_a_reply(monkeypatch):
     monkeypatch.setattr(settings, "policy_enforce", "*", raising=False)
     found = pol.quality_findings(reply="Which colour? And what size?")
     assert found and pol.enforced(found) == []
+
+
+# ── the official-numbers line on a first reply that used a tool ──────────────
+
+def test_the_first_reply_is_judged_from_the_conversation_before_the_turn():
+    # found by the model run of 2026-11-23: the turn's own tool calls sit in
+    # `messages` as assistant entries, so a first reply that looked something
+    # up was read as a later reply and got no official-numbers line
+    import inspect
+    src = inspect.getsource(rt.run_turn)
+    i = src.index("_first_reply = not any(")
+    assert "for _m in turn_messages)" in src[i:i + 200]
+
+
+def test_a_second_mention_of_our_numbers_gives_way_on_the_first_reply(monkeypatch):
+    from app.agent.voice import strip_numbers_line
+    monkeypatch.setattr(settings, "whatsapp_handoff_number", "+254727891989", raising=False)
+    monkeypatch.setattr(settings, "whatsapp_handoff_alt", "+254785490805", raising=False)
+    t = "Our Cassock is KES 13,000. Which colour would you like?\n\nYou can reach us on +254727891989 or +254785490805."
+    assert strip_numbers_line(t, every_mention=True) == "Our Cassock is KES 13,000. Which colour would you like?"
+    assert strip_numbers_line(t) == " ".join(t.split()) or strip_numbers_line(t) == t   # later replies are left alone

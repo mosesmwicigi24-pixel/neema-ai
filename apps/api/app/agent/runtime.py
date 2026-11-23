@@ -2888,9 +2888,13 @@ async def run_turn(db: AsyncSession, redis, wa_id: str, user_text: str, llm: LLM
         # wrong. Whatever version the model wrote gives way to this one.
         try:
             from app.agent.voice import official_numbers_line, strip_numbers_line
+            # the conversation as it stood BEFORE this turn: `messages` also
+            # holds this turn's own tool calls, which made every first reply
+            # that looked something up read as a later one (model run of
+            # 2026-11-23: the line reached 1 first reply in 12)
             _first_reply = not any(isinstance(_m, dict) and _m.get("role") == "assistant"
-                                   for _m in messages[:-1])
-            reply = strip_numbers_line(reply)
+                                   for _m in turn_messages)
+            reply = strip_numbers_line(reply, every_mention=_first_reply)
             if _first_reply and reply.strip():
                 _line = official_numbers_line(swahili=looks_swahili(user_text or ""))
                 if _line:
