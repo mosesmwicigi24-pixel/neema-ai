@@ -216,6 +216,13 @@ MIGRATION_STATEMENTS = [
         TRUE
     ) ON CONFLICT (id) DO NOTHING
     """,
+    # Whoever holds the Super Admin role IS the super admin: the takeover of a
+    # held chat reads agents.is_superuser, which the role never set (owner,
+    # 2026-11-23). Runs after the role seed above; a no-op once aligned.
+    """
+    UPDATE agents SET is_superuser = TRUE
+    WHERE custom_role_id = 'super_admin' AND is_superuser IS NOT TRUE
+    """,
     # Seed: Agent
     """
     INSERT INTO custom_roles (id, name, description, color, permissions, protected)
