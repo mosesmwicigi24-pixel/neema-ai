@@ -43,3 +43,7 @@ Done: see `F_IMPLEMENTATION_RECORD.md` and `G_VERIFICATION_REPORT.md`.
 ## Phase 5 — conversational quality
 
 Naturalness is evaluated in context and corrected by one focused rewrite, never by phrase bans: repeated greetings, re-asked questions, stacked paragraphs, menus, selling into a complaint, pressure after a decline. The record-only length and pacing measures already exist and feed this.
+
+## Status, 23 November 2026
+
+Phases 1 and 2 are live (#387, #388): the six critical policies are enforced, the route guards and the three wording switches are on. Next, in order: read `/api/admin/policy/report` for false alarms on the enforced policies; photos only after the reply passes; the repair rule against the hub's delivered date; the remaining conflicts; conversational quality.

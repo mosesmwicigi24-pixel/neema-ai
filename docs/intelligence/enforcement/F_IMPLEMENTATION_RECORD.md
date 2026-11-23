@@ -93,3 +93,48 @@ A complaint opens a tracked team check, the same record an availability question
 | D5: making the repair texts agree | The instruction text is one long string with tests pinned to its wording; the edit is planned with D7's. |
 | D8: removing the instruction to book a check-in before a deadline | Same reason. ACT-03 already records the behaviour. |
 | H2 photos before the check, H3 templates in a held chat, H10 pause on a complaint, H12–H16 | Planned; see `PLAN.md` Phase 4. |
+
+# Switch-on and the next fixes — merged as #388 (main 5e13d15), 23 November 2026
+
+On the owner's word ("build this in one go"). This section supersedes "nothing switched on" and the first three rows of "Not built in this round" above.
+
+## Switched on (defaults in `core/config.py`)
+
+| Setting | Value | Effect |
+|---|---|---|
+| `policy_mode` | `enforce` | Policies named in `policy_enforce` hold the message; all others still only record. |
+| `policy_enforce` | `FIN-02,FIN-03,FIN-04,FIN-05,ORD-01,ORD-02` | Discounts, refunds/remakes/replacements, pay on delivery, payment at collection, confirmed orders. |
+| `policy_guards_active` | on | Opt-out silences later sends (RTE-01); a human-held chat is not answered through Neema (RTE-02); no pause over a held chat. |
+| `official_numbers_by_code` | on | Official-numbers line written by code on the first private reply. |
+| `offer_price_after_grant` | on | Discount figure reaches the writer only after the offer step grants and records it. |
+| `second_deferral_line` | on | Second "I'll get back to you" gets one short line. |
+| `whatsapp_debounce_seconds`, `meta_debounce_seconds` | 60 | Messages within one minute are combined into one reply; ceiling `reply_window_max_seconds` = 120. |
+
+The switch-on was made without reading the live Phase 1 record: `/api/admin/policy/report` needs a staff sign-in this work does not have. False-alarm counts on live traffic are therefore NOT YET MEASURED.
+
+## Wording changed (owner's decisions)
+
+- D5 repairs: 14 days from delivery, our items only, said plainly once; a colleague decides exceptions.
+- D7 availability: "confirming with a colleague", a check is raised; never "out of stock".
+- D8 check-ins: the instruction to book one the day before a deadline is removed; booked only when the customer names a time.
+
+## Also built
+
+- Policy step on staff-approved sends (`services/actions.py`), hub announcements, team answers, order creation.
+- Guidance, directives and learned-rule changes are logged with who and when (D9).
+- Draft approval is once-only; markdown is stripped on WhatsApp Cloud and web-chat sends.
+- Unclaimed-order lookups run as lookup-only turns.
+
+## Rollback
+
+`POLICY_MODE=shadow` on the server returns every policy to record-only. Each other switch is its own setting and can be turned off alone.
+
+## Still not built
+
+| Item | Why |
+|---|---|
+| Photos and cards only after the reply passes (H2) | Sends are interleaved with the tool loop; needs a buffered-send change. |
+| Repair rule checked against the purchase date | Needs the delivered date from the hub. |
+| Remaining instruction conflicts (about 20 of X1–X22) | Each needs an owner decision or a model run. |
+| Conversational quality in context | Not started. |
+| "I've sent you a private message" claim check; bare numbers; two-way language check | Partial; the rest of findings 5, 7, 9. |

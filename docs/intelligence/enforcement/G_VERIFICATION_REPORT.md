@@ -86,3 +86,10 @@ CI on the first Phase 1 commit failed two existing order tests: the consent chec
 - **The customer's yes (ORD-01)** is read from wording in the last three messages. A yes phrased another way, or given four messages back, is recorded as missing. This is why it is record-only.
 - **Phone numbers (FIN-05)** are recognised by shape. A number written in an unusual format may be missed.
 - **Dates (FUL-01)** accept a day the customer named anywhere in their recent words, which is permissive.
+
+## 6. Switch-on (#388, main 5e13d15)
+
+- Full local suite on dd583ae: 3934 passed, 1 xpassed. CI green (API tests, migrations, lint ratchet, import smoke, web build).
+- Older tests run with the new switches off (autouse fixture in `tests/conftest.py`); each switch is tested on in `tests/test_safeguards_on.py` (15 tests).
+- Model check of the wording changes, 7 cases (run 45152831211): all behaved as decided. In that run the model wrote the official-numbers line in 1 of 7 first replies, which is why the line is now written by code.
+- NOT YET MEASURED: false alarms of the six enforced policies on live traffic; the one-minute wait's effect on reply counts.
