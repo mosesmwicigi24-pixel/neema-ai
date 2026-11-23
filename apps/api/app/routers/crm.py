@@ -989,6 +989,7 @@ async def list_deals(
 async def update_deal(
     deal_id: str,
     body: dict,
+    request: Request,
     db: AsyncSession = Depends(get_db),
     agent: Agent = Depends(get_current_agent),
 ):
@@ -1005,6 +1006,13 @@ async def update_deal(
         raise HTTPException(status_code=404, detail="Deal not found")
     for field in ("guidance", "blocking", "stage", "status", "title"):
         if field in body:
+            if field == "guidance" and (body[field] or "") != (deal.guidance or ""):
+                try:
+                    from app.agent import policy as _pol
+                    await _pol.record_change(getattr(request.app.state, "redis", None), "deal guidance",
+                                             getattr(agent, "name", None) or agent.id, str(body[field] or ""))
+                except Exception:
+                    pass
             setattr(deal, field, body[field])
     if "next_action" in body:
         deal.next_action = body["next_action"] or None
@@ -1470,6 +1478,12 @@ async def judge_proposal(
         from app.services.learned_rules import keep_newest
         rules = keep_newest(rules, 1200)
         await set_value(db, "learned_rules", rules)
+        try:
+            from app.agent import policy as _pol
+            await _pol.record_change(getattr(request.app.state, "redis", None), "learned rule approved",
+                                     getattr(agent, "name", None) or agent.id, proposals[idx]["rule"])
+        except Exception:
+            pass
         redis = getattr(request.app.state, "redis", None)
         if redis is not None:
             try:

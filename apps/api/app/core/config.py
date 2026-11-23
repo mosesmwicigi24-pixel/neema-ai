@@ -263,7 +263,14 @@ class Settings(BaseSettings):
     # 15s; raised to 30s (owner, 2026-08-12) so a burst of
     # enquiries merges into ONE model call — half the turns on a typing
     # customer, and one coherent answer instead of two overlapping ones.
-    whatsapp_debounce_seconds: int = 30
+    # 60 (owner, 2026-11-20: "Make Neema wait for one minute and combine any
+    # message that comes in one minute and give one response. That allow Neema
+    # to avoid answering in increased turns"). The minute restarts with each
+    # new message, so a customer still typing is not answered mid-thought —
+    # up to `reply_window_max_seconds` from their first message, after which
+    # she answers what she has (a steady typer is never left waiting forever).
+    whatsapp_debounce_seconds: int = 60
+    reply_window_max_seconds: int = 120
     # READ-ONLY ACCESS BY KEY (routers/ops_read): empty = off. 32+ characters.
     ops_read_key: str = ""
     # How many customer photos one turn may carry: every photo of a burst, and
@@ -273,10 +280,9 @@ class Settings(BaseSettings):
     # How far back a message may point at a photo ("as in the picture").
     photo_reference_minutes: int = 180
     # Messenger / Instagram / TikTok DMs: rapid-fire messages are combined for
-    # this long and answered ONCE (cost audit, 2026-09-26). Shorter than
-    # WhatsApp's: a chat bubble expects a quicker turn, and "typing…" shows
-    # meanwhile. 0 disables the buffer.
-    meta_debounce_seconds: int = 12
+    # this long and answered ONCE (cost audit, 2026-09-26). Was 12; one minute
+    # on every private channel (owner, 2026-11-20). 0 disables the buffer.
+    meta_debounce_seconds: int = 60
     whatsapp_verify_token: str = ""
     # Set only when the WhatsApp product lives in a DIFFERENT Meta app than
     # Messenger (different X-Hub-Signature-256 secret). Falls back to
@@ -366,15 +372,27 @@ class Settings(BaseSettings):
     # shadow: every decision is recorded, no message is changed.
     # enforce: findings of the policies listed in policy_enforce hold the
     # message ("*" = every critical policy). Activation is the owner's word.
-    policy_mode: str = "shadow"
-    policy_enforce: str = ""
+    # ON (owner, 2026-11-23): the six critical policies hold a message.
+    # To go back to record-only without a deploy of code: POLICY_MODE=shadow.
+    policy_mode: str = "enforce"
+    policy_enforce: str = "FIN-02,FIN-03,FIN-04,FIN-05,ORD-01,ORD-02"
     # The route guards found by the audit (a second "stop" answered by the
     # sweep; "team answer" sent twice or to a customer who opted out). False =
     # recorded only, exactly as today; True = the guard acts.
-    policy_guards_active: bool = False
+    policy_guards_active: bool = True       # on (owner, 2026-11-23)
     # Payment at collection in the shop needs an explicitly approved policy
     # (owner, 2026-11-20). False = saying it is a FIN-04 finding.
     policy_pay_at_collection: bool = False
+    # ── Phase 2 changes, each OFF until the owner switches it on ─────────────
+    # The official-numbers line of the first greeting is written by code from
+    # the configured lines (a digit can then not be wrong).
+    official_numbers_by_code: bool = True   # on (owner, 2026-11-23)
+    # The offer price is given to the writer only once the offer is granted
+    # (owner's policy 1), and a quiet customer does not earn it.
+    offer_price_after_grant: bool = True    # on (owner, 2026-11-23)
+    # A second "I'll get back to you" gets one short line, then silence
+    # (decision D11). Off = silence from the second, as today.
+    second_deferral_line: bool = True       # on (owner, 2026-11-23)
     # ── Business facts Neema answers logistics/FAQ questions from ─────────────
     # Free text (location/branches, hours, delivery, payment, contacts) injected
     # into the system prompt. Without it Neema only knows the catalogue and can't

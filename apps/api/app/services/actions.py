@@ -239,10 +239,14 @@ async def needs_approval(db, deal, conv, in_window: bool) -> str | None:
     """The reason this action must wait for a human — None when safe to auto-send."""
     from app.models.agent_action import AgentAction
     from app.models.conversation import InterceptMode
-    if not in_window:
-        return "outside the 24h messaging window"
+    # Human-held is read FIRST (audit H3, 2026-11-23): "outside the window"
+    # is the one reason that lets a template go out automatically, and it used
+    # to be returned before this check — so a chat a colleague held still got
+    # the automatic template.
     if conv is not None and conv.intercept_mode == InterceptMode.human:
         return "conversation is human-held"
+    if not in_window:
+        return "outside the 24h messaging window"
     # "Never sell into displeasure" binds the scheduler exactly as it binds a
     # live turn: a thread flagged for the team in the last 7 days (a complaint,
     # a failed reply, a sourcing gap) gets NO automatic refill/fit-check/nudge —
@@ -529,8 +533,24 @@ async def _send(db, redis, conv, text: str, action=None, shadow: list | None = N
     # THE POLICY LAYER (agent/policy.py): a message Neema starts is read
     # against the same company rules as a reply (audit C1, 2026-11-20).
     from app.agent import policy as _pol
-    _p_find = _pol.evaluate(text, route=_pol.INITIATED,
+    _p_said: list[str] = []
+    try:
+        # what the message may draw its figures from: the conversation itself
+        # (its own session — this function's reads on `db` are left as they are)
+        from app.database import AsyncSessionLocal
+        from app.models.message import Message
+        async with AsyncSessionLocal() as _db2:
+            _p_said = [str(t) for t in (await _db2.execute(
+                select(Message.text).where(Message.conversation_id == conv.id,
+                                           Message.text.isnot(None))
+                .order_by(Message.created_at.desc()).limit(16))).scalars().all() if t]
+    except Exception:
+        _p_said = []
+    _p_find = _pol.evaluate(text, route=_pol.INITIATED, said=_p_said,
                             source_text=str(getattr(action, "payload", "") or ""))
+    if not _p_said:
+        # with no conversation to read, an unsourced figure cannot be told from a sourced one
+        _p_find = [f for f in _p_find if f["policy"] != "FIN-01"]
     if _p_find:
         _p_held = _pol.enforced(_p_find)
         await _pol.record(redis, _p_find, route=_pol.INITIATED, channel=conv.channel,

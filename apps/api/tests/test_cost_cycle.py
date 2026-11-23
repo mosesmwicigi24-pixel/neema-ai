@@ -479,5 +479,6 @@ def test_a_comment_turn_is_about_the_post_it_is_under_and_tool_rows_are_compact(
                       separators=(",", ":")) == '{"name":"Cassock — Black","price":4500}'
 
 
-def test_meta_debounce_setting_exists_with_a_short_window():
-    assert 0 < settings.meta_debounce_seconds < settings.whatsapp_debounce_seconds
+def test_meta_debounce_setting_exists_and_matches_whatsapp():
+    # one minute on every private channel (owner, 2026-11-20); it was shorter
+    assert 0 < settings.meta_debounce_seconds <= settings.whatsapp_debounce_seconds

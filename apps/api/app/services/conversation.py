@@ -801,6 +801,18 @@ async def approve_draft(
     original = intercept.ai_reply_held if intercept else ""
     if not text:
         text = original
+    # ONE TAP, ONE MESSAGE (audit H13, 2026-11-23): a double tap sent the
+    # draft twice. The same draft for the same chat is sent once.
+    if redis is not None:
+        try:
+            import hashlib as _hl
+            _once = "approve:once:%s:%s" % (conv_id, _hl.sha1((text or "").encode()).hexdigest()[:16])
+            if not await redis.set(_once, "1", nx=True, ex=60):
+                from fastapi import HTTPException
+                raise HTTPException(status_code=409, detail="that draft is already being sent — check the thread")
+        except Exception as _exc:
+            if _exc.__class__.__name__ == "HTTPException":
+                raise
 
     # Learning loop (plan D1): an edited draft is a lesson — the diff between
     # what Neema wrote and what the human actually sent feeds the weekly

@@ -15,3 +15,20 @@ def _no_hub_rates_carried_between_tests():
     yield
     fx._HUB_PER.update(rates={}, mark=None)
     prompt_prices._PRICES.update(by_slug={}, mark=None)
+
+
+@pytest.fixture(autouse=True)
+def _safeguards_as_the_older_tests_were_written(monkeypatch):
+    """The safeguards the owner switched on (2026-11-23) change what a reply
+    and an order step do: a line is added to a first greeting, an order step
+    without the customer's yes is refused, a second deferral gets a line.
+    Hundreds of older tests pin the behaviour BEFORE those switches and are
+    about other things, so the suite runs with them off; the switched-on
+    behaviour, and the deployed defaults themselves, are tested where they
+    are named (tests/test_policy_layer.py, tests/test_safeguards_on.py)."""
+    from app.core.config import settings
+    for name, value in (("policy_mode", "shadow"), ("policy_guards_active", False),
+                        ("official_numbers_by_code", False), ("offer_price_after_grant", False),
+                        ("second_deferral_line", False)):
+        monkeypatch.setattr(settings, name, value, raising=False)
+    yield

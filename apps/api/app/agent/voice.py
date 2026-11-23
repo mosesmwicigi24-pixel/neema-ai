@@ -190,3 +190,28 @@ def drop_repeated_name(reply: str | None, name: str | None, earlier: list[str] |
     if len(rest.strip()) < 3:
         return text
     return rest[0].upper() + rest[1:]
+
+
+# ── THE OFFICIAL NUMBERS, WRITTEN BY CODE (audit C6, 2026-11-20) ─────────────
+_NUMBERS_LINE_RE = re.compile(
+    r"[^.!?\n]*(?:official numbers?|namba (?:zetu )?rasmi)[^.!?\n]*[.!?]?[ \t]*"
+    r"(?:[^.!?\n]*(?:any other number|namba nyingine)[^.!?\n]*[.!?]?)?",
+    re.IGNORECASE)
+
+
+def official_numbers_line(*, swahili: bool = False) -> str:
+    """The first-greeting line, built from the configured lines. "" when none
+    is configured."""
+    from app.core.config import settings
+    nums = [n.strip() for n in (getattr(settings, "whatsapp_handoff_number", ""),
+                                getattr(settings, "whatsapp_handoff_alt", "")) if n and n.strip()]
+    if not nums:
+        return ""
+    if swahili:
+        return f"Namba zetu rasmi ni {' na '.join(nums)}. Namba nyingine yoyote si ya Bethany House."
+    return f"Our official numbers are {' and '.join(nums)}. Any other number is not from Bethany House."
+
+
+def strip_numbers_line(reply: str | None) -> str:
+    """`reply` without any official-numbers line the model wrote itself."""
+    return _NUMBERS_LINE_RE.sub("", reply or "").strip()

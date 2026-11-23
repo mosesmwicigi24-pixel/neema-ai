@@ -139,8 +139,10 @@ def _public_comment_addendum(currency: str = "USD") -> str:
         "the silver one, never a bread tray. 'Communion cups', 'holy communion "
         "cups', 'tot glasses' are the SMALL cups the tray holds — Plastic, Silver "
         "(stainless), Glass, Pre-Packed — offer those, cheapest first; a chalice "
-        "ONLY when they say chalice. If we do not have the exact item, say so and "
-        "offer the nearest with its hub price.\n"
+        "ONLY when they say chalice. If the row you found is not the exact item, never "
+        "present it as theirs: say you are confirming the exact one with our team, and you "
+        "may offer the nearest by its own name with its hub price. Never say we do not have "
+        "it.\n"
         "- ANSWER EVERY QUESTION IN THE COMMENT. 'Where is your location?' — Nairobi, "
         "Kenya; 'do you have a shop in South Africa?' — no shop there, we deliver "
         "there by DHL; then the item and its price. A comment with two questions "
@@ -700,7 +702,16 @@ async def closer_gate(redis, channel: str, key: str, text: str) -> bool:
         if not is_closer(text):
             await redis.delete(rkey)
             return False
-        if await redis.get(rkey):
+        _lid = await redis.get(rkey)
+        if _lid and getattr(settings, "second_deferral_line", False) \
+                and (_lid.decode() if isinstance(_lid, bytes) else str(_lid)) == "1" \
+                and not is_bare_closer(text):
+            # Decision D11 (2026-11-20): a SECOND "I'll get back to you" gets
+            # one short line; the third and later get silence.
+            await redis.set(rkey, "2", ex=_CLOSER_KEY_TTL)
+            _log.info("closer gate: a second deferral gets one line for %s/%s", channel, key)
+            return False
+        if _lid:
             await redis.expire(rkey, _CLOSER_KEY_TTL)   # keep the lid on
             _log.info("closer gate: politeness ping-pong ended for %s/%s", channel, key)
             await _mark_silenced(redis, channel, key)
@@ -731,7 +742,11 @@ async def mark_closer_answered(redis, channel: str, key: str, inbound_text: str,
     if not is_closer(inbound_text):
         return
     try:
-        await redis.set(f"closer:{channel}:{key}", "1", ex=_CLOSER_KEY_TTL)
+        _cur = await redis.get(f"closer:{channel}:{key}")
+        if (_cur.decode() if isinstance(_cur, bytes) else str(_cur or "")) == "2":
+            await redis.expire(f"closer:{channel}:{key}", _CLOSER_KEY_TTL)   # the second line is spent
+        else:
+            await redis.set(f"closer:{channel}:{key}", "1", ex=_CLOSER_KEY_TTL)
     except Exception:
         pass
 
@@ -1752,6 +1767,7 @@ async def run_turn(db: AsyncSession, redis, wa_id: str, user_text: str, llm: LLM
                    *, channel: str = "whatsapp", external_id: str | None = None,
                    public_comment: bool = False, read_only: bool = False,
                    scribe_only: bool = False, deferred: bool = False,
+                   lookup_only: bool = False,
                    product_sink: list | None = None,
                    comment_reading: dict | None = None,
                    comment_post_id: str | None = None,
@@ -2590,6 +2606,11 @@ async def run_turn(db: AsyncSession, redis, wa_id: str, user_text: str, llm: LLM
         tools = [t for t in tools if t["name"] in _READONLY_TOOL_NAMES | _SCRIBE_TOOL_NAMES]
         ctx.allowed_tools = frozenset(
             _SCRIBE_TOOL_NAMES if scribe_only else _READONLY_TOOL_NAMES)
+    elif lookup_only:
+        # A real reply (the gate runs, it is sent) that may only LOOK THINGS UP:
+        # the unclaimed-chat answer in a chat a colleague owns (audit H12).
+        tools = [t for t in tools if t["name"] in _READONLY_TOOL_NAMES]
+        ctx.allowed_tools = frozenset(_READONLY_TOOL_NAMES)
     if scribe_only:
         # The instruction rides on the message, never in the shared rules
         # block — that block is cached fleet-wide and must not change.
@@ -2760,6 +2781,19 @@ async def run_turn(db: AsyncSession, redis, wa_id: str, user_text: str, llm: LLM
                 for _m in messages if isinstance(_m, dict) and _m.get("role") == "user"][-8:]
             _p_find = _pol.evaluate(reply, route=_pol.LIVE, tool_log=tool_log, said=_p_said,
                                     source_text=str(_turn_note or ""))
+            _p_part = _pol.partial_only_figures(reply, ctx.seen_products,
+                                                getattr(ctx, "partial_products", ()), currency)
+            if _p_part:
+                _p_find.append(_pol.finding(
+                    "PRD-02", "quotes a price that belongs only to a near-match row",
+                    ", ".join(f"{x:g}" for x in _p_part[:3])))
+            _p_earlier = [(_m.get("content") if isinstance(_m.get("content"), str) else "")
+                          for _m in messages[:-1] if isinstance(_m, dict) and _m.get("role") == "assistant"]
+            _p_stale = _pol.stale_figures(reply, tool_log, _p_earlier)
+            if _p_stale:
+                _p_find.append(_pol.finding(
+                    "FIN-10", "repeats a price from earlier in the chat with no look-up this turn",
+                    ", ".join(f"{x:g}" for x in _p_stale[:3])))
             if _p_find:
                 _p_held = _pol.enforced(_p_find)
                 await _pol.record(redis, _p_find, route=_pol.LIVE, channel=channel, key=key)
@@ -2776,6 +2810,23 @@ async def run_turn(db: AsyncSession, redis, wa_id: str, user_text: str, llm: LLM
                     _gate_outcome = "held"
         except Exception as exc:
             _log.warning("policy check skipped for %s: %s", key, exc)
+    if reply and not read_only and not scribe_only and not public_comment \
+            and getattr(settings, "official_numbers_by_code", False) \
+            and _gate_outcome not in ("held", "unowned"):
+        # THE OFFICIAL-NUMBERS LINE IS WRITTEN BY CODE (audit C6): on the first
+        # reply to a person, from the configured lines — a digit cannot be
+        # wrong. Whatever version the model wrote gives way to this one.
+        try:
+            from app.agent.voice import official_numbers_line, strip_numbers_line
+            _first_reply = not any(isinstance(_m, dict) and _m.get("role") == "assistant"
+                                   for _m in messages[:-1])
+            reply = strip_numbers_line(reply)
+            if _first_reply and reply.strip():
+                _line = official_numbers_line(swahili=looks_swahili(user_text or ""))
+                if _line:
+                    reply = reply.rstrip() + "\n\n" + _line
+        except Exception as exc:
+            _log.info("official-numbers line skipped for %s: %s", key, exc)
     if reply and customer_name and not public_comment:
         # A name is not a prefix (agent/voice.drop_repeated_name).
         try:
@@ -3222,6 +3273,9 @@ async def _run_and_send(redis, wa_id: str, text: str, media: dict | None = None,
                 return False
             unknown = None
             try:
+                # plain text on WhatsApp too (audit H14): no **bold**, no # headings
+                from app.agent.voice import strip_markdown as _plain
+                reply = _plain(reply)
                 wamid = await svc._send_waba(wa_id, reply)
             except svc.SendOutcomeUnknown as exc:
                 # Meta may have delivered it. Record it so nothing re-answers
@@ -3810,10 +3864,16 @@ async def _run_meta_after_burst(redis, channel: str, external_id: str, text: str
     the ids of every buffered row, so the turn excludes them from history and
     appends them once (the overlap rule, as on WhatsApp)."""
     if token is not None:
-        await asyncio.sleep(max(settings.meta_debounce_seconds, 1))
+        from app.services.wa_native import reply_wait
+        _first = f"agent:burst:first:{channel}:{external_id}"
+        await asyncio.sleep(await reply_wait(redis, _first, settings.meta_debounce_seconds))
         drained = await _meta_drain(redis, channel, external_id, token)
         if drained is None:
             return False                       # superseded — a later flush owns it
+        try:
+            await redis.delete(_first)         # the burst is answered: the next one starts fresh
+        except Exception:
+            pass
         text, media, ids = drained
         inbound_ids = ids or inbound_ids
     if not ((text or "").strip() or media):

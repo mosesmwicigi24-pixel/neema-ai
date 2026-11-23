@@ -27,8 +27,11 @@ def test_the_rule_is_in_the_prompt():
 def test_items_from_elsewhere_and_late_requests_are_declined_without_an_exception():
     flat = " ".join(_prompt().split())
     assert "An item bought or made elsewhere: we do not repair or alter it." in flat
-    assert "more than 14 days after they received it: no repair or alteration is accepted" in flat
-    assert "never suggest an exception" in flat
+    # owner, 2026-11-20 (decision D5): the window is said plainly; an exception
+    # is a colleague's decision — never promised, never hinted at
+    assert "more than 14 days after they received it: say plainly, once, that our repair and alteration window is 14 days from delivery" in flat
+    assert "Never promise an exception and never hint that one is likely" in flat
+    assert "a colleague decides exceptions" in flat
 
 
 def test_within_the_window_she_does_not_promise_and_brings_in_a_colleague():

@@ -55,6 +55,11 @@ POLICIES: dict[str, tuple[str, str, str]] = {
     "FUL-01": ("No delivery date or production time without a source", "high", "D6"),
     "FUL-02": ("Repairs: our items, 14 days, never 'for life'", "high", "D5"),
     "ACT-01": ("A promise to ask the team needs the team to have been asked", "high", "D7"),
+    "ACT-03": ("A check-in needs a time the customer named", "high", "D8"),
+    "ACT-04": ("A promised follow-up is booked", "high", ""),
+    "FIN-10": ("A price is not repeated without a fresh look-up", "high", ""),
+    "FIN-01": ("Every figure has a source", "critical", ""),
+    "PRD-02": ("A near-match row's price is not the item's price", "critical", ""),
     # the existing reply gate's outcomes, recorded here so one report shows all
     "GATE": ("The reply gate's own verdict (agent/review.py)", "medium", ""),
     # route guards (bypass and duplicate-send findings of the audit)
@@ -216,6 +221,13 @@ _WILL_ASK_RE = re.compile(
     r"|\bi have (?:raised|passed|flagged) (?:it|this)\b", re.IGNORECASE)
 _ASKED_TOOLS = ("check_availability", "handoff_to_human", "raise_complaint", "update_cart", "schedule_check_in")
 
+# ── ACT-04 "I'll check in on Friday" ─────────────────────────────────────────
+_WILL_FOLLOW_UP_RE = re.compile(
+    r"\b(?:i(?:'ll| will)|we(?:'ll| will)|nita\w*|tuta\w*)\s+(?:check in|check back|follow up|get back to you|"
+    r"come back to you|reach out|remind you|message you|write to you|kufuatilia|kukujulisha|kukutafuta)\b"
+    r"[^.?!\n]{0,40}\b(?:on|by|next|this|kesho|tomorrow|" + _WHEN + r")\b", re.IGNORECASE)
+_BOOKED_TOOLS = ("schedule_check_in", "check_availability", "handoff_to_human", "raise_complaint")
+
 # ── ORD-01 the customer's yes ────────────────────────────────────────────────
 _YES_RE = re.compile(
     r"\b(?:yes|yeah|yep|ok(?:ay)?|sure|go ahead|proceed|please do|do it|confirm(?:ed)?|place (?:it|the order)|"
@@ -223,6 +235,68 @@ _YES_RE = re.compile(
     r"how (?:do|can) i pay|let(?:'s| us) (?:do it|go|proceed)|book it|order it|"
     r"ndio|ndiyo|sawa|endelea|nataka|nitumie|tuma (?:link|bili)|nalipaje|haya|oui|d'accord|sim)\b",
     re.IGNORECASE)
+
+
+_NAMED_TIME_RE = re.compile(
+    r"\b(?:" + _WHEN + r"|next (?:month|year|sunday|monday|tuesday|wednesday|thursday|friday|saturday)|"
+    r"(?:in|after|within) (?:a|an|one|two|three|\d{1,2}) (?:day|week|month|hour)s?|"
+    r"(?:end|start|beginning|middle) of (?:the |this |next )?(?:week|month|year)|"
+    r"(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)\w*|"
+    r"later (?:today|this week|this month)|in the (?:morning|afternoon|evening)|"
+    r"(?:after|before) (?:the )?(?:service|sunday|christmas|easter|payday|salary)|"
+    r"wiki ijayo|mwezi ujao|jioni|asubuhi|baadaye leo)\b", re.IGNORECASE)
+
+
+def customer_named_a_time(said: list[str] | tuple[str, ...] | None) -> bool:
+    """Did the customer say WHEN to come back to them? Read from their words."""
+    return any(_NAMED_TIME_RE.search(s) for s in (said or ()) if s)
+
+
+def unsourced_figures(text: str, sources: list[str]) -> list[float]:
+    """Money figures in `text` that appear in none of `sources` (the brief a
+    message was composed from, the conversation, a colleague's facts)."""
+    from app.agent.review import money_figures
+    have: set[float] = set()
+    for s in sources:
+        try:
+            have.update(money_figures(str(s or "")))
+            # a bare number in a brief or a hub event is a source too
+            have.update(float(n.replace(",", "")) for n in re.findall(r"(?<![\w.])\d[\d,]*(?:\.\d+)?", str(s or ""))
+                        if n.replace(",", "").replace(".", "").isdigit())
+        except Exception:
+            pass
+    return [f for f in money_figures(text or "") if not any(abs(f - h) < 0.51 for h in have)]
+
+
+def partial_only_figures(text: str, seen: list, partial_ids, currency: str = "USD") -> list[float]:
+    """Figures in `text` that belong ONLY to rows that matched some of the
+    customer's words (audit C11): the price of a near-match, quoted."""
+    from app.agent.review import _row_figures, money_figures
+    part, full = set(), set()
+    for p in seen or ():
+        try:
+            (part if p.get("id") in (partial_ids or ()) else full).update(_row_figures(p, currency))
+        except Exception:
+            pass
+    only = {f for f in part if not any(abs(f - g) < 0.51 for g in full)}
+    return [f for f in money_figures(text or "") if any(abs(f - o) < 0.51 for o in only)]
+
+
+_PRICE_TOOLS = ("search_catalog", "get_cart", "update_cart", "create_order", "apply_offer",
+                "prepare_quotation", "check_order_status")
+
+
+def stale_figures(text: str, tool_log: list | None, earlier: list[str]) -> list[float]:
+    """Figures in `text` that this turn looked nothing up for, and that appear
+    only in what was said EARLIER in the chat: a price repeated from memory."""
+    from app.agent.review import money_figures
+    figs = money_figures(text or "")
+    if not figs or _tool_ran(tool_log, _PRICE_TOOLS):
+        return []
+    before: set[float] = set()
+    for s in earlier or ():
+        before.update(money_figures(str(s or "")))
+    return [f for f in figs if any(abs(f - b) < 0.51 for b in before)]
 
 
 def customer_agreed(said: list[str] | tuple[str, ...] | None, last: int = 3) -> bool:
@@ -332,6 +406,23 @@ def evaluate(text: str | None, *, route: str, tool_log: list | None = None,
         add("FUL-01", f"gives a time ({when}) that no tool, colleague or customer stated", m)
         break
 
+    # FIN-01 — on the routes Neema composes from a brief (she starts the
+    # message, or re-words a colleague's facts) every figure has a source
+    if route in (INITIATED, HUB_EVENT, TEAM_ANSWER):
+        try:
+            loose = unsourced_figures(t, sources)
+            if loose:
+                add("FIN-01", "states a figure that is in neither the brief nor the conversation",
+                    excerpt=", ".join(f"{x:g}" for x in loose[:3]))
+        except Exception:
+            pass
+
+    # ACT-04 — a follow-up Neema promises for a day is booked in this turn
+    if route == LIVE:
+        m = _WILL_FOLLOW_UP_RE.search(t)
+        if m and not _tool_ran(tool_log, _BOOKED_TOOLS):
+            add("ACT-04", "promises to come back on a day, but nothing was booked", m)
+
     # ACT-01 — the team must actually have been asked
     if route == LIVE:
         m = _WILL_ASK_RE.search(t)
@@ -416,6 +507,30 @@ async def report(redis, days: int = 7) -> dict:
                 out["recent"].append(json.loads(item.decode() if isinstance(item, bytes) else item))
             except Exception:
                 pass
+        out["guidance_changes"] = []
+        for item in await redis.lrange("policy:guidance_changes", 0, 49) or []:
+            try:
+                out["guidance_changes"].append(json.loads(item.decode() if isinstance(item, bytes) else item))
+            except Exception:
+                pass
     except Exception as exc:
         _log.info("policy report unreadable: %s", exc)
     return out
+
+
+CHANGES_KEY = "policy:guidance_changes"
+
+
+async def record_change(redis, what: str, who, detail: str = "") -> None:
+    """Who changed text that enters Neema's instructions (decision D9: any
+    colleague may, and every change is recorded). Never raises."""
+    _log.info("guidance changed: %s by %s — %s", what, who, (detail or "")[:120])
+    if redis is None:
+        return
+    try:
+        await redis.lpush(CHANGES_KEY, json.dumps({
+            "at": datetime.now(timezone.utc).isoformat(timespec="seconds"), "what": what,
+            "who": str(who or ""), "detail": " ".join((detail or "").split())[:200]}, ensure_ascii=False))
+        await redis.ltrim(CHANGES_KEY, 0, 199)
+    except Exception as exc:
+        _log.info("guidance change not recorded: %s", exc)

@@ -293,6 +293,29 @@ def _buf_key(wa_id: str) -> str:
     return f"wa:native:buf:{wa_id}"
 
 
+async def reply_wait(redis, first_key: str, window: int) -> float:
+    """How long THIS message waits before the combined turn is answered.
+
+    The window restarts with each new message (a customer still typing is not
+    answered mid-thought), but the whole wait is capped from the FIRST message
+    of the burst: `reply_window_max_seconds`. `first_key` holds when the burst
+    began; it is set by the first message and cleared when the burst is
+    answered. Never raises; with no redis it is the plain window."""
+    import time
+    window = max(int(window or 0), 1)
+    cap = int(getattr(settings, "reply_window_max_seconds", 0) or 0)
+    if redis is None or cap <= 0:
+        return float(window)
+    try:
+        now = time.time()
+        await redis.set(first_key, str(now), nx=True, ex=max(cap * 3, 600))
+        raw = await redis.get(first_key)
+        first = float(raw.decode() if isinstance(raw, bytes) else raw)
+        return float(max(1.0, min(window, cap - (now - first))))
+    except Exception:
+        return float(window)
+
+
 def _tok_key(wa_id: str) -> str:
     return f"wa:native:tok:{wa_id}"
 
@@ -426,10 +449,15 @@ async def _reply_after_debounce(redis, wa_id: str, token: int | None,
 
     inbound_ids: list[str] = [msg_id] if msg_id else []
     if token is not None:
-        await asyncio.sleep(max(settings.whatsapp_debounce_seconds, 1))
+        _first = f"wa:native:first:{wa_id}"
+        await asyncio.sleep(await reply_wait(redis, _first, settings.whatsapp_debounce_seconds))
         drained = await _drain(redis, wa_id, token)
         if drained is None:
             return                            # superseded — a later flush owns it
+        try:
+            await redis.delete(_first)        # the burst is answered: the next one starts fresh
+        except Exception:
+            pass
         text, media, inbound_ids = drained
     # Voice notes: their tokens become the customer's words (or the reason
     # they couldn't be heard) — waited for, bounded, if still transcribing.

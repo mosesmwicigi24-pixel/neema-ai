@@ -111,6 +111,11 @@ async def get_house_voice(db, redis) -> str:
 async def set_directives(db, redis, value: str, updated_by=None) -> str:
     from app.models.app_setting import AppSetting
     val = (value or "").strip()[:DIRECTIVES_MAX_CHARS]
+    try:
+        from app.agent import policy as _pol
+        await _pol.record_change(redis, "standing orders", updated_by, val)
+    except Exception:
+        pass
     row = (await db.execute(select(AppSetting).where(
         AppSetting.id == DIRECTIVES_KEY))).scalar_one_or_none()
     if row is None:
