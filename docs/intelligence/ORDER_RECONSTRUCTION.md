@@ -103,3 +103,19 @@ Two runs of five turns are evidence, not a measurement.
 ## 7. Rollback
 
 Revert the slice's commit. Data written: `raw_meta.photo` on image messages, `units` on cart lines, `pending` in a cart. All are ignored by the previous code.
+
+
+## The served report (owner, 2026-11-23)
+
+`GET /api/ops/read/served?channel=whatsapp&days=30&limit=60&offset=0`, behind the same `OPS_READ_KEY`.
+
+The owner's rule: a chat that began online and ended as a purchase under the same number — a walk-in at the till included — is a sale that began online.
+
+| It does | It does not |
+|---|---|
+| Match each contact active in the window to their hub customer by phone, on the server | Return a name, a number or an order line |
+| Count purchases made on or after the day of the first chat, by the hub's own order type | Count purchases from before the first chat as converted (they mark an existing customer) |
+| Link Messenger, Instagram, TikTok and website chats by the phone saved on the person, and count the chats with no number saved | Prove the chat caused the sale: it is a link in time |
+| Bucket the days from first chat to first purchase | Write, send or change anything |
+
+Limits: a till sale recorded without the customer's number cannot be matched, and a customer who buys under a different number is not linked. Both undercount.
