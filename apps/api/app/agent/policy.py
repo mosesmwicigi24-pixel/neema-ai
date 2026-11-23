@@ -59,12 +59,22 @@ POLICIES: dict[str, tuple[str, str, str]] = {
     "ACT-04": ("A promised follow-up is booked", "high", ""),
     "FIN-10": ("A price is not repeated without a fresh look-up", "high", ""),
     "FIN-01": ("Every figure has a source", "critical", ""),
+    "FIN-11": ("A price written without its currency still has a source", "high", ""),
+    "FIN-12": ("Nothing is called free without a source", "high", ""),
     "PRD-02": ("A near-match row's price is not the item's price", "critical", ""),
     # the existing reply gate's outcomes, recorded here so one report shows all
     "GATE": ("The reply gate's own verdict (agent/review.py)", "medium", ""),
     # route guards (bypass and duplicate-send findings of the audit)
     "RTE-01": ("A customer who said stop is not messaged", "critical", ""),
     "RTE-02": ("One instruction sends one message", "high", ""),
+    "RTE-03": ("Photos and cards go out only with a reply that passed", "high", ""),
+    # conversational quality, read in context — measured, never enforced here
+    # (a rewrite is earned by the measured rate, not by a phrase list)
+    "CNV-01": ("No second welcome in a conversation already under way", "medium", ""),
+    "CNV-03": ("No selling into a complaint", "medium", ""),
+    "CNV-04": ("One question per reply", "medium", ""),
+    "CNV-05": ("An answer, not a menu", "medium", ""),
+    "CNV-06": ("A decline is accepted, not argued with", "medium", ""),
 }
 
 
@@ -180,6 +190,30 @@ _ORDER_PLACED_RE = re.compile(
     r"|\boda yako imewekwa\b", re.IGNORECASE)
 
 # ── FUL-02 repairs ───────────────────────────────────────────────────────────
+_REPAIR_OFFER_RE = re.compile(
+    r"\b(?:we(?:'ll| will| can| shall)|i(?:'ll| will| can)|happy to|glad to|of course|"
+    r"bring it|send it (?:back|in|to us)|drop it)\b[^.?!\n]{0,60}"
+    r"\b(?:repair|alter|adjust|fix|mend|resize|re-?stitch|take it in|let it out)\w*", re.IGNORECASE)
+_REPAIR_DEFER_RE = re.compile(
+    r"\b(?:colleague|team|14[- ]day|fourteen|window|exception|confirm\w*|decide\w*)\b", re.IGNORECASE)
+
+
+def repair_offered(text: str | None) -> str:
+    """The words that offer to do a repair or alteration outright — not a
+    sentence that states the 14-day rule or leaves it to a colleague. ""
+    when there are none."""
+    for m in _REPAIR_OFFER_RE.finditer(text or ""):
+        start = (text or "").rfind(".", 0, m.start()) + 1
+        end = m.end()
+        nxt = re.search(r"[.?!\n]", (text or "")[end:])
+        sentence = (text or "")[start:end + (nxt.start() if nxt else 0)]
+        if re.search(r"\b(?:not|cannot|can'?t|won'?t|unable|never)\b", m.group(0), re.IGNORECASE):
+            continue
+        if not _REPAIR_DEFER_RE.search(sentence) and not _negated(text or "", m.start()):
+            return " ".join(m.group(0).split())[:120]
+    return ""
+
+
 _FOR_LIFE_RE = re.compile(
     r"\b(?:repair\w*|alter\w*|maintain\w*|mend\w*|fix\w*|guarantee\w*|warrant\w*)\b[^.?!\n]{0,40}\b(?:for life|lifetime|forever|any ?time|always)\b"
     r"|\b(?:lifetime|life-long)\s+(?:repair\w*|alteration\w*|guarantee|warranty)\b", re.IGNORECASE)
@@ -266,6 +300,79 @@ def unsourced_figures(text: str, sources: list[str]) -> list[float]:
         except Exception:
             pass
     return [f for f in money_figures(text or "") if not any(abs(f - h) < 0.51 for h in have)]
+
+
+# ── FIN-11 a price with no currency mark (audit H9) ──────────────────────────
+# The reply gate reads a number as money only beside a currency. A number
+# that is plainly a price by its words ("it is 4,200 each", "bei ni 4500")
+# and carries no currency was read by nothing.
+_BARE_PRICE_RE = re.compile(
+    r"\b(?:price(?: is| of)?|priced at|costs?|costing|goes for|going for|sells? for|"
+    r"(?:it|that|this|they|each|one|total|set)(?:'s| comes to| will be)|is|are|was|at|for|only|just|"
+    r"comes to|bei(?: ni| ya)?|ni|kwa|@)\s*[:=]?\s*(?P<n>\d{1,3}(?:,\d{3})+|\d{3,7})\b"
+    r"(?!\s*(?:%|percent|cups?|pcs?|pieces?|days?|weeks?|months?|years?|cm|mm|inch(?:es)?|\"|kgs?|"
+    r"grams?|ml|litres?|people|members|sets?|pairs?|units?|items?|am\b|pm\b|hrs?|hours?|minutes?|"
+    r"st\b|nd\b|rd\b|th\b|/=|bob|shillings?|dollars?|kes|ksh|usd|zmw|rands?|naira|cedis?|pula|euros?|pounds?))",
+    re.IGNORECASE)
+
+
+def bare_price_numbers(text: str | None) -> list[float]:
+    """Numbers the words mark as a price that carry no currency. Years, order
+    numbers, phone numbers, sizes and counts are not prices."""
+    from app.agent.review import _MONEY_RE
+    t = text or ""
+    money_spans = [m.span() for m in _MONEY_RE.finditer(t)]
+    out: list[float] = []
+    for m in _BARE_PRICE_RE.finditer(t):
+        a, b = m.span("n")
+        if any(a < e and b > st for st, e in money_spans):
+            continue                                     # it has a currency after all
+        raw = m.group("n")
+        before = t[max(0, a - 14):a].lower()
+        if re.search(r"(?:#|order|no\.?|number|ref|size|saizi)\s*$", before):
+            continue
+        if b < len(t) and t[b] in "-/:" and b + 1 < len(t) and t[b + 1].isdigit():
+            continue                                     # a date, a range, a time
+        v = float(raw.replace(",", ""))
+        if re.match(r"\s+[A-Z][a-z]+\s+(?:Avenue|Ave|Road|Rd|Street|St|Lane|Drive|Way|House|Plaza|Building)\b", t[b:]):
+            continue                                     # a street address
+        if "," not in raw and 1900 <= v <= 2100:
+            continue                                     # a year
+        if v not in out:
+            out.append(v)
+    return out
+
+
+# ── FIN-12 "free" with no source (audit: NR-0174) ────────────────────────────
+_FREE_RE = re.compile(
+    r"\b(?:free(?: of charge)?|complimentary|at no (?:extra |additional )?(?:cost|charge)|no charge|"
+    r"on the house|bure|bila malipo|gratuit(?:e|s|es|ement)?)\b", re.IGNORECASE)
+_FREE_IDIOM_RE = re.compile(r"\b(?:feel|be|are|is|you'?re)\s+free\s+to\b|\bfree\s+(?:time|moment|day)\b|"
+                            r"\byou(?:'re| are)\s+free\b", re.IGNORECASE)
+
+
+def unsourced_free(text: str | None, sources: list[str]) -> str:
+    """The words that call something free when no source (the instructions, a
+    tool result, a colleague, the customer) says that thing is. "" if none."""
+    t = text or ""
+    src = " ".join(str(x or "") for x in sources).lower()
+    for m in _FREE_RE.finditer(t):
+        if _FREE_IDIOM_RE.search(t[max(0, m.start() - 16):m.end() + 12]) or _negated(t, m.start()):
+            continue
+        near = t[max(0, m.start() - 40):m.end() + 40]
+        nouns = {w.lower() for w in re.findall(r"[A-Za-z]{4,}", near)} - {
+            "free", "charge", "complimentary", "cost", "extra", "additional", "bure", "with",
+            "your", "that", "this", "they", "have", "will", "each", "also", "comes", "come",
+            "them", "from", "every", "house", "malipo", "bila", "gratuit"}
+        if not nouns:
+            continue
+        sourced = any(re.search(r"(?:free|complimentary|no (?:extra )?(?:cost|charge)|bure|gratuit)"
+                                r"[^.\n]{0,60}\b" + re.escape(n) + r"|\b" + re.escape(n)
+                                + r"[^.\n]{0,60}(?:free|complimentary|no (?:extra )?(?:cost|charge)|bure|gratuit)",
+                                src) for n in nouns)
+        if not sourced:
+            return " ".join(near.split())[:110]
+    return ""
 
 
 def partial_only_figures(text: str, seen: list, partial_ids, currency: str = "USD") -> list[float]:
@@ -433,6 +540,53 @@ def evaluate(text: str | None, *, route: str, tool_log: list | None = None,
 
 def mode() -> str:
     return "enforce" if str(getattr(settings, "policy_mode", "shadow")).strip().lower() == "enforce" else "shadow"
+
+
+# ── conversational quality in context (record-only) ──────────────────────────
+_GREET_OPEN_RE = re.compile(
+    r"^\W*(?:(?:hello|hi|hey|greetings|good (?:morning|afternoon|evening)|habari|hujambo|shalom|"
+    r"bonjour|bonsoir)\b[^.!?\n]{0,40}[.!?,]?\s*)?(?:welcome to bethany house|karibu bethany house|"
+    r"bienvenue (?:chez|à) bethany house)", re.IGNORECASE)
+_CUSTOMER_GREETS_RE = re.compile(
+    r"^\W*(?:hello|hi|hey|good (?:morning|afternoon|evening)|habari|hujambo|mambo|shalom|bonjour|"
+    r"bonsoir|niaje|sasa)\b", re.IGNORECASE)
+_LIST_LINE_RE = re.compile(r"(?m)^\s*(?:[-•*▪●]|\d{1,2}[.)])\s+\S")
+_ASKED_LIST_RE = re.compile(
+    r"\b(?:list|catalogue|catalog|options|range|all (?:the|your)|everything|what (?:do|else) you have|"
+    r"which ones|prices? for|orodha|zote|aina (?:gani|zote))\b", re.IGNORECASE)
+
+
+def quality_findings(reply: str | None, *, user_text: str = "", earlier_replies: list[str] | None = None,
+                     tool_log: list | None = None) -> list[dict]:
+    """How the reply reads IN THIS CONVERSATION — not against a phrase list.
+    Each finding needs the context that makes it one: a welcome is fine first
+    and wrong fifth; a price is fine in a sale and wrong in a complaint; a
+    list is fine when a list was asked for. Recorded only."""
+    t = (reply or "").strip()
+    out: list[dict] = []
+    if not t:
+        return out
+    earlier = [e for e in (earlier_replies or []) if (e or "").strip()]
+    tools_run = {str(e.get("tool")) for e in (tool_log or ()) if isinstance(e, dict)}
+    m = _GREET_OPEN_RE.search(t)
+    if m and len(earlier) >= 1 and not _CUSTOMER_GREETS_RE.search(user_text or ""):
+        out.append(finding("CNV-01", "welcomes the customer again mid-conversation", m.group(0)[:80]))
+    if "raise_complaint" in tools_run:
+        from app.agent.review import money_figures
+        if money_figures(t) and not re.search(r"\b(?:paid|refund|balance|total|order)\b", t, re.IGNORECASE):
+            out.append(finding("CNV-03", "quotes a price in the reply to a complaint", t[:90]))
+    q = len(re.findall(r"\?", t))
+    if q >= 2:
+        out.append(finding("CNV-04", f"asks {q} questions in one reply", t[-90:]))
+    if len(_LIST_LINE_RE.findall(t)) >= 4 and not _ASKED_LIST_RE.search(user_text or ""):
+        out.append(finding("CNV-05", "answers with a list of four or more lines nobody asked for", t[:90]))
+    try:
+        from app.services.declines import customer_declined
+        if customer_declined(user_text) and ("?" in t or _DISCOUNT_RE.search(t)):
+            out.append(finding("CNV-06", "answers a decline with a question or an offer", t[:90]))
+    except Exception:
+        pass
+    return out
 
 
 def enforced(findings: list[dict]) -> list[dict]:

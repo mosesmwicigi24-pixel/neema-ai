@@ -215,3 +215,54 @@ def official_numbers_line(*, swahili: bool = False) -> str:
 def strip_numbers_line(reply: str | None) -> str:
     """`reply` without any official-numbers line the model wrote itself."""
     return _NUMBERS_LINE_RE.sub("", reply or "").strip()
+
+
+# ── a private message is only spoken of when one went (audit H5, X21) ────────
+_INBOX_WORDS = (r"(?:inbox|dms?|pm|private message|direct message|privately|messenger|"
+                r"ujumbe(?: wa faragha| binafsi)?|message priv[ée]e?|mp)")
+_INBOX_CLAIM_RE = re.compile(
+    r"\b(?:i|we)(?:'ve|\s+have|'ll|\s+will|\s+am|\s+are|'m|'re)?\s+(?:also\s+|just\s+|already\s+)?"
+    r"(?:sent|sending|send|dropped|shared|sharing|share|inboxed|messaged|message|dm'?e?d)\b"
+    r"[^.?!\n]{0,80}\b" + _INBOX_WORDS + r"\b"
+    r"|\bcheck your (?:inbox|dms?|messages|messenger)\b"
+    r"|\b(?:i|we)(?:'ve|\s+have)\s+(?:inboxed|dm'?e?d|messaged)\s+you\b"
+    r"|\b(?:nimekutumia|tumekutumia|nitakutumia|tutakutumia)\b[^.?!\n]{0,60}\b" + _INBOX_WORDS + r"\b"
+    r"|\bangalia (?:inbox|ujumbe|dm)\b"
+    r"|\b(?:je vous ai|nous vous avons|je viens de vous)\s+envoy[ée]\b[^.?!\n]{0,60}\b" + _INBOX_WORDS + r"\b",
+    re.IGNORECASE)
+_PHOTO_WORD_RE = re.compile(r"\b(?:photos?|pictures?|pics?|images?|picha|catalogue|catalog)\b", re.IGNORECASE)
+_SENT_LINE = {
+    ("en", True): "I've sent you a private message with the link.",
+    ("en", False): "I've sent you a private message.",
+    ("sw", True): "Nimekutumia ujumbe wa faragha wenye kiungo.",
+    ("sw", False): "Nimekutumia ujumbe wa faragha.",
+}
+
+
+def honest_inbox_claims(text: str, *, dm_sent: bool, link_sent: bool = False,
+                        swahili: bool = False) -> str:
+    """A public reply may speak of a private message only when one went.
+
+    The reply is written before the private message is attempted, and it may
+    not go at all (an opt-out, a campaign post, a refused send). A sentence
+    that says one was sent is dropped when none was; a sentence that says
+    PHOTOS were sent there — the private message carries words and at most
+    one link, never photos — becomes the plain true line. Everything else is
+    left exactly as written."""
+    if not (text or "").strip() or not _INBOX_CLAIM_RE.search(text):
+        return text
+    parts = re.split(r"(?<=[.!?…])\s+|\n+", text.strip())
+    kept: list[str] = []
+    for part in parts:
+        if not _INBOX_CLAIM_RE.search(part):
+            kept.append(part)
+            continue
+        if not dm_sent:
+            continue
+        if _PHOTO_WORD_RE.search(part):
+            line = _SENT_LINE[("sw" if swahili else "en", bool(link_sent))]
+            if line not in kept:
+                kept.append(line)
+            continue
+        kept.append(part)
+    return " ".join(k for k in kept if k.strip()).strip()

@@ -401,10 +401,43 @@ async def _mirror_order_state(db, event: dict) -> bool:
             update(OrderEvent).where(or_(*conds)).values(**values)
         )
         await db.commit()
-        return bool(res.rowcount)
+        mirrored = bool(res.rowcount)
     except Exception:
         _log.warning("could not mirror hub state for %s", number or hub_id, exc_info=True)
         return False
+    if mirrored and (event.get("type") == "order.delivered"
+                     or str(event.get("fulfillment_status") or "").lower() == "delivered"):
+        await _stamp_delivered(conds, event)
+    return mirrored
+
+
+async def _stamp_delivered(conds: list, event: dict) -> None:
+    """Keep WHEN the hub said this order was delivered — once, never moved by
+    a later event. The 14-day repair window is counted from it
+    (services/repair_window). Its own session; never raises."""
+    try:
+        from sqlalchemy import or_, select
+        from sqlalchemy.orm.attributes import flag_modified
+        from app.database import AsyncSessionLocal
+        from app.models.order_event import OrderEvent
+        from app.services.repair_window import _parse
+        when = (_parse(event.get("delivered_at")) or _parse(event.get("occurred_at"))
+                or datetime.now(timezone.utc))
+        async with AsyncSessionLocal() as db2:
+            rows = (await db2.execute(select(OrderEvent).where(or_(*conds)))).scalars().all()
+            changed = False
+            for r in rows:
+                st = dict(r.state or {})
+                if st.get("delivered_at"):
+                    continue
+                st["delivered_at"] = when.isoformat(timespec="seconds")
+                r.state = st
+                flag_modified(r, "state")
+                changed = True
+            if changed:
+                await db2.commit()
+    except Exception as exc:
+        _log.warning("delivered date not kept for %s: %s", event.get("order_number"), exc)
 
 
 async def _receipt_link_for(db, redis, event: dict) -> str:
