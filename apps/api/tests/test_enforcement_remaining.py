@@ -326,3 +326,17 @@ def test_the_served_report_returns_no_name_and_no_number():
     src = inspect.getsource(ops_read.served)
     ret = src[src.rindex("return {"):]
     assert "wa_id" not in ret and "name" not in ret and "phone" not in ret
+
+
+def test_a_hub_record_with_orders_counted_but_none_listed_is_seen():
+    from app.routers.ops_read import record_shape
+    into: dict = {}
+    record_shape({"customer": {"id": 7, "name": "X", "sales": [{"id": 1}]},
+                  "stats": {"total_orders": "3"}}, into)
+    record_shape({"customer": {"orders": [{"id": 2}]}, "stats": {"total_orders": 1}}, into)
+    record_shape(None, into)
+    assert into["records"] == 3
+    assert into["stats_say_orders"] == 2 and into["orders_listed"] == 1
+    assert into["stats_say_orders_but_none_listed"] == 1
+    assert into["lists_of_records"] == {"customer.sales": 1, "customer.orders": 1}
+    assert "X" not in str(into) and "name" in into["customer_keys"]

@@ -193,6 +193,34 @@ def served_reading(first_chat_at, hub_summary: dict | None) -> dict:
     return out
 
 
+def record_shape(body: dict, into: dict) -> dict:
+    """What a hub customer record LOOKS like, so an empty order list is seen
+    for what it is (third run, 2026-11-23: 19 customers found, every one with
+    an order Neema had created, and not one order read). Field NAMES and
+    counts only — never a value."""
+    body = body if isinstance(body, dict) else {}
+    cust = body.get("customer") if isinstance(body.get("customer"), dict) else {}
+    stats = body.get("stats") if isinstance(body.get("stats"), dict) else {}
+    into["records"] = into.get("records", 0) + 1
+    for label, d in (("top_keys", body), ("customer_keys", cust), ("stats_keys", stats)):
+        into[label] = sorted(set(into.get(label, [])) | {str(k)[:40] for k in d})[:60]
+    lists = into.setdefault("lists_of_records", {})
+    for where, d in (("", body), ("customer.", cust)):
+        for k, v in d.items():
+            if isinstance(v, list) and v and isinstance(v[0], dict):
+                lists[where + str(k)[:40]] = lists.get(where + str(k)[:40], 0) + 1
+    try:
+        counted = int(float(stats.get("total_orders") or 0))
+    except (TypeError, ValueError):
+        counted = 0
+    listed = len(cust.get("orders") or []) if isinstance(cust.get("orders"), list) else 0
+    into["stats_say_orders"] = into.get("stats_say_orders", 0) + (1 if counted else 0)
+    into["orders_listed"] = into.get("orders_listed", 0) + (1 if listed else 0)
+    into["stats_say_orders_but_none_listed"] = (into.get("stats_say_orders_but_none_listed", 0)
+                                                + (1 if counted and not listed else 0))
+    return into
+
+
 @router.get("/served")
 async def served(request: Request, channel: str = Query("whatsapp", max_length=20),
                  days: int = Query(30, ge=1, le=120),
@@ -241,7 +269,6 @@ async def served(request: Request, channel: str = Query("whatsapp", max_length=2
         select(OrderEvent.wa_id, OrderEvent.hub_payment_status)
         .where(OrderEvent.wa_id.in_(numbers), OrderEvent.hub_order_id.isnot(None),
                OrderEvent.created_at >= since))).all() if numbers else []
-    redis = getattr(request.app.state, "redis", None)
     gate = asyncio.Semaphore(1)
     # THE HUB LIMITS HOW FAST IT IS ASKED (second run, 2026-11-23: 867 of 913
     # look-ups answered 429). One at a time, a pause between, and the page
@@ -259,6 +286,7 @@ async def served(request: Request, channel: str = Query("whatsapp", max_length=2
              "results_returned": 0}
     base = settings.hub_api_url.rstrip("/")
     has_neema_order = {w for w, _s in neema}
+    shape: dict = {}
     known = {"contacts_with_a_neema_order": len(has_neema_order), "of_those_found_in_hub": 0}
 
     async def one(conv_id, wa_id):
@@ -291,11 +319,34 @@ async def served(request: Request, channel: str = Query("whatsapp", max_length=2
             except Exception:
                 probe["search_failed"] += 1
                 return "error"
+            match = next((c for c in data if same_number(wa_id, c.get("phone"))), None)
+            if not match:
+                return served_reading(firsts.get(conv_id), None)
+            # ONE search per contact, then the record by its id (third run:
+            # the summary helper searched a second time, doubling the calls,
+            # and hid a refusal of that second search as "not in the hub").
             try:
-                summ = await hub_client.fetch_customer_summary(wa_id, redis)
+                async with httpx.AsyncClient(timeout=15.0) as client:
+                    resp = await client.get(f"{base}/api/v1/admin/customers/{match.get('id')}",
+                                            headers=hub_client._api_headers())
+                if resp.status_code == 429:
+                    limited["hit"] = True
+                    limited["retry_after"] = resp.headers.get("retry-after")
+                    return "skipped"
+                if resp.status_code != 200:
+                    k = "record_" + str(resp.status_code)
+                    probe["search_http_error"][k] = probe["search_http_error"].get(k, 0) + 1
+                    return "error"
+                body = resp.json() or {}
             except Exception:
+                probe["search_failed"] += 1
                 return "error"
-        if summ and wa_id in has_neema_order:
+            record_shape(body, shape)
+            cust = body.get("customer") or {}
+            summ = {"customer_id": match.get("id"),
+                    "orders": [hub_client._map_hub_order(o) for o in (cust.get("orders") or [])
+                               if isinstance(o, dict)]}
+        if wa_id in has_neema_order:
             known["of_those_found_in_hub"] += 1
         return served_reading(firsts.get(conv_id), summ)
 
@@ -348,7 +399,7 @@ async def served(request: Request, channel: str = Query("whatsapp", max_length=2
     return {"channel": channel, "days": days, "offset": offset, "page": tally,
             "orders_since_first_chat_by_type": by_type, "paid_value_by_currency": value,
             "first_purchase_after_first_chat": lag,
-            "hub_lookup": probe, "check_known_customers": known,
+            "hub_lookup": probe, "check_known_customers": known, "hub_record_shape": shape,
             "orders_neema_created": {"contacts": len({w for w, _s in neema}), "orders": len(neema),
                                      "paid": sum(1 for _w, s in neema if str(s or "").lower() in _PAID)},
             "finished": finished, "rate_limit": limited,
