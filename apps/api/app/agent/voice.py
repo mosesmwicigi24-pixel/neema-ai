@@ -212,9 +212,27 @@ def official_numbers_line(*, swahili: bool = False) -> str:
     return f"Our official numbers are {' and '.join(nums)}. Any other number is not from Bethany House."
 
 
-def strip_numbers_line(reply: str | None) -> str:
-    """`reply` without any official-numbers line the model wrote itself."""
-    return _NUMBERS_LINE_RE.sub("", reply or "").strip()
+def strip_numbers_line(reply: str | None, *, every_mention: bool = False) -> str:
+    """`reply` without any official-numbers line the model wrote itself.
+    `every_mention` (the first reply, where the code-written line follows)
+    also drops a sentence that merely carries one of our numbers — "You can
+    reach us on +254… or +254…" beside the official line said them twice
+    (model run of 2026-11-23)."""
+    out = _NUMBERS_LINE_RE.sub("", reply or "").strip()
+    if not every_mention or not out:
+        return out
+    from app.core.config import settings
+    tails = [re.sub(r"\D", "", n)[-9:] for n in (getattr(settings, "whatsapp_handoff_number", ""),
+                                                 getattr(settings, "whatsapp_handoff_alt", "")) if n]
+    tails = [t for t in tails if len(t) == 9]
+    if not tails:
+        return out
+    kept = []
+    for part in re.split(r"(?<=[.!?…])\s+|\n+", out):
+        if any(t in re.sub(r"\D", "", part) for t in tails):
+            continue
+        kept.append(part)
+    return " ".join(k for k in kept if k.strip()).strip()
 
 
 # ── a private message is only spoken of when one went (audit H5, X21) ────────
