@@ -316,6 +316,7 @@ def test_an_order_counts_as_served_only_from_the_day_they_first_wrote():
     r = served_reading("2026-11-20T08:00:00+00:00", summ)
     assert r["in_hub"] and r["orders"] == 3 and r["before"] == 1
     assert [(o["type"], o["paid"]) for o in r["after"]] == [("whatsapp", True), ("invoice", False)]
+    assert [o["days"] for o in r["after"]] == [0, 1]          # same day, then the next day
     assert served_reading("2026-11-20T08:00:00+00:00", None) == {"in_hub": False, "orders": 0, "after": [], "before": 0}
 
 

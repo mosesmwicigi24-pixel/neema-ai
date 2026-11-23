@@ -188,7 +188,8 @@ def served_reading(first_chat_at, hub_summary: dict | None) -> dict:
             "paid": str(o.get("payment_status") or "").lower() in _PAID,
             "total": float(o.get("total") or 0),
             "currency": str(o.get("currency_code") or "").upper() or "?",
-            "undated": made is None})
+            "undated": made is None,
+            "days": (made - day0).days if (made is not None and day0 is not None) else None})
     return out
 
 
@@ -213,11 +214,23 @@ async def served(request: Request, channel: str = Query("whatsapp", max_length=2
     from app.models.order_event import OrderEvent
 
     since = datetime.now(timezone.utc) - timedelta(days=days)
-    rows = (await db.execute(
-        select(Conversation.id, Conversation.wa_id)
-        .where(Conversation.channel == channel, Conversation.last_message_at >= since,
-               Conversation.wa_id.isnot(None))
+    raw = (await db.execute(
+        select(Conversation.id, Conversation.wa_id, Conversation.person_id)
+        .where(Conversation.channel == channel, Conversation.last_message_at >= since)
         .order_by(Conversation.last_message_at.desc()).offset(offset).limit(limit))).all()
+    # THE NUMBER THAT LINKS A CHAT TO A PURCHASE: WhatsApp is its own number;
+    # on Messenger, Instagram, TikTok and the website it is the phone the
+    # customer gave us in the chat (saved on their person), when they gave one.
+    saved: dict = {}
+    if channel != "whatsapp":
+        from app.models.person import Identifier
+        pids = [r[2] for r in raw if r[2] is not None]
+        if pids:
+            for pid, val in (await db.execute(
+                    select(Identifier.person_id, Identifier.value)
+                    .where(Identifier.person_id.in_(pids), Identifier.type == "phone"))).all():
+                saved.setdefault(pid, (val or "").lstrip("+"))
+    rows = [(r[0], (r[1] if channel == "whatsapp" else saved.get(r[2])) or "") for r in raw]
     ids = [r[0] for r in rows]
     firsts = dict((await db.execute(
         select(Message.conversation_id, func.min(Message.created_at))
@@ -241,13 +254,15 @@ async def served(request: Request, channel: str = Query("whatsapp", max_length=2
         return served_reading(firsts.get(conv_id), summ)
 
     results = await asyncio.gather(*(one(cid, wa) for cid, wa in rows))
-    tally = {"contacts": len(rows), "not_a_phone": 0, "hub_error": 0, "in_hub": 0,
+    tally = {"contacts": len(rows), "no_number_saved": 0, "hub_error": 0, "in_hub": 0,
              "bought_before_only": 0, "ordered_since_first_chat": 0, "paid_since_first_chat": 0}
     by_type: dict = {}
     value: dict = {}
+    # how long after the first chat the first purchase came (per contact)
+    lag = {"same_day": 0, "1_to_3_days": 0, "4_to_14_days": 0, "15_days_or_more": 0, "date_unknown": 0}
     for r in results:
         if r is None:
-            tally["not_a_phone"] += 1
+            tally["no_number_saved"] += 1
             continue
         if r == "error":
             tally["hub_error"] += 1
@@ -256,6 +271,13 @@ async def served(request: Request, channel: str = Query("whatsapp", max_length=2
             tally["in_hub"] += 1
         if r["after"]:
             tally["ordered_since_first_chat"] += 1
+            _d = [o["days"] for o in r["after"] if o.get("days") is not None]
+            if not _d:
+                lag["date_unknown"] += 1
+            else:
+                _m = min(_d)
+                lag["same_day" if _m <= 0 else "1_to_3_days" if _m <= 3
+                    else "4_to_14_days" if _m <= 14 else "15_days_or_more"] += 1
             if any(o["paid"] for o in r["after"]):
                 tally["paid_since_first_chat"] += 1
         elif r["before"]:
@@ -273,6 +295,7 @@ async def served(request: Request, channel: str = Query("whatsapp", max_length=2
     _log.info("ops read: served report %s days=%d offset=%d (%d contacts)", channel, days, offset, len(rows))
     return {"channel": channel, "days": days, "offset": offset, "page": tally,
             "orders_since_first_chat_by_type": by_type, "paid_value_by_currency": value,
+            "first_purchase_after_first_chat": lag,
             "orders_neema_created": {"contacts": len({w for w, _s in neema}), "orders": len(neema),
                                      "paid": sum(1 for _w, s in neema if str(s or "").lower() in _PAID)},
             "more": len(rows) == limit}
