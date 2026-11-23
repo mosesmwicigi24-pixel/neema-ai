@@ -530,7 +530,10 @@ def test_the_guard_knows_the_hubs_names_and_urgent_buyers_get_a_date_led_reply()
     assert "A DATE ON THE TABLE (urgent buyers)" in p
     assert "fire `check_availability` for a READY piece in that same turn" in p
     assert "close TODAY" in p and 'Never say "that\'s not possible"' in p
-    assert "`schedule_check_in` on the day before their date" in p
+    # removed (decision D8, 2026-11-20): a check-in is booked only when the
+    # customer names a time to come back to them
+    assert "`schedule_check_in` on the day before their date" not in p
+    assert "A check-in is booked only when THEY name a time" in p
 
 
 def test_a_person_commenting_non_stop_hits_a_daily_budget(monkeypatch):
