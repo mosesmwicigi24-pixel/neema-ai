@@ -300,3 +300,29 @@ def test_a_second_mention_of_our_numbers_gives_way_on_the_first_reply(monkeypatc
     t = "Our Cassock is KES 13,000. Which colour would you like?\n\nYou can reach us on +254727891989 or +254785490805."
     assert strip_numbers_line(t, every_mention=True) == "Our Cassock is KES 13,000. Which colour would you like?"
     assert strip_numbers_line(t) == " ".join(t.split()) or strip_numbers_line(t) == t   # later replies are left alone
+
+
+# ── who was served: one contact against their hub record ─────────────────────
+
+def test_an_order_counts_as_served_only_from_the_day_they_first_wrote():
+    from app.routers.ops_read import served_reading
+    summ = {"orders": [
+        {"order_type": "pos", "payment_status": "paid", "total": 5000, "currency_code": "KES",
+         "created_at": "2026-10-01T09:00:00Z"},
+        {"order_type": "whatsapp", "payment_status": "paid", "total": 13000, "currency_code": "KES",
+         "created_at": "2026-11-20T15:00:00Z"},
+        {"order_type": "invoice", "payment_status": "unpaid", "total": 2500, "currency_code": "KES",
+         "created_at": "2026-11-21T10:00:00Z"}]}
+    r = served_reading("2026-11-20T08:00:00+00:00", summ)
+    assert r["in_hub"] and r["orders"] == 3 and r["before"] == 1
+    assert [(o["type"], o["paid"]) for o in r["after"]] == [("whatsapp", True), ("invoice", False)]
+    assert [o["days"] for o in r["after"]] == [0, 1]          # same day, then the next day
+    assert served_reading("2026-11-20T08:00:00+00:00", None) == {"in_hub": False, "orders": 0, "after": [], "before": 0}
+
+
+def test_the_served_report_returns_no_name_and_no_number():
+    import inspect
+    from app.routers import ops_read
+    src = inspect.getsource(ops_read.served)
+    ret = src[src.rindex("return {"):]
+    assert "wa_id" not in ret and "name" not in ret and "phone" not in ret
