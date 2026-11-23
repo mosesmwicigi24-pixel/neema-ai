@@ -197,6 +197,7 @@ def served_reading(first_chat_at, hub_summary: dict | None) -> dict:
 async def served(request: Request, channel: str = Query("whatsapp", max_length=20),
                  days: int = Query(30, ge=1, le=120),
                  limit: int = Query(60, ge=1, le=100), offset: int = Query(0, ge=0),
+                 pause: float = Query(1.0, ge=0.2, le=10.0),
                  db: AsyncSession = Depends(get_db),
                  _: None = Depends(require_key)) -> dict:
     """How many of the people who wrote to us on a channel were SERVED,
@@ -241,7 +242,13 @@ async def served(request: Request, channel: str = Query("whatsapp", max_length=2
         .where(OrderEvent.wa_id.in_(numbers), OrderEvent.hub_order_id.isnot(None),
                OrderEvent.created_at >= since))).all() if numbers else []
     redis = getattr(request.app.state, "redis", None)
-    gate = asyncio.Semaphore(2)
+    gate = asyncio.Semaphore(1)
+    # THE HUB LIMITS HOW FAST IT IS ASKED (second run, 2026-11-23: 867 of 913
+    # look-ups answered 429). One at a time, a pause between, and the page
+    # STOPS at the first 429: it says how many contacts it finished and how
+    # long the hub asked us to wait, and the reader resumes from there. The
+    # same hub key serves live customers — the report must never crowd them.
+    limited = {"hit": False, "retry_after": None, "limit": None, "remaining": None}
     # WHY A LOOK-UP FAILED IS COUNTED, NEVER SWALLOWED (first run, 2026-11-23:
     # 4 of 909 WhatsApp contacts "found" while 38 of them held orders Neema
     # herself had put in the hub — hub_client's search hides every error as
@@ -258,11 +265,20 @@ async def served(request: Request, channel: str = Query("whatsapp", max_length=2
         if not is_plausible_phone(wa_id):
             return None
         async with gate:
+            if limited["hit"]:
+                return "skipped"
+            await asyncio.sleep(pause)
             try:
                 q = national_digits(wa_id) or "".join(ch for ch in wa_id if ch.isdigit())
                 async with httpx.AsyncClient(timeout=15.0) as client:
                     resp = await client.get(f"{base}/api/v1/admin/pos/customers/search",
                                             headers=hub_client._api_headers(), params={"q": q})
+                limited["limit"] = resp.headers.get("x-ratelimit-limit") or limited["limit"]
+                limited["remaining"] = resp.headers.get("x-ratelimit-remaining") or limited["remaining"]
+                if resp.status_code == 429:
+                    limited["hit"] = True
+                    limited["retry_after"] = resp.headers.get("retry-after")
+                    return "skipped"
                 if resp.status_code != 200:
                     k = str(resp.status_code)
                     probe["search_http_error"][k] = probe["search_http_error"].get(k, 0) + 1
@@ -283,8 +299,14 @@ async def served(request: Request, channel: str = Query("whatsapp", max_length=2
             known["of_those_found_in_hub"] += 1
         return served_reading(firsts.get(conv_id), summ)
 
-    results = await asyncio.gather(*(one(cid, wa) for cid, wa in rows))
-    tally = {"contacts": len(rows), "no_number_saved": 0, "hub_error": 0, "in_hub": 0,
+    results = []
+    for cid, wa in rows:                      # in order, so "finished" is a clean offset
+        r = await one(cid, wa)
+        if r == "skipped":
+            break
+        results.append(r)
+    finished = len(results)
+    tally = {"contacts": finished, "no_number_saved": 0, "hub_error": 0, "in_hub": 0,
              "bought_before_only": 0, "ordered_since_first_chat": 0, "paid_since_first_chat": 0}
     by_type: dict = {}
     value: dict = {}
@@ -329,4 +351,5 @@ async def served(request: Request, channel: str = Query("whatsapp", max_length=2
             "hub_lookup": probe, "check_known_customers": known,
             "orders_neema_created": {"contacts": len({w for w, _s in neema}), "orders": len(neema),
                                      "paid": sum(1 for _w, s in neema if str(s or "").lower() in _PAID)},
-            "more": len(rows) == limit}
+            "finished": finished, "rate_limit": limited,
+            "more": len(rows) == limit or finished < len(rows)}
