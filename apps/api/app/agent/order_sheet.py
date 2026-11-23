@@ -177,6 +177,10 @@ def sheet_note(items: list, total, currency: str, pending: list[dict]) -> str:
     if pending:
         lines.append("While a piece awaits its price: do NOT offer to start or place the order, and "
                      "never give the total as the whole order.")
+    if len(items) > 1:
+        lines.append("WHEN YOU GIVE THE TOTAL, list every line it is made of (name, how many, "
+                     "its amount) in the same reply. A customer who just chose one piece reads a "
+                     "bare total as the price of that piece.")
     lines.append("A correction changes only the piece it names — every other piece above stands. "
                  "Count the pieces the customer asked for against this record before you "
                  "quote a total or offer to place the order.)")
@@ -193,3 +197,60 @@ def for_order(cart: dict | None) -> str:
         if units:
             bits.append(f"{i.get('name')}: " + " | ".join(units))
     return "; ".join(bits)
+
+
+# ── a total is never given without what it is made of ────────────────────────
+# Owner, 2026-11-23 (a customer in Zambia): two cassocks at ZMW 2,100 were
+# confirmed with "The order totals ZMW 7,600". The sum was right — two refiller
+# bottles and a cross chosen earlier were still on the order — but the reply
+# named only the cassocks, so the customer read 7,600 as the price of two
+# cassocks and felt overcharged. The breakdown is written by code from the
+# system's own lines: names and figures only, so it reads in any language.
+_NUM = re.compile(r"(?<![\w.])\d[\d,]*(?:\.\d+)?")
+
+
+def _names_line(reply_low: str, name: str) -> bool:
+    words = [w for w in re.findall(r"[a-z]{3,}", str(name or "").lower())]
+    return bool(words) and all(w in reply_low for w in words)
+
+
+def total_breakdown(reply: str, items: list, total, currency: str) -> str:
+    """The reply with the order's lines written under the paragraph that
+    states the total — only when it states the cart total, the order has more
+    than one line, and at least one line is not named in the reply. Otherwise
+    the reply, untouched."""
+    try:
+        tot = float(total)
+    except (TypeError, ValueError):
+        return reply
+    rows = []
+    for i in items or []:
+        try:
+            qty, unit = int(i.get("qty") or 1), float(i.get("unit_price"))
+        except (TypeError, ValueError):
+            return reply                      # a line without a price: say nothing we cannot stand behind
+        rows.append((str(i.get("name") or "").strip(), qty, unit * qty))
+    if len(rows) < 2 or tot <= 0 or not reply:
+        return reply
+
+    def _states_total(text: str) -> bool:
+        for m in _NUM.finditer(text):
+            try:
+                if abs(float(m.group(0).replace(",", "")) - tot) < 0.5:
+                    return True
+            except ValueError:
+                continue
+        return False
+
+    if not _states_total(reply):
+        return reply
+    low = reply.lower()
+    if all(_names_line(low, n) for n, _q, _a in rows):
+        return reply
+    listing = "\n".join(f"{q} × {n} = {_money(a, currency)}" for n, q, a in rows)
+    paras = reply.split("\n\n")
+    for k, para in enumerate(paras):
+        if _states_total(para):
+            paras[k] = para.rstrip() + "\n" + listing
+            break
+    return "\n\n".join(paras)

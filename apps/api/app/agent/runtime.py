@@ -2901,6 +2901,23 @@ async def run_turn(db: AsyncSession, redis, wa_id: str, user_text: str, llm: LLM
                     reply = reply.rstrip() + "\n\n" + _line
         except Exception as exc:
             _log.info("official-numbers line skipped for %s: %s", key, exc)
+    if reply and not read_only and not scribe_only and not public_comment \
+            and _gate_outcome not in ("held", "unowned"):
+        # A TOTAL IS NEVER GIVEN WITHOUT WHAT IT IS MADE OF (owner,
+        # 2026-11-23, order_sheet.total_breakdown): the lines are written by
+        # code from the order as it stands AFTER this turn's cart changes.
+        try:
+            from app.agent import cart as _cartmod_b, order_sheet as _sheet_b
+            from app.agent.tools import _cart_display as _cd_b
+            _cart_b = await _cartmod_b.get_cart(db, key, channel)
+            if len(_cart_b.get("items") or []) > 1:
+                _bi, _bt = await _cd_b(_cart_b, ctx)
+                _with_lines = _sheet_b.total_breakdown(reply, _bi, _bt, currency)
+                if _with_lines != reply:
+                    _log.info("turn %s: wrote the order's lines under a bare total", key)
+                    reply = _with_lines
+        except Exception as exc:
+            _log.info("total breakdown skipped for %s: %s", key, exc)
     if reply and customer_name and not public_comment:
         # A name is not a prefix (agent/voice.drop_repeated_name).
         try:
