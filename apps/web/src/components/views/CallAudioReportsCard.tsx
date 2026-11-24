@@ -76,13 +76,12 @@ export function CallAudioReportsCard({ onToast }: { onToast?: (msg: string, type
     const [error, setError] = useState<string | null>(null);
     const [open, setOpen] = useState<number | null>(null);
 
-    const load = useCallback(() => {
-        setError(null);
+    const fetchReports = useCallback(() =>
         api.get<DiagResp>("/admin/calls-diagnostics", { params: { limit: 30 } })
-            .then((r) => setData(r.data))
-            .catch(() => setError("Couldn't load the call audio reports."));
-    }, []);
-    useEffect(() => { load(); }, [load]);
+            .then((r) => { setData(r.data); setError(null); })
+            .catch(() => setError("Couldn't load the call audio reports.")), []);
+    useEffect(() => { void fetchReports(); }, [fetchReports]);
+    const load = () => { void fetchReports(); };
 
     const copyAll = async () => {
         if (!data) return;
