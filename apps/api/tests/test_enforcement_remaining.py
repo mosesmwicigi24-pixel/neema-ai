@@ -379,3 +379,19 @@ def test_the_order_note_asks_for_the_lines_with_the_total():
     from app.agent.order_sheet import sheet_note
     assert "WHEN YOU GIVE THE TOTAL" in sheet_note(_ORDER, 7600, "ZMW", [])
     assert "WHEN YOU GIVE THE TOTAL" not in sheet_note(_ORDER[:1], 600, "ZMW", [])
+
+
+def test_the_hubs_channel_names_the_kind_of_sale():
+    from app.routers.ops_read import order_kind, served_reading
+    assert order_kind({"channel": "till", "order_type": "pos"}) == "till"
+    assert order_kind({"channel": "quoted", "invoice_number": "INV-1"}) == "invoice"
+    assert order_kind({"channel": "quoted", "invoice_number": None}) == "quote"
+    assert order_kind({"order_type": "POS"}) == "pos"
+    # a till sale typed with a phone and no customer record still counts,
+    # and Nairobi time is compared as an instant with the first chat (UTC)
+    r = served_reading("2026-11-10T09:00:00+00:00", {"orders": [
+        {"order_type": "till", "payment_status": "paid", "total": 800, "currency_code": "KES",
+         "created_at": "2026-11-10T17:45:00+03:00"},
+        {"order_type": "web", "payment_status": "paid", "total": 500, "currency_code": "KES",
+         "created_at": "2026-11-09T23:30:00+03:00"}]})
+    assert [o["type"] for o in r["after"]] == ["till"] and r["before"] == 1
