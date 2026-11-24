@@ -193,6 +193,15 @@ def served_reading(first_chat_at, hub_summary: dict | None) -> dict:
     return out
 
 
+def order_kind(o: dict) -> str:
+    """The hub's own channel for an order — till, web, chat — with an invoice
+    told apart from a plain quote (both arrive as "quoted")."""
+    ch = str(o.get("channel") or o.get("order_type") or "unknown").lower()
+    if ch == "quoted":
+        return "invoice" if o.get("invoice_number") else "quote"
+    return ch
+
+
 def record_shape(body: dict, into: dict) -> dict:
     """What a hub customer record LOOKS like, so an empty order list is seen
     for what it is (third run, 2026-11-23: 19 customers found, every one with
@@ -281,12 +290,10 @@ async def served(request: Request, channel: str = Query("whatsapp", max_length=2
     # herself had put in the hub — hub_client's search hides every error as
     # "no such customer"). The search is made here so its outcome is seen.
     import httpx
-    from app.core.phone import national_digits, same_number
     probe = {"search_ok": 0, "search_http_error": {}, "search_failed": 0, "no_match_in_results": 0,
-             "results_returned": 0}
+             "results_returned": 0, "orders_truncated": 0, "till_sale_without_customer_record": 0}
     base = settings.hub_api_url.rstrip("/")
     has_neema_order = {w for w, _s in neema}
-    shape: dict = {}
     known = {"contacts_with_a_neema_order": len(has_neema_order), "of_those_found_in_hub": 0}
 
     async def one(conv_id, wa_id):
@@ -296,11 +303,19 @@ async def served(request: Request, channel: str = Query("whatsapp", max_length=2
             if limited["hit"]:
                 return "skipped"
             await asyncio.sleep(pause)
+            # ONE CALL PER PERSON: the hub's orders-by-phone (2026-11-24). It
+            # also finds a till sale where the cashier typed a phone and no
+            # customer record was made — the owner's rule exactly ("we
+            # capture the same number"). The whole number with its country
+            # code is sent: a bare number would be read as Kenyan.
+            digits = "".join(ch for ch in str(wa_id) if ch.isdigit())
+            # no `since`: an order from BEFORE the first chat tells an existing
+            # customer from a new one (the hub sends the newest 50)
+            params = {"phone": "+" + digits}
             try:
-                q = national_digits(wa_id) or "".join(ch for ch in wa_id if ch.isdigit())
                 async with httpx.AsyncClient(timeout=15.0) as client:
-                    resp = await client.get(f"{base}/api/v1/admin/pos/customers/search",
-                                            headers=hub_client._api_headers(), params={"q": q})
+                    resp = await client.get(f"{base}/api/v1/admin/orders/by-phone",
+                                            headers=hub_client._api_headers(), params=params)
                 limited["limit"] = resp.headers.get("x-ratelimit-limit") or limited["limit"]
                 limited["remaining"] = resp.headers.get("x-ratelimit-remaining") or limited["remaining"]
                 if resp.status_code == 429:
@@ -308,44 +323,26 @@ async def served(request: Request, channel: str = Query("whatsapp", max_length=2
                     limited["retry_after"] = resp.headers.get("retry-after")
                     return "skipped"
                 if resp.status_code != 200:
+                    # 403 = Neema's hub account lacks the Customer History
+                    # Reader role; 422 = the hub would not read the number.
                     k = str(resp.status_code)
-                    probe["search_http_error"][k] = probe["search_http_error"].get(k, 0) + 1
-                    return "error"
-                data = (resp.json() or {}).get("data", []) or []
-                probe["search_ok"] += 1
-                probe["results_returned"] += 1 if data else 0
-                if data and not any(same_number(wa_id, c.get("phone")) for c in data):
-                    probe["no_match_in_results"] += 1
-            except Exception:
-                probe["search_failed"] += 1
-                return "error"
-            match = next((c for c in data if same_number(wa_id, c.get("phone"))), None)
-            if not match:
-                return served_reading(firsts.get(conv_id), None)
-            # ONE search per contact, then the record by its id (third run:
-            # the summary helper searched a second time, doubling the calls,
-            # and hid a refusal of that second search as "not in the hub").
-            try:
-                async with httpx.AsyncClient(timeout=15.0) as client:
-                    resp = await client.get(f"{base}/api/v1/admin/customers/{match.get('id')}",
-                                            headers=hub_client._api_headers())
-                if resp.status_code == 429:
-                    limited["hit"] = True
-                    limited["retry_after"] = resp.headers.get("retry-after")
-                    return "skipped"
-                if resp.status_code != 200:
-                    k = "record_" + str(resp.status_code)
                     probe["search_http_error"][k] = probe["search_http_error"].get(k, 0) + 1
                     return "error"
                 body = resp.json() or {}
             except Exception:
                 probe["search_failed"] += 1
                 return "error"
-            record_shape(body, shape)
-            cust = body.get("customer") or {}
-            summ = {"customer_id": match.get("id"),
-                    "orders": [hub_client._map_hub_order(o) for o in (cust.get("orders") or [])
-                               if isinstance(o, dict)]}
+            probe["search_ok"] += 1
+            custs = [c for c in (body.get("customers") or []) if isinstance(c, dict)]
+            orders = [o for o in (body.get("orders") or []) if isinstance(o, dict)]
+            probe["results_returned"] += 1 if (custs or orders) else 0
+            probe["orders_truncated"] += 1 if body.get("orders_truncated") else 0
+            probe["till_sale_without_customer_record"] += (
+                1 if any(o.get("customer_id") is None for o in orders) else 0)
+            if not custs and not orders:
+                return served_reading(firsts.get(conv_id), None)
+            summ = {"orders": [dict(hub_client._map_hub_order(o), order_type=order_kind(o))
+                               for o in orders]}
         if wa_id in has_neema_order:
             known["of_those_found_in_hub"] += 1
         return served_reading(firsts.get(conv_id), summ)
@@ -399,7 +396,7 @@ async def served(request: Request, channel: str = Query("whatsapp", max_length=2
     return {"channel": channel, "days": days, "offset": offset, "page": tally,
             "orders_since_first_chat_by_type": by_type, "paid_value_by_currency": value,
             "first_purchase_after_first_chat": lag,
-            "hub_lookup": probe, "check_known_customers": known, "hub_record_shape": shape,
+            "hub_lookup": probe, "check_known_customers": known, 
             "orders_neema_created": {"contacts": len({w for w, _s in neema}), "orders": len(neema),
                                      "paid": sum(1 for _w, s in neema if str(s or "").lower() in _PAID)},
             "finished": finished, "rate_limit": limited,
