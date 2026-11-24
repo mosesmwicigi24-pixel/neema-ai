@@ -395,3 +395,39 @@ def test_the_hubs_channel_names_the_kind_of_sale():
         {"order_type": "web", "payment_status": "paid", "total": 500, "currency_code": "KES",
          "created_at": "2026-11-09T23:30:00+03:00"}]})
     assert [o["type"] for o in r["after"]] == ["till"] and r["before"] == 1
+
+
+# ── where an unpaid order stopped (owner, 2026-11-24) ────────────────────────
+
+def test_where_an_unpaid_order_stopped():
+    from app.routers.ops_read import stall_reading
+    t = "2026-11-20T10:%02d:00+00:00"
+    assert stall_reading(t % 0, [])["reason"] == "customer_silent_since_order"
+    # what was said BEFORE the order, and internal notes, are not read
+    r = stall_reading(t % 10, [(t % 5, "user", "I have paid", False),
+                               (t % 12, "human_agent", "note: call him", True),
+                               (t % 13, "ai", "Here is your order.", False)])
+    assert r["reason"] == "customer_silent_since_order" and not r["staff_replied_after"]
+    assert stall_reading(t % 0, [(t % 1, "ai", "Order made.", False),
+                                 (t % 2, "user", "Nimetuma pesa", False),
+                                 (t % 3, "ai", "Thank you.", False)])["reason"] \
+        == "customer_says_paid_order_still_unpaid"
+    assert stall_reading(t % 0, [(t % 1, "ai", "Order made.", False),
+                                 (t % 2, "user", "ok and delivery?", False)])["reason"] \
+        == "customer_wrote_last_no_reply"
+    promised = [(t % 1, "ai", "A colleague will send you the payment number.", False)]
+    assert stall_reading(t % 0, promised)["reason"] == "colleague_promised_none_came"
+    assert stall_reading(t % 0, promised + [(t % 4, "human_agent", "Here it is", False)])["reason"] \
+        == "customer_silent_since_order"
+    assert stall_reading(t % 0, [(t % 1, "user", "what is your till number", False),
+                                 (t % 2, "ai", "Use the link above.", False)])["reason"] \
+        == "asked_how_to_pay_then_stopped"
+
+
+def test_the_stalled_report_returns_no_name_no_number_no_text():
+    import inspect
+    from app.routers import ops_read
+    src = inspect.getsource(ops_read.orders_stalled)
+    ret = src[src.index("out = {"):]
+    for word in ('"name"', '"text"', '"wa_id"', '"phone"', '"contact"'):
+        assert word not in ret

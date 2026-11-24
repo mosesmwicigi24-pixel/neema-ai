@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import hmac
 import logging
+import re as _re
 import time
 import uuid
 
@@ -401,3 +402,119 @@ async def served(request: Request, channel: str = Query("whatsapp", max_length=2
                                      "paid": sum(1 for _w, s in neema if str(s or "").lower() in _PAID)},
             "finished": finished, "rate_limit": limited,
             "more": len(rows) == limit or finished < len(rows)}
+
+
+# ── where the unpaid chat orders stopped (owner, 2026-11-24) ─────────────────
+# 77 chat orders in the hub, 1 marked paid. For each order Neema put in the
+# hub that is not paid, the thread AFTER the order is read on the server and
+# only the tally leaves: no name, no number, no message text.
+_SAYS_PAID = _re.compile(
+    r"\b(i\s*(have|'ve)?\s*(paid|sent)|payment\s+(made|done|sent)|paid\b|nimelipa|nimetuma|"
+    r"nishalipa|nimeshalipa|transaction|confirmation\s+code|receipt|j'ai\s+pay[ée]|pagu[ée]|pago\s+hecho)", _re.I)
+_ASKS_HOW = _re.compile(
+    r"(how\s+(do|can|to)\s+i?\s*pay|payment\s+(details|number|method|link)|till\s+number|paybill|"
+    r"account\s+(number|details)|bank\s+details|western\s+union|mukuru|moneygram|world\s*remit|"
+    r"mobile\s+money|momo|send\s+(the\s+)?money|where\s+(do|to)\s+i\s+(pay|send)|nilipe|nitume|"
+    r"comment\s+payer|c[oó]mo\s+pag)", _re.I)
+_COLLEAGUE = _re.compile(r"\b(colleague|a\s+member\s+of\s+(our|the)\s+team|team\s+will|mwenzangu)\b", _re.I)
+
+
+def stall_reading(order_at, msgs: list) -> dict:
+    """Where one unpaid order stopped. `msgs` is the thread oldest-first as
+    (when, sender, text, is_note). One reason per order, the most actionable
+    first. Pure."""
+    t0 = _when(order_at)
+    after = [m for m in msgs if not m[3] and t0 is not None and _when(m[0]) is not None
+             and _when(m[0]) >= t0]
+    cust = [m for m in after if m[1] == "user"]
+    staff = [m for m in after if m[1] == "human_agent"]
+    ours = [m for m in after if m[1] in ("ai", "human_agent")]
+    said_paid = any(_SAYS_PAID.search(m[2] or "") for m in cust)
+    asked_how = any(_ASKS_HOW.search(m[2] or "") for m in cust)
+    promised = [m for m in after if m[1] == "ai" and _COLLEAGUE.search(m[2] or "")]
+    staff_after_promise = bool(promised) and any(
+        _when(s[0]) > _when(promised[0][0]) for s in staff)
+    last = after[-1][1] if after else None
+    if said_paid:
+        reason = "customer_says_paid_order_still_unpaid"
+    elif last == "user":
+        reason = "customer_wrote_last_no_reply"
+    elif promised and not staff_after_promise:
+        reason = "colleague_promised_none_came"
+    elif asked_how:
+        reason = "asked_how_to_pay_then_stopped"
+    elif not cust:
+        reason = "customer_silent_since_order"
+    else:
+        reason = "talked_on_then_went_quiet"
+    return {"reason": reason, "customer_messages_after": len(cust),
+            "staff_replied_after": bool(staff), "we_wrote_after": bool(ours),
+            "colleague_promised": bool(promised), "asked_how_to_pay": asked_how}
+
+
+@router.get("/orders/stalled")
+async def orders_stalled(channel: str = Query("", max_length=20),
+                         days: int = Query(30, ge=1, le=120),
+                         db: AsyncSession = Depends(get_db),
+                         _: None = Depends(require_key)) -> dict:
+    """Counts only: of the orders Neema put in the hub in the last `days`,
+    how many are unpaid and where each one's conversation stopped."""
+    from datetime import datetime, timedelta, timezone
+    from app.models.order_event import OrderEvent
+    since = datetime.now(timezone.utc) - timedelta(days=days)
+    q = select(OrderEvent).where(OrderEvent.hub_order_id.isnot(None), OrderEvent.created_at >= since)
+    if channel:
+        q = q.where(OrderEvent.channel == channel)
+    orders = (await db.execute(q.order_by(OrderEvent.created_at.asc()))).scalars().all()
+    now = datetime.now(timezone.utc)
+    out = {"orders": len(orders), "paid": 0, "unpaid": 0, "no_conversation_found": 0,
+           "reasons": {}, "by_channel": {}, "hub_status": {}, "currency": {},
+           "unpaid_value_by_currency": {}, "had_payment_link": 0, "staff_replied_after": 0,
+           "colleague_promised": 0, "asked_how_to_pay": 0, "customer_never_wrote_again": 0,
+           "order_age": {"under_2_days": 0, "2_to_7_days": 0, "over_7_days": 0},
+           "hub_status_never_updated": 0}
+    for oe in orders:
+        if str(oe.hub_payment_status or oe.payment_status or "").lower() in _PAID:
+            out["paid"] += 1
+            continue
+        out["unpaid"] += 1
+        ch = oe.channel or "whatsapp"
+        out["by_channel"][ch] = out["by_channel"].get(ch, 0) + 1
+        hs = str(oe.hub_status or "not_reported").lower()
+        out["hub_status"][hs] = out["hub_status"].get(hs, 0) + 1
+        out["hub_status_never_updated"] += 0 if oe.hub_status_at else 1
+        cur = str(oe.hub_currency or oe.currency or "?").upper()
+        out["currency"][cur] = out["currency"].get(cur, 0) + 1
+        try:
+            amt = float(oe.hub_total if oe.hub_total is not None else oe.subtotal or 0)
+        except (TypeError, ValueError):
+            amt = 0.0
+        out["unpaid_value_by_currency"][cur] = round(out["unpaid_value_by_currency"].get(cur, 0) + amt, 2)
+        out["had_payment_link"] += 1 if (oe.hub_payment_url or oe.hub_public_url) else 0
+        made = _when(oe.created_at)
+        age = (now - made).days if made else 0
+        out["order_age"]["under_2_days" if age < 2 else "2_to_7_days" if age <= 7 else "over_7_days"] += 1
+        cq = select(Conversation.id).where(Conversation.channel == ch)
+        if oe.person_id is not None:
+            cq = cq.where(or_(Conversation.person_id == oe.person_id, Conversation.wa_id == oe.wa_id,
+                              Conversation.external_id == oe.wa_id))
+        else:
+            cq = cq.where(or_(Conversation.wa_id == oe.wa_id, Conversation.external_id == oe.wa_id))
+        cid = (await db.execute(cq.order_by(Conversation.last_message_at.desc().nullslast()).limit(1))).scalar()
+        if cid is None:
+            out["no_conversation_found"] += 1
+            continue
+        rows = (await db.execute(
+            select(Message.created_at, Message.sender, Message.text, Message.raw_meta)
+            .where(Message.conversation_id == cid, Message.created_at >= oe.created_at)
+            .order_by(Message.created_at.asc()).limit(400))).all()
+        msgs = [(r[0], getattr(r[1], "value", str(r[1])), r[2] or "",
+                 isinstance(r[3], dict) and r[3].get("kind") == "note") for r in rows]
+        r = stall_reading(oe.created_at, msgs)
+        out["reasons"][r["reason"]] = out["reasons"].get(r["reason"], 0) + 1
+        out["staff_replied_after"] += 1 if r["staff_replied_after"] else 0
+        out["colleague_promised"] += 1 if r["colleague_promised"] else 0
+        out["asked_how_to_pay"] += 1 if r["asked_how_to_pay"] else 0
+        out["customer_never_wrote_again"] += 1 if not r["customer_messages_after"] else 0
+    _log.info("ops read: stalled orders days=%d (%d orders)", days, len(orders))
+    return out
