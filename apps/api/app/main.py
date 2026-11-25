@@ -409,6 +409,10 @@ async def lifespan(app: FastAPI):
                     # continue on one the same person has open, else hand the
                     # thread to a human (who gets Meta's 7-day window).
                     await escalate_window_closed(redis)
+                    # Public comments kept while the model could not answer:
+                    # one reply per person, once it can (owner, 2026-11-25).
+                    from app.services.comment_catchup import sweep as _comment_catchup
+                    await _comment_catchup(redis)
             except Exception as exc:
                 logger.warning("missed-reply sweep tick failed: %s", exc)
             await _asyncio.sleep(interval)
