@@ -7431,9 +7431,9 @@ async def _run_comment_engage(redis, channel: str, comment: dict, own_pages: set
     # not read goes to the team to answer RIGHT THERE in the thread (owner,
     # 2026-09-22). A cheer needs no one; "which item?" is a real question back.
     # A draft HELD by the reviewer goes to a colleague with the reasons.
-    if not _followed and not answer and intent != "goodwill" and not ask_which \
-            and not (product_name and price_text):
-        # (a kept comment is on the ONE follow-up above, not flagged again)
+    if _followed:
+        pass        # a kept comment is on the ONE follow-up above, not flagged again
+    elif not answer and intent != "goodwill" and not ask_which and not (product_name and price_text):
         # Under a CAMPAIGN post an entry over the cap needs no colleague — the
         # host's thank-you is the answer; a question or a request still does.
         if not campaign or held_issues or (kind in ("request", "question")
