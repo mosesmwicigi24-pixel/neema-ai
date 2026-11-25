@@ -44,6 +44,9 @@ class _Redis:
     async def lrem(self, k, n, v):
         self.lists[k] = [x for x in self.lists.get(k, []) if x != v]
 
+    async def llen(self, k):
+        return len(self.lists.get(k, []))
+
     async def sadd(self, k, v):
         self.sets.setdefault(k, set()).add(v)
 
@@ -80,7 +83,9 @@ class World:
         self.answer = "Here is your answer."
         self.reject_sends = 0          # how many of the next public sends Meta refuses
         self.over_cap = False
-        self.staff_at = 0.0
+        self.records = {}              # the database's comments, by id
+        self.staff_ids = set()         # comment ids a colleague replied under
+        self.send_error = None         # raised by the next public send, once
         self.during_turn = None        # a hook run while the model is composing
         ident = dict(identity or {})
         w = self
@@ -100,6 +105,9 @@ class World:
             return w.answer
 
         async def reply_to_comment(cid, t, page_id=None, channel=None):
+            if w.send_error is not None:
+                err, w.send_error = w.send_error, None
+                raise err
             if w.reject_sends > 0:
                 w.reject_sends -= 1
                 raise RuntimeError("meta refused the reply")
@@ -137,8 +145,11 @@ class World:
         async def note_silent(channel, ext, cid, why):
             w.noted.append((cid, why))
 
-        async def staff_at(channel, ext, post_id=""):
-            return w.staff_at
+        async def staff_ids(channel, ext, ids):
+            return set(w.staff_ids) & {str(i) for i in ids}
+
+        async def load_records(channel, ext, ids):
+            return {str(i): dict(w.records[str(i)]) for i in ids if str(i) in w.records}
 
         async def followup(redis, channel, ext, key, items, state, why=""):
             w.followups.append({"state": state, "why": why,
@@ -159,6 +170,7 @@ class World:
         monkeypatch.setattr(ah, "ai_down", ai_down)
         monkeypatch.setattr(ah, "record_turn_failure", none)
         monkeypatch.setattr(cc, "followup", followup)
+        monkeypatch.setattr(cc, "load_records", load_records)
         monkeypatch.setattr(asyncio, "sleep", none)
         for n, f in (("read_comment", read_comment), ("run_turn", run_turn),
                      ("_route_comment_to_human", route_human), ("_note_silent_decision", note_silent),
@@ -166,7 +178,7 @@ class World:
                      ("_remember_post_product", none), ("_storefront_product_link", none),
                      ("_post_over_cap", over), ("_person_over_cap", false), ("_first_contact", false),
                      ("_meta_market", market), ("_thread_parent", thread_parent),
-                     ("_private_complaint_message", false), ("_staff_answered_at", staff_at)):
+                     ("_private_complaint_message", false), ("_staff_replied_ids", staff_ids)):
             monkeypatch.setattr(rt, n, f)
         monkeypatch.setattr(rt, "build_llm", lambda model=None, **kw: object())
 
@@ -175,8 +187,14 @@ class World:
                 "post_id": "p1", "page_id": "PAGE",
                 "post_context": {"post_id": "p1", "title": caption, "caption": caption, "thumb": ""}}
 
+    def record(self, cid, text, **kw):
+        """The webhook stored this comment before the handler ran."""
+        c = self.comment(cid, text, **kw)
+        self.records[cid] = {"text": text, "post_context": c["post_context"]}
+        return c
+
     def says(self, cid, text, **kw):
-        asyncio.run(rt._run_comment_engage(self.r, "facebook", self.comment(cid, text, **kw), {"PAGE"}))
+        asyncio.run(rt._run_comment_engage(self.r, "facebook", self.record(cid, text, **kw), {"PAGE"}))
 
     def age(self, seconds=600):
         """Make every kept comment old enough for the sweep to look at it."""
@@ -185,7 +203,7 @@ class World:
                            for x in self.r.lists.get(q, [])]
 
     def sweep(self):
-        self.r.kv.pop("comment:catchup:lock:" + KEY, None)      # the next pass, ten minutes on
+        self.r.kv.pop("comment:catchup:backoff:" + KEY, None)   # the next pass, ten minutes on
         return asyncio.run(cc.sweep(self.r))
 
     def waiting(self):
@@ -257,7 +275,7 @@ def test_a_comment_that_arrives_during_recovery_stays_waiting(monkeypatch):
 
     async def arrives():
         w.during_turn = None
-        await cc.keep(w.r, "facebook", w.comment("c9", "And do you deliver to Uganda?"), {"PAGE"}, cc.MODEL)
+        await cc.keep(w.r, "facebook", w.record("c9", "And do you deliver to Uganda?"), {"PAGE"}, cc.MODEL)
     w.during_turn = arrives
     w.sweep()
     assert w.public[-1][0] == "c1"                         # the reply covered what it read …
@@ -265,26 +283,69 @@ def test_a_comment_that_arrives_during_recovery_stays_waiting(monkeypatch):
     assert w.followups[-1]["state"] == cc.WAITING and w.followups[-1]["texts"] == ["And do you deliver to Uganda?"]
 
 
-def test_a_colleague_who_answered_first_is_not_answered_over(monkeypatch):
+def test_a_colleagues_reply_answers_the_comment_it_was_made_to_and_no_other(monkeypatch):
     w = World(monkeypatch)
     w.says("c1", "How much is the cassock?")
-    w.says("c2", "I am in Tarime")
+    w.says("c2", "Do you deliver to Tarime?")
+    # the same person, waiting under ANOTHER post as well
+    other = dict(w.record("x1", "Is the chalice in stock?"), post_id="p2")
+    asyncio.run(cc.keep(w.r, "facebook", other, {"PAGE"}, cc.MODEL))
+    # a colleague replies under c1 (services/conversation.send_agent_reply → staff_replied)
+    assert asyncio.run(cc.staff_replied(w.r, "facebook", "u1", "c1")) is True
+    assert w.waiting() == ["Do you deliver to Tarime?"]                # c2 still owed
+    assert len(asyncio.run(cc.waiting_ids(w.r, "facebook:p2:u1"))) == 1   # the other post untouched
+    assert w.followups[-1]["state"] == cc.WAITING and w.followups[-1]["texts"] == ["Do you deliver to Tarime?"]
+    w.model, w.answer = "up", "Yes, we deliver to Tarime by DHL."
+    w.age()
+    w.sweep()
+    assert w.turns[-1]["user_text"] == "Do you deliver to Tarime?"       # only what is still owed
+    assert w.public[-1] == ("c2", "Yes, we deliver to Tarime by DHL.") and w.waiting() == []
+    # a reply to a comment that was not waiting changes nothing
+    assert asyncio.run(cc.staff_replied(w.r, "facebook", "u1", "zzz")) is False
+
+
+def test_a_colleague_who_answers_while_the_reply_is_composed_is_not_answered_over(monkeypatch):
+    w = World(monkeypatch)
+    w.says("c1", "How much is the cassock?")
+    w.says("c2", "Do you deliver to Tarime?")
     w.model = "up"
     w.age()
-    import time
-    w.staff_at = time.time() - 60                          # staff replied after both comments
-    turns, public = len(w.turns), len(w.public)
-    assert w.sweep() == 0
-    assert len(w.turns) == turns and len(w.public) == public          # no model call, no second reply
-    assert w.waiting() == [] and w.followups[-1]["state"] == cc.CLOSED
-    # … and what they write AFTER the colleague's reply is still theirs to have answered
-    w.model = "down"
-    w.says("c3", "Asante. Na stole peke yake ni bei gani?")
-    w.model = "up"
-    w.age(100)                                             # newer than the colleague's reply
+
+    async def colleague():
+        w.during_turn = None
+        w.staff_ids = {"c2"}                               # they reply under c2 mid-compose
+    w.during_turn = colleague
+    public = len(w.public)
     w.sweep()
-    assert w.turns[-1]["user_text"] == "Asante. Na stole peke yake ni bei gani?"
-    assert w.public[-1][0] == "c3" and w.waiting() == []
+    assert len(w.public) == public                         # the composed reply is not posted
+    assert w.waiting() == ["How much is the cassock?"]     # c1 is still owed; c2 is the colleague's
+    w.sweep()
+    assert w.turns[-1]["user_text"] == "How much is the cassock?" and w.public[-1][0] == "c1"
+
+
+def test_the_staff_reply_path_names_the_comment_it_answered(monkeypatch):
+    import inspect
+    import types
+    from app.services import conversation as cs, meta_send
+    sent_to = []
+
+    async def reply_to_comment(cid, t, channel=None, page_id=None):
+        sent_to.append(cid)
+
+    async def latest_inbound(db, conv_id):
+        return types.SimpleNamespace(waba_msg_id="c7", comment_context={"post_id": "p1"})
+
+    async def window(db, conv):
+        return {"mode": "closed"}
+    monkeypatch.setattr(meta_send, "reply_to_comment", reply_to_comment)
+    monkeypatch.setattr(cs, "_latest_inbound", latest_inbound)
+    monkeypatch.setattr(cs, "messaging_window", window)
+    conv = types.SimpleNamespace(id="k", channel="facebook", external_id="u1", wa_id=None)
+    asyncio.run(cs._deliver_agent_reply(None, conv, "It is KES 45,000."))
+    assert sent_to == ["c7"] and conv._replied_comment_id == "c7"
+    src = inspect.getsource(cs.send_agent_reply)
+    assert 'comment_context=({"reply_to": _replied} if _replied else None)' in src
+    assert "await comment_catchup.staff_replied(redis, conv.channel" in src
 
 
 def test_a_cap_during_recovery_leaves_every_question_with_staff(monkeypatch):
@@ -400,7 +461,6 @@ def test_the_plan_for_what_is_waiting():
     assert p["answer"]["comment"]["comment_id"] == "c3"
     assert p["answer"]["comment"]["catch_up"] == ["price?", "I am in Tarime"]      # the same words read once
     assert p["answer"]["comment"]["catch_up_ids"] == ["c1", "c2", "c3"]           # but every id is covered
-    assert cc.plan(items, now=now, human_cut=now - 1000)["covered"] == ["c1", "c2"]
     assert cc.plan([_item("c1", "x", now - 10)], now=now)["answer"] is None         # too fresh
     old = cc.plan([_item("c1", "x", now - cc.WINDOW_S - 5)], now=now)
     assert old["expired"] == ["c1"] and old["answer"] is None
@@ -408,6 +468,15 @@ def test_the_plan_for_what_is_waiting():
     assert cc.plan(items, now=now, staff_cut=now - 100)["answer"] is None                       # handed to staff
     mixed = cc.plan([_item("c1", "a", now - 900, cc.CAP), _item("c2", "b", now - 500)], now=now)
     assert mixed["answer"]["comment"]["catch_up"] == ["a", "b"]                 # one answer covers all
+
+
+def test_only_ids_are_kept_and_words_come_from_the_database():
+    items = [{"at": 1, "cid": "c1", "reason": cc.MODEL, "post_id": "p1", "page_id": "PAGE", "own_pages": ["PAGE"]},
+             {"at": 2, "cid": "c2", "reason": cc.MODEL, "post_id": "p1", "page_id": "PAGE", "own_pages": ["PAGE"]}]
+    live, gone = cc.hydrate("facebook", "u1", items, {"c1": {"text": "How much?", "post_context": {"post_id": "p1"}}})
+    assert gone == ["c2"] and [i["comment"]["text"] for i in live] == ["How much?"]
+    assert live[0]["comment"]["comment_id"] == "c1" and live[0]["comment"]["from_id"] == "u1"
+    assert "from_name" not in live[0]["comment"]
 
 
 def test_the_follow_up_says_what_staff_need_to_know():
@@ -424,3 +493,144 @@ def test_a_hold_line_that_is_our_last_word_is_not_said_again():
     assert hold_line_stands(["hold_line"]) is True
     assert hold_line_stands([None]) is False                   # we answered since
     assert hold_line_stands([]) is False
+
+
+# ── the second review's four failures ────────────────────────────────────────
+def test_nothing_a_customer_wrote_is_stored_in_the_queue(monkeypatch):
+    w = World(monkeypatch)
+    w.says("c1", "Hiyo nguo ni sh. Ngapi")
+    w.says("c2", "Nipo Tanzania Tarime")
+    blob = json.dumps([w.r.kv, w.r.lists, [sorted(v) for v in w.r.sets.values()]], default=str)
+    assert "Ngapi" not in blob and "Tarime" not in blob and "Ruben" not in blob
+    assert [i["cid"] for i in asyncio.run(cc.waiting_ids(w.r, KEY))] == ["c1", "c2"]
+    assert set(asyncio.run(cc.waiting_ids(w.r, KEY))[0]) == {
+        "at", "cid", "reason", "own_pages", "post_id", "page_id", "parent_id"}
+
+
+def test_a_comment_deleted_while_it_waits_is_never_answered(monkeypatch):
+    w = World(monkeypatch)
+    w.says("c1", "How much is the cassock?")
+    w.says("c2", "Do you deliver to Tarime?")
+    w.model = "up"
+    w.age()
+    del w.records["c1"]                                    # a data-deletion request removed it
+    w.sweep()
+    assert w.turns[-1]["user_text"] == "Do you deliver to Tarime?"      # only what still exists is read
+    assert [i["cid"] for i in asyncio.run(cc.waiting_ids(w.r, KEY))] == []
+    w2 = World(monkeypatch)
+    w2.says("c1", "How much is the cassock?")
+    w2.model = "up"
+    w2.age()
+    w2.records.clear()                                     # everything they wrote is gone
+    turns, public = len(w2.turns), len(w2.public)
+    w2.sweep()
+    assert len(w2.turns) == turns and len(w2.public) == public          # no call, no reply
+    assert asyncio.run(cc.waiting_ids(w2.r, KEY)) == [] and KEY not in w2.r.sets.get("comment:catchup:index", set())
+
+
+def test_a_comment_deleted_while_the_reply_is_composed_is_not_answered(monkeypatch):
+    w = World(monkeypatch)
+    w.says("c1", "How much is the cassock?")
+    w.says("c2", "Do you deliver to Tarime?")
+    w.model = "up"
+    w.age()
+
+    async def deletion():
+        w.during_turn = None
+        del w.records["c1"]
+    w.during_turn = deletion
+    public = len(w.public)
+    w.sweep()
+    assert len(w.public) == public                         # the reply that read c1 is not posted
+    assert w.waiting() == ["Do you deliver to Tarime?"]
+    w.sweep()
+    assert w.turns[-1]["user_text"] == "Do you deliver to Tarime?" and w.public[-1][0] == "c2"
+
+
+def test_a_comment_arriving_between_the_read_and_the_cleanup_is_not_lost(monkeypatch):
+    w = World(monkeypatch)
+    w.says("c1", "How much is the cassock?")
+    real, fired = w.r.lrange, []
+
+    async def lrange(k, a, b):
+        rows = await real(k, a, b)
+        if not fired:                                      # the worker has read the queue …
+            fired.append(1)
+            await cc.keep(w.r, "facebook", w.record("c9", "And the stole?"), {"PAGE"}, cc.MODEL)
+        return rows                                        # … and a comment arrives before it cleans up
+    w.r.lrange = lrange
+    left = asyncio.run(cc.resolve(w.r, KEY, ["c1"]))
+    w.r.lrange = real
+    assert left == 1 and w.waiting() == ["And the stole?"]
+    assert KEY in w.r.sets["comment:catchup:index"]        # and the sweep will still find it
+
+
+def test_a_comment_arriving_after_the_count_keeps_its_place_in_the_index(monkeypatch):
+    w = World(monkeypatch)
+    w.says("c1", "How much is the cassock?")
+    real, n = w.r.llen, []
+
+    async def llen(k):
+        v = await real(k)
+        n.append(1)
+        if len(n) == 1:                                    # counted empty, then one arrives
+            await cc.keep(w.r, "facebook", w.record("c9", "And the stole?"), {"PAGE"}, cc.MODEL)
+        return v
+    w.r.llen = llen
+    asyncio.run(cc.resolve(w.r, KEY, ["c1"]))
+    w.r.llen = real
+    assert w.waiting() == ["And the stole?"] and KEY in w.r.sets["comment:catchup:index"]
+
+
+def test_the_live_handler_and_the_sweep_never_both_compose_the_reply(monkeypatch):
+    w = World(monkeypatch)
+    w.says("c1", "How much is the cassock?")
+    w.model = "up"
+    w.age()
+
+    async def live_comment():                              # arrives while the sweep is composing
+        w.during_turn = None
+        await rt._run_comment_engage(w.r, "facebook", w.record("c9", "Do you have it in purple?"), {"PAGE"})
+    w.during_turn = live_comment
+    w.sweep()
+    asked = [t["user_text"] for t in w.turns]
+    assert sum("How much is the cassock?" in a for a in asked[1:]) == 1    # gathered by ONE composer
+    assert [cid for cid, _t in w.public].count("c1") == 2               # the holding line, then one answer
+    # and the other way round: while the live handler holds the claim the sweep stands back
+    w3 = World(monkeypatch)
+    w3.says("c1", "How much is the cassock?")
+    w3.model = "up"
+    w3.age()
+    assert asyncio.run(cc.claim_answer(w3.r, KEY)) is True
+    turns = len(w3.turns)
+    assert w3.sweep() == 0 and len(w3.turns) == turns
+
+
+def test_a_holding_line_with_an_unknown_outcome_is_never_sent_again(monkeypatch):
+    from app.services.messaging import SendOutcomeUnknown
+    w = World(monkeypatch)
+    w.send_error = SendOutcomeUnknown("ReadTimeout: reply to comment outcome unknown")
+    w.says("c1", "How much is the cassock?")
+    assert w.public == [] and "comment:hold_said:" + KEY in w.r.kv      # it MAY be up: counted as said
+    assert "did not confirm" in w.followups[-1]["why"]                  # and a colleague is told to look
+    w.says("c2", "Hello?")
+    w.age()
+    w.sweep()
+    assert w.public == []                                               # not by a comment, not by the sweep
+
+
+def test_a_recovery_reply_with_an_unknown_outcome_goes_to_staff_not_to_a_retry(monkeypatch):
+    from app.services.messaging import SendOutcomeUnknown
+    w = World(monkeypatch)
+    w.says("c1", "How much is the cassock?")
+    w.model = "up"
+    w.age()
+    w.send_error = SendOutcomeUnknown("ReadTimeout: reply to comment outcome unknown")
+    w.sweep()
+    last = w.followups[-1]
+    assert last["state"] == cc.STAFF and "check the thread" in last["why"]
+    assert last["texts"] == ["How much is the cassock?"] and w.waiting() == last["texts"]
+    turns, public = len(w.turns), len(w.public)
+    w.sweep()
+    w.sweep()
+    assert len(w.turns) == turns and len(w.public) == public            # nobody posts another

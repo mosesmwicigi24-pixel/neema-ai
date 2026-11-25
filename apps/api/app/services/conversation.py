@@ -512,6 +512,12 @@ async def _deliver_agent_reply(db: AsyncSession, conv: Conversation, text: str,
         # Instagram replies on a different edge (/replies) than Facebook
         # (/comments) — pass the channel or an IG comment reply 400s.
         await reply_to_comment(comment_id, text, channel=channel)   # public reply under the comment
+        # WHICH comment this answered, for the caller's record (a transient
+        # mark on the loaded row; never a column)
+        try:
+            conv._replied_comment_id = comment_id
+        except Exception:
+            pass
         return None
     context_wamid = None
     if channel not in META_CHANNELS and quoted is not None:
@@ -699,6 +705,8 @@ async def send_agent_reply(
     # What the person typed (the English original under a translation) is what
     # is compared with the draft they were offered.
     origin = await _draft_origin(redis, conv.id, (original_text or "").strip() or text)
+    _replied = getattr(conv, "_replied_comment_id", None)
+    _replied = str(_replied) if isinstance(_replied, (str, int)) and _replied else None
     msg = Message(
         wa_id=conv.wa_id,
         external_id=conv.external_id,
@@ -719,7 +727,18 @@ async def send_agent_reply(
         translated_text=((original_text or "").strip() or None),
         translated_from=((original_lang or "").strip()[:24] or None),
         raw_meta=({"from_ai_draft": origin} if origin else None),
+        # A public reply names the comment it answers, as Neema's own do —
+        # the thread shows it under that comment, and that comment (only
+        # that one) stops waiting for an answer (services/comment_catchup).
+        comment_context=({"reply_to": _replied} if _replied else None),
     )
+    if _replied:
+        try:
+            from app.services import comment_catchup
+            await comment_catchup.staff_replied(redis, conv.channel or "", conv.external_id or "",
+                                                _replied)
+        except Exception:
+            pass
     # It went out. From here nothing may report a failed send: a DB hiccup
     # answered as an error made the agent press Send again and the customer
     # got the message twice. A record that won't save is logged loudly and

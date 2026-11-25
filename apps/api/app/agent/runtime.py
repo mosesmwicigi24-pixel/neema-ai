@@ -9,7 +9,6 @@ from __future__ import annotations
 import json
 import logging
 import re
-import time
 import types
 from datetime import datetime, timezone
 
@@ -6667,39 +6666,37 @@ def _returning_note(n: int) -> str:
             "before; often one short sentence.)")
 
 
-async def _staff_answered_at(channel: str, ext: str, post_id: str = "") -> float:
-    """When a COLLEAGUE last replied to this commenter (epoch seconds; 0 =
-    never, or unreadable). Any staff reply in this person's comment
-    conversation counts, whichever post it sits under: a kept comment older
-    than it is taken as answered, so the catch-up never speaks over a person
-    (services/comment_catchup)."""
-    if not ext:
-        return 0.0
+async def _staff_replied_ids(channel: str, ext: str, ids) -> set:
+    """Which of these comment ids a COLLEAGUE has replied under (their public
+    reply carries `comment_context.reply_to`). Only those: a reply to one
+    comment answers that comment, not the person's other questions and not
+    another post's (services/comment_catchup). set() on any doubt."""
+    ids = {str(i) for i in (ids or []) if i}
+    if not (ids and ext):
+        return set()
     try:
-        from sqlalchemy import select, func
+        from sqlalchemy import select
         from app.database import AsyncSessionLocal
         from app.models.message import Message, MsgDirection, MsgSender
         async with AsyncSessionLocal() as db:
-            at = (await db.execute(
-                select(func.max(Message.created_at)).where(
+            rows = (await db.execute(
+                select(Message.comment_context).where(
                     Message.channel == channel, Message.external_id == ext,
                     Message.direction == MsgDirection.outbound,
                     Message.sender == MsgSender.human_agent,
-                    Message.media_type.is_(None) | (Message.media_type != "note")))).scalar()
-        if at is None:
-            return 0.0
-        if at.tzinfo is None:
-            from datetime import timezone as _tz
-            at = at.replace(tzinfo=_tz.utc)
-        return at.timestamp()
+                    Message.comment_context.isnot(None))
+                .order_by(Message.created_at.desc()).limit(200))).all()
+        return {str((r[0] or {}).get("reply_to")) for r in rows
+                if isinstance(r[0], dict)} & ids
     except Exception as exc:
-        _log.info("staff-answer read skipped for %s: %s", ext, exc)
-        return 0.0
+        _log.info("staff-reply read skipped for %s: %s", ext, exc)
+        return set()
 
 
-async def _post_hold_ack(redis, channel: str, comment: dict, own_pages) -> bool:
+async def _post_hold_ack(redis, channel: str, comment: dict, own_pages) -> bool | None:
     """Say the holding line under a kept comment (the sweep's retry of a send
-    Meta refused). True when it landed."""
+    Meta refused). True when it landed, False when Meta refused it, None when
+    the outcome is unknown (it may have posted: never resent)."""
     if not own_pages:
         return False
     from app.database import AsyncSessionLocal
@@ -6711,6 +6708,9 @@ async def _post_hold_ack(redis, channel: str, comment: dict, own_pages) -> bool:
         str(ext)).replace("{name}", ""))
     try:
         await reply_to_comment(cid, text, page_id=comment.get("page_id"), channel=channel)
+    except svc.SendOutcomeUnknown as exc:
+        _log.warning("holding line to %s: outcome UNKNOWN (%s) — not resent", cid, exc)
+        return None
     except Exception as exc:
         _log.warning("holding line retry failed for %s: %s", cid, exc)
         return False
@@ -6848,17 +6848,16 @@ async def _run_comment_engage(redis, channel: str, comment: dict, own_pages: set
     catch_up = [str(t) for t in (comment.get("catch_up") or []) if str(t).strip()]
     catch_ids = [str(i) for i in (comment.get("catch_up_ids") or [])]
     from_sweep = bool(catch_up)
-    _turn_started = time.time()
+    _live_claim = False
     if not from_sweep and redis is not None:
         try:
-            _waiting = await _catchup.waiting(redis, _ckey)
-            if _waiting:
+            if await _catchup.waiting_ids(redis, _ckey):
                 from app.services.agent_health import ai_down as _ai_down
-                if not await _ai_down(redis):
-                    _open = _catchup.plan(
-                        _waiting, min_age=0,
-                        human_cut=await _staff_answered_at(channel, ext, _catchup.post_of(comment)),
-                    )["outstanding"]
+                # one composer at a time: the sweep holds the same claim
+                if not await _ai_down(redis) and await _catchup.claim_answer(redis, _ckey):
+                    _live_claim = True
+                    _open = _catchup.plan(await _catchup.waiting(redis, _ckey), min_age=0)["outstanding"]
+                    _open = [i for i in _open if str(i.get("cid")) != str(cid)]
                     _texts = [" ".join(str(i["comment"].get("text") or "").split()) for i in _open]
                     _texts = [t for n, t in enumerate(_texts) if t and t not in _texts[:n]]
                     if _texts:
@@ -6946,9 +6945,13 @@ async def _run_comment_engage(redis, channel: str, comment: dict, own_pages: set
         await _note_silent_decision(channel, ext, cid, intent)
         return
 
+    _delivery = {"unknown": False}
+
     async def _post_public(text: str) -> bool:
         """The public reply. True when it landed — the Like below follows only
-        a reply that did."""
+        a reply that did. False when Meta REFUSED it, and also when the
+        outcome is UNKNOWN (`_delivery["unknown"]`): the request left and no
+        answer came back, so it may have posted and is never sent again."""
         if not own_pages:                        # loop guard: can't tell our own reply apart
             _log.warning("META_PAGE_ID unset — skipping public reply for %s", cid)
             return False
@@ -6958,6 +6961,10 @@ async def _run_comment_engage(redis, channel: str, comment: dict, own_pages: set
             await reply_to_comment(cid, plain_public_voice(text),
                                    page_id=comment.get("page_id"), channel=channel)
             return True
+        except svc.SendOutcomeUnknown as exc:
+            _delivery["unknown"] = True
+            _log.warning("public comment reply to %s: outcome UNKNOWN (%s) — not resent", cid, exc)
+            return False
         except Exception as exc:
             _log.warning("public comment reply failed for %s: %s", cid, exc)
             return False
@@ -7371,6 +7378,8 @@ async def _run_comment_engage(redis, channel: str, comment: dict, own_pages: set
     async def _followup_now() -> bool:
         """The ONE staff follow-up for this person here, as things stand."""
         items = await _catchup.waiting(redis, _ckey)
+        if not items:
+            return bool(await _catchup.waiting_ids(redis, _ckey))    # unreadable just now: leave it
         cut = await _catchup.staff_only(redis, _ckey)
         auto = any(i.get("reason") == _catchup.MODEL and float(i.get("at") or 0) > cut for i in items)
         why = "" if auto else ("the reply reviewer held the draft" if held_issues
@@ -7394,9 +7403,24 @@ async def _run_comment_engage(redis, channel: str, comment: dict, own_pages: set
         _log.info("comment %s: catch-up had no answer (model_failed=%s) — nothing posted, kept",
                   cid, model_failed)
         return
-    if from_sweep and await _staff_answered_at(channel, ext, str(post_id)) >= _turn_started:
-        _log.info("comment %s: a colleague answered while the catch-up was composing — not posted", cid)
-        return
+    if answer and catch_ids:
+        # LOOK AGAIN BEFORE POSTING: a comment deleted while the reply was
+        # being written (a data-deletion request), or one a colleague
+        # answered meanwhile, is not answered — the next pass reads what is
+        # left and composes for that.
+        _gone = [i for i in catch_ids
+                 if i not in await _catchup.load_records(channel, str(ext), catch_ids)]
+        _done = [] if _gone else list(await _staff_replied_ids(channel, str(ext), catch_ids))
+        if _gone or _done:
+            if await _catchup.resolve(redis, _ckey, _gone or _done):
+                await _followup_now()
+            else:
+                await _catchup.followup(redis, channel, ext, _ckey, [], _catchup.CLOSED)
+            if _live_claim:
+                await _catchup.release_answer(redis, _ckey)
+            _log.info("comment %s: %s while the reply was composed — not posted", cid,
+                      "a comment was deleted" if _gone else "a colleague answered")
+            return
     if not answer and _promise_only:
         _kept = await _catchup.keep(
             redis, channel, own_comment, own_pages,
@@ -7415,17 +7439,30 @@ async def _run_comment_engage(redis, channel: str, comment: dict, own_pages: set
         _hold_claimed = True
 
     posted = await _post_public(public_text)
+    _why_unknown = _catchup.UNKNOWN_WHY if _delivery["unknown"] else ""
     if _hold_claimed:
-        # said only when Meta took it; a refused send may be tried again
-        await (_catchup.hold_confirm if posted else _catchup.hold_release)(redis, _ckey)
+        # said when Meta took it — or may have (unknown: never resent); a
+        # send Meta refused may be tried again
+        await (_catchup.hold_confirm if (posted or _delivery["unknown"])
+               else _catchup.hold_release)(redis, _ckey)
+    if answer and catch_ids and _delivery["unknown"]:
+        # the combined reply may be up: nobody posts another, a colleague looks
+        await _catchup.hand_to_staff(redis, _ckey)
+        await _catchup.followup(redis, channel, ext, _ckey, await _catchup.waiting(redis, _ckey),
+                                _catchup.STAFF, _why_unknown)
+    if _live_claim:
+        await _catchup.release_answer(redis, _ckey)
     if answer and posted and catch_ids:
         # cleared only now, and only what this reply covered
-        _left = await _catchup.resolve(redis, _ckey, catch_ids)
-        if _left:
+        if await _catchup.resolve(redis, _ckey, catch_ids):
             await _followup_now()
         else:
             await _catchup.followup(redis, channel, ext, _ckey, [], _catchup.CLOSED)
     _followed = bool(_kept) and await _followup_now()
+    if _followed and _hold_claimed and _delivery["unknown"]:
+        await _catchup.followup(redis, channel, ext, _ckey, await _catchup.waiting(redis, _ckey),
+                                _catchup.WAITING,
+                                "the holding line may or may not have posted — Meta did not confirm it")
     # NO MODEL ANSWER and nothing sold: the canned line promised a person, so
     # a person is told — the request, the question, or the comment we could
     # not read goes to the team to answer RIGHT THERE in the thread (owner,
