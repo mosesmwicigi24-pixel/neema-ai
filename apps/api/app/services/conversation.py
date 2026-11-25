@@ -479,8 +479,7 @@ async def messaging_window(db: AsyncSession, conv: Conversation) -> dict:
 
 
 async def _deliver_agent_reply(db: AsyncSession, conv: Conversation, text: str,
-                               quoted: "Message | None" = None,
-                               sent: dict | None = None) -> str | None:
+                               quoted: "Message | None" = None) -> str | None:
     """Send a human reply on the conversation's channel, raising on failure.
     Returns the sent message's wamid (WhatsApp only) so the outbound row can
     carry it and be reply-quotable by the customer later.
@@ -513,8 +512,12 @@ async def _deliver_agent_reply(db: AsyncSession, conv: Conversation, text: str,
         # Instagram replies on a different edge (/replies) than Facebook
         # (/comments) — pass the channel or an IG comment reply 400s.
         await reply_to_comment(comment_id, text, channel=channel)   # public reply under the comment
-        if sent is not None:
-            sent["comment_id"] = comment_id        # WHICH comment this answered
+        # WHICH comment this answered, for the caller's record (a transient
+        # mark on the loaded row; never a column)
+        try:
+            conv._replied_comment_id = comment_id
+        except Exception:
+            pass
         return None
     context_wamid = None
     if channel not in META_CHANNELS and quoted is not None:
@@ -657,9 +660,8 @@ async def send_agent_reply(
 
     # Deliver first; only persist the outbound if it actually went out. A send
     # failure returns a clean error (not a 500) so the inbox can surface it.
-    _sent: dict = {}
     try:
-        wamid = await _deliver_agent_reply(db, conv, text, quoted=quoted, sent=_sent)
+        wamid = await _deliver_agent_reply(db, conv, text, quoted=quoted)
     except Exception as exc:
         await _release_reply_id(redis, idem)
         import logging
@@ -703,6 +705,8 @@ async def send_agent_reply(
     # What the person typed (the English original under a translation) is what
     # is compared with the draft they were offered.
     origin = await _draft_origin(redis, conv.id, (original_text or "").strip() or text)
+    _replied = getattr(conv, "_replied_comment_id", None)
+    _replied = str(_replied) if isinstance(_replied, (str, int)) and _replied else None
     msg = Message(
         wa_id=conv.wa_id,
         external_id=conv.external_id,
@@ -726,13 +730,13 @@ async def send_agent_reply(
         # A public reply names the comment it answers, as Neema's own do —
         # the thread shows it under that comment, and that comment (only
         # that one) stops waiting for an answer (services/comment_catchup).
-        comment_context=({"reply_to": _sent["comment_id"]} if _sent.get("comment_id") else None),
+        comment_context=({"reply_to": _replied} if _replied else None),
     )
-    if _sent.get("comment_id"):
+    if _replied:
         try:
             from app.services import comment_catchup
             await comment_catchup.staff_replied(redis, conv.channel or "", conv.external_id or "",
-                                                _sent["comment_id"])
+                                                _replied)
         except Exception:
             pass
     # It went out. From here nothing may report a failed send: a DB hiccup

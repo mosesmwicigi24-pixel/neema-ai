@@ -341,11 +341,10 @@ def test_the_staff_reply_path_names_the_comment_it_answered(monkeypatch):
     monkeypatch.setattr(cs, "_latest_inbound", latest_inbound)
     monkeypatch.setattr(cs, "messaging_window", window)
     conv = types.SimpleNamespace(id="k", channel="facebook", external_id="u1", wa_id=None)
-    sent: dict = {}
-    asyncio.run(cs._deliver_agent_reply(None, conv, "It is KES 45,000.", sent=sent))
-    assert sent_to == ["c7"] and sent == {"comment_id": "c7"}
+    asyncio.run(cs._deliver_agent_reply(None, conv, "It is KES 45,000."))
+    assert sent_to == ["c7"] and conv._replied_comment_id == "c7"
     src = inspect.getsource(cs.send_agent_reply)
-    assert 'comment_context=({"reply_to": _sent["comment_id"]} if _sent.get("comment_id") else None)' in src
+    assert 'comment_context=({"reply_to": _replied} if _replied else None)' in src
     assert "await comment_catchup.staff_replied(redis, conv.channel" in src
 
 
