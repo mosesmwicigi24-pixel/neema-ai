@@ -3201,6 +3201,40 @@ def _hold_line(channel: str = "whatsapp") -> str:
     return "\n\n".join(parts)
 
 
+def hold_line_stands(last_outbound_kinds: list) -> bool:
+    """`last_outbound_kinds` = the `kind` of our messages in the thread,
+    newest first (notes left out). True when the newest thing we said is the
+    hold line itself. Pure."""
+    from app.services.reply_sweeper import HOLD_LINE_KIND
+    return bool(last_outbound_kinds) and last_outbound_kinds[0] == HOLD_LINE_KIND
+
+
+async def _hold_line_stands(channel: str, key: str) -> bool:
+    """Best-effort read for `hold_line_stands`; False on any doubt (the line
+    then goes out, as before)."""
+    try:
+        from app.database import AsyncSessionLocal
+        from app.models.conversation import Conversation
+        from app.models.message import Message, MsgDirection
+        async with AsyncSessionLocal() as db:
+            where = (Conversation.wa_id == key) if channel == "whatsapp" else (
+                (Conversation.channel == channel) & (Conversation.external_id == key))
+            conv_id = (await db.execute(select(Conversation.id).where(where))).scalar()
+            if conv_id is None:
+                return False
+            rows = (await db.execute(
+                select(Message.raw_meta).where(
+                    Message.conversation_id == conv_id,
+                    Message.direction == MsgDirection.outbound,
+                    Message.media_type.is_(None) | (Message.media_type != "note"))
+                .order_by(Message.created_at.desc()).limit(1))).all()
+        return hold_line_stands([(r[0] or {}).get("kind") if isinstance(r[0], dict) else None
+                                 for r in rows])
+    except Exception as exc:
+        _log.info("hold-line check skipped for %s/%s: %s", channel, key, exc)
+        return False
+
+
 async def _send_hold_line(redis, channel: str, key: str) -> None:
     """When a turn dies, the customer must never get pure silence.
 
@@ -3231,6 +3265,13 @@ async def _send_hold_line(redis, channel: str, key: str) -> None:
         from app.database import AsyncSessionLocal
         from app.services import messaging as svc
         from app.services.reply_sweeper import HOLD_LINE_META
+        # SAID ONCE UNTIL WE ANSWER (owner, 2026-11-25): in a long outage the
+        # two-hour key ran out and the same welcome went out again and again.
+        # If the last thing we said in this thread IS the hold line, they
+        # have it; the sweeper answers everything they wrote when it can.
+        if await _hold_line_stands(channel, key):
+            _log.info("hold line already stands for %s/%s — not repeated", channel, key)
+            return
         text = _hold_line(channel)
         if channel == "whatsapp":
             wamid = await svc._send_waba(key, text)
@@ -6739,6 +6780,15 @@ async def _run_comment_engage(redis, channel: str, comment: dict, own_pages: set
         comment = dict(comment, text=comment_text)
     first = (comment.get("from_name") or "").strip().split(" ")[0]
     name_tag = f" {first}" if first else ""
+    # ONE HOLDING LINE, THEN ONE ANSWER (owner, 2026-11-25; services/
+    # comment_catchup): `catch_up` is everything this person wrote under this
+    # post while we could not answer, oldest first — read together here and
+    # answered once, under their latest comment.
+    from app.services import comment_catchup as _catchup
+    catch_up = [str(t) for t in (comment.get("catch_up") or []) if str(t).strip()]
+    if catch_up:
+        comment_text = " ".join(catch_up)
+        comment = dict(comment, text=comment_text)
 
     # READ THE INTENT, GRADE IT, ROUTE IT (owner, 2026-09-22): one reading —
     # the plan's intent, what the comment IS (a request, a question, a
@@ -6755,7 +6805,7 @@ async def _run_comment_engage(redis, channel: str, comment: dict, own_pages: set
         # Named once under this post already: the canned lines do not name
         # them again on every reply (owner, 2026-11-20).
         name_tag = ""
-    if _prior and _nothing_to_add(comment):
+    if _prior and not catch_up and _nothing_to_add(comment):
         _log.info("comment %s: an acknowledgement after our reply — reacting, not replying", cid)
         if settings.meta_comment_like and channel != "instagram":
             try:
@@ -6902,7 +6952,7 @@ async def _run_comment_engage(redis, channel: str, comment: dict, own_pages: set
     # comment; the public CTA pulls them to their inbox instead. The comment
     # NEVER carries a link, whether or not the DM opened: an external link taxes
     # the reach of the whole post, so the invitation to write to us is the door.
-    prompt_text = comment_text or "How much?"
+    prompt_text = (_catchup.catch_up_prompt(catch_up) if catch_up else comment_text) or "How much?"
     post_ctx = comment.get("post_context") or {}
     post_id = comment.get("post_id") or post_ctx.get("post_id") or ""
     thumb = (post_ctx.get("thumb") or "").strip()
@@ -6946,8 +6996,12 @@ async def _run_comment_engage(redis, channel: str, comment: dict, own_pages: set
     # Checked BEFORE the cap counter: a free reply must not spend the post's
     # daily model budget (the counter increments on every call).
     free_ask = _trusted and is_bare_price_ask(prompt_text) and not campaign
+    # The catch-up is ONE call standing in for every comment it gathers, so
+    # the per-person count (which those comments already ran up) does not
+    # stop it; the post's own daily cap still does.
     skip_model = free_ask or await _post_over_cap(redis, post_id) \
-        or await _person_over_cap(redis, post_id, ext)
+        or (not catch_up and await _person_over_cap(redis, post_id, ext))
+    model_failed = False
 
     answer = ""
     seen_products: list = []          # the catalogue rows the agent actually priced
@@ -6972,6 +7026,13 @@ async def _run_comment_engage(redis, channel: str, comment: dict, own_pages: set
                     thread_parent=_parent, turn_facts=_facts)).strip()
         except Exception as exc:
             _log.warning("public agent reply failed for %s: %s", cid, exc)
+            model_failed = True
+            try:
+                # so the catch-up knows the model cannot answer yet
+                from app.services.agent_health import record_turn_failure
+                await record_turn_failure(redis, ext, exc)
+            except Exception:
+                pass
         if answer and _prior:
             answer = _trim_continuing(answer, comment_text, explained=bool(reading.get("explained")))
 
@@ -7218,6 +7279,36 @@ async def _run_comment_engage(redis, channel: str, comment: dict, own_pages: set
             # (below) — never "the exact item and price".
             public_text = _campaign_canned(comment_text, kind, ask, name_tag, ext, swahili)
     public_text = plain_public_voice(public_text)
+
+    # ONE HOLDING LINE, THEN ONE ANSWER (owner, 2026-11-25). A line that only
+    # promises a person is said once per person per post; what they write
+    # after it is seen (the Like), kept, and answered together when the model
+    # can answer again.
+    _promise_only = (not answer and intent != "goodwill" and not ask_which
+                     and not (product_name and price_text) and not campaign)
+    if answer:
+        await _catchup.clear(redis, channel, str(post_id), str(ext))
+    elif catch_up:
+        # The gathered comments still have no answer. A failed model call
+        # waits for the next pass; anything else (the reviewer held it, the
+        # post is over its cap) is the colleague's the first comment called.
+        if not model_failed:
+            await _catchup.drop_kept(redis, channel, str(post_id), str(ext))
+        _log.info("comment %s: catch-up had no answer (model_failed=%s) — nothing posted",
+                  cid, model_failed)
+        return
+    elif _promise_only:
+        if model_failed:
+            await _catchup.keep(redis, channel, comment, own_pages)
+        if not await _catchup.first_hold(redis, channel, str(post_id), str(ext)):
+            _log.info("comment %s: holding line already said to this person here — "
+                      "liked, kept, not repeated", cid)
+            await _like_answered()
+            await _note_silent_decision(
+                channel, ext, cid,
+                "we could not answer yet and they were already told a colleague will "
+                "come back — seen, not repeated" + ("; kept for one answer" if model_failed else ""))
+            return
 
     posted = await _post_public(public_text)
     # NO MODEL ANSWER and nothing sold: the canned line promised a person, so

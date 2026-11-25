@@ -545,7 +545,8 @@ def test_a_person_commenting_non_stop_hits_a_daily_budget(monkeypatch):
     assert asyncio.run(rt._person_over_cap(r, "POST2", "U1")) is False      # another post too
     assert asyncio.run(rt._person_over_cap(None, "POST1", "U1")) is False
     src = inspect.getsource(rt)
-    assert "or await _person_over_cap(redis, post_id, ext)" in src
+    # the one catch-up answer stands in for the comments it gathers (2026-11-25)
+    assert "or (not catch_up and await _person_over_cap(redis, post_id, ext))" in src
     # the free priced path is decided BEFORE the caps, so it never spends them
     i = src.index("free_ask = _trusted and is_bare_price_ask(prompt_text)")
     assert i < src.index("_person_over_cap(redis, post_id, ext)")
