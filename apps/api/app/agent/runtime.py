@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import logging
 import re
+import time
 import types
 from datetime import datetime, timezone
 
@@ -4153,18 +4154,18 @@ _SW_PRIVATE_COMPLAINT = (
 # ("send us a message"). Their words are noted back to them, a person is
 # promised, and the team is handed the ask — so the thread stays the shop.
 _REQUEST_ACK_POOL = [
-    "Thank you{name} 🙏 Noted: {ask}. One of our team will send you the options right here shortly.",
-    "Thank you{name} 🙏 We have you: {ask}. Our team will come back to you here with what we have shortly.",
+    "Thank you{name} 🙏 Noted: {ask}. One of our team will send you the options right here.",
+    "Thank you{name} 🙏 We have you: {ask}. Our team will come back to you here with what we have.",
 ]
 _QUESTION_ACK_POOL = [
-    "Thank you{name} 🙏 Good question — one of our team will answer you right here shortly.",
-    "Thank you{name} 🙏 Let us get you the exact answer — our team will reply to you here shortly.",
+    "Thank you{name} 🙏 Good question — one of our team will answer you right here.",
+    "Thank you{name} 🙏 Let us get you the exact answer — our team will reply to you here.",
 ]
 _SW_REQUEST_ACK_POOL = [
-    "Asante{name} 🙏 Tumepokea: {ask}. Mmoja wa timu yetu atakutumia chaguo hapa hivi karibuni.",
+    "Asante{name} 🙏 Tumepokea: {ask}. Mmoja wa timu yetu atakutumia chaguo hapa.",
 ]
 _SW_QUESTION_ACK_POOL = [
-    "Asante{name} 🙏 Swali zuri — mmoja wa timu yetu atakujibu hapa hivi karibuni.",
+    "Asante{name} 🙏 Swali zuri — mmoja wa timu yetu atakujibu hapa.",
 ]
 _INTENTS = ("high", "low", "negative", "spam", "goodwill")
 _KINDS = ("request", "question", "complaint", "praise", "mixed", "greeting", "other")
@@ -5279,9 +5280,9 @@ _OVER_CAP_SELL_EACH_POOL = [
 # shop, so this line never sends anyone away — it promises a person, and the
 # engine hands the team the comment to answer right there.
 _NEUTRAL_ACK_POOL = [
-    "Thank you for reaching out{name} 🙏 One of our team will come back to you right here shortly.",
-    "We appreciate you{name} 🙏 A colleague will pick this up with you here shortly.",
-    "Thank you{name} 🙏 We're here — one of us will reply to you right here shortly.",
+    "Thank you for reaching out{name} 🙏 One of our team will come back to you right here.",
+    "We appreciate you{name} 🙏 A colleague will pick this up with you here.",
+    "Thank you{name} 🙏 We're here — one of us will reply to you right here.",
 ]
 # Over the per-post cap (or the turn failed) on a GOODWILL comment — the line a
 # host gives when the room is full. Never the neutral "tell us a little more",
@@ -5340,8 +5341,8 @@ _SW_OVER_CAP_SELL_EACH_POOL = [
     "Karibu{name} 🙏 {product} ni {price} kila kimoja, tayari kwa ajili yako. Tafadhali weka oda yako — unahitaji ngapi, na unazihitaji lini? 💛",
 ]
 _SW_NEUTRAL_ACK_POOL = [
-    "Asante kwa kutufikia{name} 🙏 Mmoja wa timu yetu atakujibu hapa hivi karibuni.",
-    "Asante{name} 🙏 Tuko hapa — mwenzetu atakujibu hapa hivi karibuni.",
+    "Asante kwa kutufikia{name} 🙏 Mmoja wa timu yetu atakujibu hapa.",
+    "Asante{name} 🙏 Tuko hapa — mwenzetu atakujibu hapa.",
 ]
 _SW_GOODWILL_POOL = [
     "Asante{name} 🙏 Ukarimu wako unatutia nguvu sana.",
@@ -6666,6 +6667,62 @@ def _returning_note(n: int) -> str:
             "before; often one short sentence.)")
 
 
+async def _staff_answered_at(channel: str, ext: str, post_id: str = "") -> float:
+    """When a COLLEAGUE last replied to this commenter (epoch seconds; 0 =
+    never, or unreadable). Any staff reply in this person's comment
+    conversation counts, whichever post it sits under: a kept comment older
+    than it is taken as answered, so the catch-up never speaks over a person
+    (services/comment_catchup)."""
+    if not ext:
+        return 0.0
+    try:
+        from sqlalchemy import select, func
+        from app.database import AsyncSessionLocal
+        from app.models.message import Message, MsgDirection, MsgSender
+        async with AsyncSessionLocal() as db:
+            at = (await db.execute(
+                select(func.max(Message.created_at)).where(
+                    Message.channel == channel, Message.external_id == ext,
+                    Message.direction == MsgDirection.outbound,
+                    Message.sender == MsgSender.human_agent,
+                    Message.media_type.is_(None) | (Message.media_type != "note")))).scalar()
+        if at is None:
+            return 0.0
+        if at.tzinfo is None:
+            from datetime import timezone as _tz
+            at = at.replace(tzinfo=_tz.utc)
+        return at.timestamp()
+    except Exception as exc:
+        _log.info("staff-answer read skipped for %s: %s", ext, exc)
+        return 0.0
+
+
+async def _post_hold_ack(redis, channel: str, comment: dict, own_pages) -> bool:
+    """Say the holding line under a kept comment (the sweep's retry of a send
+    Meta refused). True when it landed."""
+    if not own_pages:
+        return False
+    from app.database import AsyncSessionLocal
+    from app.services import messaging as svc
+    from app.services.meta_send import reply_to_comment
+    cid, ext = comment.get("comment_id"), comment.get("from_id")
+    text = plain_public_voice(_pick(
+        _SW_NEUTRAL_ACK_POOL if looks_swahili(comment.get("text") or "") else _NEUTRAL_ACK_POOL,
+        str(ext)).replace("{name}", ""))
+    try:
+        await reply_to_comment(cid, text, page_id=comment.get("page_id"), channel=channel)
+    except Exception as exc:
+        _log.warning("holding line retry failed for %s: %s", cid, exc)
+        return False
+    try:
+        async with AsyncSessionLocal() as db:
+            await svc.save_outbound_channel_message(db, redis, channel, ext, text,
+                                                    reply_to_comment_id=cid)
+    except Exception as exc:
+        _log.warning("saving holding line failed for %s: %s", cid, exc)
+    return True
+
+
 async def _thread_prior(channel: str, ext: str, post_id: str) -> list[str]:
     """Our earlier public replies to THIS person under THIS post, oldest
     first — what the thread has already heard from us. [] on any doubt (no
@@ -6781,11 +6838,34 @@ async def _run_comment_engage(redis, channel: str, comment: dict, own_pages: set
     first = (comment.get("from_name") or "").strip().split(" ")[0]
     name_tag = f" {first}" if first else ""
     # ONE HOLDING LINE, THEN ONE ANSWER (owner, 2026-11-25; services/
-    # comment_catchup): `catch_up` is everything this person wrote under this
-    # post while we could not answer, oldest first — read together here and
-    # answered once, under their latest comment.
+    # comment_catchup). `catch_up` is everything this person wrote under this
+    # post that is still unanswered, oldest first — read together here and
+    # answered once, under their latest comment. The sweep hands it in; a
+    # live comment gathers it itself when the model can answer again.
     from app.services import comment_catchup as _catchup
+    own_comment = {k: v for k, v in comment.items() if k not in ("catch_up", "catch_up_ids")}
+    _ckey = _catchup.key_of(channel, _catchup.post_of(comment), ext)
     catch_up = [str(t) for t in (comment.get("catch_up") or []) if str(t).strip()]
+    catch_ids = [str(i) for i in (comment.get("catch_up_ids") or [])]
+    from_sweep = bool(catch_up)
+    _turn_started = time.time()
+    if not from_sweep and redis is not None:
+        try:
+            _waiting = await _catchup.waiting(redis, _ckey)
+            if _waiting:
+                from app.services.agent_health import ai_down as _ai_down
+                if not await _ai_down(redis):
+                    _open = _catchup.plan(
+                        _waiting, min_age=0,
+                        human_cut=await _staff_answered_at(channel, ext, _catchup.post_of(comment)),
+                    )["outstanding"]
+                    _texts = [" ".join(str(i["comment"].get("text") or "").split()) for i in _open]
+                    _texts = [t for n, t in enumerate(_texts) if t and t not in _texts[:n]]
+                    if _texts:
+                        catch_up = _texts + ([comment_text] if comment_text and comment_text not in _texts else [])
+                        catch_ids = [str(i.get("cid")) for i in _open]
+        except Exception as exc:
+            _log.info("comment %s: waiting comments not gathered: %s", cid, exc)
     if catch_up:
         comment_text = " ".join(catch_up)
         comment = dict(comment, text=comment_text)
@@ -7281,42 +7361,79 @@ async def _run_comment_engage(redis, channel: str, comment: dict, own_pages: set
     public_text = plain_public_voice(public_text)
 
     # ONE HOLDING LINE, THEN ONE ANSWER (owner, 2026-11-25). A line that only
-    # promises a person is said once per person per post; what they write
-    # after it is seen (the Like), kept, and answered together when the model
-    # can answer again.
+    # promises a person is said once per person per post — counted as said
+    # when Meta took it; what they write after it is seen (the Like), kept,
+    # and answered together when the model can answer again.
     _promise_only = (not answer and intent != "goodwill" and not ask_which
                      and not (product_name and price_text) and not campaign)
-    if answer:
-        await _catchup.clear(redis, channel, str(post_id), str(ext))
-    elif catch_up:
-        # The gathered comments still have no answer. A failed model call
-        # waits for the next pass; anything else (the reviewer held it, the
-        # post is over its cap) is the colleague's the first comment called.
+    _hold_claimed = _kept = False
+
+    async def _followup_now() -> bool:
+        """The ONE staff follow-up for this person here, as things stand."""
+        items = await _catchup.waiting(redis, _ckey)
+        cut = await _catchup.staff_only(redis, _ckey)
+        auto = any(i.get("reason") == _catchup.MODEL and float(i.get("at") or 0) > cut for i in items)
+        why = "" if auto else ("the reply reviewer held the draft" if held_issues
+                               else "a reply limit was reached")
+        return bool(await _catchup.followup(redis, channel, ext, _ckey, items,
+                                            _catchup.WAITING if auto else _catchup.STAFF, why))
+
+    if from_sweep and not answer:
+        # The gathered comments still have no answer. A failed model call is
+        # tried again on a later pass, three times; anything else (the
+        # reviewer held it, a cap) is a colleague's, and they are told so.
+        _why = ""
         if not model_failed:
-            await _catchup.drop_kept(redis, channel, str(post_id), str(ext))
-        _log.info("comment %s: catch-up had no answer (model_failed=%s) — nothing posted",
+            _why = "the reply reviewer held the draft" if held_issues else "a reply limit was reached"
+        elif await _catchup.tried(redis, _ckey) >= _catchup.MAX_TRIES:
+            _why = "three tries to answer failed"
+        if _why:
+            await _catchup.hand_to_staff(redis, _ckey)
+            await _catchup.followup(redis, channel, ext, _ckey, await _catchup.waiting(redis, _ckey),
+                                    _catchup.STAFF, _why)
+        _log.info("comment %s: catch-up had no answer (model_failed=%s) — nothing posted, kept",
                   cid, model_failed)
         return
-    elif _promise_only:
-        if model_failed:
-            await _catchup.keep(redis, channel, comment, own_pages)
-        if not await _catchup.first_hold(redis, channel, str(post_id), str(ext)):
+    if from_sweep and await _staff_answered_at(channel, ext, str(post_id)) >= _turn_started:
+        _log.info("comment %s: a colleague answered while the catch-up was composing — not posted", cid)
+        return
+    if not answer and _promise_only:
+        _kept = await _catchup.keep(
+            redis, channel, own_comment, own_pages,
+            _catchup.MODEL if model_failed else (_catchup.REVIEW if held_issues else _catchup.CAP))
+        if await _catchup.hold_state(redis, _ckey) != "send":
             _log.info("comment %s: holding line already said to this person here — "
                       "liked, kept, not repeated", cid)
             await _like_answered()
             await _note_silent_decision(
                 channel, ext, cid,
-                "we could not answer yet and they were already told a colleague will "
-                "come back — seen, not repeated" + ("; kept for one answer" if model_failed else ""))
+                "no answer yet and they were already told a colleague will come back — "
+                "seen and kept, the line not repeated")
+            if _kept:
+                await _followup_now()
             return
+        _hold_claimed = True
 
     posted = await _post_public(public_text)
+    if _hold_claimed:
+        # said only when Meta took it; a refused send may be tried again
+        await (_catchup.hold_confirm if posted else _catchup.hold_release)(redis, _ckey)
+    if answer and posted and catch_ids:
+        # cleared only now, and only what this reply covered
+        _left = await _catchup.resolve(redis, _ckey, catch_ids)
+        if _left:
+            await _followup_now()
+        else:
+            await _catchup.followup(redis, channel, ext, _ckey, [], _catchup.CLOSED)
+    _followed = bool(_kept) and await _followup_now()
     # NO MODEL ANSWER and nothing sold: the canned line promised a person, so
     # a person is told — the request, the question, or the comment we could
     # not read goes to the team to answer RIGHT THERE in the thread (owner,
     # 2026-09-22). A cheer needs no one; "which item?" is a real question back.
     # A draft HELD by the reviewer goes to a colleague with the reasons.
-    if not answer and intent != "goodwill" and not ask_which and not (product_name and price_text):
+    if not _followed and not answer and intent != "goodwill" and not ask_which \
+            and not (product_name and price_text):
+        # (a kept comment is on the ONE follow-up above, not flagged again)
         # Under a CAMPAIGN post an entry over the cap needs no colleague — the
         # host's thank-you is the answer; a question or a request still does.
         if not campaign or held_issues or (kind in ("request", "question")
