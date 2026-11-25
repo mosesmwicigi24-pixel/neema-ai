@@ -6666,33 +6666,6 @@ def _returning_note(n: int) -> str:
             "before; often one short sentence.)")
 
 
-async def _staff_replied_ids(channel: str, ext: str, ids) -> set:
-    """Which of these comment ids a COLLEAGUE has replied under (their public
-    reply carries `comment_context.reply_to`). Only those: a reply to one
-    comment answers that comment, not the person's other questions and not
-    another post's (services/comment_catchup). set() on any doubt."""
-    ids = {str(i) for i in (ids or []) if i}
-    if not (ids and ext):
-        return set()
-    try:
-        from sqlalchemy import select
-        from app.database import AsyncSessionLocal
-        from app.models.message import Message, MsgDirection, MsgSender
-        async with AsyncSessionLocal() as db:
-            rows = (await db.execute(
-                select(Message.comment_context).where(
-                    Message.channel == channel, Message.external_id == ext,
-                    Message.direction == MsgDirection.outbound,
-                    Message.sender == MsgSender.human_agent,
-                    Message.comment_context.isnot(None))
-                .order_by(Message.created_at.desc()).limit(200))).all()
-        return {str((r[0] or {}).get("reply_to")) for r in rows
-                if isinstance(r[0], dict)} & ids
-    except Exception as exc:
-        _log.info("staff-reply read skipped for %s: %s", ext, exc)
-        return set()
-
-
 async def _post_hold_ack(redis, channel: str, comment: dict, own_pages) -> bool | None:
     """Say the holding line under a kept comment (the sweep's retry of a send
     Meta refused). True when it landed, False when Meta refused it, None when
@@ -6851,18 +6824,21 @@ async def _run_comment_engage(redis, channel: str, comment: dict, own_pages: set
     _live_claim = False
     if not from_sweep and redis is not None:
         try:
-            if await _catchup.waiting_ids(redis, _ckey):
+            # this person's OTHER unresolved comments here (this one is owed too,
+            # stamped by the webhook — it is the one being handled)
+            _others = [i for i in await _catchup.waiting(redis, _ckey)
+                       if str(i.get("cid")) != str(cid) and i.get("state") != _catchup.VERIFY
+                       and (i.get("decided") or i.get("state") != _catchup.OWED)]
+            if _others:
                 from app.services.agent_health import ai_down as _ai_down
                 # one composer at a time: the sweep holds the same claim
                 if not await _ai_down(redis) and await _catchup.claim_answer(redis, _ckey):
                     _live_claim = True
-                    _open = _catchup.plan(await _catchup.waiting(redis, _ckey), min_age=0)["outstanding"]
-                    _open = [i for i in _open if str(i.get("cid")) != str(cid)]
-                    _texts = [" ".join(str(i["comment"].get("text") or "").split()) for i in _open]
+                    _texts = [" ".join(str(i["comment"].get("text") or "").split()) for i in _others]
                     _texts = [t for n, t in enumerate(_texts) if t and t not in _texts[:n]]
                     if _texts:
                         catch_up = _texts + ([comment_text] if comment_text and comment_text not in _texts else [])
-                        catch_ids = [str(i.get("cid")) for i in _open]
+                        catch_ids = [str(i.get("cid")) for i in _others]
         except Exception as exc:
             _log.info("comment %s: waiting comments not gathered: %s", cid, exc)
     if catch_up:
@@ -7377,30 +7353,18 @@ async def _run_comment_engage(redis, channel: str, comment: dict, own_pages: set
 
     async def _followup_now() -> bool:
         """The ONE staff follow-up for this person here, as things stand."""
-        items = await _catchup.waiting(redis, _ckey)
-        if not items:
-            return bool(await _catchup.waiting_ids(redis, _ckey))    # unreadable just now: leave it
-        cut = await _catchup.staff_only(redis, _ckey)
-        auto = any(i.get("reason") == _catchup.MODEL and float(i.get("at") or 0) > cut for i in items)
-        why = "" if auto else ("the reply reviewer held the draft" if held_issues
-                               else "a reply limit was reached")
-        return bool(await _catchup.followup(redis, channel, ext, _ckey, items,
-                                            _catchup.WAITING if auto else _catchup.STAFF, why))
+        return bool(await _catchup.refresh_followup(redis, _ckey))
 
     if from_sweep and not answer:
         # The gathered comments still have no answer. A failed model call is
-        # tried again on a later pass, three times; anything else (the
-        # reviewer held it, a cap) is a colleague's, and they are told so.
-        _why = ""
+        # tried again on a later pass (the sweep counts the tries); anything
+        # else (the reviewer held it, a cap) is a colleague's, and they are
+        # told so on the follow-up.
         if not model_failed:
-            _why = "the reply reviewer held the draft" if held_issues else "a reply limit was reached"
-        elif await _catchup.tried(redis, _ckey) >= _catchup.MAX_TRIES:
-            _why = "three tries to answer failed"
-        if _why:
-            await _catchup.hand_to_staff(redis, _ckey)
-            await _catchup.followup(redis, channel, ext, _ckey, await _catchup.waiting(redis, _ckey),
-                                    _catchup.STAFF, _why)
-        _log.info("comment %s: catch-up had no answer (model_failed=%s) — nothing posted, kept",
+            await _catchup.hand_to_staff(
+                redis, _ckey, _catchup.WHY[_catchup.REVIEW if held_issues else _catchup.CAP])
+            await _catchup.refresh_followup(redis, _ckey, ring=True)
+        _log.info("comment %s: catch-up had no answer (model_failed=%s) — nothing posted, still owed",
                   cid, model_failed)
         return
     if answer and catch_ids:
@@ -7408,14 +7372,14 @@ async def _run_comment_engage(redis, channel: str, comment: dict, own_pages: set
         # being written (a data-deletion request), or one a colleague
         # answered meanwhile, is not answered — the next pass reads what is
         # left and composes for that.
-        _gone = [i for i in catch_ids
-                 if i not in await _catchup.load_records(channel, str(ext), catch_ids)]
-        _done = [] if _gone else list(await _staff_replied_ids(channel, str(ext), catch_ids))
+        _still = await _catchup.ledger.existing(channel, str(ext), catch_ids)
+        _gone = [i for i in catch_ids if i not in _still]
+        _done = [] if _gone else list(
+            await _catchup.ledger.replied_ids(channel, str(ext), catch_ids, staff_only=True))
         if _gone or _done:
-            if await _catchup.resolve(redis, _ckey, _gone or _done):
-                await _followup_now()
-            else:
-                await _catchup.followup(redis, channel, ext, _ckey, [], _catchup.CLOSED)
+            if _done:
+                await _catchup.resolve(redis, _ckey, _done, by="staff")
+            await _catchup.refresh_followup(redis, _ckey)
             if _live_claim:
                 await _catchup.release_answer(redis, _ckey)
             _log.info("comment %s: %s while the reply was composed — not posted", cid,
@@ -7447,22 +7411,18 @@ async def _run_comment_engage(redis, channel: str, comment: dict, own_pages: set
                else _catchup.hold_release)(redis, _ckey)
     if answer and catch_ids and _delivery["unknown"]:
         # the combined reply may be up: nobody posts another, a colleague looks
-        await _catchup.hand_to_staff(redis, _ckey)
-        await _catchup.followup(redis, channel, ext, _ckey, await _catchup.waiting(redis, _ckey),
-                                _catchup.STAFF, _why_unknown)
+        await _catchup.needs_verify(redis, _ckey, catch_ids, _why_unknown)
+        await _catchup.refresh_followup(redis, _ckey, _why_unknown, ring=True)
     if _live_claim:
         await _catchup.release_answer(redis, _ckey)
     if answer and posted and catch_ids:
         # cleared only now, and only what this reply covered
-        if await _catchup.resolve(redis, _ckey, catch_ids):
-            await _followup_now()
-        else:
-            await _catchup.followup(redis, channel, ext, _ckey, [], _catchup.CLOSED)
+        await _catchup.resolve(redis, _ckey, catch_ids, by="neema")
+        await _catchup.refresh_followup(redis, _ckey)
     _followed = bool(_kept) and await _followup_now()
     if _followed and _hold_claimed and _delivery["unknown"]:
-        await _catchup.followup(redis, channel, ext, _ckey, await _catchup.waiting(redis, _ckey),
-                                _catchup.WAITING,
-                                "the holding line may or may not have posted — Meta did not confirm it")
+        await _catchup.refresh_followup(
+            redis, _ckey, "the holding line may or may not have posted — Meta did not confirm it")
     # NO MODEL ANSWER and nothing sold: the canned line promised a person, so
     # a person is told — the request, the question, or the comment we could
     # not read goes to the team to answer RIGHT THERE in the thread (owner,
@@ -7531,11 +7491,22 @@ def _public_price_text(kes, usd, currency: str = "USD") -> str:
         return ""
 
 
+async def _engage_and_settle(redis, channel: str, comment: dict, own_pages: set) -> None:
+    """Run the comment handler, then record that it FINISHED with this
+    comment (services/comment_ledger): a comment it left waiting already says
+    so; anything else — answered, or deliberately left — is resolved. A
+    handler that raised, or a process that died mid-way, records nothing: the
+    comment stays owed and the sweep picks it up."""
+    await _run_comment_engage(redis, channel, comment, own_pages)
+    from app.services import comment_catchup
+    await comment_catchup.settle(channel, comment.get("from_id"), comment.get("comment_id"))
+
+
 def schedule_comment_engage(redis, channel: str, comment: dict, own_pages: set) -> None:
     """Fire the intent-gated public + private replies for one comment, off the
     webhook ack path. A crash in the worker is logged (never silently swallowed by
     asyncio) so "no reply appeared" is always explainable from the logs."""
-    task = asyncio.create_task(_run_comment_engage(redis, channel, comment, own_pages))
+    task = asyncio.create_task(_engage_and_settle(redis, channel, comment, own_pages))
     _bg_tasks.add(task)
 
     def _done(t: asyncio.Task) -> None:

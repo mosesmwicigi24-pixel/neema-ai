@@ -14,10 +14,13 @@ So, per person per post:
     claim so the next comment (or the sweep) may try again. A send whose
     outcome is UNKNOWN (the request left and no answer came back) may have
     posted: it is never resent, and a colleague is told to look.
-  * WHAT THEY WROTE IS KEPT BY ID ONLY — the comment's id, when, and why it
-    had no answer. Its words stay in the database and are read from there
-    each time, so a deleted comment (a customer's data-deletion request) is
-    gone from here too, and nothing is answered that no longer exists.
+  * WHO OWES THE REPLY IS WRITTEN ON THE COMMENT ITSELF, in the database
+    (services/comment_ledger): owed by Neema, a colleague's, to be verified,
+    or resolved. The webhook stamps "owed" in the commit that saves the
+    comment, so a restart before the reply was even scheduled loses nothing,
+    and nothing here runs out — Redis only spaces the attempts. No copy of
+    a comment's words is kept anywhere else: a deleted comment (a customer's
+    data-deletion request) is gone from here too.
   * ONE ANSWER LATER. When the model can answer, everything outstanding is
     read together and answered in one reply under their latest comment. One
     claim is shared by the live handler and the sweep, so only one of them
@@ -30,8 +33,7 @@ So, per person per post:
     conversation's timeline, rewritten as comments arrive, saying plainly
     when Neema will not answer by herself, and closed when none is left.
 
-Redis only for the waiting state, best-effort: with no redis the old
-behaviour stands (the line goes out, the team is flagged per comment).
+Redis holds only the said-once mark, the claims and the retry spacing.
 """
 from __future__ import annotations
 
@@ -39,18 +41,23 @@ import json
 import logging
 import time
 
+from app.services import comment_ledger as ledger
+from app.services.comment_ledger import OWED, STAFF as L_STAFF, VERIFY, RESOLVED
+
 _log = logging.getLogger("neema.agent")
 
-WINDOW_S = 24 * 3600            # how long a comment may wait for the one answer
+WINDOW_S = 24 * 3600            # how long Neema may still answer by herself
 MIN_AGE_S = 90                  # let the live path finish before the sweep looks
+ORPHAN_AGE_S = 600              # a comment no handler ever decided on (a restart)
 CLAIM_S = 120                   # a holding-line send in flight
 ANSWER_CLAIM_S = 180            # one composer of the combined reply at a time
 BACKOFF_S = 600                 # between the sweep's tries for one person
-MAX_TRIES = 3                   # failed catch-up answers before it is a colleague's
-_INDEX = "comment:catchup:index"
+MAX_TRIES = 3                   # catch-up tries before it is a colleague's
 MODEL = "model"                 # why a comment had no answer: the model call failed …
 CAP = "cap"                     # … a cap stopped the call …
 REVIEW = "review"               # … or the reviewer held the draft
+MISSED = "missed"               # … or no handler ever reached it
+WHY = {CAP: "a reply limit was reached", REVIEW: "the reply reviewer held the draft"}
 UNKNOWN_WHY = ("a reply may already have posted — Meta did not confirm it; "
                "check the thread before answering")
 
@@ -63,6 +70,11 @@ def post_of(comment: dict) -> str:
     return str(comment.get("post_id") or (comment.get("post_context") or {}).get("post_id") or "")
 
 
+def _parts(key: str) -> tuple[str, str, str]:
+    channel, post_id, ext = key.split(":", 2)
+    return channel, post_id, ext
+
+
 def _said(key: str) -> str:
     return f"comment:hold_said:{key}"
 
@@ -71,20 +83,8 @@ def _claim(key: str) -> str:
     return f"comment:hold_claim:{key}"
 
 
-def _queue(key: str) -> str:
-    return f"comment:catchup:q:{key}"
-
-
-def _staff(key: str) -> str:
-    return f"comment:catchup:staff:{key}"
-
-
 def _tries(key: str) -> str:
     return f"comment:catchup:tries:{key}"
-
-
-def _follow(key: str) -> str:
-    return f"comment:catchup:followup:{key}"
 
 
 def _answering(key: str) -> str:
@@ -93,10 +93,6 @@ def _answering(key: str) -> str:
 
 def _backoff(key: str) -> str:
     return f"comment:catchup:backoff:{key}"
-
-
-def _s(v) -> str:
-    return v.decode() if isinstance(v, (bytes, bytearray)) else str(v)
 
 
 # ── the holding line: claimed, sent, then counted ────────────────────────────
@@ -157,198 +153,150 @@ async def release_answer(redis, key: str) -> None:
         pass
 
 
-# ── what is waiting: ids, never words ────────────────────────────────────────
-async def _rows(redis, key: str) -> list[tuple[str, dict]]:
-    out = []
-    for raw in await redis.lrange(_queue(key), 0, -1):
-        try:
-            out.append((_s(raw), json.loads(raw)))
-        except ValueError:
-            continue
-    return out
-
-
-async def keep(redis, channel: str, comment: dict, own_pages, reason: str) -> bool:
-    """Keep a comment that had no answer — its id and where it sits, never
-    its words or the commenter's name. Idempotent by comment id."""
-    post_id, ext = post_of(comment), str(comment.get("from_id") or "")
-    cid = str(comment.get("comment_id") or "")
-    if redis is None or not (post_id and ext and cid):
-        return False
-    key = key_of(channel, post_id, ext)
-    try:
-        if any(str(i.get("cid")) == cid for _r, i in await _rows(redis, key)):
-            return True
-        item = {"at": time.time(), "cid": cid, "reason": reason,
-                "own_pages": sorted(own_pages or []), "post_id": post_id,
-                "page_id": comment.get("page_id"), "parent_id": comment.get("parent_id")}
-        await redis.rpush(_queue(key), json.dumps(item, default=str))
-        await redis.expire(_queue(key), WINDOW_S)
-        await redis.sadd(_INDEX, key)          # AFTER the push: see `resolve`
-        return True
-    except Exception as exc:
-        _log.info("comment catch-up: could not keep %s: %s", cid, exc)
-        return False
-
-
-async def waiting_ids(redis, key: str) -> list[dict]:
-    """The kept ids, oldest first ([] on any doubt)."""
-    if redis is None:
-        return []
-    try:
-        return [i for _r, i in await _rows(redis, key)]
-    except Exception:
-        return []
-
-
-async def load_records(channel: str, ext: str, ids) -> dict:
-    """The comments as the database holds them NOW: {comment id → {"text",
-    "post_context"}}. An id with no row is a comment that was deleted."""
-    ids = [str(i) for i in (ids or []) if i]
-    if not ids:
-        return {}
-    from sqlalchemy import select
-    from app.database import AsyncSessionLocal
-    from app.models.message import Message, MsgDirection
-    out = {}
-    async with AsyncSessionLocal() as db:
-        rows = (await db.execute(
-            select(Message.waba_msg_id, Message.text, Message.comment_context, Message.raw_meta)
-            .where(Message.channel == channel, Message.external_id == ext,
-                   Message.direction == MsgDirection.inbound,
-                   Message.waba_msg_id.in_(ids)))).all()
-    for cid, text, ctx, meta in rows:
-        wordless = isinstance(meta, dict) and meta.get("kind") == "comment_media"
-        out[str(cid)] = {"text": "" if wordless else (text or ""),
-                         "post_context": ctx if isinstance(ctx, dict) else {}}
-    return out
-
-
-def hydrate(channel: str, ext: str, items: list, records: dict) -> tuple[list, list]:
-    """Kept ids + their records → (items carrying the comment to answer, the
-    ids whose record is gone). Pure."""
-    live, gone = [], []
-    for i in items:
-        rec = records.get(str(i.get("cid")))
-        if rec is None:
-            gone.append(str(i.get("cid")))
-            continue
-        ctx = dict(rec.get("post_context") or {})
-        live.append(dict(i, comment={
-            "comment_id": str(i.get("cid")), "from_id": ext, "text": rec.get("text") or "",
-            "post_id": i.get("post_id") or ctx.get("post_id"), "page_id": i.get("page_id"),
-            "parent_id": i.get("parent_id"), "post_context": ctx}))
-    return live, gone
-
-
-async def waiting(redis, key: str) -> list[dict]:
-    """The kept comments WITH their words, read from the database now. A
-    comment whose record is gone is dropped here, for good."""
-    items = await waiting_ids(redis, key)
-    if not items:
-        return []
-    channel, _post, ext = key.split(":", 2)
-    try:
-        records = await load_records(channel, ext, [i.get("cid") for i in items])
-    except Exception as exc:
-        _log.info("comment catch-up: records unreadable for %s: %s", key, exc)
-        return []                               # unreadable is not "deleted": keep the ids, say nothing
-    live, gone = hydrate(channel, ext, items, records)
-    if gone:
-        _log.info("comment catch-up: %d kept comment(s) no longer exist — dropped", len(gone))
-        await resolve(redis, key, gone)
-    return live
-
-
-async def resolve(redis, key: str, ids) -> int:
-    """These comment ids are done with: remove exactly them. Returns how many
-    are still kept.
-
-    Race-free without a transaction: only the named values are removed (a
-    comment pushed meanwhile is never touched — the list itself is never
-    deleted), the count is read AFTER the removal, and the index entry is
-    put back if a comment arrived between the count and its removal (`keep`
-    adds to the index after it pushes)."""
-    if redis is None:
-        return 0
-    ids = {str(i) for i in (ids or [])}
-    try:
-        for raw, item in await _rows(redis, key):
-            if str(item.get("cid")) in ids:
-                await redis.lrem(_queue(key), 0, raw)
-        left = int(await redis.llen(_queue(key)) or 0)
-        if not left:
-            await redis.delete(_said(key), _staff(key), _tries(key), _backoff(key))
-            await redis.srem(_INDEX, key)
-            if int(await redis.llen(_queue(key)) or 0):
-                await redis.sadd(_INDEX, key)
-        return left
-    except Exception as exc:
-        _log.info("comment catch-up: resolve failed for %s: %s", key, exc)
-        return 0
-
-
-async def staff_only(redis, key: str) -> float:
-    """The instant up to which the kept comments are a colleague's (0 = none)."""
-    if redis is None:
-        return 0.0
-    try:
-        return float(_s(await redis.get(_staff(key)) or 0))
-    except Exception:
-        return 0.0
-
-
-async def hand_to_staff(redis, key: str) -> None:
-    """Everything kept so far is a colleague's: no more automatic tries."""
-    if redis is None:
-        return
-    try:
-        await redis.set(_staff(key), str(time.time()), ex=WINDOW_S)
-        await redis.delete(_tries(key))
-    except Exception:
-        pass
-
-
 async def tried(redis, key: str) -> int:
-    """Count one failed catch-up answer; returns the count so far."""
+    """Count one catch-up try; returns the count so far."""
     if redis is None:
-        return MAX_TRIES
+        return 1
     try:
         n = int(await redis.incr(_tries(key)))
         await redis.expire(_tries(key), WINDOW_S)
         return n
     except Exception:
-        return MAX_TRIES
+        return 1
 
 
-def plan(items: list, *, now: float | None = None, staff_cut: float = 0.0,
-         min_age: float = MIN_AGE_S) -> dict:
-    """What to do with one person's kept comments under one post. Pure.
+# ── what is waiting: read from the comments themselves ───────────────────────
+def _item(row: dict, ext: str) -> dict:
+    return dict(row, comment={
+        "comment_id": row["cid"], "from_id": ext, "text": row.get("text") or "",
+        "post_id": row.get("post_id"), "page_id": row.get("page_id"),
+        "parent_id": row.get("parent_id"), "post_context": dict(row.get("post_context") or {})})
 
-      expired — ids past the window
-      answer  — the ONE comment to answer (the latest, with `catch_up` = every
-                outstanding text oldest first and `catch_up_ids`), or None:
-                nothing eligible, a colleague's by `staff_cut`, or the newest
-                is too fresh for the live path to have finished
-      outstanding — what is still unanswered
+
+async def waiting(redis, key: str) -> list[dict]:
+    """This person's unresolved comments under this post (owed, a colleague's,
+    or to be verified), oldest first, with their words as the database holds
+    them now. [] when the record cannot be read."""
+    channel, post_id, ext = _parts(key)
+    try:
+        return [_item(r, ext) for r in await ledger.unresolved(channel, ext, post_id)]
+    except Exception as exc:
+        _log.info("comment catch-up: record unreadable for %s: %s", key, exc)
+        return []
+
+
+async def keep(redis, channel: str, comment: dict, own_pages, reason: str) -> bool:
+    """The handler looked at this comment and it has no answer: say so on the
+    comment. A failed model call stays Neema's; a cap or a held draft is a
+    colleague's from the start."""
+    ext, cid = str(comment.get("from_id") or ""), str(comment.get("comment_id") or "")
+    if not (post_of(comment) and ext and cid):
+        return False
+    try:
+        return bool(await ledger.mark(
+            channel, ext, [cid], create=True, decided=True, reason=reason,
+            state=OWED if reason in (MODEL, MISSED) else L_STAFF, why=WHY.get(reason, ""),
+            own_pages=sorted(own_pages or []), page_id=comment.get("page_id"),
+            parent_id=comment.get("parent_id")))
+    except Exception as exc:
+        _log.info("comment catch-up: could not record %s: %s", cid, exc)
+        return False
+
+
+async def settle(channel: str, ext, cid) -> None:
+    """The handler finished with this comment without leaving it waiting: it
+    is resolved (answered, or deliberately left). A comment the handler never
+    finished — a restart, a crash — is NOT settled and stays owed."""
+    try:
+        await ledger.mark(channel, str(ext or ""), [cid], only_undecided=True,
+                          state=RESOLVED, by="handled", decided=True)
+    except Exception as exc:
+        _log.info("comment catch-up: could not settle %s: %s", cid, exc)
+
+
+async def _tidy(redis, key: str) -> int:
+    """How many are still unresolved; when none, the wait is over and a later
+    outage may say the holding line again."""
+    left = len(await waiting(redis, key))
+    if not left and redis is not None:
+        try:
+            await redis.delete(_said(key), _tries(key), _backoff(key))
+        except Exception:
+            pass
+    return left
+
+
+async def resolve(redis, key: str, ids, by: str = "neema") -> int:
+    """These comments are answered: say so on exactly them. Returns how many
+    of this person's comments here are still unresolved."""
+    channel, _post, ext = _parts(key)
+    try:
+        await ledger.mark(channel, ext, ids, state=RESOLVED, by=by, decided=True)
+    except Exception as exc:
+        _log.info("comment catch-up: resolve failed for %s: %s", key, exc)
+    return await _tidy(redis, key)
+
+
+async def hand_to_staff(redis, key: str, why: str, ids=None) -> None:
+    """What Neema still owed here is a colleague's now, with why."""
+    channel, _post, ext = _parts(key)
+    try:
+        if ids is None:
+            ids = [i["cid"] for i in await waiting(redis, key) if i.get("state") == OWED]
+        await ledger.mark(channel, ext, ids, state=L_STAFF, why=why, decided=True)
+        if redis is not None:
+            await redis.delete(_tries(key))
+    except Exception as exc:
+        _log.info("comment catch-up: hand-over failed for %s: %s", key, exc)
+
+
+async def needs_verify(redis, key: str, ids, why: str = UNKNOWN_WHY) -> None:
+    """A reply to these may have posted: nobody posts another; a colleague looks."""
+    channel, _post, ext = _parts(key)
+    try:
+        await ledger.mark(channel, ext, ids, state=VERIFY, why=why, decided=True)
+    except Exception as exc:
+        _log.info("comment catch-up: verify mark failed for %s: %s", key, exc)
+
+
+def plan(items: list, *, now: float | None = None, min_age: float = MIN_AGE_S,
+         orphan_age: float = ORPHAN_AGE_S) -> dict:
+    """What to do with one person's unresolved comments under one post. Pure.
+
+      expired — owed ids past the window: a colleague's now
+      orphans — owed ids no handler ever decided on, old enough to be sure
+                (a restart between the save and the reply)
+      answer  — the ONE comment to answer (the latest answerable one, with
+                `catch_up` = every answerable text oldest first and
+                `catch_up_ids`), or None: Neema owes nothing here that she
+                can still answer, or the newest is too fresh
+      outstanding — everything unresolved, whoever owns it
     """
     now = time.time() if now is None else now
-    live, expired = [], []
+    expired, orphans, due, mine = [], [], [], []
     for i in items:
         if not (isinstance(i, dict) and isinstance(i.get("comment"), dict)):
             continue
-        if now - float(i.get("at") or 0) > WINDOW_S:
+        age = now - float(i.get("at") or 0)
+        if i.get("state") != OWED:
+            if i.get("state") == L_STAFF:
+                mine.append(i)                   # a colleague's, but one reply may cover it too
+            continue
+        if age > WINDOW_S:
             expired.append(str(i.get("cid")))
-        else:
-            live.append(i)
-    out = {"expired": expired, "outstanding": live, "answer": None}
-    # an automatic answer needs a comment whose MODEL call failed, newer than
-    # anything already handed to a colleague
-    eligible = [i for i in live if i.get("reason") == MODEL and float(i.get("at") or 0) > staff_cut]
-    if not eligible or now - float(live[-1].get("at") or 0) < min_age:
+        elif i.get("decided"):
+            due.append(i)
+        elif age >= orphan_age:
+            orphans.append(str(i.get("cid")))
+            due.append(i)
+    out = {"expired": expired, "orphans": orphans, "outstanding": list(items),
+           "owed": due, "answer": None}
+    if not due or now - max(float(i.get("at") or 0) for i in due) < min_age:
         return out
+    cover = sorted(due + [i for i in mine if now - float(i.get("at") or 0) <= WINDOW_S],
+                   key=lambda i: float(i.get("at") or 0))
     said, ids, seen = [], [], set()
-    for i in live:
+    for i in cover:
         ids.append(str(i.get("cid")))
         t = " ".join(str(i["comment"].get("text") or "").split())
         if t and t.lower() not in seen:           # the same words sent twice are read once
@@ -356,9 +304,9 @@ def plan(items: list, *, now: float | None = None, staff_cut: float = 0.0,
             said.append(t)
     if not said:
         return out
-    last = dict(live[-1]["comment"])
+    last = dict(cover[-1]["comment"])
     last["catch_up"], last["catch_up_ids"], last["catch_up_claimed"] = said, ids, True
-    out["answer"] = {"comment": last, "own_pages": set(live[-1].get("own_pages") or [])}
+    out["answer"] = {"comment": last, "own_pages": set(cover[-1].get("own_pages") or [])}
     return out
 
 
@@ -378,26 +326,20 @@ def catch_up_prompt(said: list[str]) -> str:
 async def staff_replied(redis, channel: str, ext: str, comment_id) -> bool:
     """A colleague's public reply went out under `comment_id`: that comment —
     and only that one — is answered. Other posts, and this person's other
-    questions under the same post, stay waiting. True when it was a kept one."""
+    questions under the same post, stay as they are. True when it was open."""
     cid = str(comment_id or "")
-    if redis is None or not (cid and ext):
+    if not (cid and ext):
         return False
     try:
-        keys = [_s(k) for k in await redis.smembers(_INDEX)]
+        st = await ledger.state_of(channel, str(ext), cid)
     except Exception:
         return False
-    for key in keys:
-        if not (key.startswith(channel + ":") and key.endswith(":" + str(ext))):
-            continue
-        if any(str(i.get("cid")) == cid for i in await waiting_ids(redis, key)):
-            await resolve(redis, key, [cid])
-            left = await waiting(redis, key)
-            cut = await staff_only(redis, key)
-            auto = any(i.get("reason") == MODEL and float(i.get("at") or 0) > cut for i in left)
-            await followup(redis, channel, str(ext), key, left,
-                           CLOSED if not left else (WAITING if auto else STAFF))
-            return True
-    return False
+    if not st or st.get("state") == RESOLVED:
+        return False
+    key = key_of(channel, st.get("post_id") or "", ext)
+    await resolve(redis, key, [cid], by="staff")
+    await refresh_followup(redis, key)
+    return True
 
 
 # ── the one follow-up staff see ──────────────────────────────────────────────
@@ -408,8 +350,10 @@ def followup_note(items: list, state: str, why: str = "") -> str:
     """The follow-up's words. Pure."""
     if state == CLOSED or not items:
         return "PUBLIC COMMENTS — answered. No comment from this person is waiting under this post."
-    lines = "\n".join(f"{n}. {' '.join(str(i['comment'].get('text') or '').split())[:300]}"
-                      for n, i in enumerate(items, 1))
+    lines = "\n".join(
+        f"{n}. {' '.join(str(i['comment'].get('text') or '').split())[:300]}"
+        + (" — CHECK THE THREAD: a reply may already be there" if i.get("state") == VERIFY else "")
+        for n, i in enumerate(items, 1))
     head = (f"PUBLIC COMMENTS WAITING FOR AN ANSWER ({len(items)}) — this person was told a "
             "colleague will come back to them, once.")
     if state == STAFF:
@@ -423,26 +367,40 @@ def followup_note(items: list, state: str, why: str = "") -> str:
     return f"{head}\n{lines}\n{tail}"
 
 
+async def refresh_followup(redis, key: str, why: str = "", ring: bool = False) -> str | None:
+    """Rewrite the follow-up from what the comments say now: closed when
+    nothing is unresolved, the colleague's when Neema owes nothing more."""
+    channel, _post, ext = _parts(key)
+    items = await waiting(redis, key)
+    if not items:
+        return await followup(redis, channel, ext, key, [], CLOSED)
+    auto = any(i.get("state") == OWED for i in items)
+    if not auto and not why:
+        why = next((i.get("why") for i in reversed(items) if i.get("why")), "")
+    return await followup(redis, channel, ext, key, items, WAITING if auto else STAFF, why, ring=ring)
+
+
 async def followup(redis, channel: str, ext: str, key: str, items: list, state: str,
-                   why: str = "") -> str | None:
+                   why: str = "", ring: bool = False) -> str | None:
     """Write (or rewrite) the ONE follow-up for this person under this post on
-    the conversation's timeline. Returns "new" when it was just created (the
-    team is rung), "updated", or None when it could not be written."""
-    if redis is None:
-        return None
+    the conversation's timeline. Its id is kept on the comments themselves.
+    Returns "new" when it was just created, "updated", or None when it could
+    not be written. The team is rung when it is new, and when `ring`."""
     try:
         import uuid
         from sqlalchemy import select
         from app.database import AsyncSessionLocal
         from app.models.conversation import Conversation
         from app.models.intercept import Intercept, InterceptAction
+        _channel, post_id, _ext = _parts(key)
         note = followup_note(items, state, why)
-        fid = await redis.get(_follow(key))
+        fid = await ledger.followup_id(channel, ext, post_id)
+        made, conv_id = False, None
         async with AsyncSessionLocal() as db:
             row = None
             if fid:
                 try:
-                    row = await db.get(Intercept, uuid.UUID(_s(fid)))
+                    row = await db.get(Intercept, uuid.UUID(str(fid)))
                 except Exception:
                     row = None
             if row is None:
@@ -456,22 +414,25 @@ async def followup(redis, channel: str, ext: str, key: str, items: list, state: 
                 row = Intercept(id=uuid.uuid4(), conversation_id=conv.id,
                                 action=InterceptAction.flag, note=note)
                 db.add(row)
-                await db.commit()
-                await redis.set(_follow(key), str(row.id), ex=WINDOW_S * 2)
-                try:
-                    await redis.publish("ws:channel:agents:all", json.dumps({
-                        "event": "notification", "type": "draft_ready",
-                        "title": f"{channel.title()} comment needs you",
-                        "body": "A commenter is waiting for an answer Neema could not give.",
-                        "conv_id": str(conv.id), "wa_id": ext}))
-                except Exception:
-                    pass
-                return "new"
-            row.note = note
+                made = True
+            else:
+                row.note = note
+            conv_id, fid = str(row.conversation_id), str(row.id)
             await db.commit()
-        if state == CLOSED or not items:
-            await redis.delete(_follow(key))
-        return "updated"
+        if made:
+            await ledger.mark(channel, ext, [items[-1]["cid"]], followup=fid)
+        if (made or ring) and redis is not None:
+            try:
+                await redis.publish("ws:channel:agents:all", json.dumps({
+                    "event": "notification", "type": "draft_ready",
+                    "title": f"{channel.title()} comment needs you",
+                    "body": ("A commenter is waiting for an answer only a colleague can give."
+                             if state == STAFF else
+                             "A commenter is waiting for an answer Neema could not give."),
+                    "conv_id": conv_id, "wa_id": ext}))
+            except Exception:
+                pass
+        return "new" if made else "updated"
     except Exception as exc:
         _log.info("comment follow-up not written for %s: %s", key, exc)
         return None
@@ -479,58 +440,68 @@ async def followup(redis, channel: str, ext: str, key: str, items: list, state: 
 
 # ── the sweep ────────────────────────────────────────────────────────────────
 async def sweep(redis, *, limit: int = 15) -> int:
-    """Answer what was kept, once the model can answer; while it cannot, say
-    the holding line that Meta refused earlier. Returns how many people it
-    tried to answer."""
-    if redis is None:
-        return 0
+    """Every comment Neema still owes, read from the comments themselves:
+    answer what can be answered, say the holding line that was never said,
+    pick up what no handler reached, and hand a colleague what has waited a
+    day. Returns how many people it tried to answer."""
     from app.services.agent_health import ai_down
     try:
         down = bool(await ai_down(redis))
-        keys = [_s(k) for k in list(await redis.smembers(_INDEX))[:200]]
-    except Exception:
+        keys = await ledger.keys_owed()
+    except Exception as exc:
+        _log.info("comment catch-up: nothing read this pass: %s", exc)
         return 0
     done = 0
-    for key in keys:
+    for channel, ext, post_id in keys:
         if done >= limit:
             break
+        key = key_of(channel, post_id, ext)
         try:
-            channel, _post_id, ext = key.split(":", 2)
-            if not await waiting_ids(redis, key):
-                await resolve(redis, key, [])          # an empty wait: tidy the index
-                continue
             from app.agent import runtime as rt
-            items = await waiting(redis, key)          # words read from the database now
-            p = plan(items, staff_cut=await staff_only(redis, key))
+            items = await waiting(redis, key)
+            p = plan(items)
+            if p["orphans"]:
+                # no handler ever reached these: a reply already under one settles
+                # it; the rest are Neema's to answer now
+                had = await ledger.replied_ids(channel, ext, p["orphans"])
+                if had:
+                    await ledger.mark(channel, ext, list(had), state=RESOLVED, by="replied", decided=True)
+                await ledger.mark(channel, ext, [i for i in p["orphans"] if i not in had],
+                                  decided=True, reason=MISSED)
+                if had:
+                    items = await waiting(redis, key)
+                    p = plan(items)
             if p["expired"]:
-                # a day has gone by: a colleague's, said so on the follow-up
-                gone = [i for i in items if str(i.get("cid")) in set(p["expired"])]
-                await followup(redis, channel, ext, key, gone + p["outstanding"], STAFF,
-                               "more than a day has passed")
-                await resolve(redis, key, p["expired"])
-            if not p["outstanding"]:
+                await hand_to_staff(redis, key, "more than a day has passed", ids=p["expired"])
+                await refresh_followup(redis, key, ring=True)
+                items = await waiting(redis, key)
+                p = plan(items)
+            if not p["owed"]:
                 continue
             if down:
                 # still cannot answer: make sure they heard the one line
                 if await hold_state(redis, key) == "send":
-                    last = p["outstanding"][-1]
+                    last = p["owed"][-1]
                     sent = await rt._post_hold_ack(redis, channel, last["comment"],
                                                    set(last.get("own_pages") or []))
                     if sent is False:                  # Meta refused: may be tried again
                         await hold_release(redis, key)
                     else:                              # landed, or unknown: never resent
                         await hold_confirm(redis, key)
-                        if sent is None:
-                            await followup(redis, channel, ext, key, p["outstanding"], WAITING,
-                                           "the holding line may or may not have posted — "
-                                           "Meta did not confirm it")
+                    await refresh_followup(
+                        redis, key, "the holding line may or may not have posted — "
+                        "Meta did not confirm it" if sent is None else "")
                 continue
-            if p["answer"] is None:
+            if p["answer"] is None or redis is None:
                 continue
             if await redis.get(_backoff(key)) or not await claim_answer(redis, key):
                 continue                               # tried lately, or the live handler has it
             try:
                 await redis.set(_backoff(key), "1", ex=BACKOFF_S)
+                if await tried(redis, key) > MAX_TRIES:
+                    await hand_to_staff(redis, key, "three tries to answer did not succeed")
+                    await refresh_followup(redis, key, ring=True)
+                    continue
                 await rt._run_comment_engage(redis, channel, p["answer"]["comment"],
                                              p["answer"]["own_pages"])
                 done += 1
