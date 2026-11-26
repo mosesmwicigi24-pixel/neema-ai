@@ -117,8 +117,10 @@ def test_wordless_comment_is_stored_with_words_and_engage_keeps_the_empty_text(m
     asyncio.run(mw._capture_comment_events(db, "messenger", payload))
     m = next(o for o in db.added if isinstance(o, Message))
     assert m.text == "📷 Commented with a photo or sticker"
-    assert m.raw_meta == {"v": 1, "type": "comment", "kind": "comment_media",
-                          "photo": "https://scontent.xx/c9.jpg"}
+    assert {k: v for k, v in m.raw_meta.items() if k != "reply"} == {
+        "v": 1, "type": "comment", "kind": "comment_media", "photo": "https://scontent.xx/c9.jpg"}
+    # and it is stamped as owed a reply in the same save (services/comment_ledger)
+    assert m.raw_meta["reply"]["state"] == "owed" and m.raw_meta["reply"]["decided"] is False
     assert engaged and engaged[0]["text"] == ""      # the public-reply path is unchanged
 
 

@@ -6,6 +6,7 @@ import json
 import app.agent.runtime as rt
 from app.core.config import settings
 from app.services import comment_catchup as cc
+from app.services import comment_ledger as ledger
 
 Q = {"intent": "high", "kind": "question", "severity": 0, "ask": "the price"}
 KEY = "facebook:p1:u1"
@@ -71,21 +72,23 @@ class _DB:
 
 
 class World:
-    """Everything outside the handler, in one place the tests can steer."""
+    """Everything outside the handler, in one place the tests can steer. The
+    comments and their reply state live in `rows` — the database's part."""
 
     def __init__(self, monkeypatch, *, identity=None):
         import app.database as dbmod
         import app.services.agent_health as ah
         from app.services import meta_send, messaging, post_catalog
         self.r = _Redis()
+        self.rows = {}                 # comment id → the stored comment (text, post, reply state)
+        self.staff_ids = set()         # comment ids a colleague replied under
+        self.ai_ids = set()            # comment ids Neema's reply is threaded under
         self.public, self.liked, self.turns, self.followups, self.human, self.noted = [], [], [], [], [], []
         self.model = "down"            # "down" | "up" | "held"
         self.answer = "Here is your answer."
         self.reject_sends = 0          # how many of the next public sends Meta refuses
-        self.over_cap = False
-        self.records = {}              # the database's comments, by id
-        self.staff_ids = set()         # comment ids a colleague replied under
         self.send_error = None         # raised by the next public send, once
+        self.over_cap = False
         self.during_turn = None        # a hook run while the model is composing
         ident = dict(identity or {})
         w = self
@@ -112,6 +115,7 @@ class World:
                 w.reject_sends -= 1
                 raise RuntimeError("meta refused the reply")
             w.public.append((cid, t))
+            w.ai_ids.add(str(cid))
 
         async def like_comment(cid, page_id=None, channel=None):
             w.liked.append(cid)
@@ -145,20 +149,64 @@ class World:
         async def note_silent(channel, ext, cid, why):
             w.noted.append((cid, why))
 
-        async def staff_ids(channel, ext, ids):
-            return set(w.staff_ids) & {str(i) for i in ids}
-
-        async def load_records(channel, ext, ids):
-            return {str(i): dict(w.records[str(i)]) for i in ids if str(i) in w.records}
-
-        async def followup(redis, channel, ext, key, items, state, why=""):
-            w.followups.append({"state": state, "why": why,
+        async def followup(redis, channel, ext, key, items, state, why="", ring=False):
+            w.followups.append({"state": state, "why": why, "ring": ring,
                                 "texts": [i["comment"]["text"] for i in items]})
             return "updated"
 
         async def ai_down(redis):
             return "credit" if w.model == "down" else None
 
+        # ── the ledger, in memory (the real one is proved on Postgres in
+        # test_comment_ledger_db.py) ──
+        def _view(cid):
+            row = w.rows[cid]
+            b = row["reply"]
+            return {"cid": cid, "at": row["at"], "state": b.get("state"), "decided": bool(b.get("decided")),
+                    "reason": b.get("reason") or "", "why": b.get("why") or "", "followup": b.get("followup"),
+                    "own_pages": list(b.get("own_pages") or []), "page_id": b.get("page_id"),
+                    "parent_id": b.get("parent_id"), "post_id": row["post_id"], "text": row["text"],
+                    "post_context": dict(row["post_context"])}
+
+        async def mark(channel, ext, ids, *, create=False, only_undecided=False, **fields):
+            n = 0
+            for cid in [str(i) for i in (ids or [])]:
+                row = w.rows.get(cid)
+                if row is None or (row.get("reply") is None and not create):
+                    continue
+                b = row.get("reply") or {}
+                if only_undecided and (b.get("decided") or b.get("state") != ledger.OWED):
+                    continue
+                row["reply"] = {**b, **fields}
+                n += 1
+            return n
+
+        async def unresolved(channel, ext, post_id, **kw):
+            return [_view(c) for c, row in sorted(w.rows.items(), key=lambda kv: kv[1]["at"])
+                    if row.get("reply") and row["reply"].get("state") in ledger.OPEN
+                    and row["post_id"] == str(post_id)]
+
+        async def keys_owed(**kw):
+            return sorted({("facebook", "u1", row["post_id"]) for row in w.rows.values()
+                           if (row.get("reply") or {}).get("state") == ledger.OWED})
+
+        async def state_of(channel, ext, cid):
+            return _view(str(cid)) if str(cid) in w.rows and w.rows[str(cid)].get("reply") else None
+
+        async def existing(channel, ext, ids):
+            return {str(i) for i in ids if str(i) in w.rows}
+
+        async def replied_ids(channel, ext, ids, *, staff_only=False):
+            have = set(w.staff_ids) if staff_only else (set(w.staff_ids) | set(w.ai_ids))
+            return have & {str(i) for i in ids}
+
+        async def followup_id(channel, ext, post_id, **kw):
+            return None
+
+        for n, f in (("mark", mark), ("unresolved", unresolved), ("keys_owed", keys_owed),
+                     ("state_of", state_of), ("existing", existing), ("replied_ids", replied_ids),
+                     ("followup_id", followup_id)):
+            monkeypatch.setattr(ledger, n, f)
         monkeypatch.setattr(settings, "meta_comment_like", True, raising=False)
         monkeypatch.setattr(dbmod, "AsyncSessionLocal", lambda: _DB())
         monkeypatch.setattr(meta_send, "reply_to_comment", reply_to_comment)
@@ -170,7 +218,6 @@ class World:
         monkeypatch.setattr(ah, "ai_down", ai_down)
         monkeypatch.setattr(ah, "record_turn_failure", none)
         monkeypatch.setattr(cc, "followup", followup)
-        monkeypatch.setattr(cc, "load_records", load_records)
         monkeypatch.setattr(asyncio, "sleep", none)
         for n, f in (("read_comment", read_comment), ("run_turn", run_turn),
                      ("_route_comment_to_human", route_human), ("_note_silent_decision", note_silent),
@@ -178,29 +225,31 @@ class World:
                      ("_remember_post_product", none), ("_storefront_product_link", none),
                      ("_post_over_cap", over), ("_person_over_cap", false), ("_first_contact", false),
                      ("_meta_market", market), ("_thread_parent", thread_parent),
-                     ("_private_complaint_message", false), ("_staff_replied_ids", staff_ids)):
+                     ("_private_complaint_message", false)):
             monkeypatch.setattr(rt, n, f)
         monkeypatch.setattr(rt, "build_llm", lambda model=None, **kw: object())
 
-    def comment(self, cid, text, caption="Vesting cassock with stole and chasuble"):
+    def comment(self, cid, text, caption="Vesting cassock with stole and chasuble", post="p1"):
         return {"comment_id": cid, "from_id": "u1", "from_name": "Ruben Matacha", "text": text,
-                "post_id": "p1", "page_id": "PAGE",
-                "post_context": {"post_id": "p1", "title": caption, "caption": caption, "thumb": ""}}
+                "post_id": post, "page_id": "PAGE",
+                "post_context": {"post_id": post, "title": caption, "caption": caption, "thumb": ""}}
 
     def record(self, cid, text, **kw):
-        """The webhook stored this comment before the handler ran."""
+        """The webhook saved this comment, stamped as owed, before any handler ran."""
+        import time
         c = self.comment(cid, text, **kw)
-        self.records[cid] = {"text": text, "post_context": c["post_context"]}
+        self.rows[cid] = {"text": text, "post_id": c["post_id"], "post_context": c["post_context"],
+                          "at": time.time(), "reply": ledger.opening({"PAGE"}, "PAGE", None)}
         return c
 
     def says(self, cid, text, **kw):
-        asyncio.run(rt._run_comment_engage(self.r, "facebook", self.record(cid, text, **kw), {"PAGE"}))
+        """The webhook saves it, then the scheduled handler runs to its end."""
+        asyncio.run(rt._engage_and_settle(self.r, "facebook", self.record(cid, text, **kw), {"PAGE"}))
 
-    def age(self, seconds=600):
-        """Make every kept comment old enough for the sweep to look at it."""
-        q = "comment:catchup:q:" + KEY
-        self.r.lists[q] = [json.dumps(dict(json.loads(x), at=json.loads(x)["at"] - seconds))
-                           for x in self.r.lists.get(q, [])]
+    def age(self, seconds=700):
+        """Time passes: every stored comment is that much older."""
+        for row in self.rows.values():
+            row["at"] -= seconds
 
     def sweep(self):
         self.r.kv.pop("comment:catchup:backoff:" + KEY, None)   # the next pass, ten minutes on
@@ -208,6 +257,14 @@ class World:
 
     def waiting(self):
         return [i["comment"]["text"] for i in asyncio.run(cc.waiting(self.r, KEY))]
+
+    def state(self, cid):
+        return (self.rows[cid]["reply"] or {}).get("state")
+
+    def staff_reply(self, cid):
+        """A colleague's public reply under this comment (send_agent_reply)."""
+        self.staff_ids.add(cid)
+        return asyncio.run(cc.staff_replied(self.r, "facebook", "u1", cid))
 
 
 def test_a_refused_holding_line_is_tried_again_and_lands_once(monkeypatch):
@@ -287,21 +344,19 @@ def test_a_colleagues_reply_answers_the_comment_it_was_made_to_and_no_other(monk
     w = World(monkeypatch)
     w.says("c1", "How much is the cassock?")
     w.says("c2", "Do you deliver to Tarime?")
-    # the same person, waiting under ANOTHER post as well
-    other = dict(w.record("x1", "Is the chalice in stock?"), post_id="p2")
-    asyncio.run(cc.keep(w.r, "facebook", other, {"PAGE"}, cc.MODEL))
-    # a colleague replies under c1 (services/conversation.send_agent_reply → staff_replied)
-    assert asyncio.run(cc.staff_replied(w.r, "facebook", "u1", "c1")) is True
-    assert w.waiting() == ["Do you deliver to Tarime?"]                # c2 still owed
-    assert len(asyncio.run(cc.waiting_ids(w.r, "facebook:p2:u1"))) == 1   # the other post untouched
+    w.says("x1", "Is the chalice in stock?", post="p2")    # the same person, waiting under ANOTHER post
+    assert w.staff_reply("c1") is True                     # a colleague replies under c1
+    assert w.state("c1") == ledger.RESOLVED and w.rows["c1"]["reply"]["by"] == "staff"
+    assert w.waiting() == ["Do you deliver to Tarime?"]    # c2 is still owed
+    assert w.state("x1") == ledger.OWED                    # the other post untouched
     assert w.followups[-1]["state"] == cc.WAITING and w.followups[-1]["texts"] == ["Do you deliver to Tarime?"]
     w.model, w.answer = "up", "Yes, we deliver to Tarime by DHL."
     w.age()
     w.sweep()
-    assert w.turns[-1]["user_text"] == "Do you deliver to Tarime?"       # only what is still owed
-    assert w.public[-1] == ("c2", "Yes, we deliver to Tarime by DHL.") and w.waiting() == []
-    # a reply to a comment that was not waiting changes nothing
-    assert asyncio.run(cc.staff_replied(w.r, "facebook", "u1", "zzz")) is False
+    asked = [t["user_text"] for t in w.turns[3:]]
+    assert "Do you deliver to Tarime?" in asked and not any("How much is the cassock?" in a for a in asked)
+    assert ("c2", "Yes, we deliver to Tarime by DHL.") in w.public and w.waiting() == []
+    assert w.staff_reply("zzz") is False                   # a reply to a comment we do not hold
 
 
 def test_a_colleague_who_answers_while_the_reply_is_composed_is_not_answered_over(monkeypatch):
@@ -375,7 +430,7 @@ def test_a_held_draft_during_recovery_goes_to_staff_with_the_reason(monkeypatch)
     assert w.waiting() == ["How much is the cassock?"] and len(w.public) == 1
 
 
-def test_three_failed_tries_hand_it_to_staff(monkeypatch):
+def test_three_tries_that_do_not_succeed_hand_it_to_staff(monkeypatch):
     w = World(monkeypatch)
     w.says("c1", "How much is the cassock?")
     w.age()
@@ -384,9 +439,11 @@ def test_three_failed_tries_hand_it_to_staff(monkeypatch):
         return None
     import app.services.agent_health as ah
     monkeypatch.setattr(ah, "ai_down", not_down)           # health says up, yet the call still fails
-    for _ in range(3):
+    for _ in range(4):
         w.sweep()
+    assert w.state("c1") == ledger.STAFF
     assert w.followups[-1]["state"] == cc.STAFF and "three tries" in w.followups[-1]["why"]
+    assert w.followups[-1]["ring"] is True                 # the team hears that it is theirs now
     turns = len(w.turns)
     w.sweep()
     assert len(w.turns) == turns
@@ -448,8 +505,8 @@ def test_a_new_comment_gathers_what_is_waiting_once_the_model_is_back(monkeypatc
 
 
 # ── the pure parts ───────────────────────────────────────────────────────────
-def _item(cid, text, at, reason=cc.MODEL):
-    return {"at": at, "cid": cid, "reason": reason, "own_pages": ["PAGE"],
+def _item(cid, text, at, state=ledger.OWED, decided=True, reason=cc.MODEL):
+    return {"at": at, "cid": cid, "state": state, "decided": decided, "reason": reason, "own_pages": ["PAGE"],
             "comment": {"comment_id": cid, "from_id": "u1", "post_id": "p1", "text": text}}
 
 
@@ -463,20 +520,17 @@ def test_the_plan_for_what_is_waiting():
     assert p["answer"]["comment"]["catch_up_ids"] == ["c1", "c2", "c3"]           # but every id is covered
     assert cc.plan([_item("c1", "x", now - 10)], now=now)["answer"] is None         # too fresh
     old = cc.plan([_item("c1", "x", now - cc.WINDOW_S - 5)], now=now)
-    assert old["expired"] == ["c1"] and old["answer"] is None
-    assert cc.plan([_item("c1", "x", now - 500, cc.CAP)], now=now)["answer"] is None            # a cap: staff's
-    assert cc.plan(items, now=now, staff_cut=now - 100)["answer"] is None                       # handed to staff
-    mixed = cc.plan([_item("c1", "a", now - 900, cc.CAP), _item("c2", "b", now - 500)], now=now)
+    assert old["expired"] == ["c1"] and old["answer"] is None                       # a day on: a colleague's
+    assert cc.plan([_item("c1", "x", now - 500, ledger.STAFF)], now=now)["answer"] is None      # staff's alone
+    assert cc.plan([_item("c1", "x", now - 500, ledger.VERIFY)], now=now)["answer"] is None     # never re-sent
+    mixed = cc.plan([_item("c1", "a", now - 900, ledger.STAFF), _item("c2", "b", now - 500)], now=now)
     assert mixed["answer"]["comment"]["catch_up"] == ["a", "b"]                 # one answer covers all
-
-
-def test_only_ids_are_kept_and_words_come_from_the_database():
-    items = [{"at": 1, "cid": "c1", "reason": cc.MODEL, "post_id": "p1", "page_id": "PAGE", "own_pages": ["PAGE"]},
-             {"at": 2, "cid": "c2", "reason": cc.MODEL, "post_id": "p1", "page_id": "PAGE", "own_pages": ["PAGE"]}]
-    live, gone = cc.hydrate("facebook", "u1", items, {"c1": {"text": "How much?", "post_context": {"post_id": "p1"}}})
-    assert gone == ["c2"] and [i["comment"]["text"] for i in live] == ["How much?"]
-    assert live[0]["comment"]["comment_id"] == "c1" and live[0]["comment"]["from_id"] == "u1"
-    assert "from_name" not in live[0]["comment"]
+    # a comment no handler decided on: left alone while a live handler may still be on it …
+    fresh = cc.plan([_item("c1", "x", now - 200, decided=False)], now=now)
+    assert fresh["answer"] is None and fresh["orphans"] == []
+    # … and picked up once it is plainly orphaned (a restart after the save)
+    orphan = cc.plan([_item("c1", "x", now - 700, decided=False)], now=now)
+    assert orphan["orphans"] == ["c1"] and orphan["answer"]["comment"]["catch_up"] == ["x"]
 
 
 def test_the_follow_up_says_what_staff_need_to_know():
@@ -495,16 +549,14 @@ def test_a_hold_line_that_is_our_last_word_is_not_said_again():
     assert hold_line_stands([]) is False
 
 
-# ── the second review's four failures ────────────────────────────────────────
-def test_nothing_a_customer_wrote_is_stored_in_the_queue(monkeypatch):
+# ── the second review: deletion ──────────────────────────────────────────────
+def test_nothing_a_customer_wrote_is_kept_outside_the_database(monkeypatch):
     w = World(monkeypatch)
     w.says("c1", "Hiyo nguo ni sh. Ngapi")
     w.says("c2", "Nipo Tanzania Tarime")
     blob = json.dumps([w.r.kv, w.r.lists, [sorted(v) for v in w.r.sets.values()]], default=str)
     assert "Ngapi" not in blob and "Tarime" not in blob and "Ruben" not in blob
-    assert [i["cid"] for i in asyncio.run(cc.waiting_ids(w.r, KEY))] == ["c1", "c2"]
-    assert set(asyncio.run(cc.waiting_ids(w.r, KEY))[0]) == {
-        "at", "cid", "reason", "own_pages", "post_id", "page_id", "parent_id"}
+    assert w.r.lists == {} and w.r.sets == {}              # no queue, no index: nothing to expire
 
 
 def test_a_comment_deleted_while_it_waits_is_never_answered(monkeypatch):
@@ -513,19 +565,18 @@ def test_a_comment_deleted_while_it_waits_is_never_answered(monkeypatch):
     w.says("c2", "Do you deliver to Tarime?")
     w.model = "up"
     w.age()
-    del w.records["c1"]                                    # a data-deletion request removed it
+    del w.rows["c1"]                                       # a data-deletion request removed it
     w.sweep()
     assert w.turns[-1]["user_text"] == "Do you deliver to Tarime?"      # only what still exists is read
-    assert [i["cid"] for i in asyncio.run(cc.waiting_ids(w.r, KEY))] == []
+    assert w.waiting() == []
     w2 = World(monkeypatch)
     w2.says("c1", "How much is the cassock?")
     w2.model = "up"
     w2.age()
-    w2.records.clear()                                     # everything they wrote is gone
+    w2.rows.clear()                                        # everything they wrote is gone
     turns, public = len(w2.turns), len(w2.public)
     w2.sweep()
     assert len(w2.turns) == turns and len(w2.public) == public          # no call, no reply
-    assert asyncio.run(cc.waiting_ids(w2.r, KEY)) == [] and KEY not in w2.r.sets.get("comment:catchup:index", set())
 
 
 def test_a_comment_deleted_while_the_reply_is_composed_is_not_answered(monkeypatch):
@@ -537,7 +588,7 @@ def test_a_comment_deleted_while_the_reply_is_composed_is_not_answered(monkeypat
 
     async def deletion():
         w.during_turn = None
-        del w.records["c1"]
+        del w.rows["c1"]
     w.during_turn = deletion
     public = len(w.public)
     w.sweep()
@@ -547,39 +598,95 @@ def test_a_comment_deleted_while_the_reply_is_composed_is_not_answered(monkeypat
     assert w.turns[-1]["user_text"] == "Do you deliver to Tarime?" and w.public[-1][0] == "c2"
 
 
-def test_a_comment_arriving_between_the_read_and_the_cleanup_is_not_lost(monkeypatch):
+# ── the third review: a customer is never lost track of ──────────────────────
+def test_a_restart_right_after_the_comment_is_saved_loses_nothing(monkeypatch):
+    w = World(monkeypatch)
+    w.model = "up"
+    w.record("c1", "How much is the cassock?")             # saved by the webhook … and the process dies:
+    assert w.state("c1") == ledger.OWED                    # no handler ever ran, yet it is owed, on the record
+    assert w.sweep() == 0                                  # too soon to call it orphaned: a handler may be on it
+    assert w.turns == []
+    w.age()                                                # ten minutes on, nobody has decided on it
+    w.answer = "The set is KES 45,000."
+    assert w.sweep() == 1
+    assert w.public == [("c1", "The set is KES 45,000.")] and w.state("c1") == ledger.RESOLVED
+
+
+def test_a_restart_during_an_outage_still_gets_the_one_line_and_a_clear_owner(monkeypatch):
+    w = World(monkeypatch)                                 # the model is down
+    w.record("c1", "How much is the cassock?")             # saved, never handled
+    w.age()
+    w.sweep()
+    assert len(w.public) == 1 and w.public[0][0] == "c1"                # they hear the holding line, once
+    assert w.public[0][1] in [x.replace("{name}", "") for x in rt._NEUTRAL_ACK_POOL]
+    assert w.rows["c1"]["reply"]["decided"] is True and w.state("c1") == ledger.OWED
+    assert w.followups[-1]["state"] == cc.WAITING and w.followups[-1]["texts"] == ["How much is the cassock?"]
+    w.sweep()
+    assert len(w.public) == 1
+
+
+def test_an_orphan_that_already_has_a_reply_is_not_answered_twice(monkeypatch):
+    w = World(monkeypatch)
+    w.model = "up"
+    w.record("c1", "How much is the cassock?")
+    w.ai_ids.add("c1")                                     # the reply went out; the process died before settling
+    w.age()
+    assert w.sweep() == 0 and w.turns == [] and w.public == []
+    assert w.state("c1") == ledger.RESOLVED and w.rows["c1"]["reply"]["by"] == "replied"
+
+
+def test_a_handler_that_crashes_leaves_the_comment_owed(monkeypatch):
+    w = World(monkeypatch)
+
+    async def boom(*a, **k):
+        raise RuntimeError("handler crashed")
+    monkeypatch.setattr(rt, "read_comment", boom)
+    try:
+        w.says("c1", "How much is the cassock?")
+    except RuntimeError:
+        pass
+    assert w.state("c1") == ledger.OWED and w.rows["c1"]["reply"]["decided"] is False
+
+
+def test_an_answered_comment_is_settled_and_never_touched_again(monkeypatch):
+    w = World(monkeypatch)
+    w.model, w.answer = "up", "It is KES 45,000."
+    w.says("c1", "How much is the cassock?")
+    assert w.state("c1") == ledger.RESOLVED and w.rows["c1"]["reply"]["by"] == "handled"
+    w.age()
+    assert w.sweep() == 0 and len(w.turns) == 1
+
+
+def test_losing_every_redis_key_while_a_customer_waits_loses_nothing(monkeypatch):
     w = World(monkeypatch)
     w.says("c1", "How much is the cassock?")
-    real, fired = w.r.lrange, []
-
-    async def lrange(k, a, b):
-        rows = await real(k, a, b)
-        if not fired:                                      # the worker has read the queue …
-            fired.append(1)
-            await cc.keep(w.r, "facebook", w.record("c9", "And the stole?"), {"PAGE"}, cc.MODEL)
-        return rows                                        # … and a comment arrives before it cleans up
-    w.r.lrange = lrange
-    left = asyncio.run(cc.resolve(w.r, KEY, ["c1"]))
-    w.r.lrange = real
-    assert left == 1 and w.waiting() == ["And the stole?"]
-    assert KEY in w.r.sets["comment:catchup:index"]        # and the sweep will still find it
+    w.says("c2", "Do you deliver to Tarime?")
+    w.r.kv.clear()                                         # Redis expires, or is wiped
+    w.r.lists.clear()
+    w.r.sets.clear()
+    assert w.waiting() == ["How much is the cassock?", "Do you deliver to Tarime?"]
+    w.model, w.answer = "up", "KES 45,000, and yes, by DHL."
+    w.age()
+    assert w.sweep() == 1
+    assert w.public[-1] == ("c2", "KES 45,000, and yes, by DHL.") and w.waiting() == []
+    assert w.followups[-1]["state"] == cc.CLOSED
 
 
-def test_a_comment_arriving_after_the_count_keeps_its_place_in_the_index(monkeypatch):
+def test_when_the_day_runs_out_the_question_moves_to_staff_and_the_inbox_says_so(monkeypatch):
     w = World(monkeypatch)
     w.says("c1", "How much is the cassock?")
-    real, n = w.r.llen, []
-
-    async def llen(k):
-        v = await real(k)
-        n.append(1)
-        if len(n) == 1:                                    # counted empty, then one arrives
-            await cc.keep(w.r, "facebook", w.record("c9", "And the stole?"), {"PAGE"}, cc.MODEL)
-        return v
-    w.r.llen = llen
-    asyncio.run(cc.resolve(w.r, KEY, ["c1"]))
-    w.r.llen = real
-    assert w.waiting() == ["And the stole?"] and KEY in w.r.sets["comment:catchup:index"]
+    assert w.followups[-1]["state"] == cc.WAITING          # "Neema will answer …"
+    w.r.kv.clear()                                         # and the Redis side is gone as well
+    w.age(cc.WINDOW_S + 60)                                # a day passes, still no model
+    public = len(w.public)
+    w.sweep()
+    assert w.state("c1") == ledger.STAFF and "day" in w.rows["c1"]["reply"]["why"]
+    last = w.followups[-1]
+    assert last["state"] == cc.STAFF and "day" in last["why"] and last["ring"] is True
+    assert last["texts"] == ["How much is the cassock?"]   # still visible, with its owner
+    assert len(w.public) == public
+    w.model = "up"
+    assert w.sweep() == 0                                  # a colleague's: Neema does not answer over them
 
 
 def test_the_live_handler_and_the_sweep_never_both_compose_the_reply(monkeypatch):
