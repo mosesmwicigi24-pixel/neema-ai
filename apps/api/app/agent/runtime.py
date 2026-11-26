@@ -6666,10 +6666,11 @@ def _returning_note(n: int) -> str:
             "before; often one short sentence.)")
 
 
-async def _post_hold_ack(redis, channel: str, comment: dict, own_pages) -> bool | None:
+async def _post_hold_ack(redis, channel: str, comment: dict, own_pages):
     """Say the holding line under a kept comment (the sweep's retry of a send
     Meta refused). True when it landed, False when Meta refused it, None when
-    the outcome is unknown (it may have posted: never resent)."""
+    the outcome is unknown (it may have posted: never resent), "gone" when
+    the comment was deleted before the send."""
     if not own_pages:
         return False
     from app.database import AsyncSessionLocal
@@ -6679,6 +6680,17 @@ async def _post_hold_ack(redis, channel: str, comment: dict, own_pages) -> bool 
     text = plain_public_voice(_pick(
         _SW_NEUTRAL_ACK_POOL if looks_swahili(comment.get("text") or "") else _NEUTRAL_ACK_POOL,
         str(ext)).replace("{name}", ""))
+    # LOOK AGAIN AT THE SEND BOUNDARY (fourth review): the comment was read a
+    # moment ago; if it has been deleted since (a data-deletion request),
+    # nothing is posted under it.
+    try:
+        from app.services import comment_ledger
+        if str(cid) not in await comment_ledger.existing(channel, str(ext), [cid]):
+            _log.info("holding line for %s: the comment no longer exists — not sent", cid)
+            return "gone"
+    except Exception as exc:
+        _log.info("holding line for %s: record unreadable (%s) — not sent", cid, exc)
+        return False
     try:
         await reply_to_comment(cid, text, page_id=comment.get("page_id"), channel=channel)
     except svc.SendOutcomeUnknown as exc:
@@ -6827,8 +6839,8 @@ async def _run_comment_engage(redis, channel: str, comment: dict, own_pages: set
             # this person's OTHER unresolved comments here (this one is owed too,
             # stamped by the webhook — it is the one being handled)
             _others = [i for i in await _catchup.waiting(redis, _ckey)
-                       if str(i.get("cid")) != str(cid) and i.get("state") != _catchup.VERIFY
-                       and (i.get("decided") or i.get("state") != _catchup.OWED)]
+                       if str(i.get("cid")) != str(cid) and i.get("state") == _catchup.OWED
+                       and i.get("decided")]          # a colleague's stays the colleague's
             if _others:
                 from app.services.agent_health import ai_down as _ai_down
                 # one composer at a time: the sweep holds the same claim
@@ -6923,6 +6935,38 @@ async def _run_comment_engage(redis, channel: str, comment: dict, own_pages: set
 
     _delivery = {"unknown": False}
 
+    async def _record_send(posted: bool) -> None:
+        """THE ACTUAL SEND OUTCOME GOES ON THE RECORD (fourth review). A
+        reply Meta refused was never said: the comment stays Neema's to
+        answer. One whose outcome is unknown may be up: nobody posts another
+        and a colleague looks. Either way the handler's wrapper must not
+        settle the comment as answered."""
+        try:
+            if not posted and _delivery["unknown"]:
+                await _catchup.needs_verify(redis, _ckey, [cid])
+                await _catchup.refresh_followup(redis, _ckey, _catchup.UNKNOWN_WHY, ring=True)
+            elif not posted:
+                await _catchup.keep(redis, channel, own_comment, own_pages, _catchup.SEND)
+                await _catchup.refresh_followup(redis, _ckey)
+        except Exception as exc:
+            _log.info("comment %s: send outcome not recorded: %s", cid, exc)
+
+    async def _save_reply(text: str, posted: bool, what: str) -> None:
+        """The inbox shows a reply that went out — never one Meta refused."""
+        if not (posted or _delivery["unknown"]):
+            return
+        try:
+            async with AsyncSessionLocal() as _dbs:
+                if _delivery["unknown"]:
+                    await svc.save_outbound_channel_message(
+                        _dbs, redis, channel, ext, text, reply_to_comment_id=cid,
+                        raw_meta={"v": 1, "delivery": "unknown"})
+                else:
+                    await svc.save_outbound_channel_message(_dbs, redis, channel, ext, text,
+                                                            reply_to_comment_id=cid)
+        except Exception as exc:
+            _log.warning("saving %s failed for %s: %s", what, cid, exc)
+
     async def _post_public(text: str) -> bool:
         """The public reply. True when it landed — the Like below follows only
         a reply that did. False when Meta REFUSED it, and also when the
@@ -6992,13 +7036,10 @@ async def _run_comment_engage(redis, channel: str, comment: dict, own_pages: set
                 text = empathy_text(kind, severity, swahili, private_sent=private_sent).replace("{name}", name_tag)
             posted = await _post_public(text)
             # Persist it threaded under the comment — the inbox must show every
-            # outgoing reply, not just the high-intent ones.
-            try:
-                async with AsyncSessionLocal() as db2:
-                    await svc.save_outbound_channel_message(db2, redis, channel, ext, text,
-                                                            reply_to_comment_id=cid)
-            except Exception as exc:
-                _log.warning("saving light reply failed for %s: %s", cid, exc)
+            # outgoing reply, not just the high-intent ones — and record what
+            # Meta said. ("saving light reply failed" is logged by the helper.)
+            await _save_reply(text, posted, "light reply")
+            await _record_send(posted)
             if posted:
                 await _like_answered()
         if plan["human"]:
@@ -7401,6 +7442,12 @@ async def _run_comment_engage(redis, channel: str, comment: dict, own_pages: set
                 await _followup_now()
             return
         _hold_claimed = True
+        if _kept and str(cid) not in await _catchup.ledger.existing(channel, str(ext), [cid]):
+            # deleted while we were composing (a data-deletion request):
+            # nothing is posted under a comment that no longer exists
+            await _catchup.hold_release(redis, _ckey)
+            _log.info("comment %s: deleted before the holding line — not posted", cid)
+            return
 
     posted = await _post_public(public_text)
     _why_unknown = _catchup.UNKNOWN_WHY if _delivery["unknown"] else ""
@@ -7413,12 +7460,15 @@ async def _run_comment_engage(redis, channel: str, comment: dict, own_pages: set
         # the combined reply may be up: nobody posts another, a colleague looks
         await _catchup.needs_verify(redis, _ckey, catch_ids, _why_unknown)
         await _catchup.refresh_followup(redis, _ckey, _why_unknown, ring=True)
-    if _live_claim:
-        await _catchup.release_answer(redis, _ckey)
     if answer and posted and catch_ids:
         # cleared only now, and only what this reply covered
         await _catchup.resolve(redis, _ckey, catch_ids, by="neema")
         await _catchup.refresh_followup(redis, _ckey)
+    if not _kept and not from_sweep:
+        await _record_send(posted)       # this comment's own reply: said, refused, or unknown
+    if _live_claim:
+        # held until the outcome is on the record: the sweep reads after it
+        await _catchup.release_answer(redis, _ckey)
     _followed = bool(_kept) and await _followup_now()
     if _followed and _hold_claimed and _delivery["unknown"]:
         await _catchup.refresh_followup(
@@ -7446,12 +7496,8 @@ async def _run_comment_engage(redis, channel: str, comment: dict, own_pages: set
 
     # Save our public reply THREADED to the comment it answers, so the inbox shows
     # comment → reply the way Facebook does (reply_to = this comment id).
-    try:
-        async with AsyncSessionLocal() as db2:
-            await svc.save_outbound_channel_message(db2, redis, channel, ext, public_text,
-                                                    reply_to_comment_id=cid)
-    except Exception as exc:
-        _log.warning("saving public reply to thread failed for %s: %s", cid, exc)
+    # ("saving public reply to thread failed" is logged by the helper.)
+    await _save_reply(public_text, posted, "public reply to thread")
     if posted:
         await _like_answered()
 

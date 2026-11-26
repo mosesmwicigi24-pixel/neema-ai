@@ -496,6 +496,14 @@ async def _deliver_agent_reply(db: AsyncSession, conv: Conversation, text: str,
     latest_in = await _latest_inbound(db, conv.id)
     has_ctx = bool(getattr(latest_in, "comment_context", None))
     comment_id = latest_in.waba_msg_id if latest_in else None
+    # THE COMMENT THE COLLEAGUE CHOSE (fourth review): when they replied to a
+    # particular comment in the thread, the public reply goes under THAT one
+    # — not under whatever the person wrote last — and that one is resolved.
+    if quoted is not None and getattr(quoted, "waba_msg_id", None) \
+            and str(getattr(getattr(quoted, "direction", None), "value",
+                            getattr(quoted, "direction", ""))) == "inbound" \
+            and (channel == "facebook" or getattr(quoted, "comment_context", None)):
+        comment_id = quoted.waba_msg_id
     win = await messaging_window(db, conv)
     dm_possible = win.get("mode") in ("open", "human_agent")
     # DM FIRST (the Mukami fix, 2026-08-19): a MESSENGER/IG thread that was

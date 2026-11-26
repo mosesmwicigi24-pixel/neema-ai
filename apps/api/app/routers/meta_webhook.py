@@ -861,7 +861,7 @@ async def _capture_comment_events(db: AsyncSession, channel: str, payload: dict,
             # nobody will ever answer or recover.
             from app.services import comment_ledger
             c_meta = {**(c_meta or {"v": 1}), comment_ledger.KEY: comment_ledger.opening(
-                own, c.get("page_id"), c.get("parent_id"))}
+                own, c.get("page_id"), c.get("parent_id"), c.get("post_id"))}
             db.add(Message(
                 channel=comment_channel, external_id=c["from_id"], wa_id=None,
                 person_id=ident.person_id, conversation_id=conv.id,
