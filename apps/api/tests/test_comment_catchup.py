@@ -84,6 +84,7 @@ class World:
         self.staff_ids = set()         # comment ids a colleague replied under
         self.ai_ids = set()            # comment ids Neema's reply is threaded under
         self.public, self.liked, self.turns, self.followups, self.human, self.noted = [], [], [], [], [], []
+        self.saved = []                # replies written to the inbox: (comment id, text, raw_meta)
         self.model = "down"            # "down" | "up" | "held"
         self.answer = "Here is your answer."
         self.reject_sends = 0          # how many of the next public sends Meta refuses
@@ -212,7 +213,10 @@ class World:
         monkeypatch.setattr(meta_send, "reply_to_comment", reply_to_comment)
         monkeypatch.setattr(meta_send, "send_private_reply", none)
         monkeypatch.setattr(meta_send, "like_comment", like_comment)
-        monkeypatch.setattr(messaging, "save_outbound_channel_message", none)
+        async def save_outbound(db, redis, channel, ext, t, reply_to_comment_id=None, raw_meta=None):
+            w.saved.append((reply_to_comment_id, t, raw_meta))
+
+        monkeypatch.setattr(messaging, "save_outbound_channel_message", save_outbound)
         monkeypatch.setattr(post_catalog, "identity_trusted",
                             lambda rec: bool((rec or {}).get("name")) and (rec or {}).get("source") == "caption")
         monkeypatch.setattr(ah, "ai_down", ai_down)
@@ -239,7 +243,7 @@ class World:
         import time
         c = self.comment(cid, text, **kw)
         self.rows[cid] = {"text": text, "post_id": c["post_id"], "post_context": c["post_context"],
-                          "at": time.time(), "reply": ledger.opening({"PAGE"}, "PAGE", None)}
+                          "at": time.time(), "reply": ledger.opening({"PAGE"}, "PAGE", None, c["post_id"])}
         return c
 
     def says(self, cid, text, **kw):
@@ -524,7 +528,8 @@ def test_the_plan_for_what_is_waiting():
     assert cc.plan([_item("c1", "x", now - 500, ledger.STAFF)], now=now)["answer"] is None      # staff's alone
     assert cc.plan([_item("c1", "x", now - 500, ledger.VERIFY)], now=now)["answer"] is None     # never re-sent
     mixed = cc.plan([_item("c1", "a", now - 900, ledger.STAFF), _item("c2", "b", now - 500)], now=now)
-    assert mixed["answer"]["comment"]["catch_up"] == ["a", "b"]                 # one answer covers all
+    assert mixed["answer"]["comment"]["catch_up"] == ["b"]                      # a colleague's stays theirs
+    assert mixed["answer"]["comment"]["catch_up_ids"] == ["c2"]
     # a comment no handler decided on: left alone while a live handler may still be on it …
     fresh = cc.plan([_item("c1", "x", now - 200, decided=False)], now=now)
     assert fresh["answer"] is None and fresh["orphans"] == []
@@ -741,3 +746,190 @@ def test_a_recovery_reply_with_an_unknown_outcome_goes_to_staff_not_to_a_retry(m
     w.sweep()
     w.sweep()
     assert len(w.turns) == turns and len(w.public) == public            # nobody posts another
+
+
+# ── the fourth review ────────────────────────────────────────────────────────
+def test_a_fresh_reply_meta_rejects_is_not_settled_as_answered(monkeypatch):
+    w = World(monkeypatch)
+    w.model, w.answer = "up", "It is KES 45,000."
+    w.reject_sends = 1
+    w.says("c1", "How much is the cassock?")               # written, and Meta refuses the post
+    assert w.public == [] and w.saved == []                # nothing shown in the inbox as sent
+    assert w.state("c1") == ledger.OWED and w.rows["c1"]["reply"]["reason"] == cc.SEND
+    assert w.followups[-1]["state"] == cc.WAITING          # visible, and Neema's to answer
+    w.age()
+    assert w.sweep() == 1                                  # the next pass answers it
+    assert w.public == [("c1", "It is KES 45,000.")] and w.state("c1") == ledger.RESOLVED
+    assert w.saved == [("c1", "It is KES 45,000.", None)]
+
+
+def test_a_fresh_reply_that_times_out_goes_to_verify_not_to_a_retry(monkeypatch):
+    from app.services.messaging import SendOutcomeUnknown
+    w = World(monkeypatch)
+    w.model, w.answer = "up", "It is KES 45,000."
+    w.send_error = SendOutcomeUnknown("ReadTimeout: reply to comment outcome unknown")
+    w.says("c1", "How much is the cassock?")
+    assert w.state("c1") == ledger.VERIFY and "check the thread" in w.rows["c1"]["reply"]["why"]
+    assert w.saved == [("c1", "It is KES 45,000.", {"v": 1, "delivery": "unknown"})]   # shown as unconfirmed
+    assert w.followups[-1]["state"] == cc.STAFF and w.followups[-1]["ring"] is True
+    w.age()
+    turns = len(w.turns)
+    assert w.sweep() == 0 and len(w.turns) == turns and w.public == []        # nobody posts another
+
+
+def test_a_canned_reply_meta_rejects_stays_owed_too(monkeypatch):
+    shoe = {"name": "Clergy Oxford Shoe", "source": "caption", "confidence": 1.0,
+            "price_kes": 4500, "price_usd": 35, "slug": "clergy-oxford-shoe", "product_type": "simple"}
+    w = World(monkeypatch, identity=shoe)
+    w.reject_sends = 1
+    w.says("c1", "How much?", caption="Clergy Oxford Shoe, in stock")
+    assert w.public == [] and w.state("c1") == ledger.OWED and w.rows["c1"]["reply"]["reason"] == cc.SEND
+
+
+def test_the_sweep_reads_its_batch_only_after_it_holds_the_claim(monkeypatch):
+    w = World(monkeypatch)
+    w.says("c1", "How much is the cassock?")
+    w.model, w.answer = "up", "KES 45,000, and yes in purple."
+    w.age()
+    real = cc.claim_answer
+
+    fired = []
+
+    async def claim(redis, key):
+        # the live handler answers c1 (with a new comment) just before the sweep's claim lands
+        if not fired:
+            fired.append(1)
+            await rt._engage_and_settle(w.r, "facebook", w.record("c2", "Is it made in purple?"), {"PAGE"})
+        return await real(redis, key)
+    monkeypatch.setattr(cc, "claim_answer", claim)
+    turns_before = len(w.turns)
+    w.sweep()
+    assert [cid for cid, _t in w.public] == ["c1", "c2"]   # the holding line, then ONE answer — no second
+    assert len(w.turns) == turns_before + 1                # the sweep made no call for the answered batch
+    assert w.state("c1") == ledger.RESOLVED and w.state("c2") == ledger.RESOLVED
+
+
+def test_the_claim_is_held_until_the_outcome_is_recorded(monkeypatch):
+    w = World(monkeypatch)
+    w.says("c1", "How much is the cassock?")
+    w.model = "up"
+    w.age()
+    seen = []
+    real_resolve = cc.resolve
+
+    async def resolve(redis, key, ids, by="neema"):
+        seen.append(bool(await redis.get("comment:catchup:claim:" + key)))   # still claimed while recording
+        return await real_resolve(redis, key, ids, by=by)
+    monkeypatch.setattr(cc, "resolve", resolve)
+    w.sweep()
+    assert seen == [True] and "comment:catchup:claim:" + KEY not in w.r.kv    # and released after
+
+
+def test_a_new_question_stays_pending_and_a_staff_question_stays_with_staff(monkeypatch):
+    w = World(monkeypatch)
+    w.says("c1", "How much is the cassock?")               # owed (the model failed)
+    w.over_cap = True
+    w.says("c2", "Can I pay in instalments?")              # a limit: a colleague's from the start
+    assert w.state("c2") == ledger.STAFF
+    w.over_cap, w.model = False, "up"
+    w.age()
+
+    async def arrives():
+        w.during_turn = None
+        await cc.keep(w.r, "facebook", w.record("c9", "And the stole?"), {"PAGE"}, cc.MODEL)
+    w.during_turn = arrives
+    w.sweep()
+    assert w.turns[-1]["user_text"] == "How much is the cassock?"       # only what Neema owed
+    assert w.state("c1") == ledger.RESOLVED
+    assert w.state("c2") == ledger.STAFF                   # the colleague's question is still theirs
+    assert w.state("c9") == ledger.OWED                    # the new one is still pending
+    assert w.followups[-1]["texts"] == ["Can I pay in instalments?", "And the stole?"]
+
+
+def test_a_staff_reply_goes_under_the_comment_staff_selected(monkeypatch):
+    import types
+    from app.services import conversation as cs, meta_send
+    sent_to = []
+
+    async def reply_to_comment(cid, t, channel=None, page_id=None):
+        sent_to.append(cid)
+
+    async def latest_inbound(db, conv_id):                 # a NEWER comment exists
+        return types.SimpleNamespace(waba_msg_id="c-new", comment_context={"post_id": "p1"})
+
+    async def window(db, conv):
+        return {"mode": "closed"}
+    monkeypatch.setattr(meta_send, "reply_to_comment", reply_to_comment)
+    monkeypatch.setattr(cs, "_latest_inbound", latest_inbound)
+    monkeypatch.setattr(cs, "messaging_window", window)
+    conv = types.SimpleNamespace(id="k", channel="facebook", external_id="u1", wa_id=None)
+    chosen = types.SimpleNamespace(waba_msg_id="c-old", direction=types.SimpleNamespace(value="inbound"),
+                                   comment_context={"post_id": "p1"})
+    asyncio.run(cs._deliver_agent_reply(None, conv, "It is KES 45,000.", quoted=chosen))
+    assert sent_to == ["c-old"] and conv._replied_comment_id == "c-old"       # posted AND resolved by that id
+    # with nothing selected, the latest comment, as before
+    conv2 = types.SimpleNamespace(id="k", channel="facebook", external_id="u1", wa_id=None)
+    asyncio.run(cs._deliver_agent_reply(None, conv2, "Hello"))
+    assert sent_to[-1] == "c-new" and conv2._replied_comment_id == "c-new"
+    # one of OUR messages selected is not a comment to reply under
+    ours = types.SimpleNamespace(waba_msg_id="m1", direction=types.SimpleNamespace(value="outbound"),
+                                 comment_context={"reply_to": "c-old"})
+    conv3 = types.SimpleNamespace(id="k", channel="facebook", external_id="u1", wa_id=None)
+    asyncio.run(cs._deliver_agent_reply(None, conv3, "Hello", quoted=ours))
+    assert sent_to[-1] == "c-new"
+
+
+def test_a_holding_line_is_not_sent_under_a_comment_deleted_after_it_was_loaded(monkeypatch):
+    w = World(monkeypatch)                                 # the model is down
+    w.reject_sends = 1
+    w.says("c1", "How much is the cassock?")               # the first holding line was refused
+    w.age()
+    real = ledger.existing
+
+    async def existing(channel, ext, ids):
+        w.rows.pop("c1", None)                             # deleted after the worker loaded it …
+        return await real(channel, ext, ids)
+    monkeypatch.setattr(ledger, "existing", existing)
+    w.sweep()
+    assert w.public == []                                  # … so nothing reaches Meta
+    assert "comment:hold_said:" + KEY not in w.r.kv and "comment:hold_claim:" + KEY not in w.r.kv
+
+
+def test_a_backlog_waiting_in_the_old_queue_is_adopted_at_rollout(monkeypatch):
+    import time
+    w = World(monkeypatch)
+    w.model, w.answer = "up", "KES 45,000, by DHL."
+    now = time.time()
+    for cid, text in (("c1", "How much is the cassock?"), ("c2", "Do you deliver to Tarime?")):
+        w.record(cid, text)
+        w.rows[cid]["reply"] = None                        # saved before the state existed
+    w.record("c3", "Can I pay later?")
+    w.rows["c3"]["reply"] = None
+    q = "comment:catchup:q:" + KEY
+    w.r.lists[q] = [json.dumps({"at": now - 900, "cid": "c1", "reason": "model", "own_pages": ["PAGE"],
+                                "post_id": "p1", "page_id": "PAGE", "parent_id": None}),
+                    json.dumps({"at": now - 800, "cid": "c2", "reason": "model", "own_pages": ["PAGE"],
+                                "post_id": "p1", "page_id": "PAGE", "parent_id": None}),
+                    json.dumps({"at": now - 700, "cid": "c3", "reason": "cap", "own_pages": ["PAGE"],
+                                "post_id": "p1", "page_id": "PAGE", "parent_id": None})]
+    w.r.sets["comment:catchup:index"] = {KEY}
+    w.age()
+    assert w.sweep() == 1
+    assert w.turns[-1]["user_text"].count("How much is the cassock?") == 1
+    assert "Do you deliver to Tarime?" in w.turns[-1]["user_text"]
+    assert w.public == [("c2", "KES 45,000, by DHL.")]
+    assert w.state("c1") == ledger.RESOLVED and w.state("c2") == ledger.RESOLVED
+    assert w.state("c3") == ledger.STAFF                   # a limit: it was, and stays, a colleague's
+    assert w.r.lists.get(q, []) == [] and KEY not in w.r.sets["comment:catchup:index"]   # the old queue is retired
+    assert asyncio.run(cc.adopt_old_queue(w.r)) == 0       # and adopting again changes nothing
+
+
+def test_a_comment_saved_without_post_context_is_still_recovered(monkeypatch):
+    w = World(monkeypatch)
+    w.model, w.answer = "up", "It is KES 45,000."
+    w.record("c1", "How much is the cassock?")
+    w.rows["c1"]["post_context"] = {}                      # the post lookup failed at the webhook
+    assert w.rows["c1"]["reply"]["post_id"] == "p1"        # the webhook's own id is on the state
+    w.age()
+    assert w.sweep() == 1
+    assert w.public == [("c1", "It is KES 45,000.")] and w.state("c1") == ledger.RESOLVED
