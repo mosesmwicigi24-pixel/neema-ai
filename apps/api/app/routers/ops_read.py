@@ -518,3 +518,13 @@ async def orders_stalled(channel: str = Query("", max_length=20),
         out["customer_never_wrote_again"] += 1 if not r["customer_messages_after"] else 0
     _log.info("ops read: stalled orders days=%d (%d orders)", days, len(orders))
     return out
+
+
+@router.get("/outage")
+async def outage(_: None = Depends(require_key)) -> dict:
+    """Counts only: the comments the credit outage left with a set reply —
+    how many are still to be picked up, how many are owed, with staff or
+    answered, and what was left alone and why. No name, number or text."""
+    from app.services import outage_backfill
+    _log.info("ops read: outage counts")
+    return await outage_backfill.counts()

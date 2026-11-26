@@ -500,6 +500,11 @@ async def sweep(redis, *, limit: int = 15) -> int:
     from app.services.agent_health import ai_down
     await adopt_old_queue(redis)
     try:
+        from app.services import outage_backfill
+        await outage_backfill.adopt(redis)
+    except Exception as exc:
+        _log.info("comment catch-up: outage backfill skipped: %s", exc)
+    try:
         down = bool(await ai_down(redis))
         keys = await ledger.keys_owed()
     except Exception as exc:
