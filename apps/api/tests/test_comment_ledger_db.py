@@ -224,3 +224,31 @@ def test_a_backlog_from_the_old_queue_lands_on_the_rows(rig):
     assert go(ledger.keys_owed()) == [(CH, EXT, "p1")]
     assert r.lists == {} and r.sets["comment:catchup:index"] == set()
     assert go(cc.adopt_old_queue(r)) == 0
+
+
+def test_the_outage_backfill_marks_only_what_is_owed_on_the_real_rows(rig, monkeypatch):
+    from datetime import timedelta
+    from app.services import comment_ledger as ledger, outage_backfill as ob
+    monkeypatch.setattr(ob, "CUTOFF", datetime.now(timezone.utc) - timedelta(minutes=30))
+    set_line = "Thank you for reaching out 🙏 One of our team will come back to you right here shortly."
+    # yesterday's outage: two comments, each given the set line; saved before the state existed
+    _comment(rig, "c1", "How much is the cassock?", minutes_ago=600, stamped=False)
+    _comment(rig, None, set_line, sender="ai", reply_to="c1", minutes_ago=599)
+    _comment(rig, "c2", "I am in Tarime", minutes_ago=590, stamped=False)
+    _comment(rig, None, set_line, sender="ai", reply_to="c2", minutes_ago=589)
+    # under another post the same person got a real answer: not the outage's
+    _comment(rig, "x1", "And the chalice?", post="p2", minutes_ago=580, stamped=False)
+    _comment(rig, None, "The chalice is KES 9,000, ready in Nairobi.", sender="ai", reply_to="x1", minutes_ago=579)
+    go = asyncio.run
+    c = go(ob.counts())
+    assert c["still_to_adopt"] == {"commenter_posts": 1, "comments": 2}
+    assert go(ob.adopt(None)) == 2
+    rows = go(ledger.unresolved(CH, EXT, "p1"))
+    assert [(r["cid"], r["state"], r["decided"], r["reason"]) for r in rows] == [
+        ("c1", ledger.OWED, True, "outage"), ("c2", ledger.OWED, True, "outage")]
+    assert go(ledger.unresolved(CH, EXT, "p2")) == []
+    assert go(ledger.keys_owed()) == [(CH, EXT, "p1")]
+    assert go(ob.adopt(None)) == 0                                          # once: nothing left to adopt
+    c = go(ob.counts())
+    assert c["still_to_adopt"]["comments"] == 0
+    assert c["outage_comments_adopted_by_state_now"] == {"owed": 2}
