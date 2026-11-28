@@ -202,9 +202,7 @@ _NUMBERS_LINE_RE = re.compile(
 def official_numbers_line(*, swahili: bool = False) -> str:
     """The first-greeting line, built from the configured lines. "" when none
     is configured."""
-    from app.core.config import settings
-    nums = [n.strip() for n in (getattr(settings, "whatsapp_handoff_number", ""),
-                                getattr(settings, "whatsapp_handoff_alt", "")) if n and n.strip()]
+    nums = [n for n, _tail in _official()]
     if not nums:
         return ""
     if swahili:
@@ -237,10 +235,15 @@ _PAYING_RE = re.compile(
 
 
 def _official() -> list[tuple[str, str]]:
-    """Our two lines as (written form, last nine digits)."""
+    """Our official numbers as (written form, last nine digits), each once.
+    From `official_numbers`; the hand-off settings only stand in when that is
+    blank. The same line written two ways, or set twice, is one number."""
     from app.core.config import settings
+    listed = [p for p in str(getattr(settings, "official_numbers", "") or "").split(",") if p.strip()]
+    if not listed:
+        listed = [getattr(settings, "whatsapp_handoff_number", ""), getattr(settings, "whatsapp_handoff_alt", "")]
     out = []
-    for n in (getattr(settings, "whatsapp_handoff_number", ""), getattr(settings, "whatsapp_handoff_alt", "")):
+    for n in listed:
         n = (n or "").strip()
         tail = re.sub(r"\D", "", n)[-9:]
         if n and len(tail) == 9 and all(tail != t for _n, t in out):
@@ -314,10 +317,7 @@ def strip_numbers_line(reply: str | None, *, every_mention: bool = False) -> str
     out = _NUMBERS_LINE_RE.sub("", reply or "").strip()
     if not every_mention or not out:
         return out
-    from app.core.config import settings
-    tails = [re.sub(r"\D", "", n)[-9:] for n in (getattr(settings, "whatsapp_handoff_number", ""),
-                                                 getattr(settings, "whatsapp_handoff_alt", "")) if n]
-    tails = [t for t in tails if len(t) == 9]
+    tails = [tail for _n, tail in _official()]
     if not tails:
         return out
     kept = []

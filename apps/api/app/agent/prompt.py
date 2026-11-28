@@ -217,8 +217,16 @@ def build_system_prompt(*, country_iso: str = "", currency: str = "KES",
         lines = []
         if wa_num:
             lines.append(f"- WhatsApp: {wa_num}")
-        if alt_num:
+        if alt_num and alt_num != wa_num:
             lines.append(f"- Phone / calls: {alt_num}")
+        # Both official numbers, each once, whatever the two hand-off settings
+        # hold (the box had set them to the same line — owner, 2026-11-28).
+        _offs = []
+        for _p in str(getattr(settings, "official_numbers", "") or "").split(","):
+            if _p.strip() and _p.strip() not in _offs:
+                _offs.append(_p.strip())
+        if len(_offs) > 1:
+            lines.append(f"- Our official numbers, BOTH ours: {' and '.join(_offs)}")
         contacts = (
             "\n\nOUR OFFICIAL CONTACTS — quote EXACTLY as written, digit for digit:\n"
             + "\n".join(lines) +

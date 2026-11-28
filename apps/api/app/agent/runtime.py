@@ -3205,10 +3205,11 @@ def _hold_line(channel: str = "whatsapp") -> str:
                      "leave us a message here and we will get right back to you.")
     # Owner, 2026-11-20: the greeting names our official numbers, so a
     # customer can tell a stranger's number from ours.
-    official = [n for n in (wa, alt) if n]
-    if official:
-        parts.append(f"Our official numbers are {' and '.join(official)}. "
-                     "Any other number is not from Bethany House.")
+    # Both, each once — from the one place the two are kept (voice), never
+    # from the hand-off settings, which the box had set to the same line.
+    from app.agent.voice import official_numbers_line as _official_line
+    if _official_line():
+        parts.append(_official_line())
     parts.append("Thank you for choosing Bethany House 💛")
     return "\n\n".join(parts)
 

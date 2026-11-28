@@ -481,3 +481,27 @@ def test_the_prompt_says_it_strictly_and_the_turn_checks_it():
     src = inspect.getsource(prompt)
     assert "WE HAVE TWO OFFICIAL NUMBERS, AND BOTH ARE OURS" in src and "NEVER say we have only one" in src
     assert "both_official_numbers" in inspect.getsource(runtime.run_turn)
+
+
+def test_the_two_official_numbers_never_collapse_into_one(monkeypatch):
+    """The box had both hand-off settings on the same line, and every first
+    greeting read "+254785490805 and +254785490805" (owner's screenshot,
+    2026-11-28)."""
+    from app.agent import runtime, voice
+    from app.core.config import settings
+    monkeypatch.setattr(settings, "whatsapp_handoff_number", B, raising=False)
+    monkeypatch.setattr(settings, "whatsapp_handoff_alt", B, raising=False)
+    line = voice.official_numbers_line()
+    assert line == f"Our official numbers are {A} and {B}. Any other number is not from Bethany House."
+    assert voice.official_numbers_line(swahili=True).count("+254") == 2
+    hold = runtime._hold_line("messenger")
+    assert hold.count(A) == 1 and f"{A} and {B}" in hold and f"{B} and {B}" not in hold
+    # the same line set twice, or written two ways, is one number
+    monkeypatch.setattr(settings, "official_numbers", f"{A}, 0727891989 ,{B},{B}", raising=False)
+    assert voice.official_numbers_line().count("+254") == 2
+    # and the check still knows both: one given, the other follows
+    assert voice.both_official_numbers(f"WhatsApp us on {B}.").endswith(f"Our other official number is {A}.")
+    # the model is handed both, each once
+    from app.agent import prompt
+    import inspect
+    assert "Our official numbers, BOTH ours" in inspect.getsource(prompt)

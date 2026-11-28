@@ -296,6 +296,14 @@ class Settings(BaseSettings):
     whatsapp_handoff_number: str = "+254727891989"
     # Second official line (calls) — quoted verbatim in prompts alongside the above.
     whatsapp_handoff_alt: str = "+254785490805"
+    # THE TWO OFFICIAL NUMBERS, as the customer is told them (owner,
+    # 2026-11-28: "Our official numbers are 2 … +254727891989 and
+    # +254785490805 … This should not be ignored"). Kept apart from the two
+    # hand-off settings above on purpose: the box set both of those to the
+    # same line, and every first greeting then read "Our official numbers are
+    # +254785490805 and +254785490805" — one number twice, the other never
+    # said. Comma-separated; repeats are dropped.
+    official_numbers: str = "+254727891989,+254785490805"
     # The mobile-money lines that RECEIVE our payments (owner, 2026-10-27: "the
     # +254727891989 and +254785490805 are our official numbers and payment made
     # via these lines are received"; "+254785490805 is Airtel payment number").
