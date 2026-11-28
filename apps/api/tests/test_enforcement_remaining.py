@@ -431,3 +431,77 @@ def test_the_stalled_report_returns_no_name_no_number_no_text():
     ret = src[src.index("out = {"):]
     for word in ('"name"', '"text"', '"wa_id"', '"phone"', '"contact"'):
         assert word not in ret
+
+
+# ── both numbers are ours (owner, 2026-11-28) ────────────────────────────────
+A, B = "+254727891989", "+254785490805"
+
+
+def test_a_reply_never_says_we_have_only_one_number():
+    from app.agent.voice import both_official_numbers as fix
+    out = fix(f"Yes, that is us. Our only number is {A}. How can I help?")
+    assert "only number" not in out and A in out and B in out
+    out = fix(f"You can reach us on {B}. We do not have another number.")
+    assert "another number" not in out and A in out and B in out
+    out = fix(f"Namba yetu ni {A}. Hatuna namba nyingine.", swahili=True)
+    assert "Hatuna namba nyingine" not in out and B in out and "rasmi" in out
+    out = fix("We only have one official line, the one you are writing to.")
+    assert "only have one" not in out and A in out and B in out
+
+
+def test_one_of_our_two_numbers_is_never_disowned():
+    from app.agent.voice import both_official_numbers as fix
+    out = fix(f"Please be careful: 0785490805 is not our number. Ours is {A}.")
+    assert "not our number" not in out and A in out and B in out
+    out = fix("Our official number is 0727 891 989. Any other number is not from Bethany House.")
+    assert out.count("Any other number") == 1 and A in out and B in out      # only beside BOTH
+    # a stranger's number may still be called not ours
+    stranger = f"0700111222 is not our number. Our official numbers are {A} and {B}."
+    assert fix(stranger) == stranger
+
+
+def test_one_number_given_as_how_to_reach_us_comes_with_the_other():
+    from app.agent.voice import both_official_numbers as fix
+    out = fix(f"You can WhatsApp us on {B} and we will finish your order there.")
+    assert out.endswith(f"Our other official number is {A}.")
+    assert fix("Tupigie kwa 0727891989.", swahili=True).endswith(f"Namba yetu nyingine rasmi ni {B}.")
+    both = f"Our official numbers are {A} and {B}. Any other number is not from Bethany House."
+    assert fix(both) == both                                                 # already right: untouched
+    plain = "The Clergy Shirt is KES 4,500. How many would you like?"
+    assert fix(plain) == plain                                               # nothing about numbers
+    # a payment instruction names the ONE line that takes that payment
+    pay = "Please pay KES 4,500 by M-Pesa to 0727891989 and send me the confirmation message."
+    assert fix(pay) == pay
+    assert fix("") == "" and fix(None) == ""
+
+
+def test_the_prompt_says_it_strictly_and_the_turn_checks_it():
+    import inspect
+    from app.agent import prompt, runtime
+    src = inspect.getsource(prompt)
+    assert "WE HAVE TWO OFFICIAL NUMBERS, AND BOTH ARE OURS" in src and "NEVER say we have only one" in src
+    assert "both_official_numbers" in inspect.getsource(runtime.run_turn)
+
+
+def test_the_two_official_numbers_never_collapse_into_one(monkeypatch):
+    """The box had both hand-off settings on the same line, and every first
+    greeting read "+254785490805 and +254785490805" (owner's screenshot,
+    2026-11-28)."""
+    from app.agent import runtime, voice
+    from app.core.config import settings
+    monkeypatch.setattr(settings, "whatsapp_handoff_number", B, raising=False)
+    monkeypatch.setattr(settings, "whatsapp_handoff_alt", B, raising=False)
+    line = voice.official_numbers_line()
+    assert line == f"Our official numbers are {A} and {B}. Any other number is not from Bethany House."
+    assert voice.official_numbers_line(swahili=True).count("+254") == 2
+    hold = runtime._hold_line("messenger")
+    assert hold.count(A) == 1 and f"{A} and {B}" in hold and f"{B} and {B}" not in hold
+    # the same line set twice, or written two ways, is one number
+    monkeypatch.setattr(settings, "official_numbers", f"{A}, 0727891989 ,{B},{B}", raising=False)
+    assert voice.official_numbers_line().count("+254") == 2
+    # and the check still knows both: one given, the other follows
+    assert voice.both_official_numbers(f"WhatsApp us on {B}.").endswith(f"Our other official number is {A}.")
+    # the model is handed both, each once
+    from app.agent import prompt
+    import inspect
+    assert "Our official numbers, BOTH ours" in inspect.getsource(prompt)

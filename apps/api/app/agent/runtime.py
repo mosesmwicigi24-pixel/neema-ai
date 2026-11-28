@@ -2918,6 +2918,18 @@ async def run_turn(db: AsyncSession, redis, wa_id: str, user_text: str, llm: LLM
                     reply = _with_lines
         except Exception as exc:
             _log.info("total breakdown skipped for %s: %s", key, exc)
+    if reply and not scribe_only and _gate_outcome not in ("held", "unowned"):
+        # BOTH NUMBERS ARE OURS (owner, 2026-11-28; voice.both_official_numbers):
+        # never "our only number", never one of our lines disowned, and one
+        # line given as how to reach us comes with the other.
+        try:
+            from app.agent.voice import both_official_numbers as _both_nums
+            _nums_fixed = _both_nums(reply, swahili=looks_swahili(user_text or ""))
+            if _nums_fixed != reply:
+                _log.info("turn %s: reply corrected about our official numbers", key)
+                reply = _nums_fixed
+        except Exception as exc:
+            _log.info("official-numbers check skipped for %s: %s", key, exc)
     if reply and customer_name and not public_comment:
         # A name is not a prefix (agent/voice.drop_repeated_name).
         try:
@@ -3193,10 +3205,11 @@ def _hold_line(channel: str = "whatsapp") -> str:
                      "leave us a message here and we will get right back to you.")
     # Owner, 2026-11-20: the greeting names our official numbers, so a
     # customer can tell a stranger's number from ours.
-    official = [n for n in (wa, alt) if n]
-    if official:
-        parts.append(f"Our official numbers are {' and '.join(official)}. "
-                     "Any other number is not from Bethany House.")
+    # Both, each once — from the one place the two are kept (voice), never
+    # from the hand-off settings, which the box had set to the same line.
+    from app.agent.voice import official_numbers_line as _official_line
+    if _official_line():
+        parts.append(_official_line())
     parts.append("Thank you for choosing Bethany House 💛")
     return "\n\n".join(parts)
 

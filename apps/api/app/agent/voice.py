@@ -202,14 +202,110 @@ _NUMBERS_LINE_RE = re.compile(
 def official_numbers_line(*, swahili: bool = False) -> str:
     """The first-greeting line, built from the configured lines. "" when none
     is configured."""
-    from app.core.config import settings
-    nums = [n.strip() for n in (getattr(settings, "whatsapp_handoff_number", ""),
-                                getattr(settings, "whatsapp_handoff_alt", "")) if n and n.strip()]
+    nums = [n for n, _tail in _official()]
     if not nums:
         return ""
     if swahili:
         return f"Namba zetu rasmi ni {' na '.join(nums)}. Namba nyingine yoyote si ya Bethany House."
     return f"Our official numbers are {' and '.join(nums)}. Any other number is not from Bethany House."
+
+
+# ── BOTH NUMBERS ARE OURS (owner, 2026-11-28) ────────────────────────────────
+# "Our official numbers are 2 … +254727891989 and +254785490805. Do not say
+# when you give one number that we do not have another number. This should
+# not be ignored." A customer asked about one of our lines and was told the
+# other was the only one. The prompt says both; this is the check.
+_ONLY_ONE_RE = re.compile(
+    r"\b(?:only|sole|single)\s+(?:official\s+|whatsapp\s+|phone\s+|contact\s+)?(?:number|line|contact)\b"
+    r"|\bonly\s+(?:have\s+|use\s+)?(?:one|1)\s+(?:official\s+|whatsapp\s+|phone\s+)?(?:number|line)\b"
+    r"|\b(?:no|not\s+have|don'?t\s+have|do\s+not\s+have|haven'?t|without)\s+(?:any\s+|an\s+)?"
+    r"(?:other|another|second)\s+(?:official\s+|whatsapp\s+|phone\s+)?(?:number|line)\b"
+    r"|\b(?:one|1)\s+(?:official\s+)?(?:number|line)\s+only\b"
+    r"|\bhatuna\s+namba\s+nyingine\b|\bnamba\s+(?:yetu\s+)?(?:rasmi\s+)?pekee\b|\bnamba\s+moja\s+tu\b"
+    r"|\b(?:un\s+)?seul\s+num[ée]ro\b|\bpas\s+d'autre\s+num[ée]ro\b",
+    re.IGNORECASE)
+_NOT_OURS_RE = re.compile(
+    r"\b(?:not|isn'?t|is\s+not|never|si|sio|siyo|n'est\s+pas)\b[^.!?\n]{0,50}"
+    r"\b(?:ours|our\s+(?:number|line)|from\s+bethany|bethany\s+house'?s?|yetu|ya\s+bethany|le\s+n[oô]tre)\b",
+    re.IGNORECASE)
+_ANY_OTHER_RE = re.compile(r"\bany\s+other\s+number\b|\bnamba\s+nyingine\s+yoyote\b", re.IGNORECASE)
+_PAYING_RE = re.compile(
+    r"\b(?:pay(?:ment|ing|s)?|paid|m-?pesa|airtel\s+money|till|paybill|lipa|send\s+(?:the\s+)?money|"
+    r"deposit|transfer|malipo|tuma\s+pesa)\b", re.IGNORECASE)
+
+
+def _official() -> list[tuple[str, str]]:
+    """Our official numbers as (written form, last nine digits), each once.
+    From `official_numbers`; the hand-off settings only stand in when that is
+    blank. The same line written two ways, or set twice, is one number."""
+    from app.core.config import settings
+    listed = [p for p in str(getattr(settings, "official_numbers", "") or "").split(",") if p.strip()]
+    if not listed:
+        listed = [getattr(settings, "whatsapp_handoff_number", ""), getattr(settings, "whatsapp_handoff_alt", "")]
+    out = []
+    for n in listed:
+        n = (n or "").strip()
+        tail = re.sub(r"\D", "", n)[-9:]
+        if n and len(tail) == 9 and all(tail != t for _n, t in out):
+            out.append((n, tail))
+    return out
+
+
+def both_official_numbers(reply: str | None, *, swahili: bool = False) -> str:
+    """`reply` made true about our numbers: we have TWO, and both are ours.
+
+      * a sentence that says we have only one number, or no other number, is
+        removed — and so is one that says one of OUR numbers is not ours;
+      * "any other number is not from Bethany House" is only ever said beside
+        BOTH numbers;
+      * when one of our numbers is given as how to reach us, the other is
+        given with it. (A payment instruction names the one line that takes
+        that payment — it is left as written.)
+
+    Unchanged when only one line is configured, or the reply says nothing
+    about our numbers."""
+    text = reply or ""
+    nums = _official()
+    if len(nums) < 2 or not text.strip():
+        return text
+
+    def has(t: str) -> set:
+        d = re.sub(r"\D", "", t)
+        return {tail for _n, tail in nums if tail in d}
+
+    kept, fixed = [], False
+    for block in re.split(r"(\n+)", text):
+        if not block.strip():
+            kept.append(block)
+            continue
+        parts = []
+        for part in re.split(r"(?<=[.!?…])\s+", block):
+            wrong = bool(_ONLY_ONE_RE.search(part)) or (bool(has(part)) and bool(_NOT_OURS_RE.search(part))
+                                                         and not _ANY_OTHER_RE.search(part))
+            if wrong:
+                fixed = True
+                continue
+            parts.append(part)
+        kept.append(" ".join(parts))
+    out = "".join(kept)
+    out = re.sub(r"\n{3,}", "\n\n", out).strip()
+    present = has(out)
+    line = official_numbers_line(swahili=swahili)
+    if _ANY_OTHER_RE.search(out) and len(present) < 2:
+        # "any other number is not ours" beside one number disowns our second line
+        out = _NUMBERS_LINE_RE.sub("", out)
+        out = "\n".join(p for p in (re.sub(r"[^.!?\n]*" + _ANY_OTHER_RE.pattern + r"[^.!?\n]*[.!?]?", "",
+                                           ln, flags=re.IGNORECASE).strip() for ln in out.split("\n")))
+        out = re.sub(r"\n{3,}", "\n\n", out).strip()
+        return (out + "\n\n" + line).strip() if line else out
+    if fixed and len(present) < 2:
+        return (out + ("\n\n" if out else "") + line).strip() if line else out
+    if len(present) == 1 and not _PAYING_RE.search(out):
+        other = next(n for n, tail in nums if tail not in present)
+        tail_line = (f"Namba yetu nyingine rasmi ni {other}." if swahili
+                     else f"Our other official number is {other}.")
+        return out.rstrip() + " " + tail_line
+    return out
 
 
 def strip_numbers_line(reply: str | None, *, every_mention: bool = False) -> str:
@@ -221,10 +317,7 @@ def strip_numbers_line(reply: str | None, *, every_mention: bool = False) -> str
     out = _NUMBERS_LINE_RE.sub("", reply or "").strip()
     if not every_mention or not out:
         return out
-    from app.core.config import settings
-    tails = [re.sub(r"\D", "", n)[-9:] for n in (getattr(settings, "whatsapp_handoff_number", ""),
-                                                 getattr(settings, "whatsapp_handoff_alt", "")) if n]
-    tails = [t for t in tails if len(t) == 9]
+    tails = [tail for _n, tail in _official()]
     if not tails:
         return out
     kept = []
